@@ -248,7 +248,9 @@ func newChangeCheckCmd() *cobra.Command {
     _apex/config.yaml commit.subject uses {type} (change.no-type; change.bad-type);
     review_tools: [<name>, …] names tools.review entries of _apex/config.yaml whose
     when: the change matches (the orchestrator runs each before the review; else
-    tools.unknown, D74); any other key must start with x-
+    tools.unknown, D74); docs: true marks the milestone's docs change (D130, D152: its
+    human-review tasks are the docs check, a delegate's by default — `+"`ape change accept --help`"+`),
+    a YAML boolean only (else change.frontmatter); any other key must start with x-
   - # title; ## Why and ## Out of scope non-empty; ## Delta; ## Tasks
   - change.md without its ## Notes section ≤ caps.change_md (D89; change.too-big) and
     design.md ≤ caps.design_md (16 KB each by default; _apex/config.yaml caps:, see
@@ -842,6 +844,27 @@ _apex/config.yaml delegates it:
                                              # {assets}, {change} (D77)
       model: sonnet                          # optional, else models.<delegate>
       effort: high                           # optional, else models.<delegate>'s
+      docs: person                           # optional: the docs default off (below)
+
+A block that sets only docs: delegates no other task (delegate.off).
+
+The one default-on exception (D152): the docs check of the milestone's docs change
+(D130). With no configured delegate, --delegate takes a human-review task of a change
+whose change.md frontmatter says docs: true with apex-accept, the default args and
+models.apex-accept — no human_review block needed — when:
+  - the change's diff from its base_sha to its tip (change/<id>'s; the recorded branch
+    tip once archived; a rename counts as both paths) touches only release.docs paths
+    (else README.md and docs/) and the development folder (and ape's _apex/state/);
+    else delegate.docs-scope (action person), naming the paths outside: a code change
+    marked docs: true still stops for a person
+  - human_review.docs is not person (human_review: {docs: person} turns it off:
+    delegate.off); human_review and release are under the config.changed guard, and
+    --delegate refuses while either is a person's unaccepted change
+    (delegate.unaccepted-config)
+The records are the delegate's below, by "delegate:apex-accept". A configured delegate
+(a block with any key but docs:) takes every human-review task, a docs change's
+included, whatever human_review.docs says (D78). `+"`ape status --json`"+` lists what a
+delegate may take now (changes[].delegable).
 
   - the task must be awaiting a person: the change reviewed (or archived) and the task
     not accepted (else delegate.not-awaiting); human_review is under the config.changed
@@ -942,7 +965,7 @@ outside its session) · 75 --delegate: still running, call again.`,
 	cmd.Flags().StringVar(&task, "task", "", "task id, e.g. T2 (or the second argument)")
 	cmd.Flags().StringVar(&by, "by", "", "who accepts (required for a person's acceptance)")
 	cmd.Flags().StringArrayVar(&evidence, "evidence", nil, "a file in the repository or a URL the acceptance (or --verdict) rests on (repeatable)")
-	cmd.Flags().BoolVar(&delegate, "delegate", false, "accept through _apex/config.yaml human_review.delegate, in its own detached session (D75)")
+	cmd.Flags().BoolVar(&delegate, "delegate", false, "accept through _apex/config.yaml human_review.delegate (or, for a docs change, the docs default, D152), in its own detached session (D75)")
 	cmd.Flags().DurationVar(&wait, "wait", defaultReviewWait, "--delegate: how long this call waits for the session (exit 75 when it is still running)")
 	cmd.Flags().StringVar(&verdict, "verdict", "", "pass or fail: the delegate session's verdict (only inside that session)")
 	cmd.Flags().StringVar(&reason, "reason", "", "--verdict: why")

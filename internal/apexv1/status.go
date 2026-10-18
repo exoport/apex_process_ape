@@ -96,6 +96,18 @@ type ChangeStatus struct {
 	// from this checkout's _apex/state/runs/delegate/: a fail leaves the
 	// task awaiting a person, and says why.
 	Delegate map[string]DelegateStatus `json:"delegate,omitempty"`
+	// Delegable are the awaiting human-review tasks a delegate may take
+	// now (D152 Q71), each with why: DelegableConfigured (human_review
+	// delegates) or DelegableDocsDefault (the docs default of a docs
+	// change). A task whose last delegate verdict is a fail or voided is
+	// a person's and not listed. Omitted when none.
+	Delegable []DelegableTask `json:"delegable,omitempty"`
+}
+
+// DelegableTask is one task `change accept --delegate` may take now.
+type DelegableTask struct {
+	Task   string `json:"task"`
+	Reason string `json:"reason"`
 }
 
 // ChangeTool is one tool a change calls for. Task and Done are a design
@@ -186,10 +198,10 @@ func (p *Project) delegateStatuses(id string) map[string]DelegateStatus {
 	return out
 }
 
-// delegable reports a task the configured delegate may still try: no
-// verdict yet, or a pass not recorded. A fail or a voided run is a
-// person's to look at.
-func (c *ChangeStatus) delegable(task string) bool {
+// delegateMayTry reports a task a delegate may still try: no verdict
+// yet, or a pass not recorded. A fail or a voided run is a person's to
+// look at.
+func (c *ChangeStatus) delegateMayTry(task string) bool {
 	d, ok := c.Delegate[task]
 	return !ok || d.Verdict == "pass" && len(d.Voided) == 0
 }
@@ -269,8 +281,8 @@ type StatusReport struct {
 	// Config holds the effective values skills read from ape rather than
 	// restate (D120, Q55): the defaults filled in.
 	Config StatusConfig `json:"config"`
-	// delegate is human_review's delegate skill, "" when acceptance is a
-	// person's alone (D75): next names the delegate first.
+	// delegate is human_review's delegate skill, "" when it configures
+	// none (D75): next names a delegate first (delegateNext).
 	delegate string
 }
 
@@ -296,7 +308,9 @@ func (p *Project) Status() *StatusReport {
 	}
 	r.Docs = cfg.Docs
 	r.Config = StatusConfig{CommitTypes: cfg.Commit.TypeList(), ReleaseScheme: cfg.Release.SchemeName(), ReleaseDocs: cfg.Release.DocsList(p.Root)}
-	r.delegate = cfg.HumanReview.Skill()
+	if cfg.HumanReview.Delegates() {
+		r.delegate = cfg.HumanReview.Skill()
+	}
 	runs, _ := cost.RunCosts(p.Root)
 	for _, run := range runs {
 		r.Spend.TotalUSD += run.CostUSD
@@ -373,6 +387,9 @@ func (p *Project) Status() *StatusReport {
 			pendingHuman = cs.PendingHuman
 			cs.Accepted = acc.Accepted
 			cs.Delegate = p.delegateStatuses(c.ID)
+			if cfgErr == nil {
+				cs.Delegable = p.delegableTasks(ctx, cfg, c, &cs)
+			}
 		}
 		cs.Tools, cs.ReviewTools = changeTools(cfg.Tools, c.Doc, c.State, p.currentLastVerify(c.ID, c.State), pendingHuman)
 		if v := c.State.Verify; v != nil {
@@ -593,18 +610,43 @@ func nextStep(r *StatusReport) string {
 }
 
 // delegateNext is the next step for a reviewed change awaiting a person
-// when human_review delegates (D75): its first task the delegate has not
-// judged; "" when there is none, or no delegate.
+// when a delegate may take one of its tasks (D75, D152): its first
+// delegable task; "" when there is none.
 func (r *StatusReport) delegateNext(c *ChangeStatus) string {
-	if r.delegate == "" {
+	if len(c.Delegable) == 0 {
 		return ""
 	}
-	for _, task := range c.AwaitingHuman {
-		if c.delegable(task) {
-			return "delegate " + task + " of " + c.ID + " to " + r.delegate + ": `ape change accept " + c.ID + " " + task + " --delegate --wait 9m`"
+	d, skill := c.Delegable[0], r.delegate
+	if d.Reason == DelegableDocsDefault {
+		skill = DefaultDelegateSkill
+	}
+	return "delegate " + d.Task + " of " + c.ID + " to " + skill + ": `ape change accept " + c.ID + " " + d.Task + " --delegate --wait 9m`"
+}
+
+// delegableTasks is cs's awaiting tasks a delegate may take now (D152
+// Q71): every one the configured delegate has not failed, or, without
+// one, a docs change's under the docs default when its diff stays in
+// release.docs and the development folder (prepareDocsDelegate's rule;
+// the config guard is --delegate's to apply).
+func (p *Project) delegableTasks(ctx context.Context, cfg Config, c ChangeInfo, cs *ChangeStatus) []DelegableTask {
+	hr := cfg.HumanReview
+	reason := DelegableConfigured
+	if !hr.Delegates() {
+		if c.Doc == nil || !c.Doc.Meta.Docs || !hr.DocsDefault() || len(cs.AwaitingHuman) == 0 {
+			return nil
+		}
+		if outside, err := p.docsScopeOutside(ctx, cfg.Release.DocsScope(), c.ID, c.State); err != nil || len(outside) > 0 {
+			return nil
+		}
+		reason = DelegableDocsDefault
+	}
+	var out []DelegableTask
+	for _, task := range cs.AwaitingHuman {
+		if cs.delegateMayTry(task) {
+			out = append(out, DelegableTask{Task: task, Reason: reason})
 		}
 	}
-	return ""
+	return out
 }
 
 // fixNext is the next step for an approved fix: it runs ahead of

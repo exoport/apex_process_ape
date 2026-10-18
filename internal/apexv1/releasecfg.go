@@ -106,6 +106,17 @@ func (r ReleaseConfig) DocsList(root string) []string {
 	return out
 }
 
+// DocsScope is what the docs default (D152) counts as docs: release.docs
+// as written, else every DefaultReleaseDocs entry, whether or not it exists
+// in this checkout — a docs change may create docs/, and the delegate may
+// run from a base branch that has none yet.
+func (r ReleaseConfig) DocsScope() []string {
+	if len(r.Docs) > 0 {
+		return r.Docs
+	}
+	return DefaultReleaseDocs
+}
+
 // SchemeName is release.scheme, else semver.
 func (r ReleaseConfig) SchemeName() string {
 	if r.Scheme == "" {

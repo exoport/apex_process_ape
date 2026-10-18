@@ -36,6 +36,11 @@ type ChangeMeta struct {
 	// ReviewTools names the tools.review entries whose when: this change
 	// matches (D59 Q4, D74): the orchestrator runs each before the review.
 	ReviewTools []string `yaml:"review_tools"`
+	// Docs marks the milestone's docs change (D130), which apex-change
+	// writes as `docs: true` (D152 Q69): its human-review tasks are the
+	// docs-accuracy check, a delegate's by default (PrepareDelegate). Read
+	// by docsFlag, which takes only a YAML boolean.
+	Docs bool `yaml:"-"`
 }
 
 // Delta is one `### ADDED|MODIFIED|REMOVED [cap] Requirement: <name>`.
@@ -96,9 +101,12 @@ type Change struct {
 	// start with "x-" (item 15, OpenSpec's rule): a typo such as
 	// "milestones:" would otherwise be ignored silently.
 	UnknownKeys []string
-	parse       []Finding
-	file        string
-	raw         string
+	// BadDocs is a docs: value that is not true or false, as written; the
+	// change is then no docs change.
+	BadDocs string
+	parse   []Finding
+	file    string
+	raw     string
 }
 
 // unknownKeys lists the frontmatter's keys that are neither v1's nor x-*.
@@ -121,7 +129,25 @@ func unknownKeys(fm []byte) []string {
 // keys are the team's own (a tracker id, say) and are ignored.
 var knownChangeKeys = map[string]bool{
 	"id": true, "milestone": true, "touches": true, "paths": true, "decisions": true, "retire": true, "type": true,
-	"review_tools": true,
+	"review_tools": true, "docs": true,
+}
+
+// docsFlag reads the frontmatter's docs: (D152): a YAML boolean, else bad
+// holds the value as written ("" when the key is absent).
+func docsFlag(fm []byte) (docs bool, bad string) {
+	var m struct {
+		Docs yaml.Node `yaml:"docs"`
+	}
+	if yaml.Unmarshal(fm, &m) != nil || m.Docs.Kind == 0 {
+		return false, ""
+	}
+	if n := m.Docs; n.Kind == yaml.ScalarNode && n.ShortTag() == "!!bool" && n.Decode(&docs) == nil {
+		return docs, ""
+	}
+	if m.Docs.Kind != yaml.ScalarNode {
+		return false, "a list or mapping"
+	}
+	return false, fmt.Sprintf("%q", m.Docs.Value)
 }
 
 var (
@@ -148,6 +174,7 @@ func ParseChange(file, doc string) *Change {
 		c.MetaErr = fmt.Errorf("frontmatter does not parse: %w", err)
 	} else {
 		c.UnknownKeys = unknownKeys(fm)
+		c.Meta.Docs, c.BadDocs = docsFlag(fm)
 	}
 	// Line numbers in findings should match the file, so count the lines
 	// the frontmatter occupied.

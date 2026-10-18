@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -29,6 +31,17 @@ import (
 //
 // Delegation is off by default (D78): `project init` writes no human_review
 // block, and without one --delegate is refused (delegate.off).
+//
+// The one default-on exception (D152): the docs-accuracy check of the
+// milestone's docs change (D130). A change whose change.md frontmatter says
+// `docs: true` has its human-review tasks taken by apex-accept, with the
+// default args and model, and no human_review block — but only while the
+// change's diff from its base_sha to its tip touches nothing outside
+// release.docs and the development folder (else delegate.docs-scope, a
+// person's), so a code change marked docs: true still stops for a person.
+// `human_review: {docs: person}` turns it off; a block with only docs:
+// delegates no other task. A configured delegate (a block with any other
+// key) takes every human-review task, the docs change's included (D78).
 //
 // `ape change accept <id> T<n> --delegate` starts the delegate skill in its
 // own detached session (an ape task, like `change review --run`), marked
@@ -87,13 +100,63 @@ const DefaultDelegateArgs = "--task {task} --change {id}"
 // DelegateByPrefix starts a delegated acceptance's By.
 const DelegateByPrefix = "delegate:"
 
+// human_review.docs values (D152 Q70): who takes a docs change's
+// docs-accuracy check. Absent means DocsDelegate.
+const (
+	DocsDelegate = "delegate"
+	DocsPerson   = "person"
+)
+
+// Why a delegate may take a task now (ape status's delegable, D152 Q71).
+const (
+	DelegableDocsDefault = "docs-default"
+	DelegableConfigured  = "configured"
+)
+
 // HumanReviewConfig is _apex/config.yaml's human_review block.
 type HumanReviewConfig struct {
 	Delegate string `json:"delegate,omitempty" yaml:"delegate"`
 	Args     string `json:"args,omitempty"     yaml:"args"`
 	Model    string `json:"model,omitempty"    yaml:"model"`
 	Effort   string `json:"effort,omitempty"   yaml:"effort"`
+	// Docs is DocsDelegate, DocsPerson or "" (the docs default, D152).
+	Docs string `json:"docs,omitempty" yaml:"docs"`
+	// docsOnly: the block sets docs: and nothing else, which delegates no
+	// other task (Delegates).
+	docsOnly bool
 }
+
+// UnmarshalYAML validates the block as it parses: its keys (a typo would
+// otherwise turn a docs-only block into a delegate for every task) and
+// docs:.
+func (h *HumanReviewConfig) UnmarshalYAML(n *yaml.Node) error {
+	if err := checkKeys(n, "human_review", "delegate", "args", "model", "effort", "docs"); err != nil {
+		return err
+	}
+	type plain HumanReviewConfig
+	var p plain
+	if err := n.Decode(&p); err != nil {
+		return err
+	}
+	p.Docs = strings.TrimSpace(p.Docs)
+	switch p.Docs {
+	case "", DocsDelegate, DocsPerson:
+	default:
+		return fmt.Errorf("human_review.docs: %q is not %s or %s", p.Docs, DocsDelegate, DocsPerson)
+	}
+	*h = HumanReviewConfig(p)
+	h.docsOnly = n.Kind == yaml.MappingNode && len(n.Content) == 2 && n.Content[0].Value == "docs"
+	return nil
+}
+
+// Delegates reports whether the block configures a delegate for every
+// human-review task (D75, D78): it is present and sets a key other than
+// docs: (an empty block delegates, as it always has).
+func (h *HumanReviewConfig) Delegates() bool { return h != nil && !h.docsOnly }
+
+// DocsDefault reports whether a docs change's docs-accuracy check is a
+// delegate's by default (D152): human_review.docs is not person.
+func (h *HumanReviewConfig) DocsDefault() bool { return h == nil || h.Docs != DocsPerson }
 
 // Skill is the delegate skill: delegate, else DefaultDelegateSkill.
 func (h *HumanReviewConfig) Skill() string {
@@ -256,14 +319,18 @@ type DelegatePlan struct {
 	Model  SkillModel
 	// ChangeTip is the change's tip now (changeTip).
 	ChangeTip string
+	// Reason is why a delegate may take the task: DelegableConfigured,
+	// or DelegableDocsDefault (D152).
+	Reason string
 }
 
-// PrepareDelegate checks that task of change id may be accepted by the
-// configured delegate now, and plans the session: human_review is set,
-// valid and accepted (no unaccepted config.changed names it, and the
-// working tree's block is HEAD's); the task is a human-review task
-// awaiting a person (the change reviewed or archived, the task not
-// accepted).
+// PrepareDelegate checks that task of change id may be accepted by a
+// delegate now, and plans the session: human_review is set, valid and
+// accepted (no unaccepted config.changed names it, and the working tree's
+// block is HEAD's); the task is a human-review task awaiting a person (the
+// change reviewed or archived, the task not accepted). Without a
+// configured delegate, only the docs default may take it (D152,
+// prepareDocsDelegate).
 func (p *Project) PrepareDelegate(ctx context.Context, id, task string) (*DelegatePlan, error) {
 	if v := os.Getenv(EnvDelegate); v != "" {
 		return nil, &UsageError{Code: "delegate.nested", Msg: "this is a delegate session (" + EnvDelegate + "=" + v + "): a delegate cannot start another delegate"}
@@ -273,18 +340,76 @@ func (p *Project) PrepareDelegate(ctx context.Context, id, task string) (*Delega
 		return nil, err
 	}
 	hr := cfg.HumanReview
-	if hr == nil {
-		return nil, &FailError{Code: "delegate.off", Msg: "delegation is off: _apex/config.yaml has no human_review: block, so only a person accepts " + task +
-			" — a person runs `ape change accept " + id + " --task " + task + " --by <who>`, or adds human_review: {delegate: " + DefaultDelegateSkill + "} (a person's change: config.changed guards it)"}
+	if !hr.Delegates() {
+		return p.prepareDocsDelegate(ctx, cfg, id, task)
 	}
-	if err := p.refuseUnacceptedHumanReview(ctx); err != nil {
+	if err := p.refuseUnacceptedConfig(ctx, "human_review"); err != nil {
 		return nil, err
 	}
-	folder, archived, err := p.delegateTarget(ctx, id, task)
+	tg, err := p.delegateTarget(ctx, id, task)
 	if err != nil {
 		return nil, err
 	}
-	tip := p.changeTip(ctx, id, folder, archived)
+	return p.planDelegate(ctx, cfg, hr, tg, DelegableConfigured)
+}
+
+// prepareDocsDelegate is PrepareDelegate with no configured delegate: the
+// docs default (D152) — apex-accept, with the default args and model —
+// takes a human-review task of a docs change (change.md docs: true) when
+// human_review.docs is not person and the change's diff from its base_sha
+// to its tip touches only release.docs and the development folder. Any
+// other task is a person's (delegate.off), as before D152. release.docs
+// bounds the default, so it is guarded here with human_review.
+func (p *Project) prepareDocsDelegate(ctx context.Context, cfg Config, id, task string) (*DelegatePlan, error) {
+	hr := cfg.HumanReview
+	tg, terr := p.delegateTarget(ctx, id, task)
+	if tg == nil || tg.doc == nil || !tg.doc.Meta.Docs {
+		return nil, delegateOff(id, task, hr)
+	}
+	if !hr.DocsDefault() {
+		return nil, &FailError{Code: "delegate.off", Msg: "the docs delegate is off: _apex/config.yaml sets human_review.docs: person, so only a person accepts " + task +
+			" of the docs change " + id + " — a person runs `ape change accept " + id + " --task " + task + " --by <who>`"}
+	}
+	if err := p.refuseUnacceptedConfig(ctx, "human_review", "release"); err != nil {
+		return nil, err
+	}
+	if terr != nil {
+		return nil, terr
+	}
+	outside, err := p.docsScopeOutside(ctx, cfg.Release.DocsScope(), id, tg.state)
+	if err != nil || len(outside) > 0 {
+		why := "touches " + strings.Join(limit(outside, 10), ", ")
+		if err != nil {
+			why = "has a diff ape cannot read (" + err.Error() + ")"
+		}
+		return nil, &FailError{Code: "delegate.docs-scope", Msg: "the docs change " + id + " " + why + ", outside release.docs (" + strings.Join(cfg.Release.DocsScope(), ", ") +
+			") and the development folder, so its docs check " + task + " is not a delegate's by default (D152) — a person reviews it (`ape change accept " + id + " --task " + task +
+			" --by <who>`), or re-plans the non-docs work into a change of its own"}
+	}
+	if hr == nil {
+		hr = &HumanReviewConfig{}
+	}
+	return p.planDelegate(ctx, cfg, hr, tg, DelegableDocsDefault)
+}
+
+// delegateOff is delegate.off for task of change id under hr (nil, or a
+// block that sets only docs:).
+func delegateOff(id, task string, hr *HumanReviewConfig) error {
+	why := "_apex/config.yaml has no human_review: block"
+	if hr != nil {
+		why = "_apex/config.yaml's human_review block sets only docs:, which delegates no other task"
+	}
+	return &FailError{Code: "delegate.off", Msg: "delegation is off: " + why + ", so only a person accepts " + task +
+		" (the one default exception, D152: a docs change's docs check — change.md docs: true, its diff only release.docs and the development folder)" +
+		" — a person runs `ape change accept " + id + " --task " + task + " --by <who>`, or adds human_review: {delegate: " + DefaultDelegateSkill + "} (a person's change: config.changed guards it)"}
+}
+
+// planDelegate is the session for tg's task: hr's skill, filled args and
+// models entry, refused while the task's last delegate verdict is a fail
+// at the change's current tip (D78).
+func (p *Project) planDelegate(ctx context.Context, cfg Config, hr *HumanReviewConfig, tg *delegateTargetInfo, reason string) (*DelegatePlan, error) {
+	id, task, folder := tg.id, tg.task, tg.folder
+	tip := p.changeTip(ctx, id, folder, tg.archived)
 	if last := p.lastDelegateVerdicts(id)[task]; last != nil && last.Verdict == "fail" && len(last.Voided) == 0 && last.ChangeTip != "" && last.ChangeTip == tip {
 		return nil, &FailError{Code: "delegate.already-failed", Msg: "the delegate failed " + task + " of " + id + " at this tip already (run " + last.Run + ": " + last.Reason +
 			") — a person reviews it (`ape change accept " + id + " --task " + task + " --by <who>`); the delegate runs again only once the change moves"}
@@ -296,28 +421,77 @@ func (p *Project) PrepareDelegate(ctx context.Context, id, task string) (*Delega
 	if err := effort.CheckLevel(strings.TrimSpace(hr.Effort)); err != nil {
 		return nil, &FailError{Code: CodeDelegateInvalidConfig, Msg: "human_review.effort: " + err.Error() + " — a person fixes _apex/config.yaml"}
 	}
-	return &DelegatePlan{Change: id, Task: task, Skill: hr.Skill(), Args: args, Folder: folder, Model: hr.SessionModel(cfg.Models), ChangeTip: tip}, nil
+	return &DelegatePlan{Change: id, Task: task, Skill: hr.Skill(), Args: args, Folder: folder, Model: hr.SessionModel(cfg.Models), ChangeTip: tip, Reason: reason}, nil
+}
+
+// docsScopeOutside lists the paths the change's diff from its base_sha to
+// its tip touches outside docs (ReleaseConfig.DocsScope), the development folder and
+// ape's state (D152 Q69 (b)): what keeps the docs default off a change
+// that is not docs only. The tip is change/<id>'s while the change is
+// unarchived, the branch tip archive recorded once archived. Renames count
+// as both paths, so code moved into docs/ is still code it touched.
+func (p *Project) docsScopeOutside(ctx context.Context, docs []string, id string, st *State) ([]string, error) {
+	if st == nil || st.BaseSHA == "" {
+		return nil, errors.New("no base_sha: the change was never started")
+	}
+	tip := st.BranchTip
+	if st.Status != StatusArchived {
+		tip, _ = git(ctx, p.Root, "rev-parse", "--verify", "--quiet", "refs/heads/"+ChangeBranch(id))
+	}
+	if tip == "" {
+		return nil, errors.New("no branch tip")
+	}
+	out, err := git(ctx, p.Root, "diff", "--name-only", "--no-renames", st.BaseSHA, tip)
+	if err != nil {
+		return nil, err
+	}
+	var outside []string
+	for f := range strings.SplitSeq(out, "\n") {
+		if f != "" && !p.notCode(f) && !inReleaseDocs(docs, f) {
+			outside = append(outside, f)
+		}
+	}
+	return outside, nil
+}
+
+// inReleaseDocs reports whether rel (project-relative) is one of docs or
+// inside one of them.
+func inReleaseDocs(docs []string, rel string) bool {
+	for _, d := range docs {
+		c := path.Clean(strings.TrimSpace(filepath.ToSlash(d)))
+		if rel == c || strings.HasPrefix(rel, c+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 // guardedKeysRe reads the keys out of a config.changed finding.
 var guardedKeysRe = regexp.MustCompile(`^guarded config keys \(([^)]*)\)`)
 
-// refuseUnacceptedHumanReview refuses delegation while the human_review
-// block is not a person's: a commit since the v1 epoch changed it and no
-// person accepted it (config.changed), or the working tree's block is not
-// the one committed at HEAD.
-func (p *Project) refuseUnacceptedHumanReview(ctx context.Context) error {
+// refuseUnacceptedConfig refuses delegation while one of blocks (the
+// human_review block; release too for the docs default, whose scope
+// release.docs is) is not a person's: a commit since the v1 epoch changed
+// it and no person accepted it (config.changed), or the working tree's
+// block is not the one committed at HEAD.
+func (p *Project) refuseUnacceptedConfig(ctx context.Context, blocks ...string) error {
 	if !p.isWorkTree(ctx) {
 		return nil
 	}
-	refuse := func(why string) error {
-		return &FailError{Code: "delegate.unaccepted-config", Msg: "_apex/config.yaml's human_review block " + why +
+	refuse := func(block, why string) error {
+		return &FailError{Code: "delegate.unaccepted-config", Msg: "_apex/config.yaml's " + block + " block " + why +
 			" — a model may not delegate a person's acceptance: a person reviews it and runs `ape project accept-config --by <who>` (or reverts it)"}
 	}
 	if epoch := p.v1Epoch(ctx, "HEAD"); epoch != "" {
 		for _, f := range p.configFindings(ctx, epoch) {
-			if m := guardedKeysRe.FindStringSubmatch(f.Message); len(m) > 1 && slices.Contains(strings.Split(m[1], ", "), "human_review") {
-				return refuse("was changed by a commit no person accepted (config.changed: " + f.Message + ")")
+			m := guardedKeysRe.FindStringSubmatch(f.Message)
+			if len(m) < 2 {
+				continue
+			}
+			for _, b := range blocks {
+				if slices.Contains(strings.Split(m[1], ", "), b) {
+					return refuse(b, "was changed by a commit no person accepted (config.changed: "+f.Message+")")
+				}
 			}
 		}
 	}
@@ -326,60 +500,74 @@ func (p *Project) refuseUnacceptedHumanReview(ctx context.Context) error {
 	if data, err := os.ReadFile(ConfigPath(p.Root)); err == nil {
 		_ = yaml.Unmarshal(data, &live)
 	}
-	if !reflect.DeepEqual(committed["human_review"], live["human_review"]) {
-		return refuse("differs from the one committed at HEAD (an uncommitted edit)")
+	for _, b := range blocks {
+		if !reflect.DeepEqual(committed[b], live[b]) {
+			return refuse(b, "differs from the one committed at HEAD (an uncommitted edit)")
+		}
 	}
 	return nil
 }
 
-// delegateTarget checks task of change id awaits a person, and returns the
-// change's folder, project-relative: changes/<id> in flight, its archive
-// folder once archived (as this checkout's tree holds it).
-func (p *Project) delegateTarget(ctx context.Context, id, task string) (folder string, archived bool, err error) {
+// delegateTargetInfo is the change a delegate would judge: its folder,
+// project-relative — changes/<id> in flight, its archive folder once
+// archived (as this checkout's tree holds it) — its change.md and its
+// state.json.
+type delegateTargetInfo struct {
+	id, task, folder string
+	archived         bool
+	doc              *Change
+	state            *State
+}
+
+// delegateTarget checks task of change id awaits a person. On a refusal
+// about the task it still returns the change it read (doc and state), for
+// prepareDocsDelegate to tell a docs change; nil when there is none.
+func (p *Project) delegateTarget(ctx context.Context, id, task string) (*delegateTargetInfo, error) {
 	ci, err := p.requireChange(ctx, id)
 	if fe, ok := errors.AsType[*FailError](err); ok && fe.Code == "change.archived" {
-		folder, err := p.archivedDelegateTarget(id, task)
-		return folder, err == nil, err
+		return p.archivedDelegateTarget(id, task)
 	}
 	if err != nil {
-		return "", false, err
+		return nil, err
 	}
+	tg := &delegateTargetInfo{id: id, task: task, folder: p.Rel(p.ChangeDir(id)), doc: ci.Doc, state: ci.State}
 	if err := humanTask(ci.Doc, id, task); err != nil {
-		return "", false, err
+		return tg, err
 	}
 	st := p.withBaseAccepted(ctx, id, ci.State)
 	if !slices.Contains(awaitingHuman(st, ci.Doc), task) {
 		if st.Status != StatusReviewed {
-			return "", false, notAwaiting(id, task, "the change is "+st.Status+", and a human-review task awaits a person once the change is reviewed")
+			return tg, notAwaiting(id, task, "the change is "+st.Status+", and a human-review task awaits a person once the change is reviewed")
 		}
-		return "", false, notAwaiting(id, task, "it is accepted already")
+		return tg, notAwaiting(id, task, "it is accepted already")
 	}
-	return p.Rel(p.ChangeDir(id)), false, nil
+	return tg, nil
 }
 
 // archivedDelegateTarget is delegateTarget for an archived change: its
 // archive folder, as this checkout's tree holds it.
-func (p *Project) archivedDelegateTarget(id, task string) (string, error) {
+func (p *Project) archivedDelegateTarget(id, task string) (*delegateTargetInfo, error) {
 	name, ok := p.ArchivedIDs()[id]
 	if !ok {
-		return "", &FailError{Code: CodeChangeNotFound, Msg: "the archived change " + id + " is not in this checkout's tree — run the delegate on the branch it was archived into"}
+		return nil, &FailError{Code: CodeChangeNotFound, Msg: "the archived change " + id + " is not in this checkout's tree — run the delegate on the branch it was archived into"}
 	}
 	dir := filepath.Join(p.ArchiveDir(), name)
 	st, err := LoadState(filepath.Join(dir, "state.json"))
 	if err != nil {
-		return "", &FailError{Code: CodeStateUnreadable, Msg: err.Error()}
+		return nil, &FailError{Code: CodeStateUnreadable, Msg: err.Error()}
 	}
 	doc := p.loadChangeDoc(filepath.Join(dir, "change.md"))
 	if doc == nil {
-		return "", &FailError{Code: CodeNoChangeMD, Msg: "the archived change " + id + " has no change.md"}
+		return nil, &FailError{Code: CodeNoChangeMD, Msg: "the archived change " + id + " has no change.md"}
 	}
+	tg := &delegateTargetInfo{id: id, task: task, folder: p.Rel(dir), archived: true, doc: doc, state: st}
 	if err := humanTask(doc, id, task); err != nil {
-		return "", err
+		return tg, err
 	}
 	if !slices.Contains(awaitingHuman(st, doc), task) {
-		return "", notAwaiting(id, task, "it is accepted already")
+		return tg, notAwaiting(id, task, "it is accepted already")
 	}
-	return p.Rel(dir), nil
+	return tg, nil
 }
 
 // notAwaiting is delegate.not-awaiting for task of change id.

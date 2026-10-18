@@ -195,9 +195,9 @@ var DiagnosticCodes = []CodeDoc{
 	{"review.stale", 1, "review", "archive: code changed since the review; `ape change review <id> --run` verifies it again first, then reviews it (D51 Q16)"},
 	{"review.start-failed", 1, "retry", "review --run: the review session could not be started"},
 	{"review.voided", 1, "retry", "review --run: the session changed more than review.md; verdict voided"},
-	{"delegate.off", 1, "person", "accept --delegate: delegation is off — _apex/config.yaml has no human_review: block (project init writes none), so only a person accepts the task (D75, D78)"},
+	{"delegate.off", 1, "person", "accept --delegate: delegation is off — _apex/config.yaml has no human_review: block (project init writes none), or one that sets only docs:, so only a person accepts the task (D75, D78); the one default exception is a docs change's docs check (change.md docs: true, D152), off too under human_review.docs: person"},
 	{"delegate.already-failed", 1, "person", "accept --delegate: the task's last delegate verdict is a fail at the change's current tip (change/<id>'s tip; the archive folder once archived) — no automatic retry on the same artefact: a person reviews it, or the change moves first (D78)"},
-	{"delegate.unaccepted-config", 1, "person", "accept --delegate: the human_review block was changed by a commit no person accepted (config.changed), or differs uncommitted from HEAD's — a model may not delegate a person's acceptance; a person runs `ape project accept-config --by <who>` or reverts it (D75)"},
+	{"delegate.unaccepted-config", 1, "person", "accept --delegate: the human_review block (and, for the docs default, the release block whose release.docs bounds it, D152) was changed by a commit no person accepted (config.changed), or differs uncommitted from HEAD's — a model may not delegate a person's acceptance; a person runs `ape project accept-config --by <who>` or reverts it (D75)"},
 	{CodeDelegateInvalidConfig, 1, "person", "human_review in _apex/config.yaml: args holds a placeholder other than {id}, {task}, {assets}, {change} or does not fill (a value that is not one shell-safe token), or effort is not a level; also a project check finding (D77)"},
 	{"delegate.not-awaiting", 1, "stop", "accept --delegate: the task is not awaiting a person — the change is not reviewed (or archived) yet, or the task is accepted already"},
 	{"delegate.voided", 1, "person", "accept --delegate: the delegate session committed, switched branch or left a file other than changes/<id>/assets/accept-*; its verdict is voided (recorded in its verdict file, shown by ape status) and nothing is accepted"},
@@ -281,7 +281,7 @@ var DiagnosticCodes = []CodeDoc{
 	{"spec.stray-check", 1, "person", "a check: line outside any scenario"},
 	{"change.too-big", 1, "replan", "change.md without its ## Notes section (D89) over its caps.change_md cap (default 16 KB, ceiling 48 KB): at check and start, split the change; at archive (D69), where the plan is frozen and only ## Why can have grown, move what ## Why gained since start to ## Notes — ape never trims a change, and abandon never measures one (Q40)"},
 	{"change.design-too-big", 1, "replan", "design.md over its caps.design_md cap (default 16 KB, ceiling 48 KB)"},
-	{"change.frontmatter", 1, "replan", "change.md frontmatter is missing, unparseable, or its id/milestone/touches are wrong"},
+	{"change.frontmatter", 1, "replan", "change.md frontmatter is missing, unparseable, or its id/milestone/touches are wrong, or docs: is not true or false (D152)"},
 	{"change.unknown-key", 1, "replan", "change.md frontmatter has a key v1 does not define (own keys: prefix x-)"},
 	{"change.spec-too-big", 1, "replan", "change check / start: merging the delta would take a spec over its caps.spec cap — split the capability first (H18)"},
 	{"change.no-type", 1, "replan", "change.md has no type: and _apex/config.yaml commit.subject uses {type} (D47)"},
@@ -338,5 +338,7 @@ var DiagnosticCodes = []CodeDoc{
 	{CodeModelsUnknownField, 1, "person", "a _apex/config.yaml models.<skill> entry has a field other than model and effort (Q45), which does nothing: an entry is a model name or {model, effort}"},
 	{"change.purpose-runs-on", 1, "replan", "an ADDED block's `Purpose:` block (the line and every line after it up to the first blank line, heading or fence; Q44) took the requirement's own text, leaving none before its first scenario: put a blank line between the Purpose and the requirement's text"},
 	{CodeMalformedHumanReview, 1, "replan", "a task check reads as human-review but is not exactly `human-review` (D111): `human-review: <what>`, `Human-Review`, `human review …`, a trailing `.` — verify would run it as a shell command; write `- T<n> <what> — check: human-review`, the artefact and criteria in <what>"},
+	// rc.6 (rc6-d).
+	{"delegate.docs-scope", 1, "person", "accept --delegate on a docs change (change.md docs: true) with no configured delegate: its diff from base_sha to its tip touches paths outside release.docs and the development folder (named), so its docs check is not a delegate's by default (D152 Q69) — a person accepts it, or the non-docs work is re-planned into a change of its own"},
 	{UnclassifiedFinding, 1, "stop", "a finding no rule classifies (a bug: report it)"},
 }

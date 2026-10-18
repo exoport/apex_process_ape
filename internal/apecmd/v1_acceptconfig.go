@@ -24,7 +24,7 @@ func newProjectAcceptConfigCmd() *cobra.Command {
   commit        the archive's squash (hooks: skip skips the project's hooks)
   evidence      archive|off (off keeps no evidence)
   marketplaces, plugins, tools   what runs inside a session (hooks, MCP, skills)
-  human_review  who accepts a human-review task in a person's place (D75)
+  human_review  who accepts a human-review task in a person's place (D75; docs: D152)
 The guard compares whole blocks, either way: raising a cap or a timeout loosens as surely
 as lowering one. Since the project's v1 epoch (the newest "apex: project init" or "apex:
 lift" commit; a block committed before it, or in it, is the baseline), a commit that
