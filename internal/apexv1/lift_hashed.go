@@ -31,8 +31,10 @@ type LiftHashed struct {
 }
 
 var (
-	// hashWordRe is a file that computes or records a content hash.
-	hashWordRe = regexp.MustCompile(`(?i)sha-?(?:1|224|256|384|512)\b|sha(?:1|256|512)\.|\bmd5\b|checksum|fingerprint|byte[-_ ]?identi(?:cal|ty)|bytes?[-_ ]?(?:unchanged|equal)`)
+	// hashWordRe is a file that computes or records a content hash: the
+	// coreutils tools (sha256sum, md5sum, b2sum, shasum) count too — a
+	// CI script hashing with them names no "sha256" on a word boundary.
+	hashWordRe = regexp.MustCompile(`(?i)sha-?(?:1|224|256|384|512)\b|sha(?:1|256|512)\.|\bmd5\b|\b(?:sha(?:1|224|256|384|512)?|md5|b2)sum\b|checksum|fingerprint|byte[-_ ]?identi(?:cal|ty)|bytes?[-_ ]?(?:unchanged|equal)`)
 	// ciPathRe is where CI guards and their scripts live.
 	ciPathRe = regexp.MustCompile(`(?:^|/)(?:\.github|\.gitlab|\.circleci|ci|scripts|tools)/|(?:^|/)(?:Makefile|[^/]*\.mk|\.gitlab-ci\.ya?ml|Jenkinsfile)$`)
 	// testPathRe is a test file in the languages the lift tokenizes.

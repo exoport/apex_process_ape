@@ -93,3 +93,14 @@ func TestLift_HashedSkipsRecordsLocksFirstCapped(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(disp), "- … and 21 more (in `_apex/state/lift-disposition.json`)")
 }
+
+// The coreutils hashers name no "sha256" on a word boundary: a CI script
+// running sha256sum over a file it names is a hasher all the same.
+func TestHashWordRe_CoreutilsTools(t *testing.T) {
+	for _, src := range []string{"sha256sum other.sh", "md5sum -c sums", "shasum -a 256 x", "b2sum x", "sha512sum x", "SHA256 of x", "hashlib.sha256(", "checksum"} {
+		require.True(t, hashWordRe.MatchString(src), src)
+	}
+	for _, src := range []string{"shaving", "summary", "md5ish", "a sha256sumx"} {
+		require.False(t, hashWordRe.MatchString(src), src)
+	}
+}
