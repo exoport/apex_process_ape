@@ -11,8 +11,8 @@ import (
 
 func refs(cs []PlannedCheck) []string {
 	out := make([]string, 0, len(cs))
-	for _, c := range cs {
-		out = append(out, c.Ref)
+	for i := range cs {
+		out = append(out, cs[i].Ref)
 	}
 	return out
 }

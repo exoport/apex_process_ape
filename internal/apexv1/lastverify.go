@@ -116,7 +116,9 @@ func (p *Project) stopChecks(ci ChangeInfo) (checks []PlannedCheck, done bool) {
 	if len(lv.Red) == 0 {
 		return nil, true
 	}
-	for _, pc := range p.ChangeChecks(ci.Doc) {
+	planned := p.ChangeChecks(ci.Doc)
+	for i := range planned {
+		pc := planned[i]
 		if _, red := lv.Red[pc.Ref]; red {
 			checks = append(checks, pc)
 		}

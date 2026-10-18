@@ -311,15 +311,7 @@ func (p *Project) Status() *StatusReport {
 	if rm := p.roadmap(); rm != nil {
 		recs, _ := p.LoadMilestoneRecords()
 		for i := range rm.Milestones {
-			m := &rm.Milestones[i]
-			line := MilestoneLine{ID: m.ID, Title: m.Title, Status: m.Status}
-			if rec := recs[m.ID]; rec != nil {
-				line.BaseSHA = rec.Approval.Base()
-				if m.Status == MilestoneDone {
-					line.AcceptRed = rec.AcceptRed
-				}
-			}
-			r.Milestones = append(r.Milestones, line)
+			r.Milestones = append(r.Milestones, milestoneLine(&rm.Milestones[i], recs[rm.Milestones[i].ID]))
 		}
 		if m := rm.Current(); m != nil {
 			r.Milestone = p.milestoneStatus(m, runs, p.fixIDs(ctx))
@@ -511,6 +503,19 @@ func (p *Project) milestoneStatus(m *Milestone, runs []cost.RunCost, fixes map[s
 		ms.Diagnostics = []Diagnostic{}
 	}
 	return ms
+}
+
+// milestoneLine is m's line in the report: its start once approved
+// (D130), and an accept-red close.
+func milestoneLine(m *Milestone, rec *MilestoneRecord) MilestoneLine {
+	line := MilestoneLine{ID: m.ID, Title: m.Title, Status: m.Status}
+	if rec != nil {
+		line.BaseSHA = rec.Approval.Base()
+		if m.Status == MilestoneDone {
+			line.AcceptRed = rec.AcceptRed
+		}
+	}
+	return line
 }
 
 // nextStep is a deterministic hint: what the way of working says comes

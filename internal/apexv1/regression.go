@@ -259,7 +259,9 @@ func (p *Project) preExistingRed(changes []ChangeInfo) []PreExistingRed {
 			continue
 		}
 		regressionScenarios := map[string]PlannedCheck{}
-		for _, pc := range p.EffectiveSpecChecks(c.Doc) {
+		planned := p.EffectiveSpecChecks(c.Doc)
+		for i := range planned {
+			pc := planned[i]
 			if pc.Kind == KindScenario && !pc.Delta {
 				regressionScenarios[pc.Ref] = pc
 			}

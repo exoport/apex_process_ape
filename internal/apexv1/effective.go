@@ -123,7 +123,9 @@ func (p *Project) ChangeChecks(c *Change) []PlannedCheck {
 	for _, capName := range c.Meta.Touches {
 		touched[capName] = true
 	}
-	for _, pc := range p.EffectiveSpecChecks(c) {
+	specs := p.EffectiveSpecChecks(c)
+	for i := range specs {
+		pc := specs[i]
 		if pc.Delta || touched[pc.Capability] || taskCmds[pc.Cmd] {
 			out = append(out, pc)
 		}

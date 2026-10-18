@@ -327,7 +327,9 @@ func (p *Project) rebaseline(ctx context.Context, ci ChangeInfo, st *State, head
 	}
 	var todo []PlannedCheck
 	var baseline []Baseline
-	for _, pc := range p.ChangeChecks(ci.Doc) {
+	planned := p.ChangeChecks(ci.Doc)
+	for i := range planned {
+		pc := planned[i]
 		if b, ok := kept[pc.Ref]; ok && b.Cmd == pc.Cmd {
 			baseline = append(baseline, b)
 			continue
@@ -432,7 +434,9 @@ func (p *Project) greenAtBaseline(c *Change, st *State) []GreenAtBaseline {
 		base[b.Task] = b
 	}
 	out := []GreenAtBaseline{}
-	for _, pc := range p.ChangeChecks(c) {
+	planned := p.ChangeChecks(c)
+	for i := range planned {
+		pc := planned[i]
 		if pc.Kind == KindScenario && !pc.Delta {
 			continue
 		}

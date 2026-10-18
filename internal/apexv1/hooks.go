@@ -697,7 +697,8 @@ func (p *Project) stopRun(ctx context.Context, ci ChangeInfo, checks []PlannedCh
 		unknown = append(unknown, pc)
 	}
 	done := map[string]CheckResult{}
-	for _, pc := range checks {
+	for i := range checks {
+		pc := checks[i]
 		if r, ok := done[pc.Cmd]; ok {
 			r.Task, r.Kind = pc.Ref, pc.Kind
 			ran = append(ran, r)
