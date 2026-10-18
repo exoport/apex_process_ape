@@ -78,9 +78,11 @@ func TestRun_IdleTerminationReachesTheManifest(t *testing.T) {
 	require.Contains(t, m.Termination.Diagnostic, "pty n/a")
 	require.InDelta(t, 3600.0, m.Termination.WindowSecs, 0.001)
 
-	// The zeros are still there — that is correct, they count COMPLETED
-	// steps — but the report now says why they are zeros.
-	require.Empty(t, m.Stages[0].Steps, "precondition: a step aborted mid-flight records no step")
+	// D159 Q84: the aborted step is recorded, failed, with whatever its
+	// transcript holds (nothing here: no telemetry hook), and the report
+	// says why the run ended.
+	require.Len(t, m.Stages[0].Steps, 1)
+	require.Equal(t, StatusFailed, m.Stages[0].Steps[0].Status)
 	report, err := os.ReadFile(filepath.Join(runDir, "pipeline-report.md"))
 	require.NoError(t, err)
 	require.Contains(t, string(report), "## Why this run ended")

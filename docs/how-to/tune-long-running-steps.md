@@ -79,23 +79,25 @@ ape prompt "run the migration" --idle-timeout 90m
 only internally, so pipelines were stuck at the 60m default with no knob).
 `--idle-timeout 0` uses the default.
 
-## Adjust or disable the hard ceiling
+## Set a hard ceiling
 
-The hard ceiling (`--max-duration`, default `3h`) is an absolute wall-clock cap,
-independent of progress. It bounds a step that stays noisy but never actually
-finishes, keeping the worst-case wall clock predictable.
+The hard ceiling (`--max-duration`) is an absolute wall-clock cap, independent
+of progress. It is **off by default** (D159): a run that shows progress stops
+only on the idle window, ape's own limits (an enforced budget, the plan's usage
+limit, the APEX v1 loop limits) or a person. The old `3h` default killed a
+healthy APEX v1 orchestrator, whose children are separate ape runs rather than
+sub-agents, so its clock never reset.
+
+Set one when you want the worst-case wall clock bounded anyway:
 
 ```bash
-# raise the ceiling for an exceptionally long step
-ape pipeline design --max-duration 8h
-
-# disable the ceiling entirely (rely on the idle window alone)
-ape pipeline design --max-duration 0
+# bound one session at 8 hours
+ape task apex-orchestrator --args M3 --max-duration 8h
 ```
 
 ## The ceiling is per batch item, not per batch
 
-The ceiling clock **resets on every sub-agent boundary** (a `SubagentStart` or
+A ceiling you set **resets on every sub-agent boundary** (a `SubagentStart` or
 `SubagentStop`). A sub-agent completing is unambiguous real progress — a whole
 unit of work just finished — so the cap starts counting again for the next one.
 
@@ -107,7 +109,7 @@ item:
 
 Running `apex-story-batch-dev` over an epic with ten stories is **one** step
 from ape's point of view, but each story is developed in its own sub-agent. The
-`3h` ceiling therefore bounds **each story**, not the ten-story batch — so a
+ceiling therefore bounds **each story**, not the ten-story batch — so a
 long batch runs to completion as long as no single story exceeds the cap, while
 a single wedged-but-noisy story is still stopped after `--max-duration`.
 
@@ -136,8 +138,8 @@ child pid 12345 alive → stopping
 - `idle for … without progress` → the **idle window** tripped. Raise
   `--idle-timeout`, or investigate why every signal went quiet (`pty n/a` means
   the PTY signal is not watched on this path, not that it was silent).
-- `exceeded max-duration …` → the **hard ceiling** tripped. Raise
-  `--max-duration`, or set it to `0` to disable.
+- `exceeded max-duration …` → the **hard ceiling** you set tripped. Raise
+  `--max-duration`, or drop it (`0`, the default).
 - `child … alive` vs `exited` tells you whether `claude` was still running when
   ape gave up.
 - `transcript touched N time(s) without growing` → the session was hung rather

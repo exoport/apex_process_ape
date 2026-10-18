@@ -248,10 +248,13 @@ type runConfig struct {
 	// backstop (default interactiveStepIdleTimeout). PLAN-11:
 	// `ape task --idle-timeout`; PLAN-19 D3: `ape pipeline --idle-timeout`.
 	idleTimeout time.Duration
+	// resumeCommand / resumeWhat: how a person resumes the run when it
+	// ends without completing (D159 Q85; pipeline.RunOptions'). Set for
+	// an APEX v1 orchestrator only.
+	resumeCommand, resumeWhat string
 	// maxDuration is the hard wall-clock per-step ceiling (PLAN-19 D2).
-	// Flag default 3h; 0 disables. A zero value here (e.g. an apescript
-	// run that never set it) is resolved to the 3h default by the caller,
-	// so the cap is only disabled by an explicit --max-duration 0.
+	// 0 (the flag default, D159) disables it; an apescript run that never
+	// set it resolves to the same default.
 	maxDuration time.Duration
 	// effort is the run-level reasoning effort (--effort). Threaded onto
 	// RunOptions.Effort; sits below the pipeline files' `effort:` and above

@@ -225,7 +225,7 @@ func TestFinalizeManifest_REPLNotReadyIsFailedNotCancelled(t *testing.T) {
 			t.Parallel()
 			mw, err := newManifestWriter(t.TempDir(), "task-r", "/tmp/p", "/nonexistent.yaml", "test", time.Now())
 			require.NoError(t, err)
-			finalizeManifest(mw, fmt.Errorf("stage %q: %w", "dev", tc.err), nil)
+			finalizeManifest(mw, fmt.Errorf("stage %q: %w", "dev", tc.err), RunOptions{})
 
 			m, err := LoadManifest(mw.runDir)
 			require.NoError(t, err)
@@ -263,4 +263,42 @@ func TestNewTerminationRecord_UsageLimitCarriesTheReset(t *testing.T) {
 
 	none := newTerminationRecord(&LimitStopError{Kind: TerminationUsageLimit, Message: "usage limit"})
 	require.Nil(t, none.ResetsAt, "no reset parsed, none recorded")
+}
+
+// D159 Q85: a run that knows how it is resumed ends its termination
+// message with the sentence — "after the reset" for a usage limit — and a
+// completed run gets no termination at all.
+func TestFinalizeManifest_ResumeLine(t *testing.T) {
+	opts := RunOptions{ResumeCommand: "ape task apex-orchestrator --args M3", ResumeWhat: "M3"}
+	for name, tc := range map[string]struct {
+		err  error
+		want string
+	}{
+		"ceiling": {
+			err:  &sessiondriver.MaxDurationError{Label: "interactive step", Elapsed: 8 * time.Hour, Max: 8 * time.Hour},
+			want: "— resume: `ape status` shows where M3 stopped; then `ape task apex-orchestrator --args M3`",
+		},
+		"usage limit": {
+			err:  &LimitStopError{Kind: TerminationUsageLimit, Message: "usage limit reached"},
+			want: "usage limit reached — resume: `ape status` shows where M3 stopped; then, after the reset, `ape task apex-orchestrator --args M3`",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			mw, err := newManifestWriter(t.TempDir(), "task-r", "/tmp/p", "/nonexistent.yaml", "test", time.Now())
+			require.NoError(t, err)
+			finalizeManifest(mw, fmt.Errorf("stage %q: %w", "dev", tc.err), opts)
+			m, err := LoadManifest(mw.runDir)
+			require.NoError(t, err)
+			require.NotNil(t, m.Termination)
+			require.True(t, strings.HasSuffix(m.Termination.Message, tc.want), m.Termination.Message)
+			require.Equal(t, TerminationKind(tc.err), m.Termination.Kind)
+		})
+	}
+	mw, err := newManifestWriter(t.TempDir(), "task-r", "/tmp/p", "/nonexistent.yaml", "test", time.Now())
+	require.NoError(t, err)
+	finalizeManifest(mw, nil, opts)
+	m, err := LoadManifest(mw.runDir)
+	require.NoError(t, err)
+	require.Nil(t, m.Termination)
+	require.Empty(t, TerminationKind(nil))
 }

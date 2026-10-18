@@ -291,19 +291,20 @@ func TestTaskCommandFlagSurface(t *testing.T) {
 	require.Equal(t, taskCommitDerivedSentinel, tc.NoOptDefVal)
 	require.True(t, strings.HasPrefix(taskCommitDerivedSentinel, "\x01"),
 		"sentinel must be non-typeable")
-	// PLAN-19 D2/D3: --max-duration ships ON with the 3h default.
+	// D159: --max-duration ships OFF — a run showing progress is never
+	// killed for time unless a person asks for a cap.
 	md := cmd.Flags().Lookup("max-duration")
-	require.Equal(t, sessiondriver.DefaultMaxDuration.String(), md.DefValue)
+	require.Equal(t, "0s", md.DefValue)
 }
 
-// TestPromptCommandTimeoutFlags asserts ape prompt carries the 3h
-// --max-duration default alongside --idle-timeout (D3).
+// TestPromptCommandTimeoutFlags asserts ape prompt carries --max-duration,
+// off by default (D159), alongside --idle-timeout (D3).
 func TestPromptCommandTimeoutFlags(t *testing.T) {
 	cmd := newPromptCmd()
 	require.NotNil(t, cmd.Flags().Lookup("idle-timeout"))
 	md := cmd.Flags().Lookup("max-duration")
 	require.NotNil(t, md)
-	require.Equal(t, sessiondriver.DefaultMaxDuration.String(), md.DefValue)
+	require.Equal(t, "0s", md.DefValue)
 }
 
 // A malformed commit-owners.csv is a preflight failure, and dispatchTask
@@ -339,4 +340,18 @@ func commitSubjects(commits []runCommit) []string {
 		out = append(out, c.Subject)
 	}
 	return out
+}
+
+// D159 Q85: a stopped orchestrator's error ends with how to resume it,
+// and still classifies as the run's own error.
+func TestOrchestratorResumeHint(t *testing.T) {
+	require.Equal(t, "ape task apex-orchestrator --args M3", orchestratorResumeCommand(" M3 "))
+	require.Equal(t, `ape task apex-orchestrator --args "M3 --x"`, orchestratorResumeCommand("M3 --x"))
+
+	idle := &sessiondriver.IdleTimeoutError{Label: "interactive step", Idle: time.Hour, Window: time.Hour}
+	err := &resumeHintError{err: fmt.Errorf("stage x: %w", idle), line: "resume: `ape status` shows where M3 stopped; then `ape task apex-orchestrator --args M3`"}
+	require.True(t, strings.HasSuffix(err.Error(), " — resume: `ape status` shows where M3 stopped; then `ape task apex-orchestrator --args M3`"))
+	_, ok := errors.AsType[*sessiondriver.IdleTimeoutError](err)
+	require.True(t, ok)
+	require.Equal(t, taskExitCode(idle), taskExitCode(err))
 }

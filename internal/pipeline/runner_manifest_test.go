@@ -156,10 +156,10 @@ func TestRun_EmitsManifest(t *testing.T) {
 
 // TestRun_FailedStepCaptured asserts the manifest still finalizes (with
 // status: failed) when a step fails. In interactive mode a step fails
-// when WaitStepDone returns an error; the stage loop breaks before the
-// step record is written, so the failure surfaces as a failed STAGE and
-// a failed overall run (StepsFailed stays 0 — no per-step record for the
-// aborted step, unlike the removed programmatic path).
+// when WaitStepDone returns an error — a ceiling, idle, budget or usage
+// stop. D159 Q84: the stopped step is still scanned and recorded, failed,
+// with its cost and turns, so the run's totals carry what it spent (a
+// killed orchestrator's manifest used to record $0).
 func TestRun_FailedStepCaptured(t *testing.T) {
 	root := t.TempDir()
 	pipelinesDir := filepath.Join(root, "_apex", "pipelines")
@@ -178,6 +178,9 @@ func TestRun_FailedStepCaptured(t *testing.T) {
 		NoCommit:    true,
 		WaitStepDone: func(_ context.Context, _ string, _ int) error {
 			return errors.New("simulated step failure")
+		},
+		StepTelemetryFn: func(_ string, _ int) *StepTelemetry {
+			return &StepTelemetry{CostUSD: 1.25, TokensInput: 100, TokensOutput: 50, NumTurns: 7}
 		},
 	})
 	if err == nil {
@@ -202,7 +205,13 @@ func TestRun_FailedStepCaptured(t *testing.T) {
 		t.Errorf("status %q, want failed", m.Status)
 	}
 	if len(m.Stages) != 1 || m.Stages[0].Status != StatusFailed {
-		t.Errorf("stage status not propagated: %+v", m.Stages)
+		t.Fatalf("stage status not propagated: %+v", m.Stages)
+	}
+	if steps := m.Stages[0].Steps; len(steps) != 1 || steps[0].Status != StatusFailed || steps[0].CostUSD != 1.25 || steps[0].NumTurns != 7 {
+		t.Errorf("the stopped step is not recorded with its cost and turns: %+v", steps)
+	}
+	if m.Totals.CostUSD != 1.25 || m.Totals.TokensInput != 100 {
+		t.Errorf("totals miss the stopped step: %+v", m.Totals)
 	}
 }
 

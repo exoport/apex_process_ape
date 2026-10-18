@@ -24,8 +24,9 @@ a **progress-aware backstop** (PLAN-19) cancels a step only after a full idle
 window (`--idle-timeout`, default 60m) with no progress across *any* watched
 signal — bridge hooks, the transcript growing, and on the `ape prompt` path
 PTY output — not just the old hook-only 60m timer. A step that is actively
-working is never cancelled for being slow; a hard `--max-duration` ceiling
-(default 3h) is the absolute stop.
+working is never cancelled for being slow. A wall-clock `--max-duration`
+ceiling exists, but is off unless a person sets one: a run that shows progress
+stops only on the idle window, ape's own limits or a person (D159).
 
 `ape task` and every pipeline stage watch hooks and transcript growth but
 **not** PTY output, deliberately: a sub-agent call emits hooks throughout, so

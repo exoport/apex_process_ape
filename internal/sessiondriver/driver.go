@@ -59,19 +59,19 @@ type hookEnvelope struct {
 // a single pipeline step.
 const DefaultIdleTimeout = 60 * time.Minute
 
-// DefaultMaxDuration is the hard wall-clock ceiling WaitStepDone enforces
-// regardless of progress (PLAN-19 D2). The cap ships ON; a value of 0
-// disables it. Bounds a genuinely stuck-but-noisy step that the activity
-// anchor would otherwise keep alive forever.
+// DefaultMaxDuration is the wall-clock ceiling WaitStepDone enforces
+// regardless of progress when nobody sets one: none (D159). A run that
+// shows progress is stopped only by the idle timeout, ape's own limits
+// (budget, usage limit, the v1 loop limits) or a person. The 3h default
+// PLAN-19 D2 shipped killed a healthy APEX v1 orchestrator: it starts its
+// children as separate ape runs (D61), not sub-agents, so the clock never
+// reset and the cap bounded the whole milestone.
 //
-// The ceiling clock is NOT measured from step start unconditionally: it
-// resets on each sub-agent boundary (SubagentStart/SubagentStop). A
-// sequential batch skill (apex-story-batch-dev/-create/-review,
-// apex-lift-project) spawns one sub-agent per item, so the cap bounds each
-// individual item rather than the whole multi-item batch. A step that
-// spawns no sub-agents sees a flat wall-clock cap from step start, exactly
-// as before.
-const DefaultMaxDuration = 3 * time.Hour
+// A cap a person sets (--max-duration) still resets on each sub-agent
+// boundary (SubagentStart/SubagentStop), so a sequential batch skill is
+// bounded per item; a step that spawns no sub-agents sees a flat
+// wall-clock cap from step start.
+const DefaultMaxDuration time.Duration = 0
 
 // idlePoll is the base recheck frequency; idlePollDivisor scales it
 // down for short configured idle timeouts so tail latency stays

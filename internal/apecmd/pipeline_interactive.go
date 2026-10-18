@@ -513,8 +513,8 @@ func (c *interactiveCore) OnStepStart(info pipeline.InteractiveStepInfo) {
 	// renders as "n/a", so an idle cancellation here prints "pty n/a" —
 	// which is how to tell "ape stopped watching" from "claude stopped
 	// working". If this ever does get wired, the case to beat is a wedged
-	// session that keeps repainting, and --max-duration (3h, and it resets
-	// at every sub-agent boundary) is not a substitute for that.
+	// session that keeps repainting, and --max-duration (off by default,
+	// D159; reset at every sub-agent boundary) is not a substitute for that.
 	// Sub-agent captures are per-step: a fresh step must not re-count
 	// the previous step's sub-sessions. stepStartedAt anchors the
 	// robustness sweep's mtime window to this step.
@@ -995,6 +995,8 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 		OnRunDir:               onRunDir,
 		WaitStepDone:           core.WaitStepDone,
 		MaxDuration:            cfg.maxDuration,
+		ResumeCommand:          cfg.resumeCommand,
+		ResumeWhat:             cfg.resumeWhat,
 		PromptSubmits:          core.driver.PromptSubmits,
 		OnInteractiveStepStart: core.OnStepStart,
 		OnInteractiveStepEnd:   core.OnStepEnd,

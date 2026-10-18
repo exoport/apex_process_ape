@@ -4,7 +4,8 @@
 
 On top of rc.5 and the candidates below: research's rc.5 lift findings R16–R22, the v0
 state readers (D141), the docs delegate by default (D152), and gates, archive layout,
-hot/ and the secret scan (D155), and the changelog in the docs delegate's scope (D158).
+hot/ and the secret scan (D155), the changelog in the docs delegate's scope (D158), and no
+wall-clock kill of a run that shows progress (D159).
 
 ### `ape project lift`
 
@@ -62,6 +63,27 @@ hot/ and the secret scan (D155), and the changelog in the docs delegate's scope 
   `betterleaks:allow` markers and `.betterleaksignore` are not honoured; bingo
   `.sum` files are skipped. A session's own commits are scanned when the
   archive squashes them. The binary grows by about 8 MB.
+
+### A working run is never killed for time (D159; class B/C)
+
+- **`--max-duration` is off by default** (was 3h) for `ape task`, `ape prompt`,
+  apescript sessions and every detached child. A run that shows progress stops
+  only on the idle window, ape's own limits (an enforced budget, the plan's
+  usage limit, the v1 loop limits) or a person. The 3h default killed a healthy
+  atomix M3 orchestrator: its children are separate ape runs (D61), not
+  sub-agents, so the clock never reset, and the cap bounded the whole
+  milestone (and, through D62, the child in flight). A cap a person sets still
+  resets on each sub-agent boundary.
+- **A stopped run records what it spent.** Idle, ceiling, budget, usage-limit,
+  api-error, parent-gone and cancelled ends now scan the step's transcript and
+  record the step (`failed`, or `cancelled`) with its cost, tokens and turns.
+  The manifest totals, `ape task --json`'s `cost_usd`/`num_turns` and the
+  milestone spend include it (a killed run used to record $0). A stopped run's
+  manifest therefore has one step record where it had none.
+- **A stopped orchestrator says how to resume.** Its error and its manifest's
+  `termination.message` end with ``resume: `ape status` shows where M3
+  stopped; then `ape task apex-orchestrator --args M3` `` ("then, after the
+  reset," for a usage limit).
 
 ### The docs delegate by default (D152; class B/C)
 

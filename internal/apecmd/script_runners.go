@@ -24,8 +24,7 @@ import (
 
 // resolveMaxDuration mirrors the CLI's --max-duration default for the
 // apescript paths, which carry no flag: a zero MaxDuration means "not
-// configured" and resolves to the 3h ceiling (PLAN-19 D2). A script that
-// truly wants no cap sets a very large value.
+// configured" and resolves to DefaultMaxDuration, no cap (D159).
 func resolveMaxDuration(d time.Duration) time.Duration {
 	if d == 0 {
 		return sessiondriver.DefaultMaxDuration

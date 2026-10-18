@@ -184,6 +184,13 @@ type RunOptions struct {
 	// smoke tests that don't wire the bridge.
 	WaitStepDone func(ctx context.Context, stage string, stepIdx int) error
 
+	// ResumeCommand / ResumeWhat: how a person resumes this run when it
+	// ends without completing (D159 Q85; an APEX v1 orchestrator's
+	// `ape task apex-orchestrator --args <M>`, and <M>). Set, the
+	// manifest's termination message ends with ResumeLine's sentence.
+	ResumeCommand string
+	ResumeWhat    string
+
 	// MaxDuration is the hard wall-clock ceiling the WaitStepDone driver
 	// enforces (0 = none). The runner reads it for one thing: a ceiling
 	// shorter than the REPL readiness window bounds that wait too.
@@ -421,7 +428,7 @@ func Run(ctx context.Context, spec *Spec, opts RunOptions) error {
 	// the interactive per-stage claude REPL. The programmatic `claude -p`
 	// path (runStages / buildArgv / runClaude) was removed.
 	runErr := runStagesInteractive(ctx, spec, opts, mw)
-	finalizeManifest(mw, runErr, opts.Observer)
+	finalizeManifest(mw, runErr, opts)
 	runLog(opts.RunLog, "pipeline-end", spec.Name, map[string]any{"error": errMessage(runErr)})
 	return runErr
 }
@@ -549,7 +556,7 @@ func startManifestWriter(spec *Spec, opts RunOptions) (*manifestWriter, error) {
 // anything else → failed. Emits a single-line report pointer through
 // the observer's OnStageEnd channel only via the existing path — this
 // helper does not synthesize new events.
-func finalizeManifest(mw *manifestWriter, runErr error, _ Observer) {
+func finalizeManifest(mw *manifestWriter, runErr error, opts RunOptions) {
 	if mw == nil {
 		return
 	}
@@ -566,8 +573,32 @@ func finalizeManifest(mw *manifestWriter, runErr error, _ Observer) {
 	case runErr != nil:
 		status = StatusFailed
 	}
-	mw.RecordTermination(newTerminationRecord(runErr))
+	rec := newTerminationRecord(runErr)
+	if rec != nil && opts.ResumeCommand != "" {
+		rec.Message += " — " + ResumeLine(rec.Kind, opts.ResumeWhat, opts.ResumeCommand)
+	}
+	mw.RecordTermination(rec)
 	_, _ = mw.Finalize(status, time.Now())
+}
+
+// ResumeLine is the sentence that tells a person how to resume a run
+// that ended with termination kind (D159 Q85): look first, then start
+// command again — after the reset, when a usage limit stopped it.
+func ResumeLine(kind, what, command string) string {
+	then := "then"
+	if kind == TerminationUsageLimit {
+		then = "then, after the reset,"
+	}
+	return "resume: `ape status` shows where " + what + " stopped; " + then + " `" + command + "`"
+}
+
+// TerminationKind is the manifest's termination kind for runErr ("" for
+// nil): what ResumeLine needs to word its sentence.
+func TerminationKind(runErr error) string {
+	if rec := newTerminationRecord(runErr); rec != nil {
+		return rec.Kind
+	}
+	return ""
 }
 
 // notReady reports a run that ended because the claude REPL never came up,

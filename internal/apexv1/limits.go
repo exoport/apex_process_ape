@@ -205,8 +205,8 @@ func approvedSince(m *Milestone) time.Time {
 // milestoneSpend is the spend of the runs started since m's approval
 // (every run when it is not approved): each run's manifest cost, or what
 // ape measured when a limit stopped it, whichever is more — a stopped
-// session's manifest counts only its completed steps, which for `ape task`
-// is none. A fix's runs — whose --args names a change of `milestone:
+// session's manifest records the stopped step's transcript scan (D159),
+// and the limit's own measure may be the later of the two. A fix's runs — whose --args names a change of `milestone:
 // none` (D40) — count toward no milestone.
 func milestoneSpend(m *Milestone, runs []cost.RunCost, stops []LimitStop, fixes map[string]bool) float64 {
 	since := approvedSince(m)

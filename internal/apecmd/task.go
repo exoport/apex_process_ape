@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -401,7 +402,7 @@ func newTaskCmd() *cobra.Command {
 	cmd.Flags().Lookup("task-commit").NoOptDefVal = taskCommitDerivedSentinel
 	cmd.Flags().BoolVar(&allowDirtyFlag, "commit-allow-dirty", false, "Bypass the dirty-tree gate (relevant only with --task-commit)")
 	cmd.Flags().DurationVar(&idleTimeoutFlag, "idle-timeout", 0, "Idle backstop: cancel only after this long with no progress across hook events or transcript growth (e.g. 15m); default matches pipeline (60m). PTY output is NOT an anchor here — see `ape prompt`")
-	cmd.Flags().DurationVar(&maxDurationFlag, "max-duration", sessiondriver.DefaultMaxDuration, "Hard wall-clock ceiling regardless of progress (e.g. 3h); the clock resets on each sub-agent boundary, so a sequential batch skill is bounded per item, not per batch. 0 disables the cap.")
+	cmd.Flags().DurationVar(&maxDurationFlag, "max-duration", sessiondriver.DefaultMaxDuration, "Wall-clock ceiling regardless of progress (e.g. 8h); off by default (D159: a run showing progress stops only on the idle timeout, ape's limits or a person). The clock resets on each sub-agent boundary, so a sequential batch skill is bounded per item.")
 	cmd.Flags().StringVar(&outputFormat, "output-format", "human", "Output format: human|json (json = result envelope on stdout, progress on stderr)")
 	cmd.Flags().BoolVar(&jsonAlias, "json", false, "Alias for --output-format json")
 	cmd.Flags().BoolVar(&quietFlag, "quiet", false, "Suppress the per-event progress stream")
@@ -784,6 +785,10 @@ func dispatchTaskWith(ctx context.Context, o taskOptions, cfg runConfig) (taskRu
 	}
 
 	exitCode := taskExitCode(runErr)
+	if runErr != nil && cfg.resumeCommand != "" {
+		// After the exit code: the line changes the message, not the verdict.
+		runErr = &resumeHintError{err: runErr, line: pipeline.ResumeLine(pipeline.TerminationKind(runErr), cfg.resumeWhat, cfg.resumeCommand)}
+	}
 	if exitCode == ExitOK && !contract.OK() {
 		// Only promoted to the verdict when nothing worse happened: a
 		// skill that crashed AND left a stash is reported as the crash,
@@ -826,6 +831,27 @@ func dispatchTaskWith(ctx context.Context, o taskOptions, cfg runConfig) (taskRu
 	}, nil
 }
 
+// orchestratorResumeCommand is the command that resumes an APEX v1
+// orchestrator run of args (D159 Q85): the orchestrator picks the
+// milestone up from its recorded state.
+func orchestratorResumeCommand(args string) string {
+	args = strings.TrimSpace(args)
+	if strings.ContainsAny(args, " \t\"'") {
+		args = strconv.Quote(args)
+	}
+	return "ape task " + v1OrchestratorSkill + " --args " + args
+}
+
+// resumeHintError is a stopped run's error with ResumeLine's sentence
+// after it; errors.As and errors.Is still see the run's own error.
+type resumeHintError struct {
+	err  error
+	line string
+}
+
+func (e *resumeHintError) Error() string { return e.err.Error() + " — " + e.line }
+func (e *resumeHintError) Unwrap() error { return e.err }
+
 // prepareV1Task makes an APEX v1 project's launch decisions for
 // dispatchTaskWith, writing them into o and cfg. Every error is a
 // preflight failure.
@@ -849,6 +875,8 @@ func prepareV1Task(ctx context.Context, p *apexv1.Project, o *taskOptions, cfg *
 		if err := p.OrchestratorLimits(ctx, o.args); err != nil {
 			return nil, &taskPreflightError{err: err}
 		}
+		// D159 Q85: a stopped orchestrator says how to resume it.
+		cfg.resumeCommand, cfg.resumeWhat = orchestratorResumeCommand(o.args), strings.TrimSpace(o.args)
 	}
 	// Backlog 30: the milestone's enforced budget refuses the start, or
 	// stops the session when its live spend reaches it.

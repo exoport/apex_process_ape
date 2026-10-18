@@ -433,6 +433,23 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, skips Sta
 			stageErr = fmt.Errorf("stage %q step %d: wait done: %w", stage.Name, i, waitErr)
 			stageStatus = StatusFailed
 			closeStepLog(eventLog)
+			// A stopped step's session still spent (D159 Q84): an idle,
+			// ceiling, budget, usage-limit, parent-gone or cancelled end
+			// is scanned and recorded like a finished one, so the run's
+			// totals — and the milestone spend that sums them — carry it.
+			var ev *resultEvent
+			if opts.StepTelemetryFn != nil {
+				if tele := opts.StepTelemetryFn(stage.Name, i); tele != nil {
+					ev = stepTelemetryToResultEvent(tele)
+				}
+			}
+			stopped := StatusFailed
+			if errors.Is(waitErr, context.Canceled) {
+				stopped = StatusCancelled
+			}
+			recordStep(mw, stageIdx, i+1, step,
+				models{Run: runModel, Declared: declaredModel, Effort: effortPlan},
+				opts.Prompt, stepStart, time.Now(), stopped, 1, eventsRel, ev)
 			break
 		}
 
