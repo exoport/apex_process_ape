@@ -107,17 +107,22 @@ The commit:
                  placeholder. A trailing " # …" shell comment is dropped first
   lays down      the v1 skeleton, as ` + "`ape project init --brownfield`" + ` (CLAUDE.md keeps its
                  content, loses the v0 apex:managed block and gains @AGENTS.md)
-  writes         development/lift-disposition.md (at most 16 KB): the binding-rule
-                 candidates (CLAUDE.md list items, project-context "don't miss" items,
-                 team-memory gotcha titles) with an empty Disposition column for
-                 apex-plan, then a fresh read-only review, then the person, who deletes
-                 it. Then, as summaries: code and CI that still read removed paths, one
-                 line per file with its count and first reference (CI guards over the
-                 v0 corpus show up there), and edited files a guard hashes, first; ADR
-                 gaps; ids left and files not edited, counted per file; references in
-                 evidence and docs, counted; readings at the tag. Every list whole goes
-                 to _apex/state/lift-disposition.json after the commit: ignored by
-                 the state folder's whitelist, never committed, in this checkout only
+  writes         development/lift-disposition.md (16 KB, unless its candidates need
+                 more): the binding-rule candidates (CLAUDE.md list items,
+                 project-context "don't miss" items, team-memory gotcha titles), EVERY
+                 one, with an empty Disposition column for apex-plan, then a fresh
+                 read-only review, then the person, who deletes it. Then, as summaries:
+                 code and CI that still read removed paths, one line per file with its
+                 count and first reference (CI guards over the v0 corpus show up there),
+                 and edited files a guard hashes (at most 50), first; ADR gaps; ids left
+                 and files not edited, counted per file; references in evidence and
+                 docs, counted; readings at the tag. To fit 16 KB the summaries shrink
+                 to counts, then the ADR table to the ADRs with gaps; the candidates are
+                 never cut to fit it: the file grows past 16 KB to hold them, up to
+                 48 KB, and only past 48 KB lists the first ones and says how many more
+                 there are and where. Every list whole goes to
+                 _apex/state/lift-disposition.json after the commit: ignored by the
+                 state folder's whitelist, never committed, in this checkout only
 
 A byte-identity perimeter: a file a test, CI script or lock file hashes goes red once
 the lift edits a comment in it. The plan lists, as "hashed", the edited files that a lock

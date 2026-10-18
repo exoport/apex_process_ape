@@ -145,16 +145,34 @@ func cell(s string) string {
 // CI section is one line per file, and the full lists go to the ignored
 // _apex/state/lift-disposition.json: in the checkout that lifted, never in
 // history.
+//
+// R14 (the rc.4 dry runs): cut to its first 10 rows, the binding-rule
+// table left 36–68 of each project's candidates in that checkout-local
+// JSON — out of reach of the fresh reviewer, and of an apex-plan run in
+// any other checkout. The candidates are the list the file exists for, so
+// they are never cut to fit the cap: the summaries go down to counts
+// first, then the ADR table to the ADRs with gaps, and if the candidates
+// still overflow the cap, the file grows past it — up to
+// liftDispositionCeiling, and only past that are candidates cut, the file
+// saying how many and where they are.
 const liftDispositionCap = 16 << 10
+
+// liftDispositionCeiling is the most the disposition file grows to hold
+// every candidate: the hard ceiling of the caps on project.md and
+// AGENTS.md (caps.go). The file is transient — deleted once its
+// candidates have a home.
+const liftDispositionCeiling = 48 << 10
 
 // dispLimits bound one rendering of the disposition file: files is how
 // many files a summary names (the rest are counted; the report has them
-// all), rows how many ADR rows and rule candidates are listed (-1: all).
-type dispLimits struct{ files, rows int }
+// all), adrs how many ADR rows are listed, rules how many binding-rule
+// candidates (-1: all).
+type dispLimits struct{ files, adrs, rules int }
 
-// dispSteps are tried in order until a rendering fits the cap; the
-// candidates and ADRs, the file's work list, are the last cut.
-var dispSteps = []dispLimits{{40, -1}, {20, -1}, {10, -1}, {5, -1}, {5, 60}, {3, 30}, {0, 10}}
+// dispSteps are tried in order until a rendering fits the cap: the
+// summaries down to counts, then the ADR table. The candidates are cut
+// only past the ceiling (disposition).
+var dispSteps = []dispLimits{{40, -1, -1}, {20, -1, -1}, {10, -1, -1}, {5, -1, -1}, {3, -1, -1}, {0, -1, -1}, {0, 60, -1}, {0, 30, -1}, {0, 10, -1}}
 
 // liftReport is lift-disposition.json: every list the lift made, whole.
 type liftReport struct {
@@ -188,16 +206,26 @@ func (lf *lifter) report() string {
 	return string(data) + "\n"
 }
 
-// disposition renders the disposition file, within liftDispositionCap
-// when any step of dispSteps fits.
+// disposition renders the disposition file: within liftDispositionCap
+// when any step of dispSteps fits; else, every candidate kept, within
+// liftDispositionCeiling; else with as many candidates as fit it.
 func (lf *lifter) disposition() string {
 	var out string
 	for _, l := range dispSteps {
 		if out = lf.dispositionWith(l); len(out) <= liftDispositionCap {
-			break
+			return out
 		}
 	}
-	return out
+	if len(out) <= liftDispositionCeiling {
+		return out
+	}
+	last := dispSteps[len(dispSteps)-1]
+	n := sort.Search(len(lf.res.Candidates), func(n int) bool {
+		last.rules = n + 1
+		return len(lf.dispositionWith(last)) > liftDispositionCeiling
+	})
+	last.rules = n
+	return lf.dispositionWith(last)
 }
 
 func (lf *lifter) dispositionWith(lim dispLimits) string {
@@ -218,8 +246,9 @@ func (lf *lifter) dispositionWith(lim dispLimits) string {
 	} else {
 		p("| # | Candidate | Source | Disposition |\n|---|---|---|---|\n")
 		for i, c := range r.Candidates {
-			if i == lim.rows {
-				p("\n… and %d more candidate(s), numbered on from %d, in `%s` (rule_candidates)\n", len(r.Candidates)-i, i+1, report)
+			if i == lim.rules {
+				p("\n… and %d more candidate(s), numbered on from %d, past this file's %d KB ceiling: in `%s` (rule_candidates), in the checkout that lifted\n",
+					len(r.Candidates)-i, i+1, liftDispositionCeiling>>10, report)
 				break
 			}
 			p("| %d | %s | `%s` | |\n", i+1, cell(c.Text), c.Source)
@@ -274,7 +303,7 @@ func (lf *lifter) dispositionWith(lim dispLimits) string {
 	if len(r.ADRs) == 0 {
 		p("No ADRs.\n\n")
 	} else {
-		writeADRTable(&b, r.ADRs, lim.rows, lf.devRel, report)
+		writeADRTable(&b, r.ADRs, lim.adrs, lf.devRel, report)
 	}
 	if r.Canon != "" {
 		p("Canon: %s.\n\n", r.Canon)

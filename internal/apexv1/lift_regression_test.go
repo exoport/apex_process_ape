@@ -186,7 +186,7 @@ func TestLift_DispositionStaysReviewable(t *testing.T) {
 	for i := range 30 {
 		files[fmt.Sprintf("tools/ci/guard%02d.sh", i)] = "#!/bin/sh\ntest -d development/governance/adrs\n"
 	}
-	// 200 references in 85 more code files, and 300 rule candidates.
+	// 200 references in 85 more code files, and 30 rule candidates.
 	for i := range 85 {
 		var sh strings.Builder
 		sh.WriteString("#!/bin/sh\n")
@@ -198,7 +198,7 @@ func TestLift_DispositionStaysReviewable(t *testing.T) {
 	claude, err := os.ReadFile(filepath.Join(root, "CLAUDE.md"))
 	require.NoError(t, err)
 	var rules strings.Builder
-	for i := range 300 {
+	for i := range 30 {
 		fmt.Fprintf(&rules, "- Rule %d: never write to the shared ledger outside a reviewed change\n", i)
 	}
 	files["CLAUDE.md"] = string(claude) + "\n## More rules\n\n" + rules.String()
@@ -216,7 +216,7 @@ func TestLift_DispositionStaysReviewable(t *testing.T) {
 	require.GreaterOrEqual(t, len(res.DanglingRefs), 3030)
 	require.GreaterOrEqual(t, len(res.IDsLeft), 240)
 
-	require.GreaterOrEqual(t, len(res.Candidates), 300)
+	require.GreaterOrEqual(t, len(res.Candidates), 30)
 
 	disp, err := os.ReadFile(filepath.Join(root, "development", LiftDisposition))
 	require.NoError(t, err)
@@ -226,7 +226,8 @@ func TestLift_DispositionStaysReviewable(t *testing.T) {
 	require.Contains(t, d, "- `tools/verify/check03.sh` — 4, first at line 2: `development/implementation/sprint-status.yaml`\n", "one line per code file: count and first reference")
 	require.NotContains(t, d, "check03.sh:", "never a line per reference")
 	require.Contains(t, d, "more file(s) (in `_apex/state/lift-disposition.json`)")
-	require.Contains(t, d, "more candidate(s), numbered on from", "the candidates are cut last, and said where they are")
+	require.Contains(t, d, "| Rule 29: never write to the shared ledger outside a reviewed change |", "the candidates are never cut to fit (R14)")
+	require.NotContains(t, d, "more candidate(s)")
 	require.Less(t, strings.Index(d, "## Code and CI that still read removed paths"), strings.Index(d, "## ADRs"), "what can break comes first")
 
 	// The report: whole, ignored, not in the lift commit.
