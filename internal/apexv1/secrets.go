@@ -42,12 +42,16 @@ import (
 // line's author, a model, could write one — and `.betterleaksignore` is
 // not read: it is an unguarded file. A fingerprint is the sha256 of the
 // secret's exact bytes, betterleaks' own committed-ignore design. The
-// allow list is read from the config the commit's parent records (HEAD),
-// so an entry counts once a person has committed it, never from an
-// uncommitted edit.
+// allow list is read from the guard's baseline (R23, rc.6c): the newest
+// `apex: config accepted` commit since the v1 epoch on the commit's
+// parent, else the epoch itself — the rev config.changed compares
+// against — so an entry counts once a person has committed AND accepted
+// it, never from an uncommitted edit nor from one a session committed
+// itself. Before the epoch (no v1 rule applies yet: the lift commit, a
+// project ape has not made v1) it is read from the parent's config.
 
 func init() {
-	findingRules = append(findingRules, rule("", `^rule [^ ]+: .* — move it to hot/`, CodeCommitSecret))
+	findingRules = append(findingRules, rule("", `^rule [^ ]+: .* — (replace it with a placeholder|its allow entry is committed but not accepted)`, CodeCommitSecret))
 }
 
 // SecretsConfig is _apex/config.yaml's secrets block.
@@ -140,7 +144,7 @@ func scanTrees(ctx context.Context, root, from, to, subject string, paths []stri
 const maxPathspecArgs = 8 << 10
 
 // scanDiff scans the added lines of `git diff <sides> -- <paths>`, with
-// the allow list of the config at rev.
+// the allow list of the config at rev's guard baseline (allowBaseline).
 func scanDiff(ctx context.Context, root, rev, subject string, sides, paths []string) error {
 	// Fixed output whatever the user's git config: no colour, prefixes,
 	// external diff or textconv; renames paired, so a moved file adds no
@@ -165,9 +169,10 @@ func scanDiff(ctx context.Context, root, rev, subject string, sides, paths []str
 	if len(hunks) == 0 {
 		return nil
 	}
-	allow, err := secretsAllowAt(ctx, root, rev)
+	base := allowBaseline(ctx, root, rev)
+	allow, err := secretsAllowAt(ctx, root, base)
 	if err != nil {
-		return &FailError{Code: CodeCommitFailed, Msg: "scanning " + subject + " for secrets: " + configYAML + " at " + rev + ": " + err.Error() + " — nothing was committed; fix the secrets block"}
+		return &FailError{Code: CodeCommitFailed, Msg: "scanning " + subject + " for secrets: " + configYAML + " at " + base + ": " + err.Error() + " — nothing was committed; fix the secrets block"}
 	}
 	found, err := scanAdded(ctx, hunks, allow)
 	if err != nil {
@@ -176,7 +181,42 @@ func scanDiff(ctx context.Context, root, rev, subject string, sides, paths []str
 	if len(found) == 0 {
 		return nil
 	}
-	return secretRefusal(subject, found)
+	return secretRefusal(subject, found, unacceptedAllow(ctx, root, rev, base, allow))
+}
+
+// allowBaseline is the rev secrets.allow is read at for a commit on rev
+// (R23): the guard's baseline — the newest `apex: config accepted`
+// commit since the v1 epoch, else the epoch — so a committed entry counts
+// only once a person accepted it; rev itself when rev has no v1 epoch.
+func allowBaseline(ctx context.Context, root, rev string) string {
+	p := &Project{Root: root}
+	epoch := p.v1Epoch(ctx, rev)
+	if epoch == "" {
+		return rev
+	}
+	if accepted := p.lastConfigAcceptanceOn(ctx, epoch, rev); accepted != "" {
+		return accepted
+	}
+	return epoch
+}
+
+// unacceptedAllow are the fingerprints rev's config allows and the
+// baseline's does not: committed, not accepted.
+func unacceptedAllow(ctx context.Context, root, rev, base string, allow []SecretAllow) map[string]bool {
+	if base == rev {
+		return nil
+	}
+	cur, err := secretsAllowAt(ctx, root, rev)
+	if err != nil {
+		return nil
+	}
+	out := map[string]bool{}
+	for _, a := range cur {
+		if !slices.ContainsFunc(allow, func(b SecretAllow) bool { return b.Fingerprint == a.Fingerprint }) {
+			out[a.Fingerprint] = true
+		}
+	}
+	return out
 }
 
 // underAny reports whether a repository path is one of paths (relative to
@@ -442,26 +482,44 @@ func (s addedSource) Fragments(ctx context.Context, yield sources.FragmentsFunc)
 }
 
 // secretRefusal is the commit.secret error: each secret as
-// `<file>:<line> rule <id>: <redacted>`, and the allow entries a person
-// may paste.
-func secretRefusal(subject string, found []secretFinding) error {
-	var entries []string
+// `<file>:<line> rule <id>: <redacted>`, the placeholder fix first
+// (E-R6b-2: an example never needs a real value), and the allow entries a
+// person may paste. A fingerprint in unaccepted is allowed by an entry
+// committed but not accepted (R23): its finding says so.
+func secretRefusal(subject string, found []secretFinding, unaccepted map[string]bool) error {
+	var entries, pending []string
 	list := make([]string, 0, len(found))
 	findings := make([]Finding, 0, len(found))
 	for _, s := range found {
 		list = append(list, fmt.Sprintf("%s:%d rule %s: %s", s.Path, s.Line, s.Rule, s.Redacted))
 		entry := fmt.Sprintf(`{fingerprint: %q, reason: "…"}`, s.Fingerprint)
+		if unaccepted[s.Fingerprint] {
+			if !slices.Contains(pending, s.Fingerprint) {
+				pending = append(pending, s.Fingerprint)
+			}
+			findings = append(findings, Finding{File: s.Path, Line: s.Line, Message: "rule " + s.Rule + ": " + s.Redacted +
+				" — its allow entry is committed but not accepted: a person runs `ape project accept-config --by <who>`; or replace it with a placeholder (`<token>`, `$TOKEN`)"})
+			continue
+		}
 		if !slices.Contains(entries, entry) {
 			entries = append(entries, entry)
 		}
 		findings = append(findings, Finding{File: s.Path, Line: s.Line, Message: "rule " + s.Rule + ": " + s.Redacted +
-			" — move it to hot/ and read it from there; if it is not a secret, a person adds " + entry + " to " + configYAML + " secrets.allow"})
+			" — replace it with a placeholder (`<token>`, `$TOKEN`) — an example in docs never needs a real value — or move a real secret to hot/ and read it from there;" +
+			" if it is not a secret, a person adds " + entry + " to " + configYAML + " secrets.allow, commits it and accepts it (`ape project accept-config --by <who>`)"})
 	}
 	noun := "a secret"
 	if len(found) > 1 {
 		noun = strconv.Itoa(len(found)) + " secrets"
 	}
-	return &FailError{Code: CodeCommitSecret, Findings: findings, Msg: "nothing was committed: " + subject + " adds " + noun + ": " + strings.Join(list, "; ") +
-		" — move each to hot/ and read it from there; if one is not a secret, a person adds its entry to " + configYAML +
-		", commits it and accepts it (`ape project accept-config`): secrets: {allow: [" + strings.Join(entries, ", ") + "]}"}
+	msg := "nothing was committed: " + subject + " adds " + noun + ": " + strings.Join(list, "; ") +
+		" — replace each with a placeholder (`<token>`, `$TOKEN`) — an example in docs never needs a real value — or move a real secret to hot/ and read it from there"
+	if len(entries) > 0 {
+		msg += "; if one is not a secret, a person adds its entry to " + configYAML +
+			", commits it and accepts it (`ape project accept-config --by <who>`): secrets: {allow: [" + strings.Join(entries, ", ") + "]}"
+	}
+	if len(pending) > 0 {
+		msg += "; the allow entry for " + strings.Join(pending, ", ") + " is committed but not accepted: a person runs `ape project accept-config --by <who>`"
+	}
+	return &FailError{Code: CodeCommitSecret, Findings: findings, Msg: msg}
 }

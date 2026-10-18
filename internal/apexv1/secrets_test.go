@@ -66,7 +66,10 @@ func TestScanCommit_RefusesAnAddedSecret(t *testing.T) {
 	require.NotContains(t, fe.Msg, fakeToken, "redacted")
 	require.NotContains(t, fe.Msg, fakeToken[:12], "about four characters shown")
 	require.Contains(t, fe.Msg, `secrets: {allow: [{fingerprint: "`+tokenFingerprint()+`", reason: "…"}]}`)
-	require.Contains(t, fe.Msg, "move each to hot/")
+	// E-R6b-2: the placeholder fix first, the allow entry second.
+	require.Contains(t, fe.Msg, " — replace each with a placeholder (`<token>`, `$TOKEN`) — an example in docs never needs a real value — or move a real secret to hot/ and read it from there; if one is not a secret, a person adds its entry")
+	require.Less(t, strings.Index(fe.Msg, "placeholder"), strings.Index(fe.Msg, "secrets: {allow:"))
+	require.Contains(t, fe.Findings[0].Message, " — replace it with a placeholder (`<token>`, `$TOKEN`)")
 	require.Len(t, fe.Findings, 1)
 	require.Equal(t, "app.sh", fe.Findings[0].File)
 	require.Equal(t, 3, fe.Findings[0].Line)
@@ -155,6 +158,40 @@ func TestScanCommit_AllowListFromTheCommittedConfig(t *testing.T) {
 	run(t, root, "add", "--", configYAML)
 	run(t, root, "commit", "-q", "-m", "person: allow the fake token", "--", configYAML)
 	require.NoError(t, ScanCommit(ctx(), root, "apex: x", "a.sh"))
+}
+
+// R23: since the v1 epoch, secrets.allow is read from the guard's
+// baseline — the newest acceptance, else the epoch — not from HEAD: an
+// entry committed but not accepted lets nothing through, and the refusal
+// says what is missing; once a person accepts it, it does.
+func TestScanCommit_AllowListFromTheAcceptedConfig(t *testing.T) {
+	files := baseFiles()
+	files[configYAML] = "project_name: greeter\n"
+	p := fixture(t, files)
+	run(t, p.Root, "commit", "-q", "--allow-empty", "-m", "apex: project init")
+	write(t, p, configYAML, "project_name: greeter\nsecrets:\n  allow:\n    - {fingerprint: \""+tokenFingerprint()+"\", reason: a fake token in a test}\n")
+	commitAll(t, p, "chore: allow the fake token")
+	write(t, p, "a.sh", "T="+fakeToken+"\n")
+	run(t, p.Root, "add", "--", "a.sh")
+
+	fe := secretFail(t, ScanCommit(ctx(), p.Root, "apex: x", "a.sh"))
+	require.Len(t, fe.Findings, 1, "a committed, unaccepted allow entry does not count")
+	require.Contains(t, fe.Findings[0].Message, " — its allow entry is committed but not accepted: a person runs `ape project accept-config --by <who>`")
+	require.Contains(t, fe.Msg, "the allow entry for "+tokenFingerprint()+" is committed but not accepted: a person runs `ape project accept-config --by <who>`")
+	require.NotContains(t, fe.Msg, "secrets: {allow: [", "no entry to add: it is there")
+	require.Equal(t, CodeCommitSecret, ClassifyFindings(fe.Findings)[0].Code)
+
+	run(t, p.Root, "restore", "--staged", "--", "a.sh")
+	_, err := p.AcceptConfig(ctx(), "ann")
+	require.NoError(t, err)
+	run(t, p.Root, "add", "--", "a.sh")
+	require.NoError(t, ScanCommit(ctx(), p.Root, "apex: x", "a.sh"), "accepted: it counts")
+
+	// A later, unaccepted commit that drops the entry from HEAD does not
+	// take it away either: the baseline decides.
+	write(t, p, configYAML, "project_name: greeter\n")
+	run(t, p.Root, "commit", "-q", "-m", "chore: drop it", "--", configYAML)
+	require.NoError(t, ScanCommit(ctx(), p.Root, "apex: x", "a.sh"))
 }
 
 // Q78: a secret only in a deleted line, or in unchanged context, does not
