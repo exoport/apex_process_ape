@@ -359,6 +359,8 @@ func (p *Project) checkDeltas(file string, c *Change, touches map[string]bool) [
 				add(d.PurposeLine, "`Purpose:` in an ADDED block names a new capability's purpose, and ["+d.Capability+"] already has one — drop it, or change the spec's Purpose through its own change")
 			case d.PurposeLine > 0 && d.Purpose == "":
 				add(d.PurposeLine, "`Purpose:` is empty — one or more sentences on what the capability is for")
+			case d.PurposeLine > 0 && strings.Contains(d.Purpose, "\n") && !reqHasLeadText(d.Req.Text):
+				add(d.PurposeLine, "`Purpose:` runs to the first blank line and took the requirement's own text — put a blank line between the Purpose and the requirement's text")
 			}
 			if existing != nil {
 				add(d.Line, fmt.Sprintf("ADDED requirement %q already exists in specs/%s — use MODIFIED", d.Name, d.Capability))
@@ -731,4 +733,20 @@ var humanReviewLikeRe = regexp.MustCompile(`(?i)^human[- ]review\b`)
 func malformedHumanReview(check string) bool {
 	check = strings.TrimSpace(check)
 	return check != HumanReview && humanReviewLikeRe.MatchString(check)
+}
+
+// reqHasLeadText reports whether a requirement has prose before its first
+// scenario: a Purpose block with no blank line after it (Q44) takes that
+// prose, and the requirement is left with none.
+func reqHasLeadText(text string) bool {
+	for l := range strings.SplitSeq(text, "\n") {
+		t := strings.TrimSpace(l)
+		switch {
+		case strings.HasPrefix(t, "#### "):
+			return false
+		case t != "" && !strings.HasPrefix(t, "#"):
+			return true
+		}
+	}
+	return false
 }
