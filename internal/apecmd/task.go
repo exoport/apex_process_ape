@@ -36,8 +36,41 @@ import (
 const taskCommitDerivedSentinel = "\x01derived"
 
 // taskLongHelp is `ape task --help`'s long text, kept out of newTaskCmd
-// so the constructor reads as flags and wiring.
-const taskLongHelp = `Run one framework skill as a single-step interactive run — everything a
+// so the constructor reads as flags and wiring. The depth-1 allow-list in
+// it is generated from apexv1.CoreChildSkills, so the help names exactly
+// the skills the refusal message and the rule use.
+var taskLongHelp = strings.Replace(taskLongHelpText, "{{depth1}}", depthOneHelp(), 1)
+
+// depthOneHelp is the nesting table's depth-1 row of `ape task --help`.
+func depthOneHelp() string {
+	return hangingWrap("  depth 1  ", "           ", "a session started from depth 0: may start a child only when it is ape's own"+
+		" apex-orchestrator run (ape task apex-orchestrator), only a skill on its allow-list ("+
+		strings.Join(apexv1.CoreChildSkills, ", ")+", the human_review: delegate skill, and every skill"+
+		" the tools: slots name), and one child at a time", 76)
+}
+
+// hangingWrap fills text into lines of at most width runes, the first after
+// prefix and the rest after indent.
+func hangingWrap(prefix, indent, text string, width int) string {
+	var b strings.Builder
+	line := prefix
+	fresh := true
+	for _, w := range strings.Fields(text) {
+		if !fresh && len(line)+1+len(w) > width {
+			b.WriteString(line + "\n")
+			line, fresh = indent, true
+		}
+		if !fresh {
+			line += " "
+		}
+		line += w
+		fresh = false
+	}
+	b.WriteString(line)
+	return b.String()
+}
+
+const taskLongHelpText = `Run one framework skill as a single-step interactive run — everything a
 pipeline step gets (agent prefix, preflight, bridge hooks, manifest,
 telemetry) with all parameters passed as flags instead of a pipeline
 YAML file. Execution is PTY-interactive only: claude runs as a REPL,
@@ -177,11 +210,7 @@ launched (ape task, ape prompt, ape chat, ape change review --run, and the
 ape service task/prompt jobs, which run those commands):
   depth 0  a terminal, a Claude Code session ape did not launch, a shell,
            ape script, the service daemon: may start any session
-  depth 1  a session started from depth 0: may start a child only when it
-           is ape's own apex-orchestrator run (ape task apex-orchestrator),
-           only a skill on its allow-list (apex-plan, apex-change,
-           apex-apply, apex-review, apex-release, and the tools: skills),
-           and one child at a time
+{{depth1}}
   depth 2  a session an orchestrator started: starts nothing
 A refusal is exit 2, code session.depth or session.not-allowed (action
 stop); a second child while one runs is exit 3, session.child-running, and
