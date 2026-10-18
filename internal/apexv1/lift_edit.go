@@ -4,7 +4,9 @@ import (
 	"go/format"
 	"regexp"
 	"slices"
+	"sort"
 	"strings"
+	"unicode"
 )
 
 // LiftIDRef is one id the lift found and did not edit, or edited text
@@ -108,11 +110,9 @@ func editComments(rel, src string, lang liftLang, vocab *liftVocab, adr *adrRewr
 		}
 	}
 
-	type repl struct {
-		start, end int
-		text       string
-	}
-	var repls []repl
+	// Each comment is cleaned on its own, then the runs of line comments
+	// are fixed as one text (fixParens), then spliced.
+	var cs []*liftComment
 	for _, s := range segs {
 		if s.Kind == segComment && !s.Block && s.End > s.Start && src[s.End-1] == '\r' {
 			s.End-- // a CRLF line keeps its CR
@@ -134,34 +134,71 @@ func editComments(rel, src string, lang liftLang, vocab *liftVocab, adr *adrRewr
 			listIDs(s.Start, text, "data comment")
 			continue
 		}
-		newText, emptied, nIDs, nADR, unresolved := cleanComment(text, s.Block, vocab, adr)
+		lineStart := strings.LastIndexByte(src[:s.Start], '\n') + 1
+		le := lineEnd(src, s.End)
+		c := &liftComment{
+			seg: s, text: text, out: text, lineStart: lineStart, le: le,
+			alone: strings.TrimSpace(src[lineStart:s.Start]) == "" && strings.TrimSpace(src[s.End:le]) == "",
+		}
+		if !s.Block {
+			c.marker = lineMarkRe.FindString(text)
+		}
+		// R2: "Story 15.4's own deliverable" has no rewrite that keeps
+		// its meaning ("'s own deliverable" was 1,941 lines in cortex):
+		// the comment is listed and left as written, its ADR citations
+		// still renumbered.
+		if vocab.possessive(text) {
+			for _, sp := range vocab.idSpans(text) {
+				left(s.Start+sp[0], text[sp[0]:sp[1]], "possessive")
+			}
+			c.keep = true
+			var unresolved []string
+			c.out, c.nADR, unresolved = adr.rewrite(text)
+			for _, u := range unresolved {
+				res.Unresolved = append(res.Unresolved, LiftIDRef{File: rel, Line: lineAt(src, s.Start), Text: u, Where: "comment"})
+			}
+			cs = append(cs, c)
+			continue
+		}
+		var unresolved []string
+		c.out, c.emptied, c.nIDs, c.nADR, unresolved = cleanComment(text, s.Block, vocab, adr)
 		for _, u := range unresolved {
 			res.Unresolved = append(res.Unresolved, LiftIDRef{File: rel, Line: lineAt(src, s.Start), Text: u, Where: "comment"})
 		}
-		if newText == text && !emptied {
+		if c.out != text || c.emptied {
+			if lang == langJSX && strings.TrimSpace(src[lineStart:s.Start]) != "" {
+				// Markup text can hold `//`: only a comment that begins its
+				// line is surely a comment.
+				listIDs(s.Start, text, "jsx-inline")
+				continue
+			}
+			if c.emptied && c.alone && c.continued(src) {
+				// Deleting a line after a continued one would join the next
+				// line onto it.
+				listIDs(s.Start, text, "continuation")
+				continue
+			}
+		}
+		cs = append(cs, c)
+	}
+	fixParens(src, cs)
+
+	type repl struct {
+		start, end int
+		text       string
+	}
+	var repls []repl
+	for _, c := range cs {
+		s, text, newText, lineStart, le := c.seg, c.text, c.out, c.lineStart, c.le
+		if newText == text && !c.emptied {
 			continue
 		}
-		lineStart := strings.LastIndexByte(src[:s.Start], '\n') + 1
-		le := lineEnd(src, s.End)
-		alone := strings.TrimSpace(src[lineStart:s.Start]) == "" && strings.TrimSpace(src[s.End:le]) == ""
-		if lang == langJSX && strings.TrimSpace(src[lineStart:s.Start]) != "" {
-			// Markup text can hold `//`: only a comment that begins its
-			// line is surely a comment.
-			listIDs(s.Start, text, "jsx-inline")
-			continue
-		}
-		if emptied && alone && lineStart > 0 && strings.HasSuffix(strings.TrimRight(src[:lineStart-1], " \t\r"), "\\") {
-			// Deleting a line after a continued one would join the next
-			// line onto it.
-			listIDs(s.Start, text, "continuation")
-			continue
-		}
-		res.IDsRemoved += nIDs
-		res.ADRsRewritten += nADR
+		res.IDsRemoved += c.nIDs
+		res.ADRsRewritten += c.nADR
 		switch {
-		case !emptied:
+		case !c.emptied:
 			repls = append(repls, repl{s.Start, s.End, newText})
-		case alone:
+		case c.alone:
 			repls = append(repls, repl{lineStart, min(le+1, len(src)), ""})
 		case !s.Block:
 			ws := s.Start
@@ -200,6 +237,192 @@ func editComments(rel, src string, lang liftLang, vocab *liftVocab, adr *adrRewr
 		return nil, err
 	}
 	return res, nil
+}
+
+// liftComment is one comment of a file the lift edits: as written, as
+// cleaned, and where its line is.
+type liftComment struct {
+	seg       tokSeg
+	text, out string
+	// marker is a line comment's ("//", "#"); "" for a block.
+	marker        string
+	lineStart, le int
+	// alone: nothing but the comment on its line; emptied: it goes.
+	alone, emptied bool
+	// keep: left as written (a possessive id); its brackets still count.
+	keep       bool
+	nIDs, nADR int
+}
+
+// continued reports a comment line after a line ending in a backslash:
+// deleting it would join the next line onto that one.
+func (c *liftComment) continued(src string) bool {
+	return c.lineStart > 0 && strings.HasSuffix(strings.TrimRight(src[:c.lineStart-1], " \t\r"), "\\")
+}
+
+// runsInto reports b as the line comment right below a, both alone on
+// their lines with the same marker: one paragraph.
+func (c *liftComment) runsInto(b *liftComment) bool {
+	return c.marker != "" && c.alone && b.alone && c.marker == b.marker && b.lineStart == c.le+1
+}
+
+// fixParens closes what a removal left open across lines (R2). An aside
+// that opens on one comment line and closes on another is cleaned a line
+// at a time: "Bounded (Story 3.2," leaves "Bounded (" over "// Task 4)
+// holds", and a line of nothing but ids takes the ")" of the line above
+// with it — on rc.3, 26–34 comment lines per project began with an
+// orphaned ")". So a "(" whose id went goes with its ")", and in a run of
+// line comments whose brackets balanced at the tag, a bracket left
+// without its pair, or a pair left around nothing, goes too; a line left
+// with no word goes. Only a run some id was stripped from is touched,
+// and a kept (possessive) line is never edited.
+func fixParens(src string, cs []*liftComment) {
+	for i := 0; i < len(cs); {
+		j := i + 1
+		for j < len(cs) && cs[j-1].runsInto(cs[j]) {
+			j++
+		}
+		run := cs[i:j]
+		i = j
+		if run[0].marker == "" || !slices.ContainsFunc(run, func(c *liftComment) bool { return c.nIDs > 0 }) {
+			continue
+		}
+		fixRunParens(src, run)
+	}
+}
+
+func fixRunParens(src string, run []*liftComment) {
+	n := len(run)
+	old, cur := make([]string, n), make([]string, n)
+	dead, touched := make([]bool, n), make([]bool, n)
+	for k, c := range run {
+		old[k], dead[k] = c.text[len(c.marker):], c.emptied
+		if !c.emptied {
+			cur[k] = c.out[len(c.marker):]
+		}
+	}
+	drop := func(at [][2]int) {
+		sort.Slice(at, func(i, j int) bool {
+			if at[i][0] != at[j][0] {
+				return at[i][0] < at[j][0]
+			}
+			return at[i][1] > at[j][1]
+		})
+		for _, d := range at {
+			if !run[d[0]].keep {
+				cur[d[0]], touched[d[0]] = dropParen(cur[d[0]], d[1]), true
+			}
+		}
+	}
+	// A "(" its id was stripped from, left at the end of its line, goes
+	// with its ")".
+	var first [][2]int
+	pairs := parenScan(cur, dead).pairs
+	for k, c := range run {
+		t := strings.TrimRight(cur[k], " \t")
+		if dead[k] || c.keep || !strings.HasSuffix(t, "(") || strings.HasSuffix(strings.TrimRight(old[k], " \t"), "(") {
+			continue
+		}
+		at := [2]int{k, len(t) - 1}
+		first = append(first, at)
+		if cl, ok := pairs[at]; ok {
+			first = append(first, cl)
+		}
+	}
+	drop(first)
+	// Then, where the run balanced at the tag, a bracket left without its
+	// pair, or a pair left around no word across lines.
+	o, c := parenScan(old, make([]bool, n)), parenScan(cur, dead)
+	var then [][2]int
+	if len(o.closers) == 0 {
+		then = append(then, c.closers...)
+	}
+	if len(o.openers) == 0 {
+		then = append(then, c.openers...)
+	}
+	if len(o.empty) == 0 {
+		then = append(then, c.empty...)
+	}
+	drop(then)
+	for k, c := range run {
+		if !touched[k] {
+			continue
+		}
+		if !hasWordRune(cur[k]) && (!c.alone || !c.continued(src)) {
+			c.emptied = true
+			continue
+		}
+		c.out = c.marker + strings.TrimRight(cur[k], " \t")
+	}
+}
+
+// parenSpans are the brackets of a run of comment lines, as [line, byte]:
+// closers with no opener, openers with no closer, the pairs that span
+// lines around nothing with a word in it, and every pair, opener →
+// closer.
+type parenSpans struct {
+	closers, openers, empty [][2]int
+	pairs                   map[[2]int][2]int
+}
+
+func parenScan(lines []string, dead []bool) parenSpans {
+	type open struct {
+		at   [2]int
+		word bool
+	}
+	out := parenSpans{pairs: map[[2]int][2]int{}}
+	var stack []open
+	for k, l := range lines {
+		if dead[k] {
+			continue
+		}
+		for x, r := range l {
+			switch {
+			case r == '(':
+				stack = append(stack, open{at: [2]int{k, x}})
+			case r == ')':
+				if len(stack) == 0 {
+					out.closers = append(out.closers, [2]int{k, x})
+					continue
+				}
+				top := stack[len(stack)-1]
+				stack = stack[:len(stack)-1]
+				out.pairs[top.at] = [2]int{k, x}
+				if !top.word && top.at[0] != k {
+					out.empty = append(out.empty, top.at, [2]int{k, x})
+				}
+				if len(stack) > 0 {
+					stack[len(stack)-1].word = stack[len(stack)-1].word || top.word
+				}
+			case unicode.IsLetter(r) || unicode.IsDigit(r):
+				if len(stack) > 0 {
+					stack[len(stack)-1].word = true
+				}
+			}
+		}
+	}
+	for _, o := range stack {
+		out.openers = append(out.openers, o.at)
+	}
+	return out
+}
+
+// glueTailRe is what an opener may be followed by to its line's end
+// when the id it led into went to the next line: "(see".
+var glueTailRe = regexp.MustCompile(`^\(\s*(?i:` + glueWords + `)?\s*$`)
+
+// dropParen removes the bracket at x — an opener with only glue after it
+// ("(see") to the end of its line — and a space it leaves before a mark,
+// another space or the end.
+func dropParen(s string, x int) string {
+	if glueTailRe.MatchString(s[x:]) {
+		return strings.TrimRight(s[:x], " \t")
+	}
+	out := s[:x] + s[x+1:]
+	if x > 0 && out[x-1] == ' ' && (x == len(out) || strings.IndexByte(" .,;:!?)", out[x]) >= 0) {
+		out = out[:x-1] + out[x:]
+	}
+	return out
 }
 
 var (

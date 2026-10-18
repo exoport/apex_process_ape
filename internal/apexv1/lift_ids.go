@@ -108,6 +108,20 @@ func (v *liftVocab) find(s string, paths bool) [][2]int {
 	return mergeSpans(out)
 }
 
+// possessiveRe is an id's possessive: "Story 15.4's own deliverable".
+var possessiveRe = regexp.MustCompile(`^['’]s\b`)
+
+// possessive reports an id in s that the sentence owns through it ("Story
+// 15.4's own deliverable"): no removal keeps such a sentence whole (R2).
+func (v *liftVocab) possessive(s string) bool {
+	for _, sp := range v.idSpans(s) {
+		if possessiveRe.MatchString(s[sp[1]:]) {
+			return true
+		}
+	}
+	return false
+}
+
 func mergeSpans(in [][2]int) [][2]int {
 	if len(in) == 0 {
 		return nil
@@ -264,7 +278,7 @@ var (
 	cutRe       = regexp.MustCompile(`[ \t]*[` + idMark + cutMark + `]+[ \t]*`)
 	// The separator a removal leaves next to a bracket or a punctuation
 	// mark goes with it (L9): "(ADR-0019,)", "(, ADR-0017", "ADR-0011 /,".
-	openSepRe   = regexp.MustCompile(`([(\[])` + cutMark + `(?:[,;/&+]|(?i:and|or)\b)?[ \t]*`)
+	openSepRe   = regexp.MustCompile(`([(\[])` + cutMark + `(?:[,;:/&+]|—|–|--?|(?i:and|or)\b)?[ \t]*`)
 	sepCloseRe  = regexp.MustCompile(`[ \t]*(?:[,;/&+]|\b(?i:and|or))[ \t]*` + cutMark + `([)\]])`)
 	sepPunctRe  = regexp.MustCompile(`[ \t]*[,;/&+][ \t]*` + cutMark + `([,;:.!?])`)
 	emptyPairRe = regexp.MustCompile(`\(\s*\)|\[\s*\]`)

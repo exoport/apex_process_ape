@@ -273,7 +273,7 @@ func (lf *lifter) disposition() string {
 	}
 
 	p("## Ids left in code\n\n")
-	p("The lift edits comments only (D37). These ids sit in identifiers, strings, directives, data-shaped comments or files it does not edit:\n")
+	p("The lift edits comments only (D37). These ids sit in identifiers, strings, directives, data-shaped comments, comments that use one as a possessive (\"Story 3.2's\": no removal keeps that sentence) or files it does not edit:\n")
 	p("rename them in a change if they should go. An ADR id here still has its OLD number.\n\n")
 	if len(r.IDsLeft) == 0 {
 		p("None.\n\n")
