@@ -84,9 +84,15 @@ The commit:
                  so are ids in a data-shaped comment, which a tool may parse: one
                  opening with a lowercase key ("# owner: …") or a record of
                  key: value fields ("# pending: q | owner: …"), and so is a comment
-                 using an id as a possessive ("Story 3.2's own test"), which no
-                 removal keeps whole. An aside split over comment lines loses
-                 both brackets with its id: no line is left starting with ")".
+                 using an id or a removed path as a possessive ("Story 3.2's own
+                 test", "development/deferred/'s Gates"), which no removal keeps
+                 whole. An aside split over comment lines loses both brackets
+                 with its id, and a mark a removal leaves at the start of a line
+                 moves to the end of the line above ("(ADR-0008," over "Story
+                 1.3), extracted" → "(ADR-0008)" over "extracted"; a separator
+                 goes): no edited line starts with ")" or "." or loses the
+                 blank after its "//". Only a bracket pair the removal emptied
+                 goes: run()'s, []byte stay.
                  Tokenized: Go (go/scanner), shell, Python, JS/TS (JSX/TSX: comments
                  that begin their line only), Dart, YAML, Makefile (recipe lines are
                  the shell's: left), C/C++. A file the tokenizer cannot read, a

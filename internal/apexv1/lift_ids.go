@@ -113,8 +113,10 @@ var possessiveRe = regexp.MustCompile(`^['’]s\b`)
 
 // possessive reports an id in s that the sentence owns through it ("Story
 // 15.4's own deliverable"): no removal keeps such a sentence whole (R2).
+// A removed path owns one the same way ("development/deferred/'s Gates
+// paragraph" left "'s Gates paragraph", R10).
 func (v *liftVocab) possessive(s string) bool {
-	for _, sp := range v.idSpans(s) {
+	for _, sp := range v.spans(s) {
 		if possessiveRe.MatchString(s[sp[1]:]) {
 			return true
 		}
@@ -259,6 +261,15 @@ const (
 	cutMark = "\x02" // where text was removed
 )
 
+// holdPair holds the brackets of a pair that was empty as written — the
+// "()" of "run()'s", the "[]" of "[]byte" — while the ids are stripped,
+// and releasePair puts them back: only a pair a removal emptied goes
+// (R9; rc.4 stripped every empty pair on a line it edited).
+var (
+	holdPair    = strings.NewReplacer("(", "\x03", ")", "\x04", "[", "\x05", "]", "\x06")
+	releasePair = strings.NewReplacer("\x03", "(", "\x04", ")", "\x05", "[", "\x06", "]")
+)
+
 // glue words that only lead into an id: "see", "per", "tracked in".
 const glueWords = `(?:see also|see|per|cf\.?|refs?:?|from|in|by|via|since|for|under|also|tracked (?:in|as|by)|follow-?ups?(?: in)?|as of|after|until|before|was|formerly)`
 
@@ -266,7 +277,7 @@ var (
 	idListRe = regexp.MustCompile(idMark + `(?:\s*(?:,|;|/|&|\+|\band\b|\bor\b)\s*` + idMark + `)+`)
 	// An aside that starts with an id ("(DW-42 tracks the gap)") goes
 	// whole.
-	idAsideRe    = regexp.MustCompile(`[ \t]*[(\[]\s*(?i:` + glueWords + `\s+)?` + idMark + `[^()\[\]]*[)\]]`)
+	idAsideRe    = regexp.MustCompile(`[ \t]*[(\[]\s*(?i:` + glueWords + `\s+)?` + idMark + `[^()\[\]\x03-\x06]*[)\]]`)
 	idParenRe    = regexp.MustCompile(`[ \t]*[(\[]\s*(?i:` + glueWords + `\s+)?` + idMark + `\s*[)\]]`)
 	idSentenceRe = regexp.MustCompile(`([.!?:;])\s+(?i:` + glueWords + `\s+)?` + idMark + `\s*[.;]`)
 	idLeadRe     = regexp.MustCompile(`^(?i:` + glueWords + `\s+)?` + idMark + `\s*(?:[:,;.]|—|–|--?)?\s*`)
@@ -282,8 +293,11 @@ var (
 	sepCloseRe  = regexp.MustCompile(`[ \t]*(?:[,;/&+]|\b(?i:and|or))[ \t]*` + cutMark + `([)\]])`)
 	sepPunctRe  = regexp.MustCompile(`[ \t]*[,;/&+][ \t]*` + cutMark + `([,;:.!?])`)
 	emptyPairRe = regexp.MustCompile(`\(\s*\)|\[\s*\]`)
-	dupPunctRe  = regexp.MustCompile(`([,;:])\s*([.,;:])`)
-	spaceBefRe  = regexp.MustCompile(`[ \t]+([.,;:!?)\]])`)
+	// emptiedPairRe is a pair a removal emptied, with the blanks before it:
+	// "Bounded ([Story 3.2]) twice" is "Bounded twice".
+	emptiedPairRe = regexp.MustCompile(`[ \t]*(?:\(\s*\)|\[\s*\])`)
+	dupPunctRe    = regexp.MustCompile(`([,;:])\s*([.,;:])`)
+	spaceBefRe    = regexp.MustCompile(`[ \t]+([.,;:!?)\]])`)
 )
 
 // stripIDsFromText removes the id spans from one line of comment text,
@@ -294,14 +308,19 @@ func stripIDsFromText(s string, spans [][2]int) (out string, empty bool) {
 		return s, false
 	}
 	lead := s[:len(s)-len(strings.TrimLeft(s, " \t"))]
+	held := []byte(s)
+	for _, m := range emptyPairRe.FindAllStringIndex(s, -1) {
+		copy(held[m[0]:], holdPair.Replace(s[m[0]:m[0]+1]))
+		copy(held[m[1]-1:], holdPair.Replace(s[m[1]-1:m[1]]))
+	}
 	var b strings.Builder
 	prev := 0
 	for _, sp := range spans {
-		b.WriteString(s[prev:sp[0]])
+		b.WriteString(string(held[prev:sp[0]]))
 		b.WriteString(idMark)
 		prev = sp[1]
 	}
-	b.WriteString(s[prev:])
+	b.WriteString(string(held[prev:]))
 	t := strings.TrimLeft(b.String(), " \t")
 	origTrim := strings.TrimSpace(s)
 	startsWithID := strings.HasPrefix(t, idMark) || idLeadRe.MatchString(t)
@@ -319,13 +338,13 @@ func stripIDsFromText(s string, spans [][2]int) (out string, empty bool) {
 	t = sepCloseRe.ReplaceAllString(t, "$1")
 	t = sepPunctRe.ReplaceAllString(t, "$1")
 	t = joinCuts(t)
-	t = emptyPairRe.ReplaceAllString(t, "")
+	t = emptiedPairRe.ReplaceAllString(t, "")
 	t = dupPunctRe.ReplaceAllString(t, "$2")
 	t = spaceBefRe.ReplaceAllString(t, "$1")
 	t = strings.TrimSpace(t)
 	t = strings.TrimLeft(t, ",;:—–- ")
 	t = strings.TrimRight(t, ",;:—– ")
-	t = strings.TrimSpace(t)
+	t = releasePair.Replace(strings.TrimSpace(t))
 	if !hasWordRune(t) {
 		return "", true
 	}

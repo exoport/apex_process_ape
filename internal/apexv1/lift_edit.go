@@ -146,9 +146,10 @@ func editComments(rel, src string, lang liftLang, vocab *liftVocab, adr *adrRewr
 		// R2: "Story 15.4's own deliverable" has no rewrite that keeps
 		// its meaning ("'s own deliverable" was 1,941 lines in cortex):
 		// the comment is listed and left as written, its ADR citations
-		// still renumbered.
+		// still renumbered. A removed path's possessive likewise (R10),
+		// and its paths are listed with its ids.
 		if vocab.possessive(text) {
-			for _, sp := range vocab.idSpans(text) {
+			for _, sp := range vocab.spans(text) {
 				left(s.Start+sp[0], text[sp[0]:sp[1]], "possessive")
 			}
 			c.keep = true
@@ -355,6 +356,7 @@ func fixRunParens(src string, run []*liftComment) {
 		then = append(then, c.empty...)
 	}
 	drop(then)
+	carryLeadPunct(run, old, cur, dead, touched)
 	for k, c := range run {
 		if !touched[k] {
 			continue
@@ -363,9 +365,68 @@ func fixRunParens(src string, run []*liftComment) {
 			c.emptied = true
 			continue
 		}
+		// Never a marker glued to its text where the tag had a blank
+		// between them: "//." fails gocritic's commentFormatting (R7).
+		if lead := leadBlanks(old[k]); lead != "" && leadBlanks(cur[k]) == "" {
+			cur[k] = lead + cur[k]
+		}
 		c.out = c.marker + strings.TrimRight(cur[k], " \t")
 	}
 }
+
+// leadPunct is what a removal can leave a comment line opening on: the
+// closer of an aside that opened on the line above, the mark that ended
+// it, a separator.
+const leadPunct = ")].!?,;:"
+
+// carryLeadPunct moves the punctuation a removal left at the start of a
+// line to the end of the live line above (R7, R8): a closer and a
+// sentence's mark go there, a separator goes, and so does the separator
+// the line above ended on before a closer. "REPLACE anything (Story 3.7;"
+// over "Story 7.2). Every other" is "REPLACE anything." over "Every
+// other", not "//. Every other"; "chain (ADR-0008," over "Story 1.3),
+// extracted" is "chain (ADR-0008)" over "extracted". With no line of
+// words above that the lift may edit (the run's first, a blank "//", a
+// kept one), it all goes.
+func carryLeadPunct(run []*liftComment, old, cur []string, dead, touched []bool) {
+	gone := func(a int) bool { return dead[a] || touched[a] && !hasWordRune(cur[a]) }
+	for k, c := range run {
+		if dead[k] || c.keep {
+			continue
+		}
+		rest := cur[k][len(leadBlanks(cur[k])):]
+		was := strings.TrimLeft(old[k], " \t")
+		if rest == "" || strings.IndexByte(leadPunct, rest[0]) < 0 || was != "" && strings.IndexByte(leadPunct, was[0]) >= 0 {
+			continue
+		}
+		n := len(rest) - len(strings.TrimLeft(rest, leadPunct+" \t"))
+		var moved strings.Builder
+		for _, r := range rest[:n] {
+			if strings.ContainsRune(")].!?", r) {
+				moved.WriteRune(r)
+			}
+		}
+		cur[k], touched[k] = leadBlanks(old[k])+rest[n:], true
+		a := k - 1
+		for a >= 0 && gone(a) {
+			a--
+		}
+		if a < 0 || run[a].keep || !hasWordRune(cur[a]) || moved.Len() == 0 {
+			continue
+		}
+		above, m := strings.TrimRight(cur[a], " \t"), moved.String()
+		if strings.IndexAny(m, ")]") == 0 {
+			above = strings.TrimRight(above, " \t,;:—–")
+		}
+		if strings.ContainsAny(above[len(above)-1:], ".!?") {
+			m = strings.TrimLeft(m, ".!?")
+		}
+		cur[a], touched[a] = above+m, true
+	}
+}
+
+// leadBlanks is the spaces and tabs s opens on.
+func leadBlanks(s string) string { return s[:len(s)-len(strings.TrimLeft(s, " \t"))] }
 
 // parenSpans are the brackets of a run of comment lines, as [line, byte]:
 // closers with no opener, openers with no closer, the pairs that span
