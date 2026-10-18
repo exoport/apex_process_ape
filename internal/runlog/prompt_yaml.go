@@ -70,8 +70,6 @@ type PromptMeta struct {
 
 // PromptStopGate is a prompt session's stop-gate verdicts, in the shape of
 // the run manifest's stop_gate (pipeline.StopGateRecord).
-//
-//nolint:tagliatelle // snake_case is the record's contract, in YAML and JSON alike
 type PromptStopGate struct {
 	// Deferrals is the number of Stops the gate blocked.
 	Deferrals int                   `json:"deferrals" yaml:"deferrals"`

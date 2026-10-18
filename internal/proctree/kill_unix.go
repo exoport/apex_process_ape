@@ -5,6 +5,7 @@ package proctree
 import (
 	"context"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -41,14 +42,7 @@ func KillTree(ctx context.Context, pid int, grace time.Duration) {
 	}
 }
 
-func anyAlive(pids []int) bool {
-	for _, p := range pids {
-		if Alive(p) {
-			return true
-		}
-	}
-	return false
-}
+func anyAlive(pids []int) bool { return slices.ContainsFunc(pids, Alive) }
 
 // Descendants lists every process below pid, by parent pid, via `ps` —
 // present on every Linux and macOS ape runs on. A failure returns nothing:

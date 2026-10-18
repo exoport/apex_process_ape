@@ -166,7 +166,7 @@ func TestLift_HashedPrecisionOrderNoDryRunCap(t *testing.T) {
 
 	require.Equal(t, 64, res.HashedTotal, "the 4 the source-hash test names and the 60 the guard globs; never cmd/tenaxd")
 	require.Len(t, res.Hashed, 64, "a dry run writes no report: it lists every one")
-	var got []string
+	got := make([]string, 0, len(res.Hashed))
 	for _, h := range res.Hashed {
 		got = append(got, h.File)
 		require.NotContains(t, h.File, "cmd/tenaxd/", "a hash word in a comment hashes nothing")

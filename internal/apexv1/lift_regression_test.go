@@ -163,7 +163,7 @@ func TestLift_RegressionAtTheTag(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "sh ./lint.sh && test -f development/team-memory.md && true", res.Gates.Regression)
 		require.Len(t, res.RegressionCommands, 3)
-		var got []string
+		got := make([]string, 0, len(res.RegressionCommands))
 		for _, c := range res.RegressionCommands {
 			got = append(got, c.Cmd+" "+c.Verdict)
 			require.NotNil(t, c.RegressionAtTag, c.Cmd)
@@ -182,7 +182,7 @@ func TestLift_RegressionAtTheTag(t *testing.T) {
 		require.Contains(t, res.RegressionNote, "1 `sh ./lint.sh` red-at-tag, 3 `true` green")
 		require.Equal(t, "_apex/state/logs/lift/regression-2.log", res.RegressionCommands[1].Regression.Log)
 		require.Equal(t, "_apex/state/logs/lift/regression-2-at-tag.log", res.RegressionCommands[1].RegressionAtTag.Log)
-		require.FileExists(t, filepath.Join(root, "_apex/state/logs/lift/regression-1-at-tag.log"))
+		require.FileExists(t, filepath.Join(root, "_apex", "state", "logs", "lift", "regression-1-at-tag.log"))
 		data, err := json.Marshal(res)
 		require.NoError(t, err)
 		require.Contains(t, string(data), `"regression_commands":[{"cmd":"sh ./lint.sh","verdict":"red-at-tag"`)

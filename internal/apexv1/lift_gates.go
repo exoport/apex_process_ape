@@ -298,9 +298,10 @@ func splitTopLevelAnd(cmd string) []string {
 				quote = 0
 			}
 		case quote == '"' || quote == '`':
-			if c == '\\' {
+			switch c {
+			case '\\':
 				i++
-			} else if c == quote {
+			case quote:
 				quote = 0
 			}
 		case c == '\\':

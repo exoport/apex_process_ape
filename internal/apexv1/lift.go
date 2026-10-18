@@ -1164,21 +1164,30 @@ func (lf *lifter) liftRegression(p *Project) {
 // liftPartRef is the ref, and log name, of a split chain's i-th command.
 func liftPartRef(i int) string { return regressionRef + "-" + strconv.Itoa(i+1) }
 
+// The lift's verdicts in rank order, worst highest (liftVerdictRank).
+const (
+	liftRankGreen = iota
+	liftRankCannotRun
+	liftRankRedAtTag
+	liftRankNoBaseline
+	liftRankLiftCaused
+)
+
 // liftVerdictRank orders the lift's verdicts, worst highest: a red the
 // lift caused, then a red nothing can attribute, a pre-existing red, a
 // command that cannot run here, green.
 func liftVerdictRank(v string) int {
 	switch v {
 	case LiftRegressionRedAfterLift, LiftRegressionRedAtTagNewFailures:
-		return 4
+		return liftRankLiftCaused
 	case LiftRegressionNoBaseline:
-		return 3
+		return liftRankNoBaseline
 	case LiftRegressionRedAtTag:
-		return 2
+		return liftRankRedAtTag
 	case LiftRegressionCannotRun:
-		return 1
+		return liftRankCannotRun
 	}
-	return 0
+	return liftRankGreen
 }
 
 // splitNote is a split chain's note: the worst command's, naming it, and
@@ -1187,10 +1196,10 @@ func splitNote(cmds []LiftRegressionCommand, worst int) string {
 	var others []string
 	for i := range cmds {
 		if i != worst {
-			others = append(others, fmt.Sprintf("%d `%s` %s", i+1, cmds[i].Cmd, cmds[i].Verdict))
+			others = append(others, fmt.Sprintf("%d %#q %s", i+1, cmds[i].Cmd, cmds[i].Verdict))
 		}
 	}
-	return fmt.Sprintf("command %d of %d, `%s` (each command of the && chain ran on its own, past a red one; the worst verdict is this one's): %s — the others: %s; each in regression_commands",
+	return fmt.Sprintf("command %d of %d, %#q (each command of the && chain ran on its own, past a red one; the worst verdict is this one's): %s — the others: %s; each in regression_commands",
 		worst+1, len(cmds), cmds[worst].Cmd, cmds[worst].Note, strings.Join(others, ", "))
 }
 

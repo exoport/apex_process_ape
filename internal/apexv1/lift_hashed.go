@@ -204,19 +204,8 @@ func (lf *lifter) hashed() []LiftHashed {
 // in a file it cannot read, a line opening with # or // is one.
 func codeText(rel, src string) string {
 	if lang := liftLangOf(rel, []byte(src[:min(len(src), 256)])); lang != langNone {
-		if segs, err := tokenize(lang, src); err == nil {
-			b := []byte(src)
-			for _, s := range segs {
-				if s.Kind != segComment {
-					continue
-				}
-				for i := s.Start; i < s.End; i++ {
-					if b[i] != '\n' {
-						b[i] = ' '
-					}
-				}
-			}
-			return string(b)
+		if code, err := blankComments(lang, src); err == nil {
+			return code
 		}
 	}
 	lines := strings.Split(src, "\n")
@@ -226,6 +215,27 @@ func codeText(rel, src string) string {
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+// blankComments is src with every comment lang's tokenizer finds blanked,
+// newlines kept; an error is the tokenizer's.
+func blankComments(lang liftLang, src string) (string, error) {
+	segs, err := tokenize(lang, src)
+	if err != nil {
+		return "", err
+	}
+	b := []byte(src)
+	for _, s := range segs {
+		if s.Kind != segComment {
+			continue
+		}
+		for i := s.Start; i < s.End; i++ {
+			if b[i] != '\n' {
+				b[i] = ' '
+			}
+		}
+	}
+	return string(b), nil
 }
 
 // isHashy reports a hash word or a hash call in s.
