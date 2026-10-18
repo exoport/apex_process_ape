@@ -3510,7 +3510,9 @@ ape milestone approve <M> --by <who> [flags]
 ```
 
 Approve a proposed milestone: its Status: line becomes "approved (by <who> <ts>)", and
-milestones.json records the approval (H2): {by, at, gate_cmd, gate_files, gate_files_sha256}
+milestones.json records the approval (H2): {by, at, gate_cmd, gate_files, gate_files_sha256,
+base_sha} — base_sha the milestone's start (D130): HEAD at its first approval, kept by a
+re-approval, passed to every gate run as APE_MILESTONE_BASE (see `ape milestone gate --help`)
 — the Gate: command, exactly as written, and the SHA-256 of each gate file: a script the
 command runs that is a regular file under the project root at approval. Of each simple
 command (split at ; && || | & newlines and parentheses; leading NAME=value assignments,
@@ -3669,7 +3671,11 @@ Run the milestone's gate and record the result
 ape milestone gate <M> [flags]
 ```
 
-Run the milestone's Gate: command from the project root, and every scenario check of
+Run the milestone's Gate: command from the project root — with APE_MILESTONE=<M> and
+APE_MILESTONE_BASE=<the milestone's start: HEAD at its first approval, ape status --json
+milestone.base_sha> in its environment (D130), so a gate can test what changed since, e.g.
+`git diff --quiet "$APE_MILESTONE_BASE" HEAD -- docs/ && exit 1`; the same two at approve's
+self-check and at close; empty base for an approval before rc.3 — and every scenario check of
 the whole spec beside it as the regression set (human-review not run; output under
 _apex/state/logs/gate-<M>/), and the project's regression command from _apex/config.yaml
 when one is configured — its milestone tier, "regression: {change: <cmd>, milestone:
@@ -6022,6 +6028,9 @@ Show where the project stands, from the records ape keeps:
 
   - the current milestone (the first not done): status, gate and its last recorded run,
     budget, and the spend of runs started since it was approved
+  - the milestone's start (JSON milestone.base_sha, and base_sha on each milestones[] line
+    once approved; D130): HEAD at its first approval — what a gate gets as
+    APE_MILESTONE_BASE, for a gate run by hand or a range since the milestone began
   - the milestone's limit stops (JSON milestone.stops: reason, at, run, skill, spent_usd,
     budget_usd, session_usd): sessions ape task stopped at its enforced budget
     (limits.budget: enforce; JSON milestone.budget_enforced), whose measured cost the

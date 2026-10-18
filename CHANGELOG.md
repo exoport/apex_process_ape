@@ -3,7 +3,7 @@
 ## v1.0.0-rc.5 (draft)
 
 On top of rc.4 and the candidates below: the morning report's ape items 4–11
-(BRIEF r48), the v1.1 items moved into v1.0 (D111, D118, D120, D129), and aboard
+(BRIEF r48), the v1.1 items moved into v1.0 (D111, D118, D120, D129), the milestone's start for its gate (D130), and aboard
 v0.4.0 (D126).
 
 ### Changes and project files
@@ -50,6 +50,19 @@ v0.4.0 (D126).
   missing key behaves as in rc.4: no migration. `ape status --json` gains
   `config: {commit_types, release_scheme, release_docs}`, the defaults filled in (class C,
   additive).
+
+### A milestone's start, for its gate (D130, class C)
+
+- **`base_sha`**: milestones.json's approval records the milestone's start,
+  HEAD at its first approval (a re-approval keeps it; an approval recorded
+  before rc.5 falls back to `self_check.sha`, the same HEAD since rc.3).
+- **Every gate ape runs** — `milestone approve`'s self-check, `milestone gate`
+  and `milestone close` — gets `APE_MILESTONE` and `APE_MILESTONE_BASE`, so a
+  gate can test what changed since the milestone began (`git diff --quiet
+  "$APE_MILESTONE_BASE" HEAD -- docs/ && exit 1`). At approval the base is
+  HEAD, so such a check is red then, as a new gate must be (D70 B, D112).
+- `ape status --json` shows `base_sha` on the milestone and on each approved
+  `milestones[]` line, for a gate run by hand and for apex-release's range.
 
 ### Regression judge (class C)
 
