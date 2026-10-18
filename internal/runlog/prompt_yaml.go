@@ -61,6 +61,30 @@ type PromptMeta struct {
 	// in the run directory instead (PromptArgsFile); the typed line named
 	// that file.
 	ArgsFile string `json:"args_file,omitempty" yaml:"args_file,omitempty"`
+	// StopGate records each verdict of an APEX v1 project's stop hook on
+	// the session's main Stops, as a task's manifest does (D1, D88): a
+	// block kept the session going instead of ending it. Absent when no
+	// verdict was consulted.
+	StopGate *PromptStopGate `json:"stop_gate,omitempty" yaml:"stop_gate,omitempty"`
+}
+
+// PromptStopGate is a prompt session's stop-gate verdicts, in the shape of
+// the run manifest's stop_gate (pipeline.StopGateRecord).
+//
+//nolint:tagliatelle // snake_case is the record's contract, in YAML and JSON alike
+type PromptStopGate struct {
+	// Deferrals is the number of Stops the gate blocked.
+	Deferrals int                   `json:"deferrals" yaml:"deferrals"`
+	Allowed   int                   `json:"allowed"   yaml:"allowed"`
+	Events    []PromptStopGateEvent `json:"events"    yaml:"events"`
+}
+
+// PromptStopGateEvent is one verdict.
+type PromptStopGateEvent struct {
+	At      time.Time `json:"at"               yaml:"at"`
+	Verdict string    `json:"verdict"          yaml:"verdict"`
+	Change  string    `json:"change,omitempty" yaml:"change,omitempty"`
+	Reason  string    `json:"reason,omitempty" yaml:"reason,omitempty"`
 }
 
 // WritePromptYAML emits prompt.yaml at <dir>/prompt.yaml.

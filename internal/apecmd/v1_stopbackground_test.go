@@ -101,3 +101,57 @@ func TestChildStopBackground(t *testing.T) {
 	require.Equal(t, []string{`shell b1 — "go test ./..." [running]`, "monitor m2 [running]"}, got)
 	require.Equal(t, `ended with live background work: shell b1 — "go test ./..." [running]; monitor m2 [running]`, apexv1.LiveBackgroundReason(got))
 }
+
+// rc.5 11a: `ape prompt` waits on the stop hook's verdict as ape task does
+// (D88). A Stop the hook blocked for background work does not end the
+// session; the next, allowed one does, and prompt.yaml records both
+// verdicts under stop_gate. With --ignore-project-settings the hook never
+// runs, so there is no gate to wait on.
+func TestPromptStopGate_BlockedStopKeepsTheSession(t *testing.T) {
+	root := v1Repo(t)
+	require.Nil(t, promptStopGate(promptOptions{projectRoot: root, ignoreProjectSettings: true}))
+
+	t.Setenv("APE_SESSION", "prompt/test") // after v1Repo, which runs as a person
+	gate := promptStopGate(promptOptions{projectRoot: root})
+	require.NotNil(t, gate)
+	d := sessiondriver.NewDriver(func() *runlog.Writer { return nil }, time.Minute)
+	d.SetStopGate(gate.bounded(t.Context()))
+
+	stop := func(active bool, tasks string) {
+		t.Helper()
+		payload := `{"session_id":"p1","hook_event_name":"Stop","cwd":"` + root + `","stop_hook_active":` +
+			map[bool]string{true: "true", false: "false"}[active] + `,"background_tasks":` + tasks + `}`
+		d.FeedHook(orchestrator.HookEvent{Event: ipc.HookStop, Payload: json.RawMessage(payload)})
+		_, _, err := v1ExecIn(t, newHookCmd, payload, "stop")
+		require.NoError(t, err)
+	}
+	stop(false, `[{"id":"b1","type":"shell","status":"running","description":"go test ./..."}]`)
+	ctx, cancel := context.WithTimeout(t.Context(), 400*time.Millisecond)
+	require.ErrorIs(t, d.WaitStepDone(ctx), context.DeadlineExceeded, "a blocked Stop does not end the prompt session")
+	cancel()
+	stop(true, `[]`)
+	ctx, cancel = context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	require.NoError(t, d.WaitStepDone(ctx), "the allowed Stop ends it")
+
+	runDir := t.TempDir()
+	writePromptRecord(runDir, "p1", promptOptions{}, promptRecordExtras{stopGate: gate}, promptStatusCompleted,
+		time.Now(), &sessiondriver.Telemetry{}, nil)
+	data, err := os.ReadFile(filepath.Join(runDir, "prompt.yaml"))
+	require.NoError(t, err)
+	var meta runlog.PromptMeta
+	require.NoError(t, yaml.Unmarshal(data, &meta))
+	require.NotNil(t, meta.StopGate, "prompt.yaml:\n%s", data)
+	require.Equal(t, 1, meta.StopGate.Deferrals)
+	require.Equal(t, 1, meta.StopGate.Allowed)
+	require.Len(t, meta.StopGate.Events, 2)
+	require.Equal(t, apexv1.StopBlock, meta.StopGate.Events[0].Verdict)
+	require.True(t, strings.HasPrefix(meta.StopGate.Events[0].Reason, apexv1.BackgroundStopPrefix), meta.StopGate.Events[0].Reason)
+	require.Equal(t, apexv1.StopAllow, meta.StopGate.Events[1].Verdict)
+
+	// No verdict consulted: no stop_gate key at all.
+	writePromptRecord(runDir, "p1", promptOptions{}, promptRecordExtras{}, promptStatusCompleted, time.Now(), &sessiondriver.Telemetry{}, nil)
+	data, err = os.ReadFile(filepath.Join(runDir, "prompt.yaml"))
+	require.NoError(t, err)
+	require.NotContains(t, string(data), "stop_gate")
+}
