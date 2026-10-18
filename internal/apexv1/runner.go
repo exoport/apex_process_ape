@@ -72,7 +72,7 @@ func RunCheck(ctx context.Context, dir, cmd, logPath string, timeout time.Durati
 // in its process group kills the group when ape's end of a pipe closes,
 // however ape ended (SIGKILL included) — on Linux the shell also has
 // Pdeathsig; on Windows the group is a job object that closes with ape.
-func runCheck(ctx context.Context, dir, cmd, logPath string, lim TierTimeout, vacuous []string) CheckResult {
+func runCheck(ctx context.Context, dir, cmd, logPath string, lim TierTimeout, vacuous []string, env ...string) CheckResult {
 	if lim.Max <= 0 {
 		lim = Timeouts{}.Limits(KindTask, 0)
 	}
@@ -86,7 +86,7 @@ func runCheck(ctx context.Context, dir, cmd, logPath string, lim TierTimeout, va
 	c.Dir = dir
 	c.Stdin = nil
 	// A check is a test, not a session: it must not inherit a terminal.
-	c.Env = os.Environ()
+	c.Env = append(os.Environ(), env...)
 	g, err := prepareCheck(c, cmd)
 	if err != nil {
 		return CheckResult{Cmd: cmd, Exit: exitNotFound, Tail: []string{"[ape] " + err.Error()}}

@@ -34,6 +34,9 @@ type PlannedCheck struct {
 	// as opposed to one the change leaves untouched (regression).
 	Delta bool
 	Cmd   string
+	// Env is added to the check's environment: a gate's milestone and
+	// its start (D130 Q60, gateEnv).
+	Env []string
 }
 
 func scenarioRef(capName, req, scen string) string { return capName + "/" + req + "/" + scen }
@@ -209,7 +212,7 @@ func (p *Project) runWithRetries(ctx context.Context, pc *PlannedCheck, logPath 
 		if inGit {
 			before = p.snapshot(ctx)
 		}
-		r = runCheck(ctx, p.Root, pc.Cmd, path, lim, vacuous)
+		r = runCheck(ctx, p.Root, pc.Cmd, path, lim, vacuous, pc.Env...)
 		if inGit {
 			strays = append(strays, p.undoStrays(ctx, before)...)
 		}

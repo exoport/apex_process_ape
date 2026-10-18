@@ -44,9 +44,10 @@ type GateSelfCheck struct {
 // gateSelfCheckProgress is how often a running self-check says it still is.
 var gateSelfCheckProgress = time.Minute
 
-// gateSelfCheck runs m's gate once and classifies it (see above). progress
-// gets a line before, while and after the run (nil: none).
-func (p *Project) gateSelfCheck(ctx context.Context, m *Milestone, progress io.Writer) (*GateSelfCheck, error) {
+// gateSelfCheck runs m's gate once and classifies it (see above), with
+// base as its $APE_MILESTONE_BASE (gateEnv). progress gets a line before,
+// while and after the run (nil: none).
+func (p *Project) gateSelfCheck(ctx context.Context, m *Milestone, base string, progress io.Writer) (*GateSelfCheck, error) {
 	if progress == nil {
 		progress = io.Discard
 	}
@@ -87,7 +88,7 @@ func (p *Project) gateSelfCheck(ctx context.Context, m *Milestone, progress io.W
 	}()
 	logPath := filepath.Join(p.LogsDir(), "gate-"+m.ID+"-approve.log")
 	p.ensureState()
-	pc := PlannedCheck{Ref: "gate-" + m.ID + "-approve", Kind: KindGate, Cmd: m.Gate}
+	pc := PlannedCheck{Ref: "gate-" + m.ID + "-approve", Kind: KindGate, Cmd: m.Gate, Env: gateEnv(m.ID, base)}
 	r := p.runWithRetries(ctx, &pc, logPath, lim, nil, 0, p.isWorkTree(ctx))
 	close(done)
 	if err := interrupted(ctx, m.ID+"'s gate self-check"); err != nil {

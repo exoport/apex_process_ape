@@ -450,6 +450,9 @@ func newStatusCmd() *cobra.Command {
 
   - the current milestone (the first not done): status, gate and its last recorded run,
     budget, and the spend of runs started since it was approved
+  - the milestone's start (JSON milestone.base_sha, and base_sha on each milestones[] line
+    once approved; D130): HEAD at its first approval — what a gate gets as
+    APE_MILESTONE_BASE, for a gate run by hand or a range since the milestone began
   - the milestone's limit stops (JSON milestone.stops: reason, at, run, skill, spent_usd,
     budget_usd, session_usd): sessions ape task stopped at its enforced budget
     (limits.budget: enforce; JSON milestone.budget_enforced), whose measured cost the

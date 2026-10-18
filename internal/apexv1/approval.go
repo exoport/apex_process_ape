@@ -47,6 +47,33 @@ type MilestoneApproval struct {
 	// SelfCheck is the gate's run at approval (D70 B): red, its exit,
 	// duration and log. Absent on approvals before rc.3.
 	SelfCheck *GateSelfCheck `json:"self_check,omitempty"`
+	// BaseSHA is the milestone's start (D130 Q60): HEAD at its first
+	// approval, before ape's approval commit; a re-approval keeps it.
+	// Absent on approvals before rc.5 (Base falls back to SelfCheck.SHA).
+	BaseSHA string `json:"base_sha,omitempty"`
+}
+
+// Base is the milestone's start: BaseSHA, else the self-check's sha (the
+// same HEAD, recorded since rc.3), else "".
+func (a *MilestoneApproval) Base() string {
+	switch {
+	case a == nil:
+		return ""
+	case a.BaseSHA != "":
+		return a.BaseSHA
+	case a.SelfCheck != nil:
+		return a.SelfCheck.SHA
+	}
+	return ""
+}
+
+// gateEnv is what every gate run gets on top of ape's environment (D130
+// Q60): the milestone and its start, so a gate can test what changed
+// since — `git diff --quiet "$APE_MILESTONE_BASE" HEAD -- docs/`. An empty
+// base (an approval before rc.3) is passed empty: the gate must fail on it
+// rather than diff against nothing.
+func gateEnv(id, base string) []string {
+	return []string{"APE_MILESTONE=" + id, "APE_MILESTONE_BASE=" + base}
 }
 
 // gateFiles are the gate files of a gate command: each of its scripts
