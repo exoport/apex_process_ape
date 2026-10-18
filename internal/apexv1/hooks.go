@@ -11,6 +11,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/exoport/apex_process_ape/internal/sessiondriver"
 )
 
 // HookPayload is the subset of Claude Code's hook input ape reads.
@@ -23,6 +25,9 @@ type HookPayload struct {
 	AgentID        string          `json:"agent_id"`
 	ToolName       string          `json:"tool_name"`
 	ToolInput      json.RawMessage `json:"tool_input"`
+	// BackgroundTasks is the work still running when the turn ended, on a
+	// Stop or SubagentStop (D88); nil when the field is absent.
+	BackgroundTasks *[]sessiondriver.BackgroundTask `json:"background_tasks"`
 }
 
 // ParseHookPayload decodes a hook's stdin. Empty input is an empty payload.
@@ -256,6 +261,11 @@ type StopRecord struct {
 	Change            string `json:"change,omitempty"`
 	ConsecutiveBlocks int    `json:"consecutive_blocks"`
 	Reason            string `json:"reason,omitempty"`
+	// Background labels the background work the main session's Stop
+	// reported still running (D88), whatever the verdict: what
+	// `ape change review --run` and `accept --delegate` read when the
+	// session ended without a verdict.
+	Background []string `json:"background,omitempty"`
 }
 
 // StopDecision is the stop hook's verdict.
@@ -366,7 +376,8 @@ func (p *Project) saveStopRecord(path string, r StopRecord) {
 	_ = writeFileAtomic(path, string(data)+"\n")
 }
 
-// StopHook decides a Stop or SubagentStop. It blocks when HEAD is on a
+// StopHook decides a Stop or SubagentStop. It blocks a main-session Stop
+// with background work still running (D88), and any stop when HEAD is on a
 // change's branch (D38), that change is in-progress, and one of its
 // command checks is red, at most
 // MaxConsecutiveStopBlocks times in a row (the count resets whenever
@@ -413,13 +424,49 @@ func StopHook(ctx context.Context, payload HookPayload, opt RunOptions) StopDeci
 		logPath = p.stopLogPath(payload.SessionID)
 		p.appendStopLog(logPath, rec)
 	}
+	bgNotice := ""
 	finish := func(d StopDecision) StopDecision {
+		if bgNotice != "" {
+			d.Notice = strings.TrimSpace(bgNotice + "\n" + d.Notice)
+		}
 		d.Record.FinishedAt = time.Now().UTC().Format(time.RFC3339Nano)
 		p.saveStopRecord(path, d.Record)
 		if logPath != "" {
 			p.appendStopLog(logPath, d.Record)
 		}
 		return d
+	}
+
+	// D88: the main session never ends its turn while background work
+	// runs. The session ends with the turn, and the work's result is never
+	// read: in longcheck r1 two review sessions re-ran a 12-minute suite in
+	// the background, armed a Monitor and stopped, and neither recorded a
+	// verdict. So every type counts, a shell and a monitor included —
+	// unlike ape task's own gate (sessiondriver's benign types), which asks
+	// only whether a result is still owed to the step, not whether the
+	// turn may end. Checked before the change branch, so it holds in
+	// review, delegate and tool sessions too; a sub-agent's stop is not
+	// the session's turn.
+	if agent == "" && payload.BackgroundTasks != nil && len(*payload.BackgroundTasks) > 0 {
+		rec.Background = backgroundLabels(*payload.BackgroundTasks)
+		switch {
+		case os.Getenv(envApeSession) == "":
+			// H13: a person's own session is informed, never blocked; the
+			// change's own notice, if any, follows.
+			bgNotice = "APEX: the turn ended with background work still running: " + strings.Join(rec.Background, "; ") +
+				". Not blocking: this session was not launched by ape."
+		case rec.ConsecutiveBlocks >= MaxConsecutiveStopBlocks:
+			rec.Verdict = StopAllow
+			rec.Reason = fmt.Sprintf("allowed after %d consecutive blocks, with background work still running", rec.ConsecutiveBlocks)
+			rec.ConsecutiveBlocks = 0
+			return finish(StopDecision{Record: rec})
+		default:
+			rec.ConsecutiveBlocks++
+			rec.Verdict = StopBlock
+			reason := backgroundStopReason(rec.Background, rec.ConsecutiveBlocks)
+			rec.Reason = truncate(reason, 300)
+			return finish(StopDecision{Block: true, Reason: reason, Record: rec})
+		}
 	}
 
 	// The change under work is the one whose branch is checked out (D38),
@@ -490,6 +537,60 @@ func StopHook(ctx context.Context, payload HookPayload, opt RunOptions) StopDeci
 	reason := stopReason(ci.ID, red, judged, unknown, rec.ConsecutiveBlocks)
 	rec.Reason = truncate(reason, 300)
 	return finish(StopDecision{Block: true, Reason: reason, Record: rec})
+}
+
+// backgroundLabels labels each background task for a record and a
+// reason: at most 10, each at most 200 characters.
+func backgroundLabels(tasks []sessiondriver.BackgroundTask) []string {
+	out := make([]string, 0, len(tasks))
+	for _, t := range tasks {
+		out = append(out, truncate(t.Label(), 200))
+	}
+	return limit(out, 10)
+}
+
+// BackgroundStopPrefix starts the reason of a stop blocked for background
+// work (D88).
+const BackgroundStopPrefix = "background work is still running"
+
+func backgroundStopReason(labels []string, n int) string {
+	return fmt.Sprintf("%s (stop blocked %d/%d): %s.\n\n"+
+		"Wait for this work to finish in this turn: never end the turn while it runs — the session ends with your turn, and its result would never be read. "+
+		"Read its output until it is done, then finish the task; stop it if you no longer need it. "+
+		"Next time run a long command in the foreground, with a 600000 ms timeout, never in the background.",
+		BackgroundStopPrefix, n, MaxConsecutiveStopBlocks, strings.Join(labels, "; "))
+}
+
+// LiveBackgroundReason is why a review or delegate session that ended
+// without a verdict ended so (D88): its last main-session Stop reported
+// background work still running.
+func LiveBackgroundReason(labels []string) string {
+	return "ended with live background work: " + strings.Join(labels, "; ")
+}
+
+// LastStopBackground is the background work the latest main-session Stop
+// of sessionIDs (a run's main sessions) reported still running; nil when
+// it reported none, or no Stop was recorded.
+func (p *Project) LastStopBackground(sessionIDs []string) []string {
+	var (
+		last StopRecord
+		at   time.Time
+	)
+	for _, id := range sessionIDs {
+		if id == "" {
+			continue
+		}
+		runs := p.readStopLog(p.stopLogPath(id))
+		if len(runs) == 0 {
+			continue
+		}
+		r := runs[len(runs)-1]
+		// RFC3339Nano drops trailing zeros, so the strings do not sort.
+		if started, err := time.Parse(time.RFC3339Nano, r.StartedAt); err == nil && started.After(at) {
+			last, at = r, started
+		}
+	}
+	return last.Background
 }
 
 // stopNotice tells a person outside an ape session which checks of the

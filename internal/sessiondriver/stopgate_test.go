@@ -3,6 +3,7 @@ package sessiondriver
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -54,15 +55,51 @@ func TestDriver_StopGateWithoutVerdictCompletes(t *testing.T) {
 	require.Zero(t, n)
 }
 
-// The gate is never consulted for a Stop the background-task gate already
-// deferred: it decides only Stops that would otherwise complete.
-func TestDriver_StopGateNotAskedForDeferredStops(t *testing.T) {
+// A Stop the background-task gate deferred is still put to the stop gate
+// (D88: the project's hook decided it too, and its verdict must be taken so
+// the next Stop meets its own), but the answer changes nothing: even an
+// allow does not complete the step.
+func TestDriver_StopGateTakesDeferredStopsVerdictAndIgnoresIt(t *testing.T) {
 	t.Parallel()
-	var asked atomic.Bool
+	var asked atomic.Int32
 	d := newTestDriver(80 * time.Millisecond)
-	d.SetStopGate(func(string, time.Time) (bool, bool) { asked.Store(true); return false, true })
+	d.SetStopGate(func(string, time.Time) (bool, bool) { asked.Add(1); return false, true })
 	payload := json.RawMessage(`{"session_id":"s","background_tasks":[{"id":"a1","type":"subagent","status":"running","description":"x"}]}`)
 	d.FeedHook(orchestrator.HookEvent{Event: ipc.HookStop, Payload: payload})
 	require.Error(t, d.WaitStepDone(t.Context()))
-	require.False(t, asked.Load())
+	require.Eventually(t, func() bool { return asked.Load() == 1 }, time.Second, 10*time.Millisecond)
+}
+
+// Stops are put to the gate in the order they arrived, one at a time,
+// whatever the goroutines' scheduling: a slow first answer does not let
+// the second Stop take the first verdict.
+func TestDriver_StopGateDecidesStopsInArrivalOrder(t *testing.T) {
+	t.Parallel()
+	var (
+		mu    sync.Mutex
+		order []time.Time
+	)
+	var calls atomic.Int32
+	d := newTestDriver(time.Minute)
+	d.SetStopGate(func(_ string, stopAt time.Time) (bool, bool) {
+		n := calls.Add(1)
+		if n == 1 {
+			time.Sleep(150 * time.Millisecond)
+		}
+		mu.Lock()
+		order = append(order, stopAt)
+		mu.Unlock()
+		return n < 3, true // block, block, allow
+	})
+	deferred := json.RawMessage(`{"session_id":"s","background_tasks":[{"id":"a1","type":"subagent","status":"running"}]}`)
+	d.FeedHook(stopEvent("s"))
+	time.Sleep(5 * time.Millisecond)
+	d.FeedHook(orchestrator.HookEvent{Event: ipc.HookStop, Payload: deferred})
+	time.Sleep(5 * time.Millisecond)
+	d.FeedHook(stopEvent("s"))
+	require.NoError(t, d.WaitStepDone(t.Context()))
+	mu.Lock()
+	defer mu.Unlock()
+	require.Len(t, order, 3)
+	require.True(t, order[0].Before(order[1]) && order[1].Before(order[2]), "decided in arrival order: %v", order)
 }

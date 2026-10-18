@@ -24,10 +24,11 @@ import (
 // trusted the first Stop would tear the session down mid-work. So in a
 // project whose settings register the hook, the driver waits for the
 // hook's verdict on every Stop and only a non-block completes the step.
-// The hook blocks only while HEAD is on an in-progress change's branch (D38)
-// and one of its checks is red; on
+// The hook blocks while background work runs (D88), or while HEAD is on an
+// in-progress change's branch (D38) and one of its checks is red; on
 // every other Stop it allows at once. Every Stop is matched to its own
-// verdict, in order.
+// verdict, in order — a Stop the driver's own background gate deferred
+// included (the driver takes its verdict and ignores it).
 type stopGateRecorder struct {
 	root string
 	// appear is how long a Stop waits for its hook run to show up.

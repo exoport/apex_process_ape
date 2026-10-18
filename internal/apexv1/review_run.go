@@ -149,6 +149,9 @@ type ReviewOutcome struct {
 	Violations []string `json:"violations,omitempty"`
 	Voided     bool     `json:"voided,omitempty"`
 	Status     string   `json:"status"`
+	// Background is the background work the session's last Stop reported
+	// still running, when it ended without a verdict (D88).
+	Background []string `json:"background,omitempty"`
 }
 
 // reviewMayTouch reports whether a review session may change path
@@ -172,8 +175,10 @@ func (p *Project) reviewMayTouch(id, rel string) bool {
 // another path, or another dirty file — voids the verdict: the review is
 // read-only by contract, and a verdict from a session that changed the
 // code under review judges code nobody verified. Bash-tool writes cannot
-// be prevented; this is where they are caught.
-func (p *Project) SettleReviewRun(ctx context.Context, run *ReviewRun) (*ReviewOutcome, error) {
+// be prevented; this is where they are caught. background is what the
+// session's last main-session Stop reported still running
+// (LastStopBackground), kept on an outcome with no verdict (D88).
+func (p *Project) SettleReviewRun(ctx context.Context, run *ReviewRun, background ...string) (*ReviewOutcome, error) {
 	id := run.Change
 	var violations []string
 	// A session that left HEAD on another branch changed more than its
@@ -227,6 +232,8 @@ func (p *Project) SettleReviewRun(ctx context.Context, run *ReviewRun) (*ReviewO
 	out := &ReviewOutcome{Violations: violations, Status: st.Status}
 	if recorded {
 		out.Verdict, out.Findings = st.Review.Verdict, st.Review.Findings
+	} else {
+		out.Background = background
 	}
 	if len(violations) == 0 {
 		return out, nil

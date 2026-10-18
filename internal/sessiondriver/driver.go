@@ -246,6 +246,10 @@ type Driver struct {
 	// which case Claude Code is already continuing the turn and tearing
 	// the session down would end it mid-work. See SetStopGate.
 	stopGate StopGate
+	// gateTurn is closed when the latest Stop's gate call is done: each
+	// Stop waits for the one before it, so the gate decides them in
+	// arrival order and the k-th Stop takes the k-th verdict.
+	gateTurn chan struct{}
 
 	activityMu   sync.Mutex
 	lastActivity time.Time
@@ -533,19 +537,13 @@ func (d *Driver) noteStop(env hookEnvelope) {
 		d.deferredStops++
 		d.deferredTasks = blocking
 		d.stopMu.Unlock()
+		// The project's stop hook decides this Stop too (an APEX v1 hook
+		// blocks every Stop with background work, D88): its verdict is
+		// taken and changes nothing here, so that the next Stop meets its
+		// own verdict, not this one's.
+		d.gateInTurn(env.SessionID, func(bool, bool) {})
 	case stopComplete:
-		d.stopMu.Lock()
-		gate := d.stopGate
-		d.stopMu.Unlock()
-		if gate == nil {
-			d.SignalStepDone()
-			return
-		}
-		// Off the hook-delivery goroutine: the gate waits on a hook that
-		// runs the project's checks.
-		stopAt := time.Now()
-		go func() {
-			blocked, ok := gate(env.SessionID, stopAt)
+		d.gateInTurn(env.SessionID, func(blocked, ok bool) {
 			if ok && blocked {
 				// The session continues the turn with the hook's reason;
 				// a later Stop decides again.
@@ -556,8 +554,35 @@ func (d *Driver) noteStop(env hookEnvelope) {
 				return
 			}
 			d.SignalStepDone()
-		}()
+		})
 	}
+}
+
+// gateInTurn asks the stop gate about the Stop that arrived now, after
+// every earlier Stop's gate call is done, and hands its answer to decide;
+// with no gate, decide gets ok=false at once. Off the hook-delivery
+// goroutine: the gate waits on a hook that runs the project's checks.
+// The turn is taken here, on the delivery goroutine, so the order is the
+// order the Stops arrived in.
+func (d *Driver) gateInTurn(sessionID string, decide func(blocked, ok bool)) {
+	stopAt := time.Now()
+	d.stopMu.Lock()
+	gate := d.stopGate
+	if gate == nil {
+		d.stopMu.Unlock()
+		decide(false, false)
+		return
+	}
+	prev, mine := d.gateTurn, make(chan struct{})
+	d.gateTurn = mine
+	d.stopMu.Unlock()
+	go func() {
+		defer close(mine)
+		if prev != nil {
+			<-prev
+		}
+		decide(gate(sessionID, stopAt))
+	}()
 }
 
 // skill reads the active step's skill under stopMu.

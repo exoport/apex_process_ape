@@ -146,7 +146,7 @@ func runReviewSession(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, id, mod
 	if h != nil {
 		res.TaskExit = h.ExitCode
 	}
-	outcome, err := p.SettleReviewRun(ctx, run)
+	outcome, err := p.SettleReviewRun(ctx, run, childStopBackground(p, h)...)
 	if err != nil {
 		return v1Fail(cmd, f, err, res)
 	}
@@ -156,6 +156,10 @@ func runReviewSession(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, id, mod
 	case outcome.Voided:
 		return v1Fail(cmd, f, &apexv1.FailError{Code: "review.voided", Msg: "review of " + id + " voided: the session changed more than its review.md (" +
 			strings.Join(outcome.Violations, ", ") + ") — the change is " + outcome.Status + "; review again"}, res)
+	case outcome.Verdict == "" && len(outcome.Background) > 0:
+		// D88: the session ended its turn while its own work still ran.
+		return v1Fail(cmd, f, &apexv1.FailError{Code: "review.no-verdict", Msg: "the review session for " + id + " " + apexv1.LiveBackgroundReason(outcome.Background) +
+			" (no verdict; " + sessionEnded(res.TaskExit) + "; log " + res.Log + ") — run `ape change review " + id + " --run` again"}, res)
 	case outcome.Verdict == "":
 		why := sessionEnded(res.TaskExit)
 		return v1Fail(cmd, f, &apexv1.FailError{Code: "review.no-verdict", Msg: "the review session for " + id + " ended without a verdict (" + why + "; log " + h.Log +
