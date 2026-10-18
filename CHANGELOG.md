@@ -1,5 +1,55 @@
 # CHANGELOG
 
+## v1.0.0-rc.6 (draft)
+
+On top of rc.5 and the candidates below: research's rc.5 lift findings R16–R22, the v0
+state readers (D141) and the docs delegate by default (D152).
+
+### `ape project lift`
+
+- **A story-first aside keeps its ADR citations** (R16, data loss since rc.3 at
+  least): `(Story 42.1, ADR-0019)` → `(ADR-0019)`. A story takes only the
+  `Task`, `Subtask` and `AC` fragments directly after it; anything else ends
+  its span and is kept — an ADR with its words, a date (`(Story 26.1,
+  2026-08-08)` → `(2026-08-08)`), a `/ADR-N`. Measured on copies of research's
+  clones: 0 edited lines lose an `ADR-NNNN` in tenax, tenax2, cortex, radix,
+  mdpdf and atomix (rc.5: tenax 276, cortex 96, radix 11, mdpdf 7, atomix 2).
+- **Comment edits** (R19–R21): an edited list item keeps its bullet (the trim
+  had taken its `- `, and gofmt then rewrote the list as a code block); a
+  trailing `,` `;` `:` is removed only when an id ended right before it; a
+  bracketed id before `'s` is listed as a possessive and left as written.
+- **A tool not found behind `make` is `cannot-run`** (R17), at both
+  comparison points: `command not found` (or dash's `: not found`, or `No such
+  file or directory`) with make's `Error 127`, and no failing test named.
+- **Flutter and Dart test names are read** (R18) by the shared parser, so
+  `change verify` and the milestone gate judge them by name too.
+- **Code and tests that read deleted v0 state** (D141) are their own class:
+  `v0_state_readers: [{file, reads}]` in the lift JSON and the disposition
+  JSON, a `v0 state` line per reader in the dry run, and a section of the
+  committed disposition, kept whole up to the 48 KB ceiling.
+- **The folder tier folds per hasher in the committed disposition** (R22): "57
+  files in `pkg/mdpdf` share a folder with `x_test.go` (folder match only)";
+  the dry run and the JSON stay complete.
+
+### The docs delegate by default (D152; class B/C)
+
+- A change whose frontmatter says **`docs: true`** — the milestone's final
+  docs change apex-plan plans under D130 — has its human-review tasks accepted
+  by the delegate (apex-accept) with no configuration, as the first default-on
+  exception to "a person accepts" (D78). ape grants it only when the change's
+  diff from its base touches nothing but the `release.docs` paths (default
+  README.md and docs/), the development folder and ape's state; otherwise
+  `delegate.docs-scope` (action person) names the paths outside.
+- `human_review: {docs: person}` turns it off (guarded, `config.changed`); a
+  block with only `docs:` delegates nothing else. An unaccepted `release:`
+  edit also blocks it, since `release.docs` sets the scope.
+- `ape status --json` changes gain `delegable: [{task, reason}]`
+  (`docs-default` or `configured`), and `next` names the delegate. Records are
+  the delegate's: `by: delegate:apex-accept`, the run, `Accepted-By:`. A fail
+  stops for a person.
+- **`human_review` refuses unknown keys** (a typo such as `doc: person` would
+  otherwise have enabled the delegate for every task).
+
 ## v1.0.0-rc.5 (draft)
 
 On top of rc.4 and the candidates below: the morning report's ape items 4–11

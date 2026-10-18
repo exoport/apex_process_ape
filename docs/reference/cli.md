@@ -1292,6 +1292,27 @@ _apex/config.yaml delegates it:
                                              # {assets}, {change} (D77)
       model: sonnet                          # optional, else models.<delegate>
       effort: high                           # optional, else models.<delegate>'s
+      docs: person                           # optional: the docs default off (below)
+
+A block that sets only docs: delegates no other task (delegate.off).
+
+The one default-on exception (D152): the docs check of the milestone's docs change
+(D130). With no configured delegate, --delegate takes a human-review task of a change
+whose change.md frontmatter says docs: true with apex-accept, the default args and
+models.apex-accept — no human_review block needed — when:
+  - the change's diff from its base_sha to its tip (change/<id>'s; the recorded branch
+    tip once archived; a rename counts as both paths) touches only release.docs paths
+    (else README.md and docs/) and the development folder (and ape's _apex/state/);
+    else delegate.docs-scope (action person), naming the paths outside: a code change
+    marked docs: true still stops for a person
+  - human_review.docs is not person (human_review: {docs: person} turns it off:
+    delegate.off); human_review and release are under the config.changed guard, and
+    --delegate refuses while either is a person's unaccepted change
+    (delegate.unaccepted-config)
+The records are the delegate's below, by "delegate:apex-accept". A configured delegate
+(a block with any key but docs:) takes every human-review task, a docs change's
+included, whatever human_review.docs says (D78). `ape status --json` lists what a
+delegate may take now (changes[].delegable).
 
   - the task must be awaiting a person: the change reviewed (or archived) and the task
     not accepted (else delegate.not-awaiting); human_review is under the config.changed
@@ -1363,7 +1384,7 @@ Flags:
 | ---- | ---- | ------- | ----------- |
 | `--by` | string | `—` | who accepts (required for a person's acceptance) |
 | `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
-| `--delegate` | bool | `false` | accept through _apex/config.yaml human_review.delegate, in its own detached session (D75) |
+| `--delegate` | bool | `false` | accept through _apex/config.yaml human_review.delegate (or, for a docs change, the docs default, D152), in its own detached session (D75) |
 | `--evidence` | stringArray | `[]` | a file in the repository or a URL the acceptance (or --verdict) rests on (repeatable) |
 | `--json` | bool | `false` | machine output (JSON on stdout) |
 | `--reason` | string | `—` | --verdict: why |
@@ -1641,7 +1662,9 @@ Validate one change and list every failure:
     _apex/config.yaml commit.subject uses {type} (change.no-type; change.bad-type);
     review_tools: [<name>, …] names tools.review entries of _apex/config.yaml whose
     when: the change matches (the orchestrator runs each before the review; else
-    tools.unknown, D74); any other key must start with x-
+    tools.unknown, D74); docs: true marks the milestone's docs change (D130, D152: its
+    human-review tasks are the docs check, a delegate's by default — `ape change accept --help`),
+    a YAML boolean only (else change.frontmatter); any other key must start with x-
   - # title; ## Why and ## Out of scope non-empty; ## Delta; ## Tasks
   - change.md without its ## Notes section ≤ caps.change_md (D89; change.too-big) and
     design.md ≤ caps.design_md (16 KB each by default; _apex/config.yaml caps:, see
@@ -2117,7 +2140,8 @@ new_failures}): it fails verify only when it is newly red — green at baseline,
 or when the change has no baseline for this command (re-start records one). Red at
 baseline and still red is reported (pre_existing_red), not failed: the planner roadmaps
 it — unless a test fails now that did not then. When both runs name their failing tests
-(go test "--- FAIL:", gotestsum "=== FAIL:", pytest, cargo, jest; the baseline's are in
+(go test "--- FAIL:", gotestsum "=== FAIL:", pytest, cargo, jest, flutter and dart test
+"[E]"; the baseline's are in
 state.json regression_baseline.failing, recorded at start since rc.5), every test failing
 now must have failed at baseline, else verify fails with the new ones in new_failures
 (the first 50; new_failures_total counts them); when either run names none (a baseline
@@ -4000,7 +4024,7 @@ Thirteen blocks of _apex/config.yaml can loosen what ape enforces, and are guard
   commit        the archive's squash (hooks: skip skips the project's hooks)
   evidence      archive|off (off keeps no evidence)
   marketplaces, plugins, tools   what runs inside a session (hooks, MCP, skills)
-  human_review  who accepts a human-review task in a person's place (D75)
+  human_review  who accepts a human-review task in a person's place (D75; docs: D152)
 The guard compares whole blocks, either way: raising a cap or a timeout loosens as surely
 as lowering one. Since the project's v1 epoch (the newest "apex: project init" or "apex:
 lift" commit; a block committed before it, or in it, is the baseline), a commit that
@@ -4440,26 +4464,31 @@ The commit:
                  four-digit form is the project's own: a short ADR-08 cites
                  another decision log, and is listed as unresolved, never
                  rewritten — even where the project has an ADR-0008
-  strips         epic, story and deferred ids from code comments — Story 3.2,
-                 Epic 12, (3-2) (a known story key), DW-…, paths into the deferred
-                 store or the implementation folder — keeping the rest of the comment;
-                 a comment that was only an id goes. A story takes its fragments with
-                 it (Story 3.2, Task 2 · Subtask 3.1 of Story 5.10 · AC 2), and the
-                 separator a removal leaves by a bracket or a mark goes too
-                 ("(ADR-0019, Story 3.2)" → "(ADR-0019)"). Comments only: ids in
-                 identifiers, strings and directives are listed, not edited — and
-                 so are ids in a data-shaped comment, which a tool may parse: one
-                 opening with a lowercase key ("# owner: …") or a record of
-                 key: value fields ("# pending: q | owner: …"), and so is a comment
-                 using an id or a removed path as a possessive ("Story 3.2's own
-                 test", "development/deferred/'s Gates"), which no removal keeps
-                 whole. An aside split over comment lines loses both brackets
-                 with its id, and a mark a removal leaves at the start of a line
-                 moves to the end of the line above ("(ADR-0008," over "Story
-                 1.3), extracted" → "(ADR-0008)" over "extracted"; a separator
-                 goes): no edited line starts with ")" or "." or loses the
-                 blank after its "//". Only a bracket pair the removal emptied
-                 goes: run()'s, []byte stay.
+  strips         epic, story and deferred ids from code comments — Story 3.2, Epic 12,
+                 (3-2) (a known story key), DW-…, paths into the deferred store or the
+                 implementation folder — keeping the rest of the comment; a comment
+                 line that was only an id goes, and an edited list item keeps its
+                 marker ("- ", "2. "). A story takes its fragments with it (Story 3.2,
+                 Task 2 · Subtask 3.1 of Story 5.10 · AC 2) and nothing else: what
+                 follows them is kept, ADR ids renumbered
+                 ("(Story 3.2, ADR-0019 decision 3)" → "(ADR-0019 decision 3)",
+                 "(Story 3.2, 2026-08-08)" → "(2026-08-08)"), and the separator a
+                 removal leaves by a bracket or a mark goes too
+                 ("(ADR-0019, Story 3.2)" → "(ADR-0019)"); a "," ";" or ":" ending a
+                 line goes only when the id was right before it ("proves," and "bump:"
+                 stay). Comments only: ids in identifiers, strings and directives are
+                 listed, not edited — and so are ids in a data-shaped comment, which a
+                 tool may parse: one opening with a lowercase key ("# owner: …") or a
+                 record of key: value fields ("# pending: q | owner: …"), and so is a
+                 comment using an id or a removed path as a possessive
+                 ("Story 3.2's own test", "(Story 2.3)'s own",
+                 "development/deferred/'s Gates"), which no removal keeps whole. An
+                 aside split over comment lines loses both brackets with its id, and a
+                 mark a removal leaves at the start of a line moves to the end of the
+                 line above ("(ADR-0008," over "Story 1.3), extracted" → "(ADR-0008)"
+                 over "extracted"; a separator goes): no edited line starts with ")"
+                 or "." or loses the blank after its "//". Only a bracket pair the
+                 removal emptied goes: run()'s, []byte stay.
                  Tokenized: Go (go/scanner), shell, Python, JS/TS (JSX/TSX: comments
                  that begin their line only), Dart, YAML, Makefile (recipe lines are
                  the shell's: left), C/C++. A file the tokenizer cannot read, a
@@ -4484,16 +4513,28 @@ The commit:
                  more): the binding-rule candidates (CLAUDE.md list items,
                  project-context "don't miss" items, team-memory gotcha titles), EVERY
                  one, with an empty Disposition column for apex-plan, then a fresh
-                 read-only review, then the person, who deletes it. Then, as summaries:
-                 code and CI that still read removed paths, one line per file with its
-                 count and first reference (CI guards over the v0 corpus show up there),
-                 and edited files a guard hashes (at most 50), first; ADR gaps; ids left
-                 and files not edited, counted per file; references in evidence and
-                 docs, counted; readings at the tag. To fit 16 KB the summaries shrink
-                 to counts, then the ADR table to the ADRs with gaps; the candidates are
-                 never cut to fit it: the file grows past 16 KB to hold them, up to
-                 48 KB, and only past 48 KB lists the first ones and says how many more
-                 there are and where. Every list whole goes to
+                 read-only review, then the person, who deletes it. Then "Code and
+                 tests that read deleted v0 state": every kept code, test, script,
+                 Makefile or CI file (not docs, not evidence) that names a path the
+                 lift deletes outside its comments — by its path (./ and ../ too), a
+                 path under a deleted folder, or the base name of a deleted file when
+                 it has an extension and no other file has it — one line per file with
+                 what it reads (--json and the report: v0_state_readers, {file,
+                 reads}); re-point each to v1 state or retire it. Then, as summaries:
+                 other code and CI that still names removed paths (in a comment, or a
+                 file that is not code), one line per file with its count and first
+                 reference, and edited files a guard hashes — those a lock file or a
+                 hasher names one line per file (at most 50), those only a folder ties
+                 to a hasher one line per hasher ("57 files in pkg/x share a folder
+                 with guard_test.go (folder match only)"); ADR gaps; ids left and
+                 files not edited, counted per file; references in evidence and docs,
+                 counted; readings at the tag. To fit 16 KB the summaries shrink to
+                 counts, then the ADR table to the ADRs with gaps; the candidates and
+                 the v0 state readers are never cut to fit it: the file grows past
+                 16 KB to hold them, up to 48 KB; past 48 KB the readers go to counts
+                 (saying so), and only then are the candidates cut, the file listing
+                 the first ones and saying how many more there are and where. Every
+                 list whole goes to
                  _apex/state/lift-disposition.json after the commit: ignored by the
                  state folder's whitelist, never committed, in this checkout only
 
@@ -4507,9 +4548,10 @@ that says "byte-identical" in prose hashes nothing. Documents and evidence (.md,
 .log, .txt, anything under an evidence folder) never count as hashers. The order is
 how sure the match is: what a lock file names, then what a hasher names (by path, or a
 test beside the file by its name), then what only its folder ties to a hasher (a glob,
-a ReadDir). --dry-run lists every one, text and --json; a real lift's output and the
-disposition file list at most 50, edited_but_hashed_total counts them all, and the
-report has every one. It is a heuristic: a copy compared byte for byte with no hash (an
+a ReadDir). --dry-run lists every one, text and --json; a real lift's output lists at
+most 50, and the disposition file at most 50 of the first two kinds and the folder kind
+as one line per hasher; edited_but_hashed_total counts them all, and the report has
+every one. It is a heuristic: a copy compared byte for byte with no hash (an
 embedded mirror of a hashed file) needs its own --exclude.
 
 The regression command runs twice (--no-verify-run skips both): at the tag, before
@@ -4518,11 +4560,14 @@ regression_verdict says whose a red is: green · red-at-tag (red there too, fail
 did: pre-existing, for apex-plan to roadmap) · red-at-tag-new-failures (red there too, but
 tests fail that did not at the tag — the LIFT broke those, named in
 regression_new_failures) · red-after-lift (green at the tag: the LIFT broke it — fix it
-in a commit, or reset to the tag and lift with --exclude) · cannot-run (exit 126/127: a
-tool it runs is missing here, which is not a red) · red-no-baseline. Red at both, the
+in a commit, or reset to the tag and lift with --exclude) · cannot-run (exit 126/127, or
+an output saying a command was not found — "command not found", "No such file or
+directory" — with make's "Error 127", and no failing test named: a tool it runs is
+missing here, which is not a red; read the same at both points) · red-no-baseline. Red at both, the
 failing tests are compared by name where the output names them (go test "--- FAIL:",
 gotestsum "=== FAIL: <pkg> <test>" and "✖ <pkg>", pytest "FAILED", cargo "... FAILED",
-jest "✕"); otherwise by output hash — tool-install lines ("(re)installing …", as bingo
+jest "✕", flutter and dart test "<name> [E]", the counters before the name dropped);
+otherwise by output hash — tool-install lines ("(re)installing …", as bingo
 prints on a first run) and durations (0.12s, 4m19s, (12ms)) left out — and a changed
 output stays red-at-tag with the note "the output changed after the lift", never called
 pre-existing. A command that is a chain joined with && at its top level (outside quotes,
@@ -6085,8 +6130,12 @@ Show where the project stands, from the records ape keeps:
     them (D75; "Accepted by a delegate" in the long output); and each human-review task's
     newest delegate verdict (JSON changes[].delegate: {"T2": {verdict, reason, run, at,
     voided}}): a fail or a voided run leaves the task awaiting a person, and the brief
-    says why. With human_review set, next names the delegate for an awaiting task it has
-    not judged (`ape change accept <id> <T> --delegate --wait 9m`) before a person
+    says why. JSON changes[].delegable: [{task, reason}] (D152, omitted when none) are the
+    awaiting tasks a delegate may take now — reason "configured" (human_review delegates)
+    or "docs-default" (a docs change's docs check, change.md docs: true, its diff only
+    release.docs and the development folder, human_review.docs not person); a task whose
+    delegate failed or was voided is a person's and not listed. next names the delegate
+    for the first (`ape change accept <id> <T> --delegate --wait 9m`) before a person
   - spend so far: the sum of finished ape task/pipeline run manifests
   - red at baseline, not any change's own (JSON "pre_existing_red": [{change, kind, ref,
     cmd, exit, sha}]): the regression command, and scenario checks of the spec a change
