@@ -78,7 +78,8 @@ const projectSkeleton = `# %s
 <!-- hard limits: platforms, performance, compliance, NEVER rules that shape the product -->
 
 ## Stack
-<!-- languages, frameworks, runtime -->
+<!-- optional: languages, frameworks, runtime; or name this section ## Tools: what the work is made
+     with, when it is not software (D118). No versions here: a pinned version is a decision (ADR). -->
 `
 
 // agentsSkeletonTemplate is the AGENTS.md init writes, {dev} the

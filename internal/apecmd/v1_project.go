@@ -67,7 +67,8 @@ appended to an _apex/config.yaml that has no models: block).
                                      rc.4 to add it
   CLAUDE.md                          "@AGENTS.md"; an existing CLAUDE.md without that line
                                      gets it appended, and nothing else
-  development/project.md             vision, users, scope, out of scope, constraints (skeleton)
+  development/project.md             vision, users, scope, out of scope, constraints (skeleton);
+                                     optional: stack or tools (either name, D118), notes
   development/roadmap.md             "# Roadmap"
   development/specs/                 empty: no backfill — a spec is born from its first change
   development/changes/               the changes in flight
