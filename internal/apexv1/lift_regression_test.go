@@ -33,15 +33,71 @@ func TestJudgeLiftRegression(t *testing.T) {
 		{"red after a tag that could not run", r(127), r(1), LiftRegressionNoBaseline},
 		{"red, no run at the tag", nil, r(1), LiftRegressionNoBaseline},
 	} {
-		got, note := judgeLiftRegression(c.before, c.after)
+		got, note, fresh := judgeLiftRegression(c.before, c.after, "", "")
+		require.Empty(t, fresh, c.name)
 		require.Equal(t, c.want, got, c.name)
 		require.NotEmpty(t, note, c.name)
 	}
 }
 
+// R4, from atomix on rc.3: gotest red at the tag (22 environmental
+// failures) and red after the lift with 25 — three tests reading the
+// deleted sprint-status.yaml — was called pre-existing. Both red, the
+// failing tests are compared by name; with no names, by output hash.
+func TestFailingTests_Runners(t *testing.T) {
+	for _, c := range []struct {
+		name, out string
+		want      []string
+	}{
+		{
+			"go test", "=== RUN   TestA\n--- FAIL: TestA (0.00s)\n    --- FAIL: TestA/the_real_pack_passes (0.01s)\nFAIL\nFAIL\tgithub.com/x/alert\t0.123s\nFAIL\tgithub.com/x/cmd [build failed]\nok  \tgithub.com/x/ok\t0.1s\n",
+			[]string{"TestA", "TestA/the_real_pack_passes", "github.com/x/alert", "github.com/x/cmd [build failed]"},
+		},
+		{
+			"pytest", "tests/test_a.py F.\n=== short test summary info ===\nFAILED tests/test_a.py::test_b - AssertionError: 1 != 2\nERROR tests/test_c.py - ImportError\n",
+			[]string{"tests/test_a.py::test_b", "tests/test_c.py"},
+		},
+		{"cargo", "running 2 tests\ntest tests::ok ... ok\ntest tests::bad ... FAILED\n", []string{"tests::bad"}},
+		{"jest", "\x1b[31mFAIL\x1b[39m src/a.test.js\n  ✓ works (3 ms)\n  ✕ renders the list (12 ms)\n", []string{"src/a.test.js", "renders the list"}},
+		{"unparsable", "make: *** [lint] Error 1\n", nil},
+	} {
+		require.Equal(t, c.want, failingTests(c.out), c.name)
+	}
+}
+
+func TestJudgeLiftRegression_RedAtTagComparesFailures(t *testing.T) {
+	r := func(sha string) *CheckResult { return &CheckResult{Exit: 1, Log: "x.log", OutputSHA256: sha} }
+	tagLog := "--- FAIL: TestEnvA (0.01s)\n--- FAIL: TestEnvB (0.02s)\nFAIL\tgithub.com/x/atomix\t3.1s\n"
+	// Different timings, same failures: pre-existing.
+	v, note, fresh := judgeLiftRegression(r("a"), r("b"), tagLog, "--- FAIL: TestEnvB (0.05s)\n--- FAIL: TestEnvA (0.03s)\nFAIL\tgithub.com/x/atomix\t2.9s\n")
+	require.Equal(t, LiftRegressionRedAtTag, v)
+	require.Contains(t, note, "pre-existing")
+	require.Empty(t, fresh)
+	// New failures: the lift's.
+	v, note, fresh = judgeLiftRegression(r("a"), r("b"), tagLog, tagLog+"--- FAIL: TestKnownUnwiredList (0.00s)\n--- FAIL: TestAlertPack/the_real_pack_passes (0.00s)\n")
+	require.Equal(t, LiftRegressionRedAtTagNewFailures, v)
+	require.Equal(t, []string{"TestKnownUnwiredList", "TestAlertPack/the_real_pack_passes"}, fresh)
+	require.Contains(t, note, "2 failing test(s) the run at apex-v0-final did not have: TestKnownUnwiredList, TestAlertPack/the_real_pack_passes")
+	require.NotContains(t, note, "pre-existing failure")
+	// No names to read: the same output is the tag's red; a changed one
+	// is never called pre-existing.
+	v, note, _ = judgeLiftRegression(r("a"), r("a"), "lint: 3 issues\n", "lint: 3 issues\n")
+	require.Equal(t, LiftRegressionRedAtTag, v)
+	require.Contains(t, note, "pre-existing")
+	v, note, fresh = judgeLiftRegression(r("a"), r("b"), "lint: 3 issues\n", "lint: 5 issues\n")
+	require.Equal(t, LiftRegressionRedAtTag, v)
+	require.Contains(t, note, "red at the tag; the output changed after the lift")
+	require.NotContains(t, note, "pre-existing")
+	require.Empty(t, fresh)
+}
+
 func liftWithGates(t *testing.T, gates string) string {
 	t.Helper()
-	root := liftFixture(t, false)
+	return liftWithGatesAt(t, liftFixture(t, false), gates)
+}
+
+func liftWithGatesAt(t *testing.T, root, gates string) string {
+	t.Helper()
 	pc := filepath.Join(root, "development", "project-context.md")
 	data, err := os.ReadFile(pc)
 	require.NoError(t, err)
@@ -74,6 +130,23 @@ func TestLift_RegressionAtTheTag(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, LiftRegressionRedAtTag, res.RegressionVerdict)
 		require.Contains(t, res.RegressionNote, "pre-existing")
+	})
+	t.Run("red at the tag, new failures after the lift", func(t *testing.T) {
+		// atomix's shape: environmental failures at the tag, plus the
+		// tests that read the v0 corpus the lift deletes.
+		root := liftFixture(t, false)
+		script := "#!/bin/sh\necho '--- FAIL: TestNeedsPostgres (0.01s)'\n" +
+			"test -f development/team-memory.md || echo '--- FAIL: TestKnownUnwiredList (0.00s)'\n" +
+			"echo 'FAIL\tgithub.com/x/atomix\t0.5s'\nexit 1\n"
+		require.NoError(t, os.WriteFile(filepath.Join(root, "gotest.sh"), []byte(script), 0o755))
+		run(t, root, "add", "gotest.sh")
+		run(t, root, "commit", "-q", "-m", "gotest")
+		root = liftWithGatesAt(t, root, "sh ./gotest.sh")
+		res, err := Lift(ctx(), root, LiftOptions{})
+		require.NoError(t, err)
+		require.Equal(t, LiftRegressionRedAtTagNewFailures, res.RegressionVerdict)
+		require.Equal(t, []string{"TestKnownUnwiredList"}, res.RegressionNewFailures)
+		require.Contains(t, res.RegressionNote, "LIFT FAILURE")
 	})
 	t.Run("cannot run here", func(t *testing.T) {
 		root := liftWithGates(t, "ape-no-such-tool-xyz build")

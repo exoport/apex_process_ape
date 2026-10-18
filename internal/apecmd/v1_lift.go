@@ -131,11 +131,17 @@ hashed file) needs its own --exclude.
 
 The regression command runs twice (--no-verify-run skips both): at the tag, before
 anything is written, and at the lift commit — the baseline red gates are judged against.
-regression_verdict says whose a red is: green · red-at-tag (red there too: pre-existing,
-for apex-plan to roadmap) · red-after-lift (green at the tag: the LIFT broke it — fix it
+regression_verdict says whose a red is: green · red-at-tag (red there too, failing as it
+did: pre-existing, for apex-plan to roadmap) · red-at-tag-new-failures (red there too, but
+tests fail that did not at the tag — the LIFT broke those, named in
+regression_new_failures) · red-after-lift (green at the tag: the LIFT broke it — fix it
 in a commit, or reset to the tag and lift with --exclude) · cannot-run (exit 126/127: a
-tool it runs is missing here, which is not a red) · red-no-baseline. The exit code stays
-0: the commit stands either way, and the verdict is in --json and the output.
+tool it runs is missing here, which is not a red) · red-no-baseline. Red at both, the
+failing tests are compared by name where the output names them (go test "--- FAIL:",
+pytest "FAILED", cargo "... FAILED", jest "✕"); otherwise by output hash, and a changed
+output stays red-at-tag with the note "the output changed after the lift", never called
+pre-existing. The exit code stays 0: the commit stands either way, and the verdict is in
+--json and the output.
 
 --from-update is how the framework's v1.0.0 migration entry runs it inside
 ` + "`ape framework update`" + `: uncommitted changes under .claude/skills/, _apex/ (not

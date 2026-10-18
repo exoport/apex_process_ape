@@ -217,3 +217,69 @@ func withCommands(doc string, g LiftGates) string {
 func indent(s, pre string) string {
 	return pre + strings.ReplaceAll(s, "\n", "\n"+pre)
 }
+
+// Both runs red says nothing about whose red it is (R4): atomix's gotest
+// was red at the tag for its environment (22 failures) and red after the
+// lift with 25, three of them tests reading the deleted
+// sprint-status.yaml, and the lift called all of it pre-existing. So the
+// failing tests are compared by name, for the runners whose report names
+// them; otherwise the outputs' hashes are.
+var (
+	ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
+	// failNameRes each capture a failing test (or package, or suite)
+	// name: go test's "--- FAIL: TestX/sub" and "FAIL pkg [build
+	// failed]", pytest's "FAILED path::test" and "ERROR path", cargo's
+	// "test name ... FAILED", jest's "✕ name" and "FAIL path".
+	failNameRes = []*regexp.Regexp{
+		regexp.MustCompile(`^\s*--- FAIL: (\S+)`),
+		regexp.MustCompile(`^FAIL\s+(\S+(?:\s+\[[a-z ]+ failed\])?)`),
+		regexp.MustCompile(`^(?:FAILED|ERROR) (\S+)`),
+		regexp.MustCompile(`^test (\S+) \.\.\. FAILED\s*$`),
+		regexp.MustCompile(`^\s*[✕×] (.+?)(?:\s+\(\d+(?:\.\d+)?\s*m?s\))?\s*$`),
+	}
+)
+
+// liftNewFailuresShown is how many new failing names the result and the
+// note carry; the count says the rest.
+const liftNewFailuresShown = 50
+
+// failingTests are the failing test names a red run's output reports, in
+// order, once each; nil when no runner's report could be read.
+func failingTests(out string) []string {
+	seen := map[string]bool{}
+	var names []string
+	for l := range strings.SplitSeq(ansiRe.ReplaceAllString(out, ""), "\n") {
+		l = strings.TrimRight(l, "\r")
+		for _, re := range failNameRes {
+			if m := re.FindStringSubmatch(l); m != nil {
+				if n := strings.TrimSpace(m[1]); n != "" && !seen[n] {
+					seen[n] = true
+					names = append(names, n)
+				}
+				break
+			}
+		}
+	}
+	return names
+}
+
+// newFailures compares two red runs' outputs. With failing names read
+// from the run after the lift, it returns those the tag's run did not
+// have (named true); without, named is false and the caller compares the
+// hashes.
+func newFailures(beforeOut, afterOut string) (fresh []string, named bool) {
+	after := failingTests(afterOut)
+	if len(after) == 0 {
+		return nil, false
+	}
+	before := map[string]bool{}
+	for _, n := range failingTests(beforeOut) {
+		before[n] = true
+	}
+	for _, n := range after {
+		if !before[n] {
+			fresh = append(fresh, n)
+		}
+	}
+	return fresh, true
+}
