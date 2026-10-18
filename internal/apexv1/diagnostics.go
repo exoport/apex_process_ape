@@ -209,6 +209,10 @@ var findingRules = []findingRule{
 	// rc.4 phase 1 (rc4-a).
 	rule("", `^AGENTS.md does not import .*project\.md`, "agents.no-project-context"),
 	rule("", `^architecture.md is .* over the .* cap \(caps.architecture_md\)`, "architecture.too-big"),
+
+	// rc.5 (rc5-d).
+	rule("", `^models\.\S+ (names no skill|is not a skill)`, CodeModelsUnknownSkill),
+	rule("", `^models\.\S+ is not a field of a models entry`, CodeModelsUnknownField),
 }
 
 // UnclassifiedFinding is the code of a finding no rule matches — a

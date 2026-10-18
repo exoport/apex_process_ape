@@ -39,6 +39,15 @@ const (
 	CodeChangeOverCeiling = "change.over-ceiling"
 )
 
+// rc.5 (rc5-d).
+const (
+	// CodeModelsUnknownSkill: a models: key names no skill a session could
+	// read it for (Q45). CodeModelsUnknownField: an entry field other
+	// than model and effort.
+	CodeModelsUnknownSkill = "models.unknown-skill"
+	CodeModelsUnknownField = "models.unknown-field"
+)
+
 // CodeDoc documents one diagnostic code.
 type CodeDoc struct {
 	Code string `json:"code"`
@@ -321,5 +330,8 @@ var DiagnosticCodes = []CodeDoc{
 	// rc.4 phase 1 (rc4-a).
 	{"agents.no-project-context", 1, "person", "AGENTS.md has no line importing <development_folder>/project.md (D82): add \"Project context: read @development/project.md before planning or changing anything.\" under its title, outside code — `ape project init` adds it"},
 	{"architecture.too-big", 1, "person", "development/architecture.md (optional) over its caps.architecture_md cap (default 16 KB, ceiling 48 KB; D84): move detail to specs/, decisions/ or docs/explanation/"},
+	// rc.5 (rc5-d).
+	{CodeModelsUnknownSkill, 1, "person", "a _apex/config.yaml models: key names no skill a session reads it for (Q45): not one of the defaults init writes, a project or user skill (.claude/skills/<key>/SKILL.md), nor a skill tools: or human_review names — so it pins nothing; `models.effort` / `models.model` are not skills: a skill's effort goes inside its entry, {model, effort}"},
+	{CodeModelsUnknownField, 1, "person", "a _apex/config.yaml models.<skill> entry has a field other than model and effort (Q45), which does nothing: an entry is a model name or {model, effort}"},
 	{UnclassifiedFinding, 1, "stop", "a finding no rule classifies (a bug: report it)"},
 }

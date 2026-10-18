@@ -335,6 +335,15 @@ func newProjectCheckCmd() *cobra.Command {
                            change_md counts change.md without ## Notes (D89); the whole
                            change.md, Notes included, has the 48 KB ceiling whatever the
                            cap (change.over-ceiling, action apply)
+  models                   each _apex/config.yaml models: key names a skill — one of the
+                           defaults ` + "`ape project init`" + ` writes, a project or user skill
+                           (.claude/skills/<key>/SKILL.md), or a skill tools: or
+                           human_review names — else models.unknown-skill: the entry pins
+                           nothing (models.effort is not a skill: a skill's effort goes
+                           inside its entry, {model, effort}; the default for every
+                           session is the top-level effort:); an entry is a model name or
+                           {model, effort}, any other field is models.unknown-field (both
+                           action person)
   docs                     each path _apex/config.yaml docs: names (changelog, user_docs)
                            exists (docs.missing: create it, or fix the path)
   .claude/settings.json    ape's hooks registered as ` + "`ape project init`" + ` writes them:
