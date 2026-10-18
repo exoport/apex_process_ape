@@ -204,6 +204,20 @@ func TestLift_RegressionAtTheTag(t *testing.T) {
 		require.Equal(t, LiftRegressionCannotRun, res.RegressionVerdict)
 		require.NotContains(t, res.RegressionNote, "red at")
 	})
+	t.Run("a tool not found behind make", func(t *testing.T) {
+		// R17: spirometer's `fvm flutter` targets, with fvm not on PATH.
+		root := liftFixture(t, false)
+		require.NoError(t, os.WriteFile(filepath.Join(root, "flutter.sh"), []byte("#!/bin/sh\necho 'fvm flutter test'\n"+
+			"echo '/bin/bash: line 1: fvm: command not found' >&2\necho 'make: *** [Makefile:88: spiroapp-flutter-test] Error 127' >&2\nexit 2\n"), 0o755))
+		run(t, root, "add", "flutter.sh")
+		root = liftWithGatesAt(t, root, "sh ./flutter.sh")
+		res, err := Lift(ctx(), root, LiftOptions{})
+		require.NoError(t, err)
+		require.Equal(t, 2, res.RegressionAtTag.Exit)
+		require.Equal(t, 2, res.Regression.Exit)
+		require.Equal(t, LiftRegressionCannotRun, res.RegressionVerdict)
+		require.Contains(t, res.RegressionNote, "command was not found and make reported Error 127")
+	})
 	t.Run("not run", func(t *testing.T) {
 		root := liftWithGates(t, "test -f nowhere.txt")
 		res, err := Lift(ctx(), root, LiftOptions{NoVerifyRun: true})

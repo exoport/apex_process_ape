@@ -156,11 +156,14 @@ regression_verdict says whose a red is: green · red-at-tag (red there too, fail
 did: pre-existing, for apex-plan to roadmap) · red-at-tag-new-failures (red there too, but
 tests fail that did not at the tag — the LIFT broke those, named in
 regression_new_failures) · red-after-lift (green at the tag: the LIFT broke it — fix it
-in a commit, or reset to the tag and lift with --exclude) · cannot-run (exit 126/127: a
-tool it runs is missing here, which is not a red) · red-no-baseline. Red at both, the
+in a commit, or reset to the tag and lift with --exclude) · cannot-run (exit 126/127, or
+an output saying a command was not found — "command not found", "No such file or
+directory" — with make's "Error 127", and no failing test named: a tool it runs is
+missing here, which is not a red; read the same at both points) · red-no-baseline. Red at both, the
 failing tests are compared by name where the output names them (go test "--- FAIL:",
 gotestsum "=== FAIL: <pkg> <test>" and "✖ <pkg>", pytest "FAILED", cargo "... FAILED",
-jest "✕"); otherwise by output hash — tool-install lines ("(re)installing …", as bingo
+jest "✕", flutter and dart test "<name> [E]", the counters before the name dropped);
+otherwise by output hash — tool-install lines ("(re)installing …", as bingo
 prints on a first run) and durations (0.12s, 4m19s, (12ms)) left out — and a changed
 output stays red-at-tag with the note "the output changed after the lift", never called
 pre-existing. A command that is a chain joined with && at its top level (outside quotes,
