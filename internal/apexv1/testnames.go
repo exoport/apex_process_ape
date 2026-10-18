@@ -17,7 +17,9 @@ var (
 	// failed]", gotestsum's "=== FAIL: pkg TestX (0.00s)" (package and
 	// test, the duration dropped) and "✖  pkg (4m19s)" (a package, R11),
 	// pytest's "FAILED path::test" and "ERROR path", cargo's "test name
-	// ... FAILED", jest's "✕ name" and "FAIL path".
+	// ... FAILED", jest's "✕ name" and "FAIL path", and flutter's and
+	// dart's "00:01 +121 ~2 -1: path_test.dart: name [E]" (the counters
+	// dropped: they change with every test that ran, R18).
 	failNameRes = []*regexp.Regexp{
 		goTestFailRe,
 		gotestsumFailRe,
@@ -26,6 +28,7 @@ var (
 		regexp.MustCompile(`^(?:FAILED|ERROR) (\S+)`),
 		regexp.MustCompile(`^test (\S+) \.{3} FAILED\s*$`),
 		regexp.MustCompile(`^\s*[✕×] (.+?)(?:\s+\(\d+(?:\.\d+)?\s*m?s\))?\s*$`),
+		regexp.MustCompile(`^\d+:\d+ \+\d+(?: ~\d+)? -\d+: (.+) \[E\]$`),
 	}
 	goTestFailRe    = regexp.MustCompile(`^\s*--- FAIL: (\S+)`)
 	gotestsumFailRe = regexp.MustCompile(`^=== FAIL: (\S+ \S+)`)

@@ -546,7 +546,8 @@ new_failures}): it fails verify only when it is newly red — green at baseline,
 or when the change has no baseline for this command (re-start records one). Red at
 baseline and still red is reported (pre_existing_red), not failed: the planner roadmaps
 it — unless a test fails now that did not then. When both runs name their failing tests
-(go test "--- FAIL:", gotestsum "=== FAIL:", pytest, cargo, jest; the baseline's are in
+(go test "--- FAIL:", gotestsum "=== FAIL:", pytest, cargo, jest, flutter and dart test
+"[E]"; the baseline's are in
 state.json regression_baseline.failing, recorded at start since rc.5), every test failing
 now must have failed at baseline, else verify fails with the new ones in new_failures
 (the first 50; new_failures_total counts them); when either run names none (a baseline
