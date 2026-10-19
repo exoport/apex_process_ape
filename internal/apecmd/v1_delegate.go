@@ -140,6 +140,12 @@ func runDelegateSession(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, id, t
 	case outcome.Voided:
 		return v1Fail(cmd, f, &apexv1.FailError{Code: "delegate.voided", Msg: "the delegate's verdict on " + task + " of " + id + " is voided: its session changed more than its accept-* notes (" +
 			strings.Join(outcome.Violations, ", ") + ") — nothing is accepted; a person looks at it"}, res)
+	case outcome.Returned != nil:
+		// D188: a fail naming a defect in the change's own diff goes back
+		// to the change, as a review block does.
+		return v1Fail(cmd, f, &apexv1.FailError{Code: "delegate.returned", Msg: "the delegate failed " + task + " of " + id + " on a defect in the change's own diff (" +
+			strings.Join(outcome.Returned.Defects, ", ") + "): " + outcome.Reason + " — the change is back in-progress, its review cleared: apply the fix on " +
+			apexv1.ChangeBranch(id) + ", verify and review it again; a second fail of " + task + " goes to a person"}, res)
 	case outcome.Verdict != "pass":
 		why := outcome.Reason
 		switch {
@@ -150,12 +156,44 @@ func runDelegateSession(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, id, t
 			// D88: it ended its turn while its own work still ran.
 			why += " (no verdict; " + sessionEnded(res.TaskExit) + "; log " + res.Log + ")"
 		}
-		return v1Fail(cmd, f, &apexv1.FailError{Code: "delegate.fail", Msg: "the delegate failed " + task + " of " + id + ": " + why +
-			" — the task still awaits a person (`ape change accept " + id + " --task " + task + " --by <who>`)"}, res)
+		return v1Fail(cmd, f, &apexv1.FailError{Code: "delegate.fail", Msg: "the delegate failed " + task + " of " + id + ": " + why + delegateToPerson(outcome) +
+			" — the task still awaits a person (`ape change accept " + id + " --task " + task + " --by <who>`)" + delegateFixOption(outcome, id)}, res)
 	}
 	return v1Emit(cmd.OutOrStdout(), f, res, func(w io.Writer) {
 		fmt.Fprintf(w, "change %s: %s accepted by %s (run %s): %s\n", id, task, outcome.Accepted.By, outcome.Accepted.Run, outcome.Reason)
 	})
+}
+
+// delegateToPerson says why a delegate's fail stays a person's rather
+// than going back to the change (D188): a clause of delegate.fail's
+// message, before its fix.
+func delegateToPerson(o *apexv1.DelegateOutcome) string {
+	switch o.ToPerson {
+	case apexv1.ToPersonSecondFail:
+		last := o.Returns[len(o.Returns)-1]
+		return "; its second fail: the delegate returned it to the change once already (run " + last.Run + ": " + last.Reason + ")"
+	case apexv1.ToPersonArchived:
+		return "; the change is archived, so ape cannot return it to the change"
+	case apexv1.ToPersonNotReviewed:
+		return "; the change is no longer reviewed, so ape does not return it"
+	case apexv1.ToPersonNoDefect:
+		if len(o.DefectsOutside) > 0 {
+			return "; its --defect paths are not in the change's own diff (" + strings.Join(o.DefectsOutside, ", ") + "), so it does not go back to the change"
+		}
+		if o.Reason != apexv1.NoVerdictReason && len(o.Background) == 0 {
+			return "; it names no defect in the change's own diff (--defect), so it does not go back to the change"
+		}
+	}
+	return ""
+}
+
+// delegateFixOption is the person's option for an archived change's
+// fail: a fix change (D188 Q107).
+func delegateFixOption(o *apexv1.DelegateOutcome, id string) string {
+	if o.ToPerson != apexv1.ToPersonArchived {
+		return ""
+	}
+	return ", or has a fix change planned for what it found (apex-change with the reason, `--milestone none`; a person approves it: `ape change approve <fix-id> --by <who>`)"
 }
 
 // startDelegateSession starts the detached delegate session for an
@@ -209,8 +247,8 @@ func childTaskArgv(root, skill, args string, launch apexv1.Launch) []string {
 
 // recordDelegateVerdict is `ape change accept <id> <T> --verdict …`, run
 // inside the delegate session.
-func recordDelegateVerdict(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, id, task, verdict, reason string, evidence []string) error {
-	v, err := p.RecordDelegateVerdict(cmd.Context(), id, task, verdict, reason, evidence)
+func recordDelegateVerdict(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, id, task, verdict, reason string, evidence, defects []string) error {
+	v, err := p.RecordDelegateVerdict(cmd.Context(), id, task, verdict, reason, evidence, defects)
 	if err != nil {
 		return v1Fail(cmd, f, err, nil)
 	}

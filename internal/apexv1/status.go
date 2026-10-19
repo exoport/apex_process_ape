@@ -102,6 +102,19 @@ type ChangeStatus struct {
 	// change). A task whose last delegate verdict is a fail or voided is
 	// a person's and not listed. Omitted when none.
 	Delegable []DelegableTask `json:"delegable,omitempty"`
+	// DelegateReturns are the change's delegate returns per task, as its
+	// state.json records them (D188): each a delegate fail that named a
+	// defect in the change's own diff and sent it back to in-progress.
+	DelegateReturns map[string][]DelegateReturn `json:"delegate_returns,omitempty"`
+	// returned is the return the change has yet to answer: in-progress
+	// since it, neither verified nor reviewed again (next and the brief).
+	returned *taskReturn
+}
+
+// taskReturn is one task's delegate return.
+type taskReturn struct {
+	task string
+	DelegateReturn
 }
 
 // DelegableTask is one task `change accept --delegate` may take now.
@@ -183,27 +196,58 @@ type DelegateStatus struct {
 	Run     string   `json:"run"`
 	At      string   `json:"at"`
 	Voided  []string `json:"voided,omitempty"`
+	// Defects are the paths a fail named (--defect, D188); Returned, that
+	// the fail went back to the change (delegate_returns).
+	Defects  []string `json:"defects,omitempty"`
+	Returned bool     `json:"returned,omitempty"`
 }
 
-// delegateStatuses is change id's newest delegate verdict per task.
-func (p *Project) delegateStatuses(id string) map[string]DelegateStatus {
+// delegateStatuses is change id's newest delegate verdict per task; st
+// (nil for none) says which fails went back to the change.
+func (p *Project) delegateStatuses(id string, st *State) map[string]DelegateStatus {
 	vs := p.lastDelegateVerdicts(id)
 	if len(vs) == 0 {
 		return nil
 	}
 	out := make(map[string]DelegateStatus, len(vs))
 	for task, v := range vs {
-		out[task] = DelegateStatus{Verdict: v.Verdict, Reason: v.Reason, Run: v.Run, At: v.At, Voided: v.Voided}
+		d := DelegateStatus{Verdict: v.Verdict, Reason: v.Reason, Run: v.Run, At: v.At, Voided: v.Voided, Defects: v.Defects}
+		if st != nil && v.Verdict == "fail" && len(v.Voided) == 0 {
+			d.Returned = slices.ContainsFunc(st.DelegateReturns[task], func(r DelegateReturn) bool { return r.Run == v.Run })
+		}
+		out[task] = d
 	}
 	return out
 }
 
 // delegateMayTry reports a task a delegate may still try: no verdict
-// yet, or a pass not recorded. A fail or a voided run is a person's to
-// look at.
+// yet, a pass not recorded, or a fail that went back to the change (D188:
+// the change is judged again once it is reviewed again). Any other fail,
+// or a voided run, is a person's to look at.
 func (c *ChangeStatus) delegateMayTry(task string) bool {
 	d, ok := c.Delegate[task]
-	return !ok || d.Verdict == "pass" && len(d.Voided) == 0
+	return !ok || d.Returned || d.Verdict == "pass" && len(d.Voided) == 0
+}
+
+// pendingReturn is st's newest delegate return since its reset that the
+// change has yet to answer (D188): it is in-progress, and neither a verify
+// nor a review was recorded since the return; nil when there is none.
+func pendingReturn(st *State) *taskReturn {
+	if st == nil || st.Status != StatusInProgress {
+		return nil
+	}
+	var out *taskReturn
+	for task := range st.DelegateReturns {
+		for _, r := range returnsSinceReset(st, task) {
+			if st.Verify != nil && r.At < st.Verify.At || st.Review != nil && r.At <= st.Review.At {
+				continue
+			}
+			if out == nil || r.At > out.At {
+				out = &taskReturn{task: task, DelegateReturn: r}
+			}
+		}
+	}
+	return out
 }
 
 // Spend is the cost recorded in the project's run manifests.
@@ -402,7 +446,8 @@ func (p *Project) Status() *StatusReport {
 			cs.AwaitingHuman = awaitingHuman(acc, c.Doc)
 			pendingHuman = cs.PendingHuman
 			cs.Accepted = acc.Accepted
-			cs.Delegate = p.delegateStatuses(c.ID)
+			cs.Delegate = p.delegateStatuses(c.ID, c.State)
+			cs.DelegateReturns, cs.returned = c.State.DelegateReturns, pendingReturn(acc)
 			if cfgErr == nil {
 				cs.Delegable = p.delegableTasks(ctx, cfg, c, &cs)
 			}
@@ -598,6 +643,10 @@ func nextStep(r *StatusReport) string {
 		case StatusVerified:
 			return "review " + c.ID + " (apex-review)" + on
 		case StatusInProgress:
+			if ret := c.returned; ret != nil {
+				return "returned by the delegate: " + c.ID + " " + ret.task + " — " + ret.Reason + " (defects: " + strings.Join(ret.Defects, ", ") +
+					"); re-plan it with the reason as the hint if its plan is wrong (apex-change), then apply the fix until `ape change verify " + c.ID + "` is green (apex-apply)" + on
+			}
 			return "apply " + c.ID + " until `ape change verify " + c.ID + "` is green (apex-apply)" + on
 		case StatusDraft:
 			return "apply " + c.ID + ": `ape change check " + c.ID + "`, then `ape change start " + c.ID + "` (apex-apply)"
@@ -755,6 +804,8 @@ groups:
 				line += " — answered by " + c.Answer.By + ": " + truncate(c.Answer.Text, briefReasonMax)
 			case c.BlockedReason != "":
 				line += " — " + truncate(c.BlockedReason, briefReasonMax)
+			case c.returned != nil:
+				line += " — returned by delegate (" + c.returned.task + "): " + truncate(c.returned.Reason, briefReasonMax)
 			case len(c.Failing) > 0 && c.Status == StatusInProgress:
 				line += " — red: " + strings.Join(c.Failing, ", ")
 			}
@@ -791,6 +842,9 @@ groups:
 func (d DelegateStatus) describe() string {
 	if len(d.Voided) > 0 {
 		return "delegate voided: " + truncate(strings.Join(d.Voided, ", "), briefReasonMax)
+	}
+	if d.Returned {
+		return "delegate returned it: " + truncate(d.Reason, briefReasonMax)
 	}
 	return "delegate " + d.Verdict + ": " + truncate(d.Reason, briefReasonMax)
 }

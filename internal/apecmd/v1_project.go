@@ -700,13 +700,17 @@ func newStatusCmd() *cobra.Command {
     or by "delegate:<skill>" with its run when _apex/config.yaml human_review delegates
     them (D75; "Accepted by a delegate" in the long output); and each human-review task's
     newest delegate verdict (JSON changes[].delegate: {"T2": {verdict, reason, run, at,
-    voided}}): a fail or a voided run leaves the task awaiting a person, and the brief
-    says why. JSON changes[].delegable: [{task, reason}] (D152, omitted when none) are the
+    voided, defects, returned}}): a fail or a voided run leaves the task awaiting a
+    person, and the brief says why — unless the fail went back to the change (D188:
+    returned, it named a defect in the change's own diff; JSON changes[].delegate_returns:
+    {"T2": [{run, reason, defects, at}]}, as state.json records them): the change is
+    in-progress again, the brief shows the reason and next names apex-change, and once
+    it is reviewed again the task is the delegate's again. JSON changes[].delegable: [{task, reason}] (D152, omitted when none) are the
     awaiting tasks a delegate may take now — reason "configured" (human_review delegates)
     or "docs-default" (a docs change's docs check, change.md docs: true, its diff only
     the docs (release.docs, docs.changelog, docs.user_docs) and the development folder,
     human_review.docs not person); a task whose
-    delegate failed or was voided is a person's and not listed. next names the delegate
+    delegate failed (not returned) or was voided is a person's and not listed. next names the delegate
     for the first (` + "`ape change accept <id> <T> --delegate --wait 9m`" + `) before a person
   - spend so far: the sum of finished ape task/pipeline run manifests
   - red at baseline, not any change's own (JSON "pre_existing_red": [{change, kind, ref,

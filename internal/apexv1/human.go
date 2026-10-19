@@ -252,7 +252,7 @@ func (p *Project) archivedAwaitingHuman() []ChangeStatus {
 		cs := ChangeStatus{
 			ID: c.ID, Title: c.Doc.Title, Milestone: c.Doc.Meta.Milestone, Status: StatusArchived, Lane: LaneMilestone,
 			PendingHuman: pending, AwaitingHuman: pending,
-			Accepted: c.State.Accepted, Delegate: p.delegateStatuses(c.ID),
+			Accepted: c.State.Accepted, Delegate: p.delegateStatuses(c.ID, c.State),
 		}
 		if c.Doc.IsFix() {
 			cs.Lane = LaneFix
