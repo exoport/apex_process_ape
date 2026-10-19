@@ -339,6 +339,14 @@ func TestReadsAt_WholePath(t *testing.T) {
 		"echo first\n" + p:                                         true,
 		"echo first \\\n  " + p:                                    false,
 		"subprocess.run(\n    \"cat " + p + "\", shell=True)":      true,
+		// R34 (tenax check-changelog-unreleased-reconciliation.sh:176): a
+		// path in a $( … ) inside a " string is unquoted there, and git log
+		// reads it.
+		"w=\"$(git log \"${newest_tag}\"..HEAD --name-only -- " + p + " 2>/dev/null \\": true,
+		"echo start; git log --oneline -- " + p:                                         true,
+		"echo start; ls " + p:                                                           true,
+		"echo \"$(date) see " + p + " now\"":                                            false,
+		"echo \"n=$(grep -c x " + p + ")\"":                                             true,
 	} {
 		code = "x\n" + code + "\n"
 		var tok pathTok
@@ -376,6 +384,20 @@ func TestReadsAt_PathInQuotedProse(t *testing.T) {
 		"subprocess.run(\"sort < " + p + "x.md\", shell=True)":                    true,
 		"run(\"echo hi\"); cat " + p + "x.md":                                     true,
 		"grep -r 'see' " + p:                                                      true,
+		// The R32 residual (tenax invocation_list_52_1_test.go:131): the
+		// sentence's last +-joined string is the path and ")." — no path.
+		"quarantinedFlake(t, \"list: flaky (see closing condition above and \"+\n\t\t\"" + p + ").\")": false,
+		"x := \"" + p + ").\"": false,
+		"x := \"" + p + "\"":   true,
+		"x := \"" + p + "/\"":  true,
+		"x := \"" + p + ",\"":  false,
+		// tenax's check-header-timestamp-monotonicity.sh: a path and a field.
+		"  \"" + p + "x.yaml:updated_at\"":             true,
+		"p := fmt.Sprintf(\"" + p + "%s.md\", id)":     true,
+		"p = f\"" + p + "{rid}.md\"":                   true,
+		"files = sorted(glob.glob(\"" + p + "*.md\"))": true,
+		"os.ReadFile(\"" + p + ").\")":                 true,
+		"grep -E '^" + p + "adr-[0-9]{4}_.*\\.md$' x":  true,
 	} {
 		code = "x\n" + code + "\n"
 		var tok pathTok
@@ -399,6 +421,15 @@ func TestLift_V0StateReadersNotByPathInQuotedSentence(t *testing.T) {
 			"\tquarantinedFlake(t, \"obs: spans drift under load (see closing condition above and development/deferred/).\")\n}\n",
 		"test/integration/invocation_list_52_1_test.go": "package integration\n\nfunc TestList(t *testing.T) {\n" +
 			"\tquarantinedFlake(t,\n\t\t\"list: flaky (see closing condition above and development/deferred/).\")\n}\n",
+		// tenax's real one (rc.6e): the sentence split across +-joined
+		// strings, the last of them "development/deferred/).".
+		"test/integration/invocation_list_52_2_test.go": "package integration\n\nfunc TestList(t *testing.T) {\n" +
+			"\tquarantinedFlake(t, \"list: flaky under load \"+\n\t\t\"(see closing condition above and \"+\n\t\t\"development/deferred/).\")\n}\n",
+		// R34: tenax's changelog check reads the ADR folder with git log
+		// in a $( … ), and its adr- files with grep.
+		"scripts/check-changelog.sh": "#!/bin/sh\n" +
+			"window_adr_files=\"$(git log \"${newest_tag}\"..HEAD --name-only -- development/governance/adrs/ 2>/dev/null \\\n" +
+			"    | grep -E '^development/governance/adrs/adr-[0-9]{4}_.*\\.md$' || true)\"\n",
 		"tools/dr/read_test.go": "package dr\n\nfunc TestRead(t *testing.T) {\n" +
 			"\t_, _ = os.ReadFile(\"development/deferred/x.md\")\n}\n",
 		"tools/dr/join_test.go": "package dr\n\nfunc TestJoin(t *testing.T) {\n" +
@@ -422,6 +453,8 @@ func TestLift_V0StateReadersNotByPathInQuotedSentence(t *testing.T) {
 	}
 	require.NotContains(t, got, "test/integration/obs_test.go", "a sentence passed to a project's helper")
 	require.NotContains(t, got, "test/integration/invocation_list_52_1_test.go", "the same, on the next line")
+	require.NotContains(t, got, "test/integration/invocation_list_52_2_test.go", "the same, split across +-joined strings")
+	require.Equal(t, []string{"development/governance/adrs", "development/governance/adrs/adr-"}, got["scripts/check-changelog.sh"], "R34: the folder git log reads stays")
 	require.Equal(t, []string{"development/deferred/x.md"}, got["tools/dr/read_test.go"])
 	require.Equal(t, []string{"development/deferred"}, got["tools/dr/join_test.go"])
 }
