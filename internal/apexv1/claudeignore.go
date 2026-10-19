@@ -86,8 +86,8 @@ func (r *ClaudeIgnoreResult) SetRevealed(skip func(rel string) bool) {
 		if skip != nil && skip(f) {
 			continue
 		}
-		parts := strings.SplitN(f, "/", 4)
-		if len(parts) == 4 && parts[1] == "skills" {
+		parts := strings.SplitN(f, "/", skillPathParts)
+		if len(parts) == skillPathParts && parts[1] == "skills" {
 			f = strings.Join(parts[:3], "/") + "/"
 		}
 		if !slices.Contains(r.Revealed, f) {
@@ -145,7 +145,7 @@ func claudeFolderIgnore(p string) bool {
 // shapeClaudeIgnore is the .gitignore text doc with the .claude/ shape in
 // place, and what that took (ClaudeIgnore*). Every line it does not
 // rewrite is kept byte for byte, and its line endings are doc's.
-func shapeClaudeIgnore(doc string) (string, string) {
+func shapeClaudeIgnore(doc string) (shaped, action string) {
 	eol := "\n"
 	if strings.Contains(doc, "\r\n") {
 		eol = "\r\n"
@@ -158,7 +158,8 @@ func shapeClaudeIgnore(doc string) (string, string) {
 		return strings.TrimPrefix(gitignorePattern(l), "/") == claudeIgnoreLocalMD
 	})
 	block := func(rules ...string) []string {
-		out := []string{claudeIgnoreMarker + eol}
+		out := make([]string, 0, 1+len(rules))
+		out = append(out, claudeIgnoreMarker+eol)
 		for _, r := range rules {
 			out = append(out, r+eol)
 		}
@@ -220,25 +221,31 @@ func shapeClaudeIgnore(doc string) (string, string) {
 	if !hasLocal {
 		missing = append(missing, claudeIgnoreLocalMD)
 	}
-	action := ClaudeIgnoreAlready
+	action = ClaudeIgnoreAlready
 	if rewritten {
 		action = ClaudeIgnoreRewritten
 	}
-	if len(missing) > 0 {
-		if n := len(out); n > 0 {
-			if !strings.HasSuffix(out[n-1], "\n") {
-				out[n-1] += eol
-			}
-			if strings.TrimSpace(out[n-1]) != "" {
-				out = append(out, eol)
-			}
+	if len(missing) == 0 {
+		return strings.Join(out, ""), action
+	}
+	if !rewritten {
+		action = ClaudeIgnoreAdded
+	}
+	return strings.Join(appendBlock(out, eol, block(missing...)), ""), action
+}
+
+// appendBlock appends block to a .gitignore's lines, after a line ending
+// and a blank line when the file has text.
+func appendBlock(lines []string, eol string, block []string) []string {
+	if n := len(lines); n > 0 {
+		if !strings.HasSuffix(lines[n-1], "\n") {
+			lines[n-1] += eol
 		}
-		out = append(out, block(missing...)...)
-		if !rewritten {
-			action = ClaudeIgnoreAdded
+		if strings.TrimSpace(lines[n-1]) != "" {
+			lines = append(lines, eol)
 		}
 	}
-	return strings.Join(out, ""), action
+	return append(lines, block...)
 }
 
 // claudeIgnorePlan is what EnsureClaudeIgnoreShape would do at root,
@@ -271,18 +278,18 @@ func EnsureClaudeIgnoreShape(ctx context.Context, root string) (*ClaudeIgnoreRes
 	if err != nil {
 		return nil, err
 	}
-	path := filepath.Join(root, ".gitignore")
+	file := filepath.Join(root, ".gitignore")
 	res := &ClaudeIgnoreResult{Action: action}
 	if action == ClaudeIgnoreAlready {
 		return res, nil
 	}
-	res.Created = !fileExists(path)
+	res.Created = !fileExists(file)
 	repo := inGitRepo(ctx, root)
 	var ignored []string
 	if repo {
 		ignored = untrackedUnder(ctx, root, true, ".claude")
 	}
-	if err := writeFileAtomic(path, shaped); err != nil {
+	if err := writeFileAtomic(file, shaped); err != nil {
 		return nil, err
 	}
 	if repo {
@@ -357,8 +364,9 @@ func gitIgnoredAs(ctx context.Context, root, rootIgnore string, paths ...string)
 			}
 		}
 	}
-	c := exec.CommandContext(ctx, "git", "--git-dir="+gitDir, "--work-tree="+tmp, "check-ignore", "--no-index", "-v", "--stdin")
+	c := exec.CommandContext(ctx, "git", "check-ignore", "--no-index", "-v", "--stdin")
 	c.Dir = tmp
+	c.Env = append(os.Environ(), "GIT_DIR="+gitDir, "GIT_WORK_TREE="+tmp)
 	c.Stdin = strings.NewReader(strings.Join(paths, "\n") + "\n")
 	var out bytes.Buffer
 	c.Stdout = &out
@@ -367,7 +375,7 @@ func gitIgnoredAs(ctx context.Context, root, rootIgnore string, paths ...string)
 	ignored := map[string]string{}
 	for l := range strings.SplitSeq(out.String(), "\n") {
 		m := checkIgnoreLine.FindStringSubmatch(l)
-		if m == nil || strings.HasPrefix(m[3], "!") {
+		if len(m) != 5 || strings.HasPrefix(m[3], "!") {
 			continue // a negation matched: not ignored
 		}
 		src := m[1]

@@ -60,6 +60,7 @@ func TestShapeClaudeIgnore(t *testing.T) {
 // CLAUDE.local.md ignored; the file is created when absent and a second
 // call writes nothing.
 func TestEnsureClaudeIgnoreShape(t *testing.T) {
+	needSh(t)
 	for name, gitignore := range map[string]string{"no .gitignore": "", ".claude/": ".claude/\n.claude/agents/\n", ".claude": ".claude\n", "/.claude/**": "/.claude/**\n"} {
 		t.Run(name, func(t *testing.T) {
 			root := t.TempDir()

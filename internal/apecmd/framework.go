@@ -78,7 +78,7 @@ type frameworkUpdateOutput struct {
 	Next string `json:"next,omitempty" yaml:"next,omitempty"`
 	// GitIgnore is what an APEX v1 install did to the root .gitignore's
 	// .claude/ rules (D203, Q113), in its commit.
-	GitIgnore *apexv1.ClaudeIgnoreResult `json:"gitignore,omitempty" yaml:"gitignore,omitempty"`
+	Gitignore *apexv1.ClaudeIgnoreResult `json:"gitignore,omitempty" yaml:"gitignore,omitempty"`
 }
 
 // v1SetupNext is setup's hint after an APEX v1 install into a project that
@@ -245,7 +245,7 @@ For subsequent refreshes against a framework version bump, use
 			// Q113: setup comes before init (D162), and it is the first
 			// command that commits .claude/skills/.
 			if res.Summary.V1Release {
-				if out.GitIgnore, err = applyClaudeIgnore(cmd.Context(), projectRoot, untracked); err != nil {
+				if out.Gitignore, err = applyClaudeIgnore(cmd.Context(), projectRoot, untracked); err != nil {
 					return err
 				}
 			}
@@ -529,7 +529,7 @@ func finishFrameworkUpdate(cmd *cobra.Command, format output.Format, projectRoot
 	// place and the update commit carries the skills.
 	if res.Summary.V1Release {
 		var err error
-		if out.GitIgnore, err = applyClaudeIgnore(cmd.Context(), projectRoot, untracked); err != nil {
+		if out.Gitignore, err = applyClaudeIgnore(cmd.Context(), projectRoot, untracked); err != nil {
 			return err
 		}
 	}
@@ -953,7 +953,7 @@ func printFrameworkUpdate(out *frameworkUpdateOutput, format output.Format) erro
 			fmt.Printf("Migrations: %d APEX v0 entr%s removed from %s/ (the ledger keeps their ids)\n",
 				n, pluralY(n), framework.ProjectMigrationsDir)
 		}
-		if gi := out.GitIgnore; gi.Changed() {
+		if gi := out.Gitignore; gi.Changed() {
 			for _, l := range apexv1.ClaudeIgnoreLines(gi) {
 				fmt.Printf("Ignore:    %s\n", l)
 			}

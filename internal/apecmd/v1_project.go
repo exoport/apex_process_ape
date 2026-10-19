@@ -298,15 +298,7 @@ Exit codes: 0 ok · 1 failed (e.g. settings.json is not valid JSON) · 2 usage.`
 					}
 					fmt.Fprintln(w, "amended  "+a+" ("+note+")")
 				}
-				for _, h := range res.HooksAdded {
-					fmt.Fprintln(w, "hook     "+h)
-				}
-				for _, l := range apexv1.ClaudeIgnoreLines(res.GitIgnore) {
-					fmt.Fprintln(w, l)
-				}
-				if pc := preCommitLine(res.PreCommit); pc != "" {
-					fmt.Fprintln(w, pc)
-				}
+				printInitHooks(w, res)
 				fmt.Fprint(w, pluginOut.String())
 				for _, warn := range res.Warnings {
 					fmt.Fprintln(cmd.ErrOrStderr(), "warning: "+warn)
@@ -319,6 +311,20 @@ Exit codes: 0 ok · 1 failed (e.g. settings.json is not valid JSON) · 2 usage.`
 	addV1Flags(cmd, &f)
 	cmd.Flags().BoolVar(&brownfield, "brownfield", false, "record that the project existed before APEX")
 	return cmd
+}
+
+// printInitHooks prints the hooks init merged, what it did to the root
+// .gitignore (D203) and to git's pre-commit hook.
+func printInitHooks(w io.Writer, res *apexv1.InitResult) {
+	for _, h := range res.HooksAdded {
+		fmt.Fprintln(w, "hook     "+h)
+	}
+	for _, l := range apexv1.ClaudeIgnoreLines(res.GitIgnore) {
+		fmt.Fprintln(w, l)
+	}
+	if pc := preCommitLine(res.PreCommit); pc != "" {
+		fmt.Fprintln(w, pc)
+	}
 }
 
 // preCommitLine says what init or the lift did with git's pre-commit hook
@@ -759,14 +765,7 @@ something left.`,
 			if check {
 				res, err := p.OperatorInterfaceCheck()
 				if err != nil {
-					left := map[string]any{"hooks": res.Hooks, "agents_line": res.AgentsLine}
-					if res.Models != "" {
-						left["models"] = res.Models
-					}
-					if res.GitIgnore != "" {
-						left["gitignore"] = res.GitIgnore
-					}
-					return v1FailWith(cmd, &f, err, nil, left)
+					return v1FailWith(cmd, &f, err, nil, operatorLeft(res))
 				}
 				return v1Emit(cmd.OutOrStdout(), &f, res, func(w io.Writer) {
 					fmt.Fprintln(w, "operator interface: nothing left to do")
@@ -803,6 +802,19 @@ something left.`,
 	addV1Flags(cmd, &f)
 	cmd.Flags().BoolVar(&check, "check", false, "write nothing: exit 0 when nothing is left to do, 1 when something is")
 	return cmd
+}
+
+// operatorLeft is what --check found left of seq-07, at the top level of
+// the failure's JSON.
+func operatorLeft(res *apexv1.OperatorInterfaceResult) map[string]any {
+	left := map[string]any{"hooks": res.Hooks, "agents_line": res.AgentsLine}
+	if res.Models != "" {
+		left["models"] = res.Models
+	}
+	if res.GitIgnore != "" {
+		left["gitignore"] = res.GitIgnore
+	}
+	return left
 }
 
 func newStatusCmd() *cobra.Command {

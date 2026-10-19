@@ -374,9 +374,6 @@ func initSkeleton(ctx context.Context, root string, brownfield bool) (*InitResul
 			return nil, nil, err
 		}
 	}
-	if err := p.initClaudeIgnore(ctx, res); err != nil {
-		return nil, nil, err
-	}
 	// A CLAUDE.md that existed without the import gets the one line it
 	// needs, and nothing else (item 15, OpenSpec Q8): the project's own
 	// instructions stay as they are.
@@ -434,10 +431,14 @@ func (p *Project) initClaudeIgnore(ctx context.Context, res *InitResult) error {
 	return nil
 }
 
-// initHooks merges ape's hooks into .claude/settings.json and installs
-// git's pre-commit hook, ape's secret scan (Q89), when absent — so
-// re-running init on a fresh clone installs it.
+// initHooks puts the .claude/ shape in the root .gitignore (D203), so
+// git shares settings.json, merges ape's hooks into it, and installs git's
+// pre-commit hook, ape's secret scan (Q89), when absent — so re-running
+// init on a fresh clone installs it.
 func (p *Project) initHooks(ctx context.Context, res *InitResult) error {
+	if err := p.initClaudeIgnore(ctx, res); err != nil {
+		return err
+	}
 	added, err := MergeHooks(p.SettingsJSON())
 	if err != nil {
 		return err
