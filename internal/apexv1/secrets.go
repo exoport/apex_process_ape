@@ -36,8 +36,9 @@ import (
 //	  allow:   # guarded (config.changed): a person's call
 //	    - {fingerprint: "sha256:<64 hex>", reason: "a test fixture's fake key"}
 //
-// The rules are betterleaks' defaults on Go's stdlib regexp engine; no
-// provider expression runs, so the scan makes no network request. The
+// The rules are betterleaks' defaults, plus ape's aws-access-key-id (Q88),
+// on Go's stdlib regexp engine; no provider expression runs, so the scan
+// makes no network request. The
 // inline `betterleaks:allow` / `gitleaks:allow` markers are disabled — the
 // line's author, a model, could write one — and `.betterleaksignore` is
 // not read: it is an unguarded file. A fingerprint is the sha256 of the
@@ -333,8 +334,48 @@ func diffPath(s string) string {
 	return strings.TrimPrefix(s, "b/")
 }
 
-// secretRules is betterleaks' default rule set, parsed once.
-var secretRules = sync.OnceValues(func() (*config.Config, error) { return config.Default() })
+// secretRules is betterleaks' default rule set, parsed once, with ape's
+// own rules appended (awsAccessKeyIDRule).
+var secretRules = sync.OnceValues(func() (*config.Config, error) {
+	cfg, err := config.Default()
+	if err != nil {
+		return nil, err
+	}
+	cfg.Rules = append(cfg.Rules, awsAccessKeyIDRule(cfg))
+	return cfg, cfg.Validate()
+})
+
+// Q88 (rc.6e): betterleaks' aws-access-token reports an AWS access key id
+// only beside its secret access key (a required component within 5
+// lines), so a lone `AKIA…` id — or `aws_access_key_id = AKIA…` with the
+// secret elsewhere — passes. ape adds aws-access-key-id: the same regex,
+// keywords and filter (a low-entropy id, or one ending EXAMPLE, is no
+// secret), no components, no validation (the scan makes no network
+// request either way). It ranks below aws-access-token (Specificity -1),
+// so an id that rule reports with its secret is not reported twice. It is
+// appended to the parsed defaults, not a fork of their TOML: a betterleaks
+// bump keeps every other rule its own.
+const awsAccessKeyIDRuleID = "aws-access-key-id"
+
+// awsAccessKeyIDRule is aws-access-key-id, built from cfg's
+// aws-access-token (its regex, keywords and filter as betterleaks ships
+// them), or from the values betterleaks v2.0.0-rc.2 ships when cfg has
+// no such rule.
+func awsAccessKeyIDRule(cfg *config.Config) config.Rule {
+	r := config.Rule{
+		Regex:      `\b((?:A3T[A-Z0-9]|AKIA|ASIA|ABIA|ACCA)[A-Z2-7]{16})\b`,
+		Keywords:   []string{"a3t", "akia", "asia", "abia", "acca"},
+		FilterExpr: "entropy(finding[\"secret\"]) <= 3.0\n|| matchesAny(finding[\"secret\"], [`.+EXAMPLE$`])\n",
+		Confidence: "high",
+	}
+	if base, ok := cfg.Rule("aws-access-token"); ok && base.Regex != "" {
+		r.Regex, r.Keywords, r.FilterExpr, r.Confidence = base.Regex, slices.Clone(base.Keywords), base.FilterExpr, base.Confidence
+	}
+	r.ID = awsAccessKeyIDRuleID
+	r.Description = "An AWS access key id on its own, with no secret access key near it (ape's rule: aws-access-token needs both)."
+	r.Specificity = -1
+	return r
+}
 
 // secretFinding is one secret in the added lines.
 type secretFinding struct {
