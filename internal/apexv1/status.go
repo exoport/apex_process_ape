@@ -224,6 +224,18 @@ type MilestoneLine struct {
 	// BaseSHA is the milestone's start (D130 Q60): HEAD at its first
 	// approval; absent before it is approved.
 	BaseSHA string `json:"base_sha,omitempty"`
+	// LastGate is the milestone's newest gate run (D170 A9): where it ran,
+	// its exit, when and its log — the record a skill reads instead of
+	// ape's state files. Absent before the gate ever ran.
+	LastGate *GateSummary `json:"last_gate,omitempty"`
+}
+
+// GateSummary is a gate run in short (LastGateRun).
+type GateSummary struct {
+	SHA  string `json:"sha"`
+	Exit int    `json:"exit"`
+	At   string `json:"at"`
+	Log  string `json:"log"`
 }
 
 // StatusReport is `ape status`.
@@ -325,7 +337,11 @@ func (p *Project) Status() *StatusReport {
 	if rm := p.roadmap(); rm != nil {
 		recs, _ := p.LoadMilestoneRecords()
 		for i := range rm.Milestones {
-			r.Milestones = append(r.Milestones, milestoneLine(&rm.Milestones[i], recs[rm.Milestones[i].ID]))
+			line := milestoneLine(&rm.Milestones[i], recs[rm.Milestones[i].ID])
+			if run := p.LastGateRun(line.ID); run != nil {
+				line.LastGate = &GateSummary{SHA: run.SHA, Exit: run.Exit, At: run.At, Log: run.Log}
+			}
+			r.Milestones = append(r.Milestones, line)
 		}
 		if m := rm.Current(); m != nil {
 			r.Milestone = p.milestoneStatus(m, runs, p.fixIDs(ctx))

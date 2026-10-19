@@ -616,6 +616,8 @@ func newStatusCmd() *cobra.Command {
   - a milestone a person closed with its gate red (` + "`ape milestone close --accept-red`" + `):
     JSON milestones[].accept_red {reason, by, at, gate}; the brief names the last one, and
     the roadmap lines say "accepted red by <who>: <reason>"
+  - each milestone's newest gate run (D170): JSON milestones[].last_gate {sha (the commit
+    the gate ran at), exit, at, log}, absent before its gate ever ran
   - the checked-out branch (JSON branch; "(on <branch>)" in the first line)
   - fixes first (trial decision D40): a change with "milestone: none" is a fix (JSON
     changes[].lane "fix"; else "milestone"). Approved fixes (changes[].approved: {by, at,
