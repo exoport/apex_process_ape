@@ -109,10 +109,13 @@ func TestLiftApe(t *testing.T) {
 	require.Nil(t, a.MovePin)
 	require.Contains(t, a.PinNote, "bingo is not on PATH")
 	require.Contains(t, a.PinNote, "APE_TOOLCHAIN=local")
+	require.Contains(t, a.PinNote, "every git commit too (the pre-commit hook runs ape)", "R33")
+	require.Contains(t, a.PinNote, "every Claude session in the project", "R33")
 
 	a = liftApe(root, "0.10.1-0.20261017042934-7f19dc3a009e", "/bin/ape", false, bingo)
 	require.Nil(t, a.MovePin)
 	require.Contains(t, a.PinNote, "is no release a pin can name")
+	require.Contains(t, a.PinNote, "until then "+apexv1.LiftPinLocal, "R33: every trial lift leaves the pin")
 	require.Equal(t, "bingo get github.com/exoport/apex_process_ape/cmd/ape@v0.10.1-0.20261017042934-7f19dc3a009e", a.PinCommand)
 
 	a = liftApe(root, "0.9.0", "/bin/ape", false, bingo)

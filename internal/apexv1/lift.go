@@ -69,6 +69,15 @@ type LiftApe struct {
 	MovePin func(ctx context.Context) error `json:"-"`
 }
 
+// LiftPinLocal is what the pin line says needs APE_TOOLCHAIN=local while a
+// lifted project's pin still names an older ape (R33): a bare ape there
+// runs the pin, and that is what git's pre-commit hook and a Claude
+// session's hooks call — so every commit and every session, not only the
+// commands a person types.
+const LiftPinLocal = "run every v1 command here with APE_TOOLCHAIN=local — every git commit too " +
+	"(the pre-commit hook runs ape) and every Claude session in the project (its hooks run ape: " +
+	"start it as APE_TOOLCHAIN=local claude)"
+
 // LiftProblem is a pre-flight refusal a dry run reports.
 type LiftProblem struct {
 	Code    string `json:"code"`
@@ -1353,7 +1362,7 @@ func (lf *lifter) movePin() bool {
 		// bingo may have half-written .bingo/: back to the tag's.
 		_, _ = git(lf.ctx, lf.root, "checkout", "--", ".bingo")
 		a.PinNote = "could not move the pin (" + err.Error() + "): after the lift, run " + a.PinCommand +
-			" and commit .bingo/; until then a bare ape here runs " + a.Pinned + ", so run v1 commands with APE_TOOLCHAIN=local"
+			" and commit .bingo/; until then a bare ape here runs " + a.Pinned + ", so " + LiftPinLocal
 		return false
 	}
 	a.PinMoved = true

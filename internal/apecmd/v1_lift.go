@@ -39,7 +39,9 @@ pins — it is exempt from the pin swap, since a v0 pin names an ape with no v1 
 The output's first lines say which binary runs (version, path) and what becomes of the
 pin: when this ape is a release (vX.Y.Z or vX.Y.Z-rc.N) and bingo is on PATH, the lift
 commit moves the pin to it (bingo get); otherwise the lift prints the one command that
-does, and until the pin moves every other v1 command there needs APE_TOOLCHAIN=local.
+does, and until the pin moves every other v1 command there needs APE_TOOLCHAIN=local —
+every git commit too (the pre-commit hook runs ape) and every Claude session in the
+project (its hooks run ape: start it as APE_TOOLCHAIN=local claude).
 
 Pre-flight (refused, exit 1): a v0 install (_apex/framework.yaml records a v0 version,
 or did in git history) and no v1 layout or earlier lift (lift.not-v0); a version in
@@ -293,9 +295,9 @@ func liftApe(root, running, self string, dryRun bool, haveBingo func() bool) *ap
 	switch {
 	case !releaseVersionRe.MatchString(running):
 		a.PinNote = "this ape (" + running + ") is no release a pin can name: the lift leaves " + pin.version +
-			"; once this version is published, run " + a.PinCommand + " and commit .bingo/ — until then run v1 commands here with " + envToolchain + "=local"
+			"; once this version is published, run " + a.PinCommand + " and commit .bingo/; until then " + apexv1.LiftPinLocal
 	case !haveBingo():
-		a.PinNote = "bingo is not on PATH: after the lift, run " + a.PinCommand + " and commit .bingo/ — until then run v1 commands here with " + envToolchain + "=local"
+		a.PinNote = "bingo is not on PATH: after the lift, run " + a.PinCommand + " and commit .bingo/; until then " + apexv1.LiftPinLocal
 	case dryRun:
 		a.PinNote = "the lift moves the pin from " + pin.version + " to " + tag + " (" + a.PinCommand + ") in its commit"
 	default:
