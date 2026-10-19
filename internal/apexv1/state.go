@@ -119,6 +119,10 @@ type Verify struct {
 	// about the rebased code. StaleReason says why.
 	Stale       bool   `json:"stale,omitempty"`
 	StaleReason string `json:"stale_reason,omitempty"`
+	// Regression is set when the verify skipped the regression command
+	// (Q87): skipped "docs-only" and the docs paths the change touched.
+	// A verify that ran it has it in Results (kind regression).
+	Regression *RegressionVerdict `json:"regression,omitempty"`
 }
 
 // Approval records a person approving a fix — a change with

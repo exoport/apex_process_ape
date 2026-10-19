@@ -1,8 +1,10 @@
 package apexv1
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -411,26 +413,34 @@ func (r *Requires) UnmarshalYAML(n *yaml.Node) error {
 //	docs:
 //	  changelog: CHANGELOG.md
 //	  user_docs: docs/
+//	  tested: [docs/examples/]   # docs the project executes (Q87)
 //
 // `ape project check` reports a configured path that does not exist
 // (docs.missing), and `ape status --json` carries the block as "docs" so
 // skills read it: apex-change adds an update task for a user-visible
-// change, apex-review checks it.
+// change, apex-review checks it. tested lists the docs the project runs
+// (doc-tests, tested examples): a change touching one is never docs-only,
+// so verify runs its regression command (Q87).
 type DocsConfig struct {
-	Changelog string `json:"changelog,omitempty"`
-	UserDocs  string `json:"user_docs,omitempty"`
+	Changelog string   `json:"changelog,omitempty"`
+	UserDocs  string   `json:"user_docs,omitempty"`
+	Tested    []string `json:"tested,omitempty"`
 }
 
 // UnmarshalYAML parses and validates the block.
 func (d *DocsConfig) UnmarshalYAML(n *yaml.Node) error {
-	if err := checkKeys(n, "docs", "changelog", "user_docs"); err != nil {
+	if err := checkKeys(n, "docs", "changelog", "user_docs", "tested"); err != nil {
 		return err
 	}
-	var raw map[string]string
+	var raw struct {
+		Changelog string   `yaml:"changelog"`
+		UserDocs  string   `yaml:"user_docs"`
+		Tested    []string `yaml:"tested"`
+	}
 	if err := n.Decode(&raw); err != nil {
 		return fmt.Errorf("docs: %w", err)
 	}
-	for k, v := range raw {
+	for k, v := range map[string]string{"changelog": raw.Changelog, "user_docs": raw.UserDocs} {
 		v = strings.TrimSpace(v)
 		if v != "" && (filepath.IsAbs(v) || strings.HasPrefix(v, "/") || v == ".." || strings.HasPrefix(filepath.ToSlash(filepath.Clean(v)), "../")) {
 			return fmt.Errorf("docs.%s: %q is not a path inside the project — write it relative to the project root", k, v)
@@ -441,6 +451,22 @@ func (d *DocsConfig) UnmarshalYAML(n *yaml.Node) error {
 		case "user_docs":
 			d.UserDocs = v
 		}
+	}
+	// tested is validated as release.docs is: relative paths inside the
+	// project, none twice; [] is none.
+	seen := map[string]bool{}
+	for _, t := range raw.Tested {
+		c := path.Clean(strings.TrimSpace(t))
+		switch {
+		case strings.TrimSpace(t) == "":
+			return errors.New("docs.tested: an empty path")
+		case path.IsAbs(c) || filepath.IsAbs(t) || c == ".." || strings.HasPrefix(c, "../"):
+			return fmt.Errorf("docs.tested: %q is not a relative path inside the project", t)
+		case seen[c]:
+			return fmt.Errorf("docs.tested: %q is listed twice", t)
+		}
+		seen[c] = true
+		d.Tested = append(d.Tested, strings.TrimSpace(t))
 	}
 	return nil
 }

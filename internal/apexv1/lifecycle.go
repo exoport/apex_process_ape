@@ -412,7 +412,9 @@ type VerifyResult struct {
 	// StrayFiles: what the checks left in the tree and ape undid (item 19).
 	StrayFiles []string `json:"stray_files"`
 	// Regression judges the regression command against the change's
-	// baseline (backlog 32); absent when none is configured.
+	// baseline (backlog 32); absent when none is configured. A docs-only
+	// change's says skipped: "docs-only" with the docs paths it touched
+	// (Q87); not_skipped says why a change otherwise docs-only ran it.
 	Regression *RegressionVerdict `json:"regression,omitempty"`
 	// Attempts is the change's red verifies since it started, this one
 	// included, AttemptsTotal every red verify of it, and AttemptsCap
@@ -528,8 +530,17 @@ func (p *Project) verify(ctx context.Context, ci ChangeInfo, opt RunOptions, kee
 	sha := HeadSHA(ctx, p.Root)
 	checks := p.ChangeChecks(ci.Doc)
 	regressionCmd := p.regressionCmd()
+	// A docs-only change skips the regression command (Q87, docsonly.go).
+	var skipped *RegressionVerdict
+	var notSkipped string
 	if regressionCmd != "" {
-		checks = append(checks, PlannedCheck{Ref: regressionRef, Kind: KindRegression, Cmd: regressionCmd})
+		skip, paths, why := p.docsOnlyRegression(ctx, ci, regressionCmd, checks)
+		notSkipped = why
+		if skip {
+			skipped = skippedRegression(regressionCmd, st.Regression, paths)
+		} else {
+			checks = append(checks, PlannedCheck{Ref: regressionRef, Kind: KindRegression, Cmd: regressionCmd})
+		}
 	}
 	results := p.RunChecks(ctx, p.LogDir(id), "", checks, opt)
 	if err := interrupted(ctx, "the verify of "+id); err != nil {
@@ -537,10 +548,11 @@ func (p *Project) verify(ctx context.Context, ci ChangeInfo, opt RunOptions, kee
 	}
 	// The checks are done: what they found is recorded, a signal or not.
 	ctx = context.WithoutCancel(ctx)
-	var regression *RegressionVerdict
-	if regressionCmd != "" {
+	regression := skipped
+	if regressionCmd != "" && skipped == nil {
 		r := &results[len(results)-1]
 		regression = judgeRegression(r, st.Regression, p.checkOutput(r))
+		regression.NotSkipped = notSkipped
 	}
 	green := true
 	for i := range results {
@@ -557,7 +569,7 @@ func (p *Project) verify(ctx context.Context, ci ChangeInfo, opt RunOptions, kee
 	if !green {
 		return p.redAttempt(ctx, ci, &VerifyResult{ID: id, Status: st.Status, SHA: sha, Green: false, Results: results, PendingHuman: pending, GreenAtBaseline: gab, StrayFiles: StrayFiles(results), Regression: regression})
 	}
-	st.Verify = &Verify{SHA: sha, At: Stamp(), Results: results, PendingHuman: pending, Green: green, GreenAtBaseline: gab}
+	st.Verify = &Verify{SHA: sha, At: Stamp(), Results: results, PendingHuman: pending, Green: green, GreenAtBaseline: gab, Regression: skipped}
 	switch {
 	case st.Status == StatusReviewed && st.Review != nil && st.Review.Verdict == "pass":
 		if moved, _, _ := p.codeMovedSince(ctx, st.Review.SHA); moved && !keepReview {
@@ -602,7 +614,7 @@ func (p *Project) redAttempt(ctx context.Context, ci ChangeInfo, res *VerifyResu
 	}
 	if a.Since < capN {
 		if st.Status != StatusInProgress {
-			st.Verify = &Verify{SHA: res.SHA, At: Stamp(), Results: res.Results, PendingHuman: res.PendingHuman, Green: false, GreenAtBaseline: res.GreenAtBaseline}
+			st.Verify = &Verify{SHA: res.SHA, At: Stamp(), Results: res.Results, PendingHuman: res.PendingHuman, Green: false, GreenAtBaseline: res.GreenAtBaseline, Regression: res.Regression.skip()}
 			st.Status = StatusInProgress
 			if err := p.saveAndCommit(ctx, id, st); err != nil {
 				return nil, err
@@ -627,7 +639,7 @@ func (p *Project) redBlock(ctx context.Context, ci ChangeInfo, res *VerifyResult
 		failing = append(failing, fmt.Sprintf("%s (%s)", red[i].Task, red[i].Outcome()))
 	}
 	if st.Status != StatusInProgress {
-		st.Verify = &Verify{SHA: res.SHA, At: Stamp(), Results: res.Results, PendingHuman: res.PendingHuman, Green: false, GreenAtBaseline: res.GreenAtBaseline}
+		st.Verify = &Verify{SHA: res.SHA, At: Stamp(), Results: res.Results, PendingHuman: res.PendingHuman, Green: false, GreenAtBaseline: res.GreenAtBaseline, Regression: res.Regression.skip()}
 	}
 	if err := p.blockAndCount(ctx, ci, what+" — "+strings.Join(limit(failing, 5), ", ")); err != nil {
 		return nil, err

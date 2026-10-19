@@ -567,6 +567,19 @@ now must have failed at baseline, else verify fails with the new ones in new_fai
 recorded before rc.5, or one naming more than 500, which stores none, included), red at
 both is pre-existing, as before. new_failures also lists a red run's tests against a
 green baseline.
+Docs-only (Q87): a change whose diff from base_sha to HEAD touches nothing but the
+user-facing docs — release.docs (default README.md and docs/), docs.changelog and
+docs.user_docs — and development/ skips the regression command, and only that: its task
+and scenario checks run, and the milestone gate still runs everything. JSON "regression":
+{cmd, skipped: "docs-only", paths (the docs paths it touched, development/ not listed;
+the first 50, paths_total counts them), baseline_exit, exit 0, failed false}, also
+recorded in state.json as verify.regression; results has no regression row. It runs
+anyway, JSON regression.not_skipped and a human line saying why, when a touched path is
+under docs.tested (docs the project executes), when _apex/config.yaml's release or docs
+block was changed by a commit no person accepted or has an uncommitted edit, or when the
+regression command or one of the change's check commands names a touched docs path or a
+folder holding one as a word (`+"`test -f README.md`"+`, `+"`markdownlint docs/`"+`). No skip when the
+change has no base_sha or its diff cannot be read.
 The working tree must hold no uncommitted changes outside development/ — commit first
 (trailer "Change: <id>"): a verify belongs to a sha. HEAD must be on the change's branch,
 change/<id> (D38; else exit 1, code change.wrong-branch).
@@ -633,6 +646,7 @@ func renderVerify(cmd *cobra.Command, f *v1Flags, id string, res *apexv1.VerifyR
 		fmt.Fprintf(w, "change %s at %.7s: %s\n", id, res.SHA, res.Status)
 		printChecks(w, res.Results, true)
 		printNewFailures(w, res.Regression)
+		printDocsOnly(w, res.Regression)
 		if len(res.PendingHuman) > 0 {
 			fmt.Fprintf(w, "human-review pending: %s\n", strings.Join(res.PendingHuman, ", "))
 		}
@@ -659,6 +673,26 @@ func renderVerify(cmd *cobra.Command, f *v1Flags, id string, res *apexv1.VerifyR
 		return v1Fail(cmd, f, &apexv1.FailError{Code: "verify.red", Msg: msg}, res)
 	}
 	return v1Emit(cmd.OutOrStdout(), f, res, human)
+}
+
+// printDocsOnly says verify skipped the regression command for a
+// docs-only change (Q87), or why a change otherwise docs-only ran it.
+func printDocsOnly(w io.Writer, v *apexv1.RegressionVerdict) {
+	switch {
+	case v == nil:
+	case v.Skipped != "":
+		what := "only the development folder"
+		if len(v.Paths) > 0 {
+			shown := v.Paths[:min(len(v.Paths), 10)]
+			what = strings.Join(shown, ", ")
+			if v.PathsTotal > len(shown) {
+				what += fmt.Sprintf(", … (%d in all)", v.PathsTotal)
+			}
+		}
+		fmt.Fprintf(w, "  regression skipped (%s): the change touched only docs and the development folder — %s  %s\n", v.Skipped, what, v.Cmd)
+	case v.NotSkipped != "":
+		fmt.Fprintf(w, "  regression ran, not skipped as docs-only: %s\n", v.NotSkipped)
+	}
 }
 
 // printCatchUp reports a catch-up with a moved base branch (D40): the

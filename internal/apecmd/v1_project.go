@@ -176,12 +176,16 @@ unparseable and every command refuses it):
                                      $RADIX_DSN") while it is unset or empty, or runs
                                      docker as a command while it is not on PATH, is not
                                      run: reason "unrun" (exit -3), red, never green
-  docs: {changelog: CHANGELOG.md, user_docs: docs/}
-                                     both optional, project-relative: the changelog and
+  docs: {changelog: CHANGELOG.md, user_docs: docs/, tested: [docs/examples/]}
+                                     all optional, project-relative: the changelog and
                                      user docs a user-visible change updates (apex-change
                                      adds the task, apex-review checks it); ape project
                                      check reports a missing path (docs.missing); ape
-                                     status --json carries the block as "docs"
+                                     status --json carries the block as "docs". tested
+                                     (a list, each path once) names the docs the project
+                                     executes (doc-tests, tested examples): a change
+                                     touching one is never docs-only, so ape change
+                                     verify runs its regression command (see its help)
 
 Scope (D45): v1.0: one operator per checkout, on a local trunk; PR mode comes later. Init
 says so (JSON "scope"); change start and archive refuse while the base branch is behind its

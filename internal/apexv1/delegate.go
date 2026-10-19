@@ -369,12 +369,14 @@ func (p *Project) prepareDocsDelegate(ctx context.Context, cfg Config, id, task 
 	if tg == nil || tg.doc == nil || !tg.doc.Meta.Docs {
 		return nil, delegateOff(id, task, hr)
 	}
+	// The guard first (Q90): a model's own unaccepted docs: person is
+	// delegate.unaccepted-config, as the help says, not delegate.off.
+	if err := p.refuseUnacceptedConfig(ctx, "human_review", "release", "docs"); err != nil {
+		return nil, err
+	}
 	if !hr.DocsDefault() {
 		return nil, &FailError{Code: "delegate.off", Msg: "the docs delegate is off: _apex/config.yaml sets human_review.docs: person, so only a person accepts " + task +
 			" of the docs change " + id + " — a person runs `ape change accept " + id + " --task " + task + " --by <who>`"}
-	}
-	if err := p.refuseUnacceptedConfig(ctx, "human_review", "release", "docs"); err != nil {
-		return nil, err
 	}
 	if terr != nil {
 		return nil, terr
@@ -435,6 +437,16 @@ func (p *Project) planDelegate(ctx context.Context, cfg Config, hr *HumanReviewC
 // unarchived, the branch tip archive recorded once archived. Renames count
 // as both paths, so code moved into docs/ is still code it touched.
 func (p *Project) docsScopeOutside(ctx context.Context, docs []string, id string, st *State) ([]string, error) {
+	touched, err := p.changeTouched(ctx, id, st)
+	if err != nil {
+		return nil, err
+	}
+	return p.outsideDocs(docs, touched), nil
+}
+
+// changeTouched lists the paths the change's diff from its base_sha to its
+// tip touches (docsScopeOutside's tip), renames as both paths.
+func (p *Project) changeTouched(ctx context.Context, id string, st *State) ([]string, error) {
 	if st == nil || st.BaseSHA == "" {
 		return nil, errors.New("no base_sha: the change was never started")
 	}
@@ -449,13 +461,25 @@ func (p *Project) docsScopeOutside(ctx context.Context, docs []string, id string
 	if err != nil {
 		return nil, err
 	}
-	var outside []string
+	var touched []string
 	for f := range strings.SplitSeq(out, "\n") {
-		if f != "" && !p.notCode(f) && !inReleaseDocs(docs, f) {
+		if f != "" {
+			touched = append(touched, f)
+		}
+	}
+	return touched, nil
+}
+
+// outsideDocs lists the paths of touched outside docs, the development
+// folder and ape's state.
+func (p *Project) outsideDocs(docs, touched []string) []string {
+	var outside []string
+	for _, f := range touched {
+		if !p.notCode(f) && !inReleaseDocs(docs, f) {
 			outside = append(outside, f)
 		}
 	}
-	return outside, nil
+	return outside
 }
 
 // inReleaseDocs reports whether rel (project-relative) is one of docs or
