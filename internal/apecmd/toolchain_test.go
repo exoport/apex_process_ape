@@ -284,13 +284,14 @@ func TestDecidePin_V1LayoutImpliesFloor(t *testing.T) {
 // reads as a block — 13 let every tool call through. stop and
 // session-start keep 13 (no block, no stop loop); git refuses a commit on
 // any non-zero exit. No real pinned binary is looked at: GOBIN, GOPATH and
-// HOME are empty scratch dirs and go is off PATH.
+// the home directory are empty scratch dirs and go is off PATH.
 func TestHonourApePin_PreToolFailsClosed(t *testing.T) {
 	t.Setenv(envToolchain, "")
 	t.Setenv(envPinned, "")
 	t.Setenv("GOBIN", t.TempDir())
 	t.Setenv("GOPATH", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", t.TempDir()) // os.UserHomeDir on Windows
 	t.Setenv("PATH", t.TempDir())
 	cases := []struct {
 		args []string
