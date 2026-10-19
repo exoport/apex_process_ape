@@ -5,8 +5,9 @@ layout, a milestone a person approved, and a green `ape doctor`. It ends where t
 framework's skills take over (`apex-plan`, then `apex-orchestrator`), so it needs
 no model session and costs nothing.
 
-You need `ape` installed ([How to install ape](../how-to/install.md)), `git`, and
-Claude Code on `PATH`.
+You need `ape` installed ([How to install ape](../how-to/install.md)), `git`,
+Claude Code on `PATH`, and read access to the APEX framework repository, which
+`ape framework setup` fetches (its `--help` says from where).
 
 ## 1. Check the host
 
@@ -17,12 +18,20 @@ ape doctor
 Every host row should read ✅ or ℹ️. Outside a project, the project rows report
 INFO: there is nothing to judge yet.
 
-## 2. Make the repository an APEX v1 project
+## 2. Install the framework and make the repository an APEX v1 project
 
 ```bash
 mkdir greeter && cd greeter && git init -q
+ape framework setup
 ape project init
 ```
+
+`framework setup` installs the framework's skills (`.claude/skills/apex-*`), its
+migrations and `_apex/framework.yaml`, and commits them as `chore(framework):
+install APEX framework …`. It comes first, so the install lands before the v1
+epoch and `init` finds the skills already there; it ends with
+`next: ape project init`. Run in the other order, `init`'s `next:` asks for
+`framework setup` instead.
 
 `init` writes `_apex/config.yaml`, `AGENTS.md`, `CLAUDE.md`, the `development/`
 folders and `_apex/state/`, merges ape's hooks into `.claude/settings.json`, and
@@ -64,8 +73,8 @@ ape doctor --strict
 `doctor --strict` runs the host checks plus the v1 project checks (project check,
 hooks, plugins, the ape floor, the Claude Code version, the `_apex/state` ignore
 rules, whether `.claude/settings.json` is shared through git). Every v1 row reads
-OK here; `skills.project` warns until the framework's skills are installed in the
-project, and once they are, `--strict` exits 0 on a healthy project.
+OK here, `skills.project` included, since step 2 installed the framework's skills;
+`--strict` exits 0 on a healthy project.
 
 ## Where to go next
 
