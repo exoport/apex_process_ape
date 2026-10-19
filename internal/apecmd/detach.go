@@ -4,7 +4,7 @@ package apecmd
 //
 // Why: Claude Code 2.1.285 stops a Bash tool's background command after at
 // most 2 h (30 min by default), SIGTERM then SIGKILL ~3 s later, and it
-// stops setsid'd and nohup'd descendants too. The apex-orchestrator runs
+// stops setsid'd and nohup'd descendants too. The apex-loop runs
 // every `ape task|change` from such a shell, so a long dispatch
 // was killed mid-run. The framework measured that a process ORPHANED at
 // launch survives, and worked around it in shell. This gives it a
@@ -72,7 +72,7 @@ type detachedHandle struct {
 	ExitCode      *int       `json:"exit_code,omitempty"`
 	Error         string     `json:"error,omitempty"`
 
-	// The nesting rule (D62), for a session an apex-orchestrator run
+	// The nesting rule (D62), for a session an apex-loop run
 	// started: the session's depth, its parent run, and the pid of the ape
 	// process running the parent, which the supervisor watches (the child
 	// dies with it). Locks are the session lock files the run holds under
@@ -677,7 +677,7 @@ func newRunSuperviseCmd() *cobra.Command {
 // A signal to the supervisor is passed on to the command, whose own
 // shutdown then decides the exit code that gets recorded.
 //
-// A session an apex-orchestrator run started dies with it (D62, RC3-PLAN
+// A session an apex-loop run started dies with it (D62, RC3-PLAN
 // Q4): the supervisor checks the parent's ape process every
 // parentPollInterval, and when it is gone stops the run the way `ape run
 // stop` does, records stop_reason parent_gone on the handle and, once the

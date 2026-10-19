@@ -33,7 +33,7 @@ import (
 // asks whether the session it runs in may start one:
 //
 //   - depth 0 (no ape session around it) starts anything;
-//   - depth 1 starts a child only when it is ape's own apex-orchestrator
+//   - depth 1 starts a child only when it is ape's own apex-loop
 //     run, only an allow-listed skill, and one child at a time;
 //   - depth 2 starts nothing.
 //
@@ -296,7 +296,7 @@ func sessionRefusal(err error) error {
 }
 
 // acquireSessionLocks takes the locks the launch needs in projectRoot: the
-// project's one apex-orchestrator run, and the parent orchestrator run's one
+// project's one apex-loop run, and the parent orchestrator run's one
 // child. token names the holder (a detached run's id, else pid-<pid>); a
 // lock the same token already holds is taken over. On error nothing is
 // held.

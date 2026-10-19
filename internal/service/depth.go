@@ -19,7 +19,7 @@ import (
 //   - no stamp: refused (fail closed, Q43): a pre-rc.4 client, or a raw
 //     publish that did not say where it comes from;
 //   - depth 2 or more: refused, nothing spawned;
-//   - depth 1: allowed only from a running apex-orchestrator run in the
+//   - depth 1: allowed only from a running apex-loop run in the
 //     job's project, for a skill on its allow-list, one child at a time —
 //     the SessionGate (apecmd) checks it with the functions a direct
 //     `ape task` uses, and the job's `ape task` runs under the caller's

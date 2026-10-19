@@ -21,7 +21,7 @@ import (
 //
 // It starts a model session, so the nesting rule applies (D62, nesting.go):
 // it counts as starting apex-review. From a terminal (depth 0) it always
-// may; from inside an ape session only ape's own apex-orchestrator run may,
+// may; from inside an ape session only ape's own apex-loop run may,
 // as its one child (session.child-running while another child runs); any
 // other session — apex-apply run by a person through `ape task`, say — is
 // refused with session.depth. The session is detached — a separate `ape

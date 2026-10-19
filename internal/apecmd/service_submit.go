@@ -43,7 +43,7 @@ const probeIDBytes = 4
 
 // serviceGate is the daemon's check of a depth-1 caller's job (the daemon
 // refuses every other non-zero depth itself): the caller's run must be a
-// running apex-orchestrator run in the job's project — its manifest, ape's
+// running apex-loop run in the job's project — its manifest, ape's
 // own record — and the job a task of a skill on that project's allow-list,
 // with the orchestrator's one child slot free. The same functions decide it
 // as for a direct `ape task` (apexv1.SessionStart, the session locks). The

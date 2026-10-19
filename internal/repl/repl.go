@@ -238,7 +238,7 @@ const EnvClaudeEffortLevel = "CLAUDE_CODE_EFFORT_LEVEL"
 // environment to every tool subprocess, so a skill that shells out to
 // `ape task` inside the session carries it, and the session-starting
 // commands apply the nesting rule under it (D62, EnvDepth): only ape's own
-// apex-orchestrator run starts a session from inside one.
+// apex-loop run starts a session from inside one.
 //
 // Deliberately NOT set by the migration shell runner or the service
 // daemon — neither spawns a claude session.
@@ -253,7 +253,7 @@ func SessionMarkerEnv(kind, runID string) []string {
 // EnvApeSession on every model session it launches:
 //
 //   - EnvDepth: the session's depth — 1 for a session a terminal, a script
-//     or the service daemon started, 2 for one an apex-orchestrator run
+//     or the service daemon started, 2 for one an apex-loop run
 //     started (its parent's depth + 1);
 //   - EnvParentRun: the run id of the session that started this one, empty
 //     at depth 1;
