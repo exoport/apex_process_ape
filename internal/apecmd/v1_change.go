@@ -525,11 +525,15 @@ other scenario whose check command is identical to a task's (H10). The rest of t
 is the milestone gate's to run (`+"`ape milestone gate`"+` runs all of it). human-review checks
 are not run. A command shared by several checks runs once. A check, regression or gate
 command that is one ( … ) block of several lines, each a simple command, runs as its lines
-joined by && — each line's exit counts, as under set -e — and its log opens with "split
-into N commands"; a block with a line that changes the shell's state (cd, export, set,
-NAME=value, …), continues (a trailing \), opens a construct (if, for, case, { }, a
-function, a here-doc) or is already joined (&&, ||, ; at its end) runs as written, its
-log saying which line. JSON cmd stays the command as configured. Each check runs under
+joined by && — each line's exit counts, as under set -e (a line that is itself a ;, & or
+|| list goes in { …; }) — and its log opens with "split into N commands". A line's
+constructs count as simple when they open and close on that line (for … done, while …
+done, if … fi, case … esac, { … }, [[ … ]], (( … ))). A block with a line that changes the
+shell's state (cd, export, set, NAME=value, … — inside a same-line loop too; a ( … )
+subshell's own cd is fine), continues (a trailing \), opens a construct it closes on
+another line, defines a function, starts a here-doc, or is already joined (&&, ||, ; at
+its end) runs as written, its log saying which line. JSON cmd stays the command as
+configured. Each check runs under
 _apex/config.yaml timeouts.check (default idle 15m, max 2h), the regression command under
 timeouts.regression (idle 30m, max 2h): a command that makes no progress — no output, no
 CPU time used by its process group — for idle, or still runs at max, is killed with its

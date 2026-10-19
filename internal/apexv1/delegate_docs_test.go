@@ -163,7 +163,7 @@ func TestDocsDelegate_ChangelogAndUserDocsAreDocs(t *testing.T) {
 		work func(p *Project)
 	}{
 		"docs.changelog CHANGELOG.md": {cfg: "docs: {changelog: CHANGELOG.md}\n", work: func(p *Project) { write(t, p, "CHANGELOG.md", "- waving\n") }},
-		"docs.changelog":          {cfg: "docs: {changelog: ./HISTORY.md}\n", work: func(p *Project) { write(t, p, "HISTORY.md", "- waving\n") }},
+		"docs.changelog":              {cfg: "docs: {changelog: ./HISTORY.md}\n", work: func(p *Project) { write(t, p, "HISTORY.md", "- waving\n") }},
 		"docs.user_docs": {cfg: "docs: {changelog: CHANGELOG.md, user_docs: manual/}\n", work: func(p *Project) {
 			write(t, p, "manual/wave.md", "Waving.\n")
 			write(t, p, "CHANGELOG.md", "- waving\n")
