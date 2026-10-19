@@ -198,6 +198,14 @@ type UpdateSummary struct {
 	// entry for `ape sprint reconcile`'s advisory-lock sidecar. False means
 	// it was already ignored, which is the steady state after the first run.
 	GitignoreLockAdded bool `json:"gitignoreLockAdded" yaml:"gitignoreLockAdded"`
+
+	// V1Release reports that the installed release is an APEX v1 framework
+	// (IsV1Release, D163): it seeds no _apex/config.yaml (`ape project init`
+	// writes it), ships no pipelines, and skips v0's surfaces.
+	V1Release bool `json:"v1Release,omitempty" yaml:"v1Release,omitempty"`
+	// MigrationsRemoved names the project's APEX v0 upgrade entries a v1
+	// install deleted (D162-3), project-relative. The ledger keeps their ids.
+	MigrationsRemoved []string `json:"migrationsRemoved,omitempty" yaml:"migrationsRemoved,omitempty"`
 }
 
 // ValidationError signals the framework repo is in a state that
@@ -313,6 +321,10 @@ func installCore(ctx context.Context, opts *UpdateOptions, doBootstrap bool) (*U
 	defer src.cleanup()
 	info, source, fetchWarning := src.info, src.source, src.fetchWarning
 	opts = src.opts
+	// An APEX v1 release (D163) seeds no config — `ape project init` writes
+	// it — and drops v0's surfaces: its pipelines are optional, its v0
+	// migration entries are removed, and the v0 lock sidecar is not ignored.
+	v1 := IsV1Release(opts.FrameworkRepo)
 	if err := os.MkdirAll(filepath.Join(opts.ProjectRoot, "_apex"), 0o755); err != nil {
 		return nil, fmt.Errorf("create _apex/: %w", err)
 	}
@@ -324,7 +336,7 @@ func installCore(ctx context.Context, opts *UpdateOptions, doBootstrap bool) (*U
 		configSeeded      bool
 		configLocalSeeded bool
 	)
-	if doBootstrap {
+	if doBootstrap && !v1 {
 		bootstrap, configSeeded, configLocalSeeded, err = bootstrapConfig(ctx, opts)
 		if err != nil {
 			return nil, err
@@ -338,11 +350,7 @@ func installCore(ctx context.Context, opts *UpdateOptions, doBootstrap bool) (*U
 	if err != nil {
 		return nil, err
 	}
-	pipelinesDir := filepath.Join(opts.ProjectRoot, ProjectPipelinesDir)
-	if err := os.MkdirAll(pipelinesDir, 0o755); err != nil {
-		return nil, fmt.Errorf("create %s: %w", pipelinesDir, err)
-	}
-	installedPipelines, err := copyPipelines(opts.FrameworkRepo, pipelinesDir)
+	installedPipelines, err := installPipelines(opts.FrameworkRepo, opts.ProjectRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -353,6 +361,12 @@ func installCore(ctx context.Context, opts *UpdateOptions, doBootstrap bool) (*U
 	commitOwnersInstalled, err := installCommitOwners(opts.FrameworkRepo, opts.ProjectRoot)
 	if err != nil {
 		return nil, err
+	}
+	var migrationsRemoved []string
+	if v1 {
+		if migrationsRemoved, err = removeV0Migrations(opts.ProjectRoot); err != nil {
+			return nil, err
+		}
 	}
 	migrationsInstalled, err := installMigrations(opts.FrameworkRepo, opts.ProjectRoot)
 	if err != nil {
@@ -387,10 +401,13 @@ func installCore(ctx context.Context, opts *UpdateOptions, doBootstrap bool) (*U
 	}
 	// Both setup AND update ensure it: update is the "verify and fix" pass
 	// for a project installed before this existed, and the call is idempotent
-	// so a project that already ignores the sidecar is untouched.
-	lockIgnored, err := EnsureLockIgnored(ctx, opts.ProjectRoot)
-	if err != nil {
-		return nil, err
+	// so a project that already ignores the sidecar is untouched. A v1
+	// release has no `ape sprint reconcile`, so no sidecar to ignore.
+	lockIgnored := false
+	if !v1 {
+		if lockIgnored, err = EnsureLockIgnored(ctx, opts.ProjectRoot); err != nil {
+			return nil, err
+		}
 	}
 	// Relocate run artifacts left at the pre-`_output/ape` paths. Both setup
 	// and update run it, and it is idempotent — a project already on the new
@@ -472,6 +489,8 @@ func installCore(ctx context.Context, opts *UpdateOptions, doBootstrap bool) (*U
 			RunsRoot:                relRoot(opts.ProjectRoot),
 			RunsRelocationConflicts: runsMoved.Conflicts,
 			GitignoreLockAdded:      lockIgnored,
+			V1Release:               v1,
+			MigrationsRemoved:       migrationsRemoved,
 		},
 	}, nil
 }
@@ -707,6 +726,38 @@ func installMigrations(frameworkRepo, projectRoot string) ([]string, error) {
 	}
 	sort.Strings(installed)
 	return installed, nil
+}
+
+// removeV0Migrations deletes the project's APEX v0 upgrade entries
+// (`_apex/migrations/v0.*`) when a v1 release is installed (D162-3), and
+// returns their project-relative paths. They maintained v0 families the
+// lift removes, and they call v0 verbs this ape no longer has, so one left
+// behind stops the update before the lift. The deletion lands in the
+// install commit; the ledger in framework.yaml keeps their ids, so the
+// history of what ran stays readable. The runner never plans an entry
+// below 1.0.0 in a v1 install either (see migration.DropBelow), whatever
+// the folder or the ledger holds.
+func removeV0Migrations(projectRoot string) ([]string, error) {
+	dir := filepath.Join(projectRoot, ProjectMigrationsDir)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read %s: %w", ProjectMigrationsDir, err)
+	}
+	var removed []string
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasPrefix(e.Name(), "v0.") || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		if err := os.Remove(filepath.Join(dir, e.Name())); err != nil {
+			return nil, fmt.Errorf("remove v0 migration %s: %w", e.Name(), err)
+		}
+		removed = append(removed, ProjectMigrationsDir+"/"+e.Name())
+	}
+	sort.Strings(removed)
+	return removed, nil
 }
 
 // installApeCommands copies the framework's required-command-surface
@@ -1091,7 +1142,7 @@ func prepareRelease(ctx context.Context, repo string, sel ReleaseSelector) (*rel
 	if err != nil {
 		return nil, err
 	}
-	if err := validateFrameworkLayout(dir); err != nil {
+	if missing := missingLayout(dir); len(missing) > 0 {
 		// Looked at BEFORE the export is removed, and reported in the
 		// tag's own terms: the export's temporary path means nothing to
 		// the reader.
@@ -1103,8 +1154,8 @@ func prepareRelease(ctx context.Context, repo string, sel ReleaseSelector) (*rel
 					"released layout. Point --repo at the ship repo", rel.Tag, repo)}
 		}
 		return nil, &ValidationError{Code: codeLayoutInvalid, Detail: fmt.Sprintf(
-			"tag %s in %s is not a framework release: it has no %s and %s at its root",
-			rel.Tag, repo, SubtreeSkills, SubtreePipelines)}
+			"tag %s in %s is not a framework release: it has no %s at its root (%s)",
+			rel.Tag, repo, strings.Join(missing, " and no "), releaseLayoutRule)}
 	}
 	info := repoInfo{tag: rel.Tag, headSHA: rel.Commit}
 	if origin, err := RemoteOrigin(ctx, repo); err == nil {
@@ -1177,15 +1228,42 @@ func bootstrapConfig(ctx context.Context, opts *UpdateOptions) (values Bootstrap
 	return bv, true, configLocalSeeded, nil
 }
 
+// releaseLayoutRule is what a framework tree must hold, in the words every
+// layout refusal ends with.
+const releaseLayoutRule = "a release holds " + SubtreeSkills + "/ and " + SubtreeApeCommands +
+	" at its root, or, for APEX v0, " + SubtreeSkills + "/ and " + SubtreePipelines + "/"
+
+// missingLayout names what a framework tree lacks to be installable:
+// .claude/skills/, plus _apex/ape-commands.yaml or (APEX v0) _apex/pipelines/.
+// A v1 release ships no pipelines (D162-1), so neither of the second pair
+// is required on its own. Empty means the layout is valid.
+func missingLayout(repoPath string) []string {
+	var missing []string
+	if !isDir(filepath.Join(repoPath, SubtreeSkills)) {
+		missing = append(missing, SubtreeSkills+"/")
+	}
+	if !isFile(filepath.Join(repoPath, SubtreeApeCommands)) && !isDir(filepath.Join(repoPath, SubtreePipelines)) {
+		missing = append(missing, SubtreeApeCommands+" (nor, for APEX v0, "+SubtreePipelines+"/)")
+	}
+	return missing
+}
+
 func validateFrameworkLayout(repoPath string) error {
-	for _, sub := range []string{SubtreeSkills, SubtreePipelines} {
-		full := filepath.Join(repoPath, sub)
-		info, err := os.Stat(full)
-		if err != nil || !info.IsDir() {
-			return &ValidationError{Code: codeLayoutInvalid, Detail: "missing or non-directory: " + full}
-		}
+	if missing := missingLayout(repoPath); len(missing) > 0 {
+		return &ValidationError{Code: codeLayoutInvalid, Detail: fmt.Sprintf(
+			"%s is not a framework tree: it has no %s (%s)", repoPath, strings.Join(missing, " and no "), releaseLayoutRule)}
 	}
 	return nil
+}
+
+func isDir(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
+func isFile(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }
 
 // wipeStaleSkills removes every apex-* entry under skillsDir,
@@ -1314,6 +1392,20 @@ func copySkills(frameworkRepo, skillsDir string) ([]string, error) {
 	}
 	sort.Strings(installed)
 	return installed, nil
+}
+
+// installPipelines copies the framework's pipelines into the project. A
+// framework that ships no _apex/pipelines/ — every APEX v1 release
+// (D162-1) — installs none and creates no empty folder.
+func installPipelines(frameworkRepo, projectRoot string) ([]string, error) {
+	if !isDir(filepath.Join(frameworkRepo, SubtreePipelines)) {
+		return nil, nil
+	}
+	pipelinesDir := filepath.Join(projectRoot, ProjectPipelinesDir)
+	if err := os.MkdirAll(pipelinesDir, 0o755); err != nil {
+		return nil, fmt.Errorf("create %s: %w", pipelinesDir, err)
+	}
+	return copyPipelines(frameworkRepo, pipelinesDir)
 }
 
 // copyPipelines copies every *.yaml under

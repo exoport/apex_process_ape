@@ -989,3 +989,59 @@ func TestUpdate_NoOpKeepsInstalledAt(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, meta.InstalledAt.Equal(clock), "installed_at moves when the install does: %v", meta.InstalledAt)
 }
+
+// The v1 marker is the release's own floor (D163): min_ape_version 1.0.0 or
+// later. No manifest, no floor, or a v0 floor is APEX v0.
+func TestIsV1Release(t *testing.T) {
+	for body, want := range map[string]bool{
+		"":                             false,
+		"min_ape_version: \"1.0.0\"\n": true,
+		"min_ape_version: v1.2.0\n":    true,
+		"min_ape_version: 0.31.0\n":    false,
+		"required_commands: [x]\n":     false,
+	} {
+		dir := t.TempDir()
+		if body != "" {
+			require.NoError(t, os.MkdirAll(filepath.Join(dir, "_apex"), 0o755))
+			require.NoError(t, os.WriteFile(filepath.Join(dir, framework.SubtreeApeCommands), []byte(body), 0o644))
+		}
+		require.Equal(t, want, framework.IsV1Release(dir), "%q", body)
+	}
+}
+
+// A v1 release (D162-1): .claude/skills/ and the manifest, no pipelines,
+// no config template. Setup installs it, seeds no config even with a
+// bootstrapper, creates no pipelines folder, removes the project's v0
+// migration entries, and leaves .gitignore alone.
+func TestSetup_V1ReleaseWithoutPipelines(t *testing.T) {
+	fw := t.TempDir()
+	for rel, body := range map[string]string{
+		".claude/skills/apex-plan/SKILL.md":      "# apex-plan",
+		"_apex/ape-commands.yaml":                "min_ape_version: \"1.0.0\"\n",
+		"_apex/migrations/v1.0.0_seq-01_lift.md": "---\nid: v1.0.0_seq-01\nversion: 1.0.0\n---\n",
+	} {
+		require.NoError(t, os.MkdirAll(filepath.Dir(filepath.Join(fw, rel)), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(fw, rel), []byte(body), 0o644))
+	}
+	gitInitForTest(t, fw)
+	commitAll(t, fw, "v1 release")
+	proj := newProject(t)
+	require.NoError(t, os.MkdirAll(filepath.Join(proj, "_apex", "migrations"), 0o755))
+	v0 := filepath.Join(proj, "_apex", "migrations", "v0.24.0_seq-01_backfill.md")
+	require.NoError(t, os.WriteFile(v0, []byte("---\nid: v0.24.0_seq-01\n---\n"), 0o644))
+
+	res, err := framework.Setup(context.Background(), &framework.UpdateOptions{
+		FrameworkRepo: fw, ProjectRoot: proj, NoFetch: true, ApeVersion: "1.0.0",
+		Bootstrapper: staticBootstrap("p"), Now: fixedNow,
+	})
+	require.NoError(t, err)
+	require.True(t, res.Summary.V1Release)
+	require.False(t, res.Summary.ConfigSeeded)
+	require.NoFileExists(t, filepath.Join(proj, "_apex", "config.yaml"))
+	require.NoDirExists(t, filepath.Join(proj, "_apex", "pipelines"))
+	require.NoFileExists(t, v0)
+	require.Equal(t, []string{"_apex/migrations/v0.24.0_seq-01_backfill.md"}, res.Summary.MigrationsRemoved)
+	require.FileExists(t, filepath.Join(proj, "_apex", "migrations", "v1.0.0_seq-01_lift.md"))
+	require.False(t, res.Summary.GitignoreLockAdded)
+	require.NoFileExists(t, filepath.Join(proj, ".gitignore"))
+}

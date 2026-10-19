@@ -3,6 +3,7 @@ package migration
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"runtime"
@@ -19,8 +20,14 @@ import (
 // Env, when non-empty, replaces the child's environment. It is how the
 // self-shadow below reaches the child; an empty Env inherits this
 // process's, which is correct for a caller that has not built one.
+//
+// Stderr, when set, receives the child's standard error. `ape framework
+// update` sets it for the commands it applies, so a migration that refuses
+// (the lift naming its missing tag, say) is read where it ran; checks keep
+// it unset, because a check's stderr is noise around a verdict.
 type ShellRunner struct {
-	Env []string
+	Env    []string
+	Stderr io.Writer
 }
 
 func (r ShellRunner) Run(ctx context.Context, dir, line string) (int, error) {
@@ -32,6 +39,9 @@ func (r ShellRunner) Run(ctx context.Context, dir, line string) (int, error) {
 	cmd.Dir = dir
 	if len(r.Env) > 0 {
 		cmd.Env = r.Env
+	}
+	if r.Stderr != nil {
+		cmd.Stderr = r.Stderr
 	}
 	err := cmd.Run()
 	if err == nil {

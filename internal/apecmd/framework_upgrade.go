@@ -68,6 +68,12 @@ func loadMigrationPlanWith(ctx context.Context, projectRoot, repo string, runner
 		}
 		entries = overlayMigrations(entries, incoming)
 	}
+	// An APEX v1 install never plans an entry below 1.0.0 (D162-3), whatever
+	// the folder or the ledger holds. Judged by the release being installed
+	// — the repo for `--plan`, else the project's installed manifest.
+	if v1Install(projectRoot, repo) && entries != nil {
+		entries = migration.DropBelow(entries, v1MigrationFloor)
+	}
 	if entries == nil {
 		// An absent folder is a normal state on a framework that ships no
 		// list, and is reported as such rather than as an empty plan that
@@ -82,6 +88,35 @@ func loadMigrationPlanWith(ctx context.Context, projectRoot, repo string, runner
 		}
 	}
 	return migration.BuildPlan(ctx, dir, projectRoot, entries, ledger, runner, runChecks), nil
+}
+
+// v1MigrationFloor is the lowest version an APEX v1 install plans.
+const v1MigrationFloor = "1.0.0"
+
+// v1Install reports whether the framework the plan is for is APEX v1: the
+// incoming release when repo is set, else the project's installed copy.
+func v1Install(projectRoot, repo string) bool {
+	if repo != "" {
+		return framework.IsV1Release(repo)
+	}
+	return framework.IsV1Release(projectRoot)
+}
+
+// blockingMigrationError is an update whose blocking derivable migration —
+// the lift, above all — failed or was not attempted (D162-4). The install
+// is not valid without it, so the update exits non-zero and does not
+// commit. The ledger of what did succeed is written before it is returned.
+type blockingMigrationError struct {
+	blocked []migration.Blocked
+}
+
+func (e *blockingMigrationError) Error() string {
+	b := e.blocked[0]
+	msg := "blocking migration " + b.ID + " " + b.Reason
+	if n := len(e.blocked) - 1; n > 0 {
+		msg += fmt.Sprintf(" (and %d more blocking entr%s)", n, pluralY(n))
+	}
+	return msg
 }
 
 // overlayMigrations is install's copy applied to the parsed lists: an
@@ -111,7 +146,9 @@ func overlayMigrations(installed, incoming []migration.Entry) []migration.Entry 
 // resumes after it. `ape framework update` installing the framework
 // correctly and a project migration failing are different outcomes, and
 // collapsing the second into a non-zero exit would make the first look
-// like it had not happened.
+// like it had not happened. The exception is a BLOCKING derivable entry
+// (D162-4): the install is not valid without it, so it is returned as a
+// *blockingMigrationError, and the update neither commits nor exits 0.
 func runUpgradeMigrations(ctx context.Context, w io.Writer, projectRoot string) error {
 	_, err := runUpgradeMigrationsApplied(ctx, w, projectRoot)
 	return err
@@ -142,10 +179,17 @@ func runUpgradeMigrationsApplied(ctx context.Context, w io.Writer, projectRoot s
 	counts := plan.Counts()
 	if counts.Runnable == 0 && counts.JudgedToRun == 0 {
 		fmt.Fprintf(w, "migrations: nothing to run (%s)\n", migrationCountLine(counts))
+		if blocked := migration.BlockingUnapplied(plan, nil); len(blocked) > 0 {
+			return nil, &blockingMigrationError{blocked: blocked}
+		}
 		return nil, nil
 	}
 
-	res := migration.Apply(ctx, w, projectRoot, plan, runner, ledgerStamp(projectRoot))
+	// A command's own stderr reaches the person: a migration that refuses
+	// says why there, and its checks stay quiet.
+	cmdRunner := runner
+	cmdRunner.Stderr = os.Stderr
+	res := migration.Apply(ctx, w, projectRoot, plan, cmdRunner, ledgerStamp(projectRoot))
 
 	rows := make([]framework.AppliedMigration, 0, len(res.Applied))
 	ids := make([]string, 0, len(res.Applied))
@@ -161,6 +205,9 @@ func runUpgradeMigrationsApplied(ctx context.Context, w io.Writer, projectRoot s
 	}
 
 	emitApplyResult(w, res)
+	if blocked := migration.BlockingUnapplied(plan, res); len(blocked) > 0 {
+		return ids, &blockingMigrationError{blocked: blocked}
+	}
 	return ids, nil
 }
 

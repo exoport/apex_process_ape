@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"golang.org/x/mod/semver"
 	"gopkg.in/yaml.v3"
 )
 
@@ -107,4 +108,20 @@ func CommandPath(entry string) []string {
 		fields = fields[1:]
 	}
 	return fields
+}
+
+// IsV1Release reports whether the framework tree at dir — a release's
+// export, a worktree, or a project's installed copy — is an APEX v1
+// framework: its _apex/ape-commands.yaml declares a min_ape_version whose
+// major is 1 or more (D163). The marker is the floor ape already reads
+// before every install, so a tree is judged by the same line that decides
+// whether this ape may install it. No manifest, an unreadable one, or a
+// v0 floor is APEX v0, which installs exactly as before.
+func IsV1Release(dir string) bool {
+	m, err := LoadApeCommands(dir)
+	if err != nil || m == nil {
+		return false
+	}
+	v := "v" + strings.TrimPrefix(m.MinApeVersion, "v")
+	return semver.IsValid(v) && semver.Compare(semver.Major(v), "v1") >= 0
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 )
 
 // Outcome is what happened to one entry during a run.
@@ -111,4 +112,56 @@ func judgedReason(r *Row) string {
 		return "judged — dispatch " + r.Skill
 	}
 	return "judged — never executed, and the entry names no skill to dispatch"
+}
+
+// Blocked is a blocking derivable entry a run left unapplied.
+type Blocked struct {
+	ID      string `json:"id"                yaml:"id"`
+	Command string `json:"command,omitempty" yaml:"command,omitempty"`
+	Summary string `json:"summary,omitempty" yaml:"summary,omitempty"`
+	// Reason says what happened: failed, or not attempted and why.
+	Reason string `json:"reason" yaml:"reason"`
+}
+
+// BlockingUnapplied lists the entries the install cannot stand without
+// (D162-4): blocking, derivable, owed before the run (pending or
+// cannot-tell), and not applied by it — failed, not attempted after an
+// earlier failure, unrunnable, or unverifiable. res is nil when nothing
+// ran. A judged blocking entry is never listed: it is a dispatch the
+// person owes after the install, not a step the install itself needs.
+func BlockingUnapplied(plan *Plan, res *ApplyResult) []Blocked {
+	applied := map[string]bool{}
+	outcome := map[string]Outcome{}
+	if res != nil {
+		for _, a := range res.Applied {
+			applied[a.ID] = true
+		}
+		for _, o := range res.Outcomes {
+			outcome[o.ID] = o
+		}
+	}
+	var out []Blocked
+	for i := range plan.Rows {
+		r := &plan.Rows[i]
+		if !r.Blocking || r.IsJudged() || applied[r.ID] ||
+			(r.State != StatePending && r.State != StateCannotTell) {
+			continue
+		}
+		b := Blocked{ID: r.Label(), Command: r.Command, Summary: r.Summary}
+		o, ran := outcome[r.Label()]
+		switch {
+		case ran && o.Error != "":
+			b.Reason = "failed (" + o.Error + ")"
+		case ran && o.Skipped != "":
+			b.Reason = o.Skipped
+		case r.State == StateCannotTell:
+			b.Reason = "not attempted — its check could not tell whether it is needed (" + r.CheckDetail + ")"
+		case r.Unrunnable:
+			b.Reason = "not attempted — the entry cannot be run: " + strings.Join(r.Findings, "; ")
+		default:
+			b.Reason = "not attempted"
+		}
+		out = append(out, b)
+	}
+	return out
 }

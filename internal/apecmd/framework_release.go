@@ -42,6 +42,9 @@ const (
 
 	apeModulePath    = "github.com/exoport/apex_process_ape/cmd/ape"
 	generatorTrailer = "Generator: ape framework update"
+	// generatorSetup is setup's own: the install commit names the command
+	// that made it (D162-7), so a setup is never recorded as an update.
+	generatorSetup = "Generator: ape framework setup"
 )
 
 // releaseFlags are the flags setup and update share.
@@ -104,13 +107,18 @@ func readableSource(ctx context.Context, repo string, sel *framework.ReleaseSele
 //
 // updateApe is `--update-ape`: above the minimum too, move ape to the
 // newest release before installing.
+//
+// v1 reports that the release is an APEX v1 framework
+// (framework.IsV1Release): setup reads it before choosing a bootstrapper,
+// because a v1 release seeds no config (D162-2).
 func prepareInstall(ctx context.Context, repo, projectRoot string, sel *framework.ReleaseSelector, commit, newest, updateApe bool) (
-	*framework.ReleaseSelector, func(), error,
+	_ *framework.ReleaseSelector, _ func(), v1 bool, _ error,
 ) {
 	src, tag, cleanup, err := readableSource(ctx, repo, sel)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, false, err
 	}
+	v1 = framework.IsV1Release(src)
 	// A default update never goes backwards: a candidate installed by
 	// name, newer than the newest final release, stays until --version
 	// says otherwise.
@@ -120,17 +128,17 @@ func prepareInstall(ctx context.Context, repo, projectRoot string, sel *framewor
 			cleanup()
 			fmt.Fprintf(os.Stdout, "framework: installed %s is newer than the newest release %s (a candidate, installed by "+
 				"name); keeping it. Pass --version %s to go back to the release.\n", meta.Framework.VersionTag, tag, tag)
-			return nil, nil, errKeepInstalled
+			return nil, nil, v1, errKeepInstalled
 		}
 	}
 	if err := checkApeMinimum(ctx, os.Stdout, src, tag, projectRoot, commit, updateApe); err != nil {
 		cleanup()
-		return nil, nil, err
+		return nil, nil, v1, err
 	}
 	if sel == nil {
-		return nil, cleanup, nil
+		return nil, cleanup, v1, nil
 	}
-	return &framework.ReleaseSelector{Version: tag}, cleanup, nil
+	return &framework.ReleaseSelector{Version: tag}, cleanup, v1, nil
 }
 
 // errKeepInstalled ends an update that has nothing to do because the
@@ -515,9 +523,9 @@ func commitPrecheck(ctx context.Context, projectRoot string) (map[string]bool, e
 // commitInstall stages what the install and its migrations changed — every
 // tracked change (the precheck proved there were none before) and every
 // untracked file that was not there before — and commits it. No change,
-// no commit.
+// no commit. generator is the Generator: trailer naming the command.
 func commitInstall(ctx context.Context, w io.Writer, projectRoot string, before map[string]bool,
-	subject string, meta framework.Metadata, migrations []string,
+	subject string, meta framework.Metadata, migrations []string, generator string,
 ) error {
 	status, err := porcelain(ctx, projectRoot)
 	if err != nil {
@@ -548,7 +556,7 @@ func commitInstall(ctx context.Context, w io.Writer, projectRoot string, before 
 	if g := meta.Governance; g != nil && g.GitHash != "" {
 		msg += "\nGovernance-Version: " + g.VersionTag + "\nGovernance-Commit: " + g.GitHash
 	}
-	msg += "\n" + generatorTrailer + "\n"
+	msg += "\n" + generator + "\n"
 	if err := commitPaths(ctx, projectRoot, paths, msg); err != nil {
 		return err
 	}
@@ -561,6 +569,53 @@ func commitInstall(ctx context.Context, w io.Writer, projectRoot string, before 
 func isV1StatePath(rel string) bool {
 	state := filepath.ToSlash(filepath.Join(apexcfg.DirName, runlog.V1StateDirName))
 	return rel == state || strings.HasPrefix(rel, state+"/")
+}
+
+// revertInstall puts the tree back as it was before an install that will
+// not be committed (D162-4): the index and every tracked file return to
+// HEAD, and every untracked file that was not there before is removed —
+// the files the install and its migrations added. aboardCreated removes
+// the board this run created, whose contents git ignores. Only commit mode
+// reverts: its precheck proved no tracked file was modified at the start,
+// so nothing here can be the person's. A commit a migration made itself
+// stays; the revert lands on top of it.
+func revertInstall(ctx context.Context, projectRoot string, before map[string]bool, aboardCreated bool) error {
+	if _, err := gitOut(ctx, projectRoot, "reset", "-q"); err != nil {
+		return err
+	}
+	if _, err := gitOut(ctx, projectRoot, "checkout", "-q", "--", "."); err != nil {
+		return err
+	}
+	status, err := porcelain(ctx, projectRoot)
+	if err != nil {
+		return err
+	}
+	for _, e := range status {
+		if !e.untracked || before[e.path] || isV1StatePath(e.path) {
+			continue
+		}
+		full := filepath.Join(projectRoot, filepath.FromSlash(e.path))
+		if err := os.Remove(full); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		pruneEmptyDirs(projectRoot, filepath.Dir(full))
+	}
+	if aboardCreated {
+		if err := os.RemoveAll(filepath.Join(projectRoot, framework.ProjectAboardDir)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// pruneEmptyDirs removes dir and each parent that is left empty, up to root.
+func pruneEmptyDirs(root, dir string) {
+	for dir != root && strings.HasPrefix(dir, root+string(filepath.Separator)) {
+		if os.Remove(dir) != nil {
+			return
+		}
+		dir = filepath.Dir(dir)
+	}
 }
 
 // commitPaths stages paths and commits them with msg, running the

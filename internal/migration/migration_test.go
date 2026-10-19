@@ -442,3 +442,43 @@ func joinAll(findings []string) string {
 	all += allSb425.String()
 	return all
 }
+
+// A v1 install plans nothing below 1.0.0 (D162-3); an unparseable version
+// is kept so its finding is still reported.
+func TestDropBelow_KeepsOnlyTheFloorAndAbove(t *testing.T) {
+	in := []Entry{{ID: "a", Version: "0.24.0"}, {ID: "b", Version: "v1.0.0"}, {ID: "c", Version: "1.2.0"}, {ID: "d", Version: "soon"}}
+	var ids []string
+	for _, e := range DropBelow(in, "1.0.0") {
+		ids = append(ids, e.ID)
+	}
+	require.Equal(t, []string{"b", "c", "d"}, ids)
+}
+
+// The install cannot stand without a blocking derivable entry (D162-4):
+// failed, not attempted after a failure, or unverifiable is listed; a
+// judged, applied or non-blocking one never is.
+func TestBlockingUnapplied(t *testing.T) {
+	r := newRunner()
+	r.codes["fail"], r.codes["exit 1"] = 3, 1
+	r.errs["no-check"] = errors.New("sh: missing")
+	entries := []Entry{
+		{ID: "v1.0.0_seq-01", Version: "1.0.0", Seq: 1, Kind: KindDerivable, Blocking: false, Check: "exit 1", Command: "fail"},
+		{ID: "v1.0.0_seq-02", Version: "1.0.0", Seq: 2, Kind: KindDerivable, Blocking: true, Check: "exit 1", Command: "ok"},
+		{ID: "v1.0.0_seq-03", Version: "1.0.0", Seq: 3, Kind: KindJudged, Blocking: true, Check: "exit 1", Skill: "apex-plan"},
+		{ID: "v1.0.0_seq-04", Version: "1.0.0", Seq: 4, Kind: KindDerivable, Blocking: true, Check: "no-check", Command: "ok"},
+		{ID: "v1.0.0_seq-05", Version: "1.0.0", Seq: 5, Kind: KindDerivable, Blocking: true, Command: "ok"},
+	}
+	plan := BuildPlan(t.Context(), "dir", t.TempDir(), entries, []Applied{{ID: "v1.0.0_seq-05"}}, r, true)
+	res := Apply(t.Context(), io.Discard, "", plan, r, func() string { return "now" })
+	got := BlockingUnapplied(plan, res)
+	require.Len(t, got, 2)
+	require.Equal(t, "v1.0.0_seq-02", got[0].ID)
+	require.Contains(t, got[0].Reason, "not attempted — an earlier migration failed")
+	require.Equal(t, "v1.0.0_seq-04", got[1].ID)
+	require.Contains(t, got[1].Reason, "could not tell")
+
+	// Nothing failed: the blocking entry applied and nothing is listed.
+	r.codes["fail"] = 0
+	plan = BuildPlan(t.Context(), "dir", t.TempDir(), entries[:2], nil, r, true)
+	require.Empty(t, BlockingUnapplied(plan, Apply(t.Context(), io.Discard, "", plan, r, func() string { return "now" })))
+}

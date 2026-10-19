@@ -111,7 +111,7 @@ func TestFrameworkInstall_CommitsTheRelease(t *testing.T) {
 	require.Contains(t, msg, "chore(framework): install APEX framework v1.0.0")
 	require.Contains(t, msg, "Framework-Version: v1.0.0")
 	require.Contains(t, msg, "Framework-Commit: "+gitRun(t, fw, "rev-parse", "v1.0.0^{commit}"))
-	require.Contains(t, msg, "Generator: ape framework update")
+	require.Contains(t, msg, "Generator: ape framework setup")
 	require.Equal(t, "?? notes.txt", gitRun(t, root, "status", "--porcelain"),
 		"only the user's own untracked file is left, uncommitted")
 
