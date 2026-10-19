@@ -399,9 +399,15 @@ func newDecisionCmd() *cobra.Command {
 		Long: `ADRs live in development/decisions/NNNN-<slug>.md. A decision is proposed, then
 accepted (` + "`ape decision accept`" + `); an accepted decision's text is fixed — ` + "`ape project check`" + `
 refuses an edit to it — and a different decision is a new ADR that supersedes it
-(` + "`ape decision new <slug> --supersedes ADR-NNNN`" + `).`,
+(` + "`ape decision new <slug> --supersedes ADR-NNNN`" + `).
+
+ADR-0001 is APEX's standard ADR, "Record architecture decisions" (D205): ape project
+init and the lift write it, ` + "`ape decision standard`" + ` keeps it at the installed standard,
+and a project's own decisions number from 0002.`,
 	}
 	cmd.AddCommand(newDecisionNewCmd(), newDecisionAcceptCmd())
+	// rc.7b (rc7b-adr).
+	cmd.AddCommand(newDecisionStandardCmd())
 	return cmd
 }
 

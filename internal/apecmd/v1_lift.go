@@ -30,7 +30,7 @@ The lift checks the tag on the current branch's upstream, so the branch needs on
 (D162-5): ` + "`git push -u origin <branch>`" + ` once, if ` + "`git rev-parse @{u}`" + ` fails.
 
   git push -u origin "$(git branch --show-current)"   # only when the branch has no upstream
-  git tag -a apex-v0-final -m "APEX v0 final" && git push origin apex-v0-final
+  git tag -a apex-v0-final -m "apex-v0 final" && git push origin apex-v0-final
   ape project lift --dry-run        # the whole plan, nothing written
   ape project lift
 
@@ -67,8 +67,22 @@ The commit:
                  indexes, capability and feature registries, deferred records, team
                  memory, project-context. Kept: docs, CHANGELOG, evidence, research,
                  code, _apex/framework.yaml (the migration ledger)
-  converts       every ADR (accepted, superseded, proposed) into
-                 development/decisions/NNNN-<slug>.md, renumbered from 0001 in the
+  writes         ADR-0001, APEX's standard ADR "Record architecture decisions"
+                 (D205): development/decisions/0001-record-architecture-decisions.md,
+                 accepted, the installed payload's _apex/standards/adr-0001.md (else
+                 ape's own copy), recorded in decisions.json by "APEX standard (ape
+                 project lift)" with standard: {framework_version, sha256}. The
+                 apex-v0 governance standard ("Use Markdown Architectural Decision
+                 Records") is identified by its canon source — a record whose
+                 output_document is governance/adrs/adr-NNNN_use-markdown-adrs.md, or
+                 that canon record copied from the governance clone — not by its
+                 number: it is not converted (its text stays at apex-v0-final), its
+                 citations go to ADR-0001, and the disposition and the commit name it
+                 as replaced. A project with no such record gets the standard all the
+                 same. JSON: standard_adr {action: created|replaced, path, source,
+                 framework_version, replaces}
+  converts       every other ADR (accepted, superseded, proposed) into
+                 development/decisions/NNNN-<slug>.md, renumbered from 0002 in the
                  original order, with Status, Date, Supersedes and a "Lifted from:"
                  line. Nothing is invented: no date → git's first date of the file; no
                  Enforced by → "review" (what ape decision new writes); a missing
@@ -346,6 +360,7 @@ func printLift(w io.Writer, r *apexv1.LiftResult) {
 		}
 		fmt.Fprintf(w, "%-9s %s  (%s)\n", verb("deleted", "delete"), d.Path, family)
 	}
+	printLiftStandard(w, r.StandardADR)
 	for i := range r.ADRs {
 		a := &r.ADRs[i]
 		line := fmt.Sprintf("adr       %s -> %s  %s  [%s]", a.Old, a.New, a.Path, a.Status)
@@ -457,4 +472,17 @@ func printLiftPreCommit(w io.Writer, r *apexv1.LiftResult) {
 	if pc := preCommitLine(r.Init.PreCommit); pc != "" {
 		fmt.Fprintln(w, pc)
 	}
+}
+
+// printLiftStandard is the lift's line for ADR-0001, APEX's standard
+// (D205 Q119): what it replaces, if anything, and where its text came from.
+func printLiftStandard(w io.Writer, sa *apexv1.StandardADRResult) {
+	if sa == nil {
+		return
+	}
+	old := "(none)"
+	if sa.Replaces != "" {
+		old, _, _ = strings.Cut(sa.Replaces, ",")
+	}
+	fmt.Fprintf(w, "adr       %s -> %s  %s  [accepted]  APEX's standard ADR (%s)\n", old, apexv1.StandardADRID, sa.Path, adrStandardSource(sa))
 }

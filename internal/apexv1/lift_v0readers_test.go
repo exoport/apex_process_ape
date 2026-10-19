@@ -77,7 +77,7 @@ func TestLift_V0StateReaders(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(root, "development", LiftDisposition))
 	require.NoError(t, err)
 	d := string(data)
-	sec := d[strings.Index(d, "## Code and tests that read deleted v0 state"):strings.Index(d, "## Code and CI that still read removed paths")]
+	sec := d[strings.Index(d, "## Code and tests that read deleted apex-v0 state"):strings.Index(d, "## Code and CI that still read removed paths")]
 	for _, line := range []string{
 		"- `.github/ci.yml` reads `development/implementation/sprint-status.yaml`\n",
 		"- `scripts/adr_release_identifier.sh` reads `development/governance/adrs`\n",
@@ -89,7 +89,7 @@ func TestLift_V0StateReaders(t *testing.T) {
 	}
 	require.Contains(t, sec, "(5 files;")
 	require.NotContains(t, sec, "tracker.go")
-	require.Less(t, strings.Index(d, "## Code and tests that read deleted v0 state"), strings.Index(d, "## ADRs"), "what can break comes first")
+	require.Less(t, strings.Index(d, "## Code and tests that read deleted apex-v0 state"), strings.Index(d, "## ADRs"), "what can break comes first")
 	code := d[strings.Index(d, "## Code and CI that still read removed paths"):strings.Index(d, "## ADRs")]
 	require.NotContains(t, code, "unwired_test.go", "a reader is not repeated")
 
@@ -111,7 +111,7 @@ func TestLift_V0StateReadersCountedPastTheCeiling(t *testing.T) {
 	}
 	d, n := liftWithCandidatesAnd(t, 150, 220, extra)
 	require.LessOrEqual(t, len(d), liftDispositionCeiling)
-	require.Contains(t, d, "## Code and tests that read deleted v0 state\n\n")
+	require.Contains(t, d, "## Code and tests that read deleted apex-v0 state\n\n")
 	require.Contains(t, d, "(301 files;", "the 300 and the fixture's .github/ci.yml")
 	require.Contains(t, d, "Counted, not listed, past this file's 48 KB ceiling: every file and what it reads is in `_apex/state/lift-disposition.json` (v0_state_readers)")
 	require.Contains(t, d, "- `development/implementation/sprint-status.yaml` — 301 files\n")

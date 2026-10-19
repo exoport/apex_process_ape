@@ -10,3 +10,9 @@ internal/apecmd/trusted_root.json -text
 # fixture — "\r\r\n" and relative cursor moves included — and the defect they
 # pin was in how those exact bytes render, so a converted copy tests nothing.
 internal/repl/testdata/** -text
+
+# APEX's standard ADR-0001, embedded in ape and written into projects byte for
+# byte: a project's ADR-0001 is compared with it, and check-framework compares
+# it with the framework payload's copy. A CRLF checkout would make every one
+# of those differ.
+internal/apexv1/standards/** -text

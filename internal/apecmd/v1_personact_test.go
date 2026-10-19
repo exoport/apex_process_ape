@@ -241,11 +241,12 @@ func TestE2_InProcessActsRecordThePrompt(t *testing.T) {
 	require.Contains(t, v1Git(t, root, "log", "-1", "--format=%s"), `apex: config accepted by Ann Person (prompt `)
 	require.Contains(t, v1Git(t, root, "log", "-1", "--format=%s"), `: "ok, accept the config")`)
 
+	// ADR-0001 is APEX's standard (D205): the project's first is ADR-0002.
 	_, _, err = v1Exec(t, newDecisionCmd, "new", "use-sqlite", "--cwd", root)
 	require.NoError(t, err)
-	s.say(t, "p2", "accept ADR-0001")
-	require.Empty(t, s.preTool(t, "p2", "ape decision accept ADR-0001"))
-	stdout, _, err = v1Exec(t, newDecisionCmd, "accept", "ADR-0001", "--cwd", root)
+	s.say(t, "p2", "accept ADR-0002")
+	require.Empty(t, s.preTool(t, "p2", "ape decision accept ADR-0002"))
+	stdout, _, err = v1Exec(t, newDecisionCmd, "accept", "ADR-0002", "--cwd", root)
 	require.NoError(t, err, stdout)
 	data, err := os.ReadFile(filepath.Join(root, "_apex", "state", "decisions.json"))
 	require.NoError(t, err)

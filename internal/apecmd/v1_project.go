@@ -95,6 +95,17 @@ for setup while no .claude/skills/apex-* exists; JSON "next" carries the same li
   development/changes/               the changes in flight
   development/archive/               archived and abandoned changes
   development/decisions/
+  development/decisions/0001-record-architecture-decisions.md
+                                     ADR-0001, APEX's standard ADR "Record architecture
+                                     decisions" (D205), accepted: the installed payload's
+                                     _apex/standards/adr-0001.md, else ape's own copy;
+                                     recorded in decisions.json as accepted by "APEX
+                                     standard (ape project init)" with standard:
+                                     {framework_version, sha256} — the framework's own
+                                     record, no person act. Kept when ADR-0001 is the
+                                     standard; any other ADR-0001 is left as it is (JSON
+                                     standard_adr.action differs; see ape decision
+                                     standard)
   development/briefs/                each plan's input, dated and verbatim (YYYY-MM-DD-<slug>.md,
                                      written by apex-plan; never edited — see ape project check)
   hot/.gitignore                     "*" when hot/ has no .gitignore (an existing one is kept):
@@ -319,6 +330,9 @@ func printInitHooks(w io.Writer, res *apexv1.InitResult) {
 	for _, h := range res.HooksAdded {
 		fmt.Fprintln(w, "hook     "+h)
 	}
+	if res.StandardADR != nil {
+		fmt.Fprintln(w, "ADR-0001 "+adrStandardLine(res.StandardADR))
+	}
 	for _, l := range apexv1.ClaudeIgnoreLines(res.GitIgnore) {
 		fmt.Fprintln(w, l)
 	}
@@ -364,6 +378,8 @@ func initAmendNote(rel string) string {
 		return "added the project-context line"
 	case "_apex/config.yaml":
 		return "appended the models: defaults"
+	case "_apex/state/decisions.json":
+		return "recorded the standard ADR-0001"
 	}
 	return "amended"
 }
@@ -521,6 +537,18 @@ line}; [] when none, beside the findings on a failure too), they never change th
                            renames it); beside one it is a leftover apex-loop's row
                            overrides (drop it). The operator's apex-orchestrator runs
                            in your own session and has no models row
+  decision.standard-stale  ADR-0001, APEX's standard ADR (D205, D206), is absent, or is
+                           framework-owned and not the installed standard (an earlier
+                           text, or the apex-v0 governance standard an earlier lift
+                           converted): ` + "`ape decision standard`" + ` writes it (the
+                           framework's migration v1.0.0_seq-08 runs it, and the entry
+                           of a release that changes the standard)
+  decision.standard-superseded
+                           an accepted ADR supersedes ADR-0001: the project opted out
+                           of the standard, and updates leave ADR-0001 alone
+  decision.standard-differs
+                           ADR-0001 is the project's own decision, not the standard:
+                           ape never replaces it; a person decides
 
 Exit codes: 0 green · 1 findings (listed on stderr, or under "findings" with --json) · 2 usage.`,
 		Example: "  ape project check\n  ape project check --json",

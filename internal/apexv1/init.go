@@ -60,6 +60,10 @@ type InitResult struct {
 	// there. Committed with the skeleton unless the .gitignore was
 	// untracked or had uncommitted changes.
 	GitIgnore *ClaudeIgnoreResult `json:"gitignore,omitempty"`
+	// StandardADR is what init did with ADR-0001, APEX's standard
+	// (D205 Q118): created, kept, or differs (another ADR-0001, left
+	// alone).
+	StandardADR *StandardADRResult `json:"standard_adr,omitempty"`
 }
 
 // hasAgentsImport reports whether a CLAUDE.md imports the map.
@@ -285,6 +289,9 @@ func mappingKeys(n *yaml.Node) []string {
 func Init(ctx context.Context, root string, brownfield bool) (*InitResult, error) {
 	res, p, err := initSkeleton(ctx, root, brownfield)
 	if err != nil {
+		return res, err
+	}
+	if err := p.initStandardADR(res); err != nil {
 		return res, err
 	}
 	if paths := p.initCommitPaths(ctx, res); len(paths) > 0 {

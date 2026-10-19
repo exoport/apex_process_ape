@@ -177,12 +177,13 @@ Goal: Five.
 	p := fixture(t, files)
 	recordApprovals(t, p)
 	commitAll(t, p, "approvals")
-	// With ape's pre-commit hook and its prompt hook in place, the gate
-	// notices are all (Q89, E2).
+	// With ape's pre-commit hook, its prompt hook and the standard
+	// ADR-0001 in place, the gate notices are all (Q89, E2, D205).
 	_, err := p.installPreCommitHook(ctx())
 	require.NoError(t, err)
 	_, err = MergeHooks(p.SettingsJSON())
 	require.NoError(t, err)
+	require.NoError(t, p.writeStandardADR(filepath.Join(p.DecisionsDir(), StandardADRFile()), standardADR(p.Root), "test"))
 
 	ns := p.Notices()
 	require.Len(t, ns, 2)

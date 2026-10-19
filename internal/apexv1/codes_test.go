@@ -15,6 +15,8 @@ var noticeCodes = []string{
 	CodeGateOutsideGates, CodeHooksPreCommitAbsent, CodeHooksPromptAbsent,
 	// rc.7 (rc7-rename).
 	CodeModelsOperatorRow,
+	// rc.7b (rc7b-adr).
+	CodeStandardDiffers, CodeStandardSuperseded, CodeStandardStale,
 }
 
 // The published list and the code agree: every code the source sets or a
@@ -72,6 +74,9 @@ func TestDiagnosticCodes_PublishedListMatchesTheCode(t *testing.T) {
 		"CodeByMismatch": CodeByMismatch, "CodeHooksPromptAbsent": CodeHooksPromptAbsent,
 		// rc.7 (rc7-rename).
 		"CodeSkillRenamed": CodeSkillRenamed, "CodeOperatorInterfacePending": CodeOperatorInterfacePending, "CodeModelsOperatorRow": CodeModelsOperatorRow,
+		// rc.7b (rc7b-adr).
+		"CodeStandardDiffers": CodeStandardDiffers, "CodeStandardSuperseded": CodeStandardSuperseded,
+		"CodeStandardStale": CodeStandardStale, "CodeStandardPending": CodeStandardPending,
 	}
 	for _, glob := range []string{"*.go", filepath.Join("..", "apecmd", "v1_*.go")} {
 		files, err := filepath.Glob(glob)

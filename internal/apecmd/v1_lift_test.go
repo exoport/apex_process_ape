@@ -57,7 +57,8 @@ func TestProjectLift_CLI(t *testing.T) {
 	require.Equal(t, "v0.29.3", plan.Version)
 	require.Equal(t, "lift.no-tag", plan.Preflight[0].Code)
 	require.Equal(t, "ADR-0003", plan.ADRs[0].Old)
-	require.Equal(t, "ADR-0001", plan.ADRs[0].New)
+	require.Equal(t, "ADR-0002", plan.ADRs[0].New, "ADR-0001 is APEX's standard (D205 Q119)")
+	require.Equal(t, apexv1.StandardCreated, plan.StandardADR.Action)
 	require.Equal(t, "main.go", plan.Changed[0].File)
 	require.FileExists(t, filepath.Join(root, "development", "implementation", "3-2_retry-publish.md"), "nothing written")
 
@@ -81,12 +82,12 @@ func TestProjectLift_CLI(t *testing.T) {
 	v1Git(t, root, "push", "-q", "origin", apexv1.LiftTag)
 	stdout, _, err = v1Exec(t, newProjectCmd, "lift", "--cwd", root)
 	require.NoError(t, err)
-	require.Contains(t, stdout, "adr       ADR-0003 -> ADR-0001  development/decisions/0001-use-go.md  [accepted]")
-	require.Contains(t, stdout, "apex: lift from APEX v0 v0.29.3")
+	require.Contains(t, stdout, "adr       ADR-0003 -> ADR-0002  development/decisions/0002-use-go.md  [accepted]")
+	require.Contains(t, stdout, "apex: lift from apex-v0 v0.29.3")
 	require.Contains(t, stdout, "no ## Code Validation found")
 	main, err := os.ReadFile(filepath.Join(root, "main.go"))
 	require.NoError(t, err)
-	require.Equal(t, "package main\n\n// Retry (ADR-0001).\nfunc main() {}\n", string(main))
+	require.Equal(t, "package main\n\n// Retry (ADR-0002).\nfunc main() {}\n", string(main))
 }
 
 // L1: which ape runs the lift, and what becomes of the project's pin.

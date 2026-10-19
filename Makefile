@@ -307,6 +307,9 @@ check-framework:  ## LOCAL ONLY: verify ape still satisfies the APEX framework's
 	@# build (nested under framework/). The whole guard is ONE shell block
 	@# because a bare `exit 0` in a make recipe ends only that line's shell —
 	@# the first draft printed "NOT verified" and then ran the tests anyway.
+	@# TestFrameworkV1_StandardADR (D205 Q117): the payload's standard ADR-0001
+	@# (_apex/standards/adr-0001.md) equals ape's embedded copy; it reports
+	@# NOT verified (a skip) while the payload has no such file.
 	@# APEX v1 (D53): a v1 framework ships no command list, only the floor, so
 	@# its contract is what its skills and migration entries run. A tree is v1
 	@# when it holds framework-v1/ (the build repo during the v1 work), or is
@@ -324,11 +327,11 @@ check-framework:  ## LOCAL ONLY: verify ape still satisfies the APEX framework's
 	elif [ -n "$$v1" ]; then \
 		echo "==> APEX v1 framework contract against $$v1$${APE_BIN:+ (binary $(APE_BIN))}"; \
 		APEX_FRAMEWORK_V1="$$v1" APE_BIN="$(APE_BIN)" go test ./internal/apecmd/ -count=1 -v \
-		  -run 'TestFrameworkV1_(SkillCommandsResolve|Floor)$$' || exit 1; \
+		  -run 'TestFrameworkV1_(SkillCommandsResolve|Floor|StandardADR)$$' || exit 1; \
 		if [ -f "$(APEX_PROJECT)/_apex/ape-commands.yaml" ]; then \
 			echo "==> APEX v1 installed contract in $(APEX_PROJECT)"; \
 			APEX_FRAMEWORK_V1="$(APEX_PROJECT)" APE_BIN="$(APE_BIN)" go test ./internal/apecmd/ -count=1 -v \
-			  -run 'TestFrameworkV1_(SkillCommandsResolve|Floor)$$' || exit 1; \
+			  -run 'TestFrameworkV1_(SkillCommandsResolve|Floor|StandardADR)$$' || exit 1; \
 		else \
 			echo "installed v1 contract NOT verified — this is a skip, not a pass."; \
 			echo "  APEX_PROJECT=$(APEX_PROJECT) has no _apex/ape-commands.yaml: it is not an install."; \

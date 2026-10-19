@@ -74,7 +74,7 @@ type LiftApe struct {
 // runs the pin, and that is what git's pre-commit hook and a Claude
 // session's hooks call — so every commit and every session, not only the
 // commands a person types.
-const LiftPinLocal = "run every v1 command here with APE_TOOLCHAIN=local — every git commit too " +
+const LiftPinLocal = "run every apex-v1 command here with APE_TOOLCHAIN=local — every git commit too " +
 	"(the pre-commit hook runs ape) and every Claude session in the project (its hooks run ape: " +
 	"start it as APE_TOOLCHAIN=local claude)"
 
@@ -118,12 +118,16 @@ type LiftResult struct {
 	TagSHA        string   `json:"tag_sha,omitempty"`
 	Remote        string   `json:"remote,omitempty"`
 	// Preflight lists what a real run would refuse (dry run only).
-	Preflight []LiftProblem    `json:"preflight,omitempty"`
-	Deleted   []LiftDeletion   `json:"deleted"`
-	KeptApex  []string         `json:"kept_apex,omitempty"`
-	ADRs      []LiftADR        `json:"adrs"`
-	Canon     string           `json:"canon,omitempty"`
-	Changed   []LiftFileChange `json:"changed"`
+	Preflight []LiftProblem  `json:"preflight,omitempty"`
+	Deleted   []LiftDeletion `json:"deleted"`
+	KeptApex  []string       `json:"kept_apex,omitempty"`
+	ADRs      []LiftADR      `json:"adrs"`
+	// StandardADR is ADR-0001, APEX's standard, which the lift writes:
+	// created, or replaced — the apex-v0 governance standard it does not
+	// convert (D205 Q119).
+	StandardADR *StandardADRResult `json:"standard_adr,omitempty"`
+	Canon       string             `json:"canon,omitempty"`
+	Changed     []LiftFileChange   `json:"changed"`
 	// ADRsNotConverted are record-shaped files no id could be read from:
 	// left in place.
 	ADRsNotConverted    []string    `json:"adrs_not_converted,omitempty"`
@@ -260,6 +264,8 @@ type lifter struct {
 	// still in: the line numbers of the tag.
 	claudeBefore string
 	rw           *adrRewriter
+	// std is the standard ADR-0001 the lift writes (D205 Q119).
+	std installedStandard
 	// tagRuns are the regression command's runs at the tag, one per
 	// command of a split chain (R12), and tagLogs their logs, outside the
 	// tree until the lift's state folder exists.
@@ -433,7 +439,7 @@ func (lf *lifter) preflight() []*FailError {
 	if err != nil || tagSHA == "" {
 		tagSHA = ""
 		out = append(out, &FailError{Code: "lift.no-tag", Msg: "no tag " + LiftTag + " — the tag is the archive of everything the lift deletes: " +
-			"`git tag -a " + LiftTag + " -m \"APEX v0 final\"` on this commit, push it, then lift"})
+			"`git tag -a " + LiftTag + " -m \"apex-v0 final\"` on this commit, push it, then lift"})
 	} else {
 		lf.res.TagSHA = tagSHA
 		if head := HeadSHA(lf.ctx, lf.root); head != tagSHA {
@@ -644,7 +650,7 @@ func (lf *lifter) plan() error {
 		}
 	}
 	for _, s := range lf.untracked {
-		lf.res.Deleted = append(lf.res.Deleted, LiftDeletion{Path: s, Family: "v0 skills", Untracked: true})
+		lf.res.Deleted = append(lf.res.Deleted, LiftDeletion{Path: s, Family: "apex-v0 skills", Untracked: true})
 	}
 	lf.res.SkillsSource = lf.layout.SkillsSource
 	lf.listKeptApex()
@@ -654,23 +660,24 @@ func (lf *lifter) plan() error {
 	}
 
 	// Old → new ADR numbers: the local records in order, then the canon
-	// records the project cites and has no local record of.
+	// records the project cites and has no local record of. num holds
+	// the old numbers seen (their new ones are set below, once the
+	// standard is known); firstOf, a second record's first of its id.
 	num := map[int]int{}
 	pathMap := map[string]string{}
 	decisionsRel := lf.devRel + "/decisions"
-	next := 1
 	var all []v0ADR
-	dups := map[int]string{} // index in all → the ADR its id's citations go to
+	firstOf := map[int]int{} // index in all → index of the first record of its id
+	seen := map[int]int{}
 	for i := range local {
 		a := local[i]
-		if first, dup := num[a.num]; dup {
-			a.slug += "-" + fmtNum4(next)
-			dups[len(all)] = "ADR-" + fmtNum4(first)
+		if first, dup := seen[a.num]; dup {
+			firstOf[len(all)] = first
 		} else {
-			num[a.num] = next
+			seen[a.num] = len(all)
+			num[a.num] = 0
 		}
 		all = append(all, a)
-		next++
 	}
 	cited := map[int]bool{}
 	for _, t := range lf.texts {
@@ -696,9 +703,8 @@ func (lf *lifter) plan() error {
 		default:
 			canon := findCanonADRs(gov, cited)
 			for i := range canon {
-				num[canon[i].num] = next
+				num[canon[i].num] = 0
 				all = append(all, canon[i])
-				next++
 			}
 			var got []string
 			for i := range canon {
@@ -710,23 +716,42 @@ func (lf *lifter) plan() error {
 			}
 		}
 	}
+	// D205 Q119: ADR-0001 is APEX's standard; the apex-v0 governance
+	// standard is not converted, and every other record numbers on from
+	// 0002 in its order.
+	stdAt, newNum := lf.numberADRs(all, firstOf)
 	for i := range all {
-		if a := &all[i]; !a.canon {
-			pathMap[a.rel] = decisionsRel + "/" + fmtNum4(i+1) + "-" + a.slug + ".md"
+		if _, dup := firstOf[i]; !dup {
+			num[all[i].num] = newNum[i]
+		} else {
+			all[i].slug += "-" + fmtNum4(newNum[i])
+		}
+	}
+	for i := range all {
+		switch a := &all[i]; {
+		case a.canon:
+		case i == stdAt:
+			pathMap[a.rel] = decisionsRel + "/" + StandardADRFile()
+		default:
+			pathMap[a.rel] = decisionsRel + "/" + fmtNum4(newNum[i]) + "-" + a.slug + ".md"
 		}
 	}
 	rw := newADRRewriter(num, pathMap, lf.rel(paths.ADRs))
 	lf.rw = rw
+	lf.planStandardADR(all, stdAt)
 	for i := range all {
+		if i == stdAt {
+			continue
+		}
 		a := &all[i]
 		date := ""
 		if !a.canon {
 			date = gitFirstDate(ctx, lf.root, a.rel)
 		}
-		la := convertADR(*a, i+1, rw, date)
+		la := convertADR(*a, newNum[i], rw, date)
 		la.Path = decisionsRel + "/" + la.Path
-		if first, ok := dups[i]; ok {
-			la.Gaps = append(la.Gaps, "a second v0 record with id "+la.Old+": citations of that id were rewritten to "+first)
+		if first, ok := firstOf[i]; ok {
+			la.Gaps = append(la.Gaps, "a second apex-v0 record with id "+la.Old+": citations of that id were rewritten to ADR-"+fmtNum4(newNum[first]))
 		}
 		for _, u := range la.unresolved {
 			lf.res.UnresolvedCitations = append(lf.res.UnresolvedCitations, LiftIDRef{File: la.Path, Text: u, Where: "decision"})
@@ -1138,6 +1163,9 @@ func (lf *lifter) apply() error {
 	if err := recordLiftedDecisions(p, lf.res.ADRs); err != nil {
 		return err
 	}
+	if err := p.recordStandardADR(lf.std, "ape project lift"); err != nil {
+		return err
+	}
 	if fileExists(p.decisionsJSON()) {
 		commit = append(commit, p.Rel(p.decisionsJSON()))
 	}
@@ -1425,8 +1453,8 @@ func (lf *lifter) movePin() bool {
 	}
 	a.PinMoved = true
 	a.PinNote = "the lift commit moves " + a.PinFile + " from " + a.Pinned + " to " + to
-	lf.res.CommitMessage = strings.Replace(lf.res.CommitMessage, "- lays down the v1 skeleton",
-		"- moves the ape pin ("+a.PinFile+") from "+a.Pinned+" to "+to+"\n- lays down the v1 skeleton", 1)
+	lf.res.CommitMessage = strings.Replace(lf.res.CommitMessage, "- lays down the apex-v1 skeleton",
+		"- moves the ape pin ("+a.PinFile+") from "+a.Pinned+" to "+to+"\n- lays down the apex-v1 skeleton", 1)
 	return true
 }
 
@@ -1566,8 +1594,8 @@ func uniqueStrings(in []string) []string {
 func (lf *lifter) commitMessage() string {
 	r := lf.res
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s from APEX v0 %s\n\n", LiftSubjectPrefix, r.Version)
-	fmt.Fprintf(&b, "The v0 state is archived at %s (%s). This commit:\n", LiftTag, short(r.TagSHA))
+	fmt.Fprintf(&b, "%s from apex-v0 %s\n\n", LiftSubjectPrefix, r.Version)
+	fmt.Fprintf(&b, "The apex-v0 state is archived at %s (%s). This commit:\n", LiftTag, short(r.TagSHA))
 	fams := map[string]int{}
 	var order []string
 	for _, d := range r.Deleted {
@@ -1579,17 +1607,20 @@ func (lf *lifter) commitMessage() string {
 	for _, f := range order {
 		fmt.Fprintf(&b, "- deletes %s (%d path(s))\n", f, fams[f])
 	}
-	fmt.Fprintf(&b, "- converts %d ADR(s) into %s/decisions/, renumbered from ADR-0001\n", len(r.ADRs), lf.devRel)
+	if sa := r.StandardADR; sa != nil {
+		fmt.Fprintf(&b, "- writes APEX's standard ADR-0001 (Record architecture decisions)%s\n", standardReplacesNote(sa))
+	}
+	fmt.Fprintf(&b, "- converts %d ADR(s) into %s/decisions/, renumbered from ADR-0002\n", len(r.ADRs), lf.devRel)
 	stripped, cited := 0, 0
 	for _, c := range r.Changed {
 		stripped += c.IDsRemoved
 		cited += c.ADRsRewritten
 	}
-	fmt.Fprintf(&b, "- rewrites %d ADR citation(s) and strips v0 ids from %d comment(s), in %d file(s)\n", cited, stripped, len(r.Changed))
+	fmt.Fprintf(&b, "- rewrites %d ADR citation(s) and strips apex-v0 ids from %d comment(s), in %d file(s)\n", cited, stripped, len(r.Changed))
 	if r.Gates.Regression != "" {
 		fmt.Fprintf(&b, "- carries %d gate command(s) from %s into AGENTS.md and regression:\n", len(r.Gates.Commands), r.Gates.Source)
 	}
-	b.WriteString("- lays down the v1 skeleton (ape project init --brownfield)\n")
+	b.WriteString("- lays down the apex-v1 skeleton (ape project init --brownfield)\n")
 	if _, action, err := claudeIgnorePlan(lf.root); err == nil && action != ClaudeIgnoreAlready && !lf.dirtyAt(".gitignore") {
 		verb := "adds"
 		if action == ClaudeIgnoreRewritten {
@@ -1599,8 +1630,12 @@ func (lf *lifter) commitMessage() string {
 			strings.Join([]string{claudeIgnoreChildren, claudeIgnoreSettings, claudeIgnoreSkills, claudeIgnoreLocalMD}, " "))
 	}
 	fmt.Fprintf(&b, "- writes %s for apex-plan and the person (its full lists in %s, not committed)\n", r.Disposition, r.Report)
-	if len(r.ADRs) > 0 {
+	if len(r.ADRs) > 0 || r.StandardADR != nil && r.StandardADR.Replaces != "" {
 		b.WriteString("\nADRs, old -> new:\n")
+		if sa := r.StandardADR; sa != nil && sa.Replaces != "" {
+			old, _, _ := strings.Cut(sa.Replaces, ",")
+			fmt.Fprintf(&b, "  %s -> %s (standard)  %s\n", old, StandardADRID, path.Base(sa.Path))
+		}
 		for i := range r.ADRs {
 			a := &r.ADRs[i]
 			from := ""
@@ -1611,4 +1646,13 @@ func (lf *lifter) commitMessage() string {
 		}
 	}
 	return b.String()
+}
+
+// standardReplacesNote is what the standard ADR-0001 replaced, for the
+// lift's commit message and disposition: "" when it replaced nothing.
+func standardReplacesNote(sa *StandardADRResult) string {
+	if sa.Replaces == "" {
+		return ""
+	}
+	return ", in place of the apex-v0 governance standard " + sa.Replaces + ", which is not converted (its text stays at " + LiftTag + ")"
 }
