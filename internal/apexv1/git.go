@@ -3,6 +3,7 @@ package apexv1
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -137,22 +138,43 @@ func (p *Project) isWorkTree(ctx context.Context) bool {
 // hooks skipped: these are ape's own records), with trailer
 // `Change: <changeID>`. Other staged or dirty files are left as they are.
 // A commit with nothing to record is skipped; one whose added lines hold a
-// secret is refused (commit.secret, ScanCommit) with the paths staged.
+// secret is refused (commit.secret, ScanCommit) with the paths staged, and
+// the refusal says how to unstage them.
 func (p *Project) commitPaths(ctx context.Context, subject, changeID string, paths ...string) (string, error) {
 	return p.commitWithTrailer(ctx, subject, "Change: "+changeID, paths...)
+}
+
+// commitOwnPaths is commitPaths for files ape wrote itself in this
+// command, as they were before (beforeOwnEdit): a refusal undoes ape's
+// edit (R28).
+func (p *Project) commitOwnPaths(ctx context.Context, own ownEdits, subject, changeID string, paths ...string) (string, error) {
+	return p.commitOwn(ctx, own, subject, "Change: "+changeID, paths...)
 }
 
 // commitRecord commits ape's own record files outside any change (the
 // roadmap, milestones.json, an ADR skeleton, the init skeleton). Outside a
 // git work tree it does nothing.
 func (p *Project) commitRecord(ctx context.Context, subject, trailer string, paths ...string) (string, error) {
+	return p.commitOwnRecord(ctx, nil, subject, trailer, paths...)
+}
+
+// commitOwnRecord is commitRecord for files ape wrote itself in this
+// command, as they were before (beforeOwnEdit): a refusal undoes ape's
+// edit (R28).
+func (p *Project) commitOwnRecord(ctx context.Context, own ownEdits, subject, trailer string, paths ...string) (string, error) {
 	if !p.isWorkTree(ctx) {
 		return "", nil
 	}
-	return p.commitWithTrailer(ctx, subject, trailer, paths...)
+	return p.commitOwn(ctx, own, subject, trailer, paths...)
 }
 
 func (p *Project) commitWithTrailer(ctx context.Context, subject, trailer string, paths ...string) (string, error) {
+	return p.commitOwn(ctx, nil, subject, trailer, paths...)
+}
+
+// commitOwn stages exactly paths and commits them; own (nil: none) is
+// what the paths ape wrote itself were before it wrote them.
+func (p *Project) commitOwn(ctx context.Context, own ownEdits, subject, trailer string, paths ...string) (string, error) {
 	if _, err := git(ctx, p.Root, append([]string{"add", "-A", "--"}, paths...)...); err != nil {
 		return "", err
 	}
@@ -164,7 +186,7 @@ func (p *Project) commitWithTrailer(ctx context.Context, subject, trailer string
 		return "", nil
 	}
 	if err := ScanCommit(ctx, p.Root, subject, paths...); err != nil {
-		return "", err
+		return "", p.undoRefused(ctx, err, own, paths)
 	}
 	msg := subject + "\n"
 	if trailer != "" {
@@ -174,4 +196,116 @@ func (p *Project) commitWithTrailer(ctx context.Context, subject, trailer string
 		return "", err
 	}
 	return HeadSHA(ctx, p.Root), nil
+}
+
+// R28 (rc.6c): a commit.secret refusal of a record commit ape makes from
+// content it wrote itself in this command (a Next line, a decision, a
+// milestone record, a state.json, a new change's skeleton) undoes that
+// edit, so the secret is neither left staged nor blocks the next record
+// commit to the same file. What a path was before ape wrote it is taken
+// first (beforeOwnEdit): one clean in the index and the working tree is
+// restored to HEAD (a file ape created is removed); one that was not keeps
+// the working tree, and only ape's staging is taken back — the index
+// entries are put back as they were — with the one command that clears the
+// rest. A record commit that carries anyone else's work (a change's notes,
+// moved folders, the archive squash, the lift) is never undone: its
+// refusal names the `git restore --staged` that unstages it.
+
+// ownEdits is what each path ape is about to write was before it wrote
+// it; nil outside a work tree.
+type ownEdits map[string]ownBefore
+
+type ownBefore struct {
+	// clean: nothing uncommitted under the path, in the index or the
+	// working tree (an absent path is clean).
+	clean bool
+	// index is `git ls-files -s --full-name` for the path: its index
+	// entries, as update-index --index-info reads them back.
+	index string
+}
+
+// beforeOwnEdit records rels (project-relative files or folders) before
+// ape writes them, for commitOwn's undo.
+func (p *Project) beforeOwnEdit(ctx context.Context, rels ...string) ownEdits {
+	if !p.isWorkTree(ctx) {
+		return nil
+	}
+	own := ownEdits{}
+	for _, rel := range rels {
+		st, err := gitRaw(ctx, p.Root, "status", "--porcelain=v1", "--untracked-files=all", "--", rel)
+		if err != nil {
+			continue // unknown: treated as not ape's
+		}
+		idx, err := gitRaw(ctx, p.Root, "ls-files", "-s", "--full-name", "--", rel)
+		if err != nil {
+			continue
+		}
+		own[rel] = ownBefore{clean: strings.TrimSpace(st) == "", index: idx}
+	}
+	return own
+}
+
+// undoRefused is a refused record commit's error: a commit.secret refusal
+// with each staged path undone (own) or named with the command that
+// unstages it; any other error as it is.
+func (p *Project) undoRefused(ctx context.Context, err error, own ownEdits, paths []string) error {
+	fe, ok := errors.AsType[*FailError](err)
+	if !ok || fe.Code != CodeCommitSecret {
+		return err
+	}
+	from := "HEAD"
+	if HeadSHA(ctx, p.Root) == "" {
+		empty, err := gitWith(ctx, p.Root, nil, []byte{}, "hash-object", "-t", "tree", "--stdin")
+		if err != nil {
+			return fe
+		}
+		from = empty
+	}
+	var undone, unstaged, staged []string
+	for _, rel := range paths {
+		if out, err := git(ctx, p.Root, "diff", "--cached", "--name-only", from, "--", rel); err != nil || out == "" {
+			continue // nothing of it staged
+		}
+		before, ours := own[rel]
+		switch {
+		case ours && before.clean:
+			if _, err := git(ctx, p.Root, "restore", "--source="+from, "--staged", "--worktree", "--", rel); err == nil {
+				undone = append(undone, rel)
+				continue
+			}
+		case ours:
+			if p.restoreIndex(ctx, rel, before.index) == nil {
+				unstaged = append(unstaged, rel)
+				continue
+			}
+		}
+		staged = append(staged, rel)
+	}
+	var said []string
+	if len(undone) > 0 {
+		said = append(said, "ape's edit to "+strings.Join(undone, ", ")+" was undone")
+	}
+	for _, rel := range unstaged {
+		said = append(said, "ape's edit to "+rel+" was unstaged and left in the working tree, which held uncommitted edits before it: take it out, or `git restore --worktree -- "+rel+"` drops every unstaged edit to "+rel)
+	}
+	if len(staged) > 0 {
+		said = append(said, strings.Join(staged, ", ")+" stays staged: `git restore --staged -- "+strings.Join(staged, " ")+"` unstages it")
+	}
+	if len(said) > 0 {
+		fe.Msg += ". " + strings.Join(said, "; ") + "; nothing was committed"
+	}
+	return fe
+}
+
+// restoreIndex puts a path's index entries back as index (ls-files -s
+// output) holds them, leaving the working tree alone.
+func (p *Project) restoreIndex(ctx context.Context, rel, index string) error {
+	if _, err := git(ctx, p.Root, "rm", "-r", "-q", "--cached", "-f", "--ignore-unmatch", "--", rel); err != nil {
+		return err
+	}
+	if strings.TrimSpace(index) == "" {
+		return nil
+	}
+	_, err := gitWith(ctx, p.Root, nil, []byte(index), "update-index", "--index-info")
+	return err
 }

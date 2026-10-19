@@ -172,8 +172,16 @@ func (p *Project) milestonePaths() []string {
 	return paths
 }
 
-func (p *Project) commitMilestone(ctx context.Context, id, what string, extra ...string) (string, error) {
-	sha, err := p.commitRecord(ctx, "apex: "+id+" "+what, "Milestone: "+id, append(p.milestonePaths(), extra...)...)
+// milestoneOwn is the milestone files as they are before ape edits them
+// (R28): a refused milestone commit undoes the edit.
+func (p *Project) milestoneOwn(ctx context.Context) ownEdits {
+	return p.beforeOwnEdit(ctx, p.Rel(p.RoadmapMD()), p.Rel(p.MilestonesJSON()))
+}
+
+// commitMilestone commits the milestone files and extra; own (nil: none)
+// is milestoneOwn from before ape's edit.
+func (p *Project) commitMilestone(ctx context.Context, own ownEdits, id, what string, extra ...string) (string, error) {
+	sha, err := p.commitOwnRecord(ctx, own, "apex: "+id+" "+what, "Milestone: "+id, append(p.milestonePaths(), extra...)...)
 	if err != nil {
 		return "", commitFailed(err, "roadmap written but its commit failed: "+err.Error()+" — fix git (identity, lock) and commit "+strings.Join(p.milestonePaths(), " "))
 	}
@@ -211,10 +219,11 @@ func (p *Project) NewMilestone(ctx context.Context, title, gate string, budget *
 		return "", err
 	}
 	id := rm.NextID()
+	own := p.milestoneOwn(ctx)
 	if err := writeFileAtomic(p.RoadmapMD(), AppendMilestone(doc, id, title, gate, budget, goal, nil)); err != nil {
 		return "", err
 	}
-	if _, err := p.commitMilestone(ctx, id, MilestoneProposed); err != nil {
+	if _, err := p.commitMilestone(ctx, own, id, MilestoneProposed); err != nil {
 		return id, err
 	}
 	return id, nil
@@ -282,6 +291,7 @@ func (p *Project) ApproveMilestone(ctx context.Context, id, by string, progress 
 		return nil, err
 	}
 	what := MilestoneApproved
+	own := p.milestoneOwn(ctx)
 	if m.Status == MilestoneApproved {
 		// The Status line keeps the first approval: the milestone's spend
 		// counts from it, and a re-approval must not reset that.
@@ -308,7 +318,7 @@ func (p *Project) ApproveMilestone(ctx context.Context, id, by string, progress 
 	if err := p.saveMilestoneRecords(recs); err != nil {
 		return nil, err
 	}
-	if _, err := p.commitMilestone(ctx, id, what); err != nil {
+	if _, err := p.commitMilestone(ctx, own, id, what); err != nil {
 		return m, err
 	}
 	return m, nil
@@ -367,11 +377,14 @@ func (p *Project) RunGate(ctx context.Context, id string, opt RunOptions) (*Gate
 			}
 		}
 	}
+	// Only milestones.json is the run's own edit: the gate may run long,
+	// and roadmap.md is a person's to edit meanwhile.
+	own := p.beforeOwnEdit(ctx, p.Rel(p.MilestonesJSON()))
 	g, err := p.runGate(ctx, id, opt)
 	if err != nil || !g.ResultChanged {
 		return g, err
 	}
-	g.Commit, err = p.commitMilestone(context.WithoutCancel(ctx), id, "gate "+gateResult(&g.Run))
+	g.Commit, err = p.commitMilestone(context.WithoutCancel(ctx), own, id, "gate "+gateResult(&g.Run))
 	return g, err
 }
 
@@ -591,6 +604,9 @@ func (p *Project) closeMilestone(ctx context.Context, id string, opt RunOptions,
 	if err != nil {
 		return nil, err
 	}
+	// Only milestones.json is the run's own edit: the gate may run long,
+	// and roadmap.md is a person's to edit meanwhile.
+	own := p.beforeOwnEdit(ctx, p.Rel(p.MilestonesJSON()))
 	g, err := p.runGate(ctx, id, opt)
 	if err != nil {
 		return nil, err
@@ -598,7 +614,7 @@ func (p *Project) closeMilestone(ctx context.Context, id string, opt RunOptions,
 	ctx = context.WithoutCancel(ctx) // the gate ran: what it found is recorded
 	if !g.Run.Green() && red == nil {
 		if g.ResultChanged {
-			if g.Commit, err = p.commitMilestone(ctx, id, "gate "+GateRed); err != nil {
+			if g.Commit, err = p.commitMilestone(ctx, own, id, "gate "+GateRed); err != nil {
 				return g, err
 			}
 		}
@@ -644,7 +660,8 @@ func (p *Project) closeMilestone(ctx context.Context, id string, opt RunOptions,
 		}
 		extra = append(extra, g.Evidence)
 	}
-	if g.Commit, err = p.commitMilestone(ctx, id, what, extra...); err != nil {
+	// The close moves the gate folders, which are not ape's: never undone.
+	if g.Commit, err = p.commitMilestone(ctx, nil, id, what, extra...); err != nil {
 		return g, err
 	}
 	return g, nil

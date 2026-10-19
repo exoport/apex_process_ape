@@ -225,12 +225,76 @@ func TestCommitRecord_PersonsStagedFileIsNotScanned(t *testing.T) {
 	require.Equal(t, "A  mine.env", run(t, p.Root, "status", "--porcelain", "--", "mine.env"))
 
 	// The same file in the pathspec is scanned, and nothing is committed.
+	// It is not ape's own edit: it stays staged, and the refusal says how
+	// to unstage it (R28).
 	head := HeadSHA(ctx(), p.Root)
 	_, err = p.commitRecord(ctx(), "apex: record", "", "mine.env")
 	fe := secretFail(t, err)
 	require.Len(t, fe.Findings, 1)
 	require.Equal(t, "mine.env", fe.Findings[0].File)
 	require.Equal(t, head, HeadSHA(ctx(), p.Root))
+	require.Contains(t, fe.Msg, "mine.env stays staged: `git restore --staged -- mine.env` unstages it; nothing was committed")
+	require.Equal(t, "A  mine.env", run(t, p.Root, "status", "--porcelain", "--", "mine.env"))
+}
+
+// R28: a refused `ape next add` undoes ape's own edit to the roadmap — the
+// tree exactly as before, the refusal says so — and the next harmless
+// `next add` commits (it was refused too while the edit stayed staged).
+func TestAddNext_RefusedEditIsUndone(t *testing.T) {
+	p := fixture(t, baseFiles())
+	write(t, p, "notes.txt", "a person's own work\n")
+	before := run(t, p.Root, "status", "--porcelain")
+	head := HeadSHA(ctx(), p.Root)
+
+	_, err := p.AddNext(ctx(), "rotate GITHUB_TOKEN="+fakeToken, "")
+	fe := secretFail(t, err)
+	require.Contains(t, fe.Msg, "ape's edit to development/roadmap.md was undone; nothing was committed")
+	require.Equal(t, before, run(t, p.Root, "status", "--porcelain"))
+	require.Equal(t, head, HeadSHA(ctx(), p.Root))
+	require.NotContains(t, read(t, p, "development/roadmap.md"), fakeToken)
+
+	res, err := p.AddNext(ctx(), "rotate the GitHub token", "")
+	require.NoError(t, err)
+	require.Equal(t, res.Commit, HeadSHA(ctx(), p.Root))
+	require.Equal(t, before, run(t, p.Root, "status", "--porcelain"))
+}
+
+// R28: a roadmap that held a person's uncommitted edits keeps its working
+// tree (ape's line in it, beside theirs); only ape's staging is taken
+// back, the person's staged hunk kept, and the refusal names the command
+// that clears the rest.
+func TestAddNext_RefusedEditOnADirtyFileOnlyUnstages(t *testing.T) {
+	p := fixture(t, baseFiles())
+	rm := "development/roadmap.md"
+	write(t, p, rm, read(t, p, rm)+"\nstaged by a person\n")
+	run(t, p.Root, "add", "--", rm)
+	write(t, p, rm, read(t, p, rm)+"unstaged by a person\n")
+	staged := run(t, p.Root, "diff", "--cached")
+
+	_, err := p.AddNext(ctx(), "rotate GITHUB_TOKEN="+fakeToken, "")
+	fe := secretFail(t, err)
+	require.Contains(t, fe.Msg, "ape's edit to "+rm+" was unstaged and left in the working tree, which held uncommitted edits before it: take it out, or `git restore --worktree -- "+rm+"` drops every unstaged edit to "+rm)
+	require.Equal(t, staged, run(t, p.Root, "diff", "--cached"), "the index is as the person left it")
+	doc := read(t, p, rm)
+	require.Contains(t, doc, "unstaged by a person")
+	require.Contains(t, doc, fakeToken, "the working tree is left alone")
+	run(t, p.Root, "restore", "--worktree", "--", rm)
+	require.NotContains(t, read(t, p, rm), fakeToken)
+	require.Contains(t, read(t, p, rm), "staged by a person")
+}
+
+// R28: a file ape created for the refused record (an ADR skeleton) is
+// removed with its staging.
+func TestNewDecision_RefusedSkeletonIsRemoved(t *testing.T) {
+	p := fixture(t, baseFiles())
+	before := run(t, p.Root, "status", "--porcelain")
+	_, err := p.NewDecision(ctx(), "rotate-token", "Rotate "+fakeToken, "")
+	fe := secretFail(t, err)
+	require.Contains(t, fe.Msg, "ape's edit to development/decisions/0001-rotate-token.md was undone")
+	require.NoFileExists(t, filepath.Join(p.Root, "development", "decisions", "0001-rotate-token.md"))
+	require.Equal(t, before, run(t, p.Root, "status", "--porcelain"))
+	_, err = p.NewDecision(ctx(), "rotate-token", "Rotate the token", "")
+	require.NoError(t, err)
 }
 
 // A record commit — state.json through commitPaths — is scanned, and

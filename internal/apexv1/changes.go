@@ -609,6 +609,7 @@ func (p *Project) NewChange(ctx context.Context, id, milestone string, touches, 
 			return nil, &UsageError{Code: "usage.paths", Msg: "--paths entry \"" + g + "\" is not a valid glob"}
 		}
 	}
+	own := p.beforeOwnEdit(ctx, p.Rel(p.ChangeDir(id)))
 	if err := os.MkdirAll(p.ChangeDir(id), 0o755); err != nil {
 		return nil, err
 	}
@@ -624,7 +625,7 @@ func (p *Project) NewChange(ctx context.Context, id, milestone string, touches, 
 	// are the skill's own commit.
 	commit := ""
 	if p.isWorkTree(ctx) {
-		sha, err := p.commitPaths(ctx, "apex: "+id+" "+StatusDraft, id, p.Rel(p.ChangeDir(id)))
+		sha, err := p.commitOwnPaths(ctx, own, "apex: "+id+" "+StatusDraft, id, p.Rel(p.ChangeDir(id)))
 		if err != nil {
 			return nil, commitFailed(err, "change written but its commit failed: "+err.Error())
 		}

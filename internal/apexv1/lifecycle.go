@@ -704,13 +704,14 @@ func (p *Project) saveAndCommit(ctx context.Context, id string, st *State) error
 
 // saveAndCommitSubject is saveAndCommit with its own subject.
 func (p *Project) saveAndCommitSubject(ctx context.Context, id string, st *State, subject string) error {
+	own := p.beforeOwnEdit(ctx, p.Rel(p.StateFile(id)))
 	if err := SaveState(p.StateFile(id), st); err != nil {
 		return err
 	}
 	if !p.isWorkTree(ctx) {
 		return nil
 	}
-	if _, err := p.commitPaths(ctx, subject, id, p.Rel(p.StateFile(id))); err != nil {
+	if _, err := p.commitOwnPaths(ctx, own, subject, id, p.Rel(p.StateFile(id))); err != nil {
 		return commitFailed(err, "state.json written but its commit failed: "+err.Error()+" — fix git (identity, lock) and re-run the command")
 	}
 	return nil

@@ -171,8 +171,10 @@ func (p *Project) commitOnBranchAt(ctx context.Context, branch, tip string, file
 }
 
 // commitHere writes files into the working tree and commits exactly
-// those paths, as every other ape record commit does.
+// those paths, as every other ape record commit does. The content is
+// ape's own, so a commit.secret refusal undoes the write (R28).
 func (p *Project) commitHere(ctx context.Context, files map[string][]byte, rels []string, msg string) (string, error) {
+	own := p.beforeOwnEdit(ctx, rels...)
 	for _, rel := range rels {
 		path := filepath.Join(p.Root, filepath.FromSlash(rel))
 		if files[rel] == nil {
@@ -188,7 +190,7 @@ func (p *Project) commitHere(ctx context.Context, files map[string][]byte, rels 
 			return "", err
 		}
 	}
-	sha, err := p.commitWithTrailer(ctx, msg, "", rels...)
+	sha, err := p.commitOwn(ctx, own, msg, "", rels...)
 	if err != nil {
 		return "", commitFailed(err, "written but the commit failed: "+err.Error()+" — fix git (identity, lock) and commit "+strings.Join(rels, " "))
 	}

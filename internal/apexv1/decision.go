@@ -146,6 +146,11 @@ func (p *Project) NewDecision(ctx context.Context, slug, title, supersedes strin
 		"## Decision\n<!-- what we decided -->\n\n" +
 		"## Consequences\n<!-- what becomes easier or harder -->\n\n" +
 		"Enforced by: review\n"
+	ownRels := []string{p.Rel(path)}
+	if oldPath != "" {
+		ownRels = append(ownRels, p.Rel(oldPath))
+	}
+	own := p.beforeOwnEdit(ctx, ownRels...)
 	if err := os.MkdirAll(p.DecisionsDir(), 0o755); err != nil {
 		return nil, err
 	}
@@ -170,7 +175,7 @@ func (p *Project) NewDecision(ctx context.Context, slug, title, supersedes strin
 		paths = append(paths, p.Rel(oldPath))
 		subject += ", supersedes " + supersedes
 	}
-	sha, err := p.commitRecord(ctx, subject, "", paths...)
+	sha, err := p.commitOwnRecord(ctx, own, subject, "", paths...)
 	if err != nil {
 		return res, commitFailed(err, "decision written but its commit failed: "+err.Error())
 	}
@@ -210,6 +215,7 @@ func (p *Project) AcceptDecision(ctx context.Context, id, by string) (*DecisionR
 		return nil, &FailError{Code: "decision.malformed", Msg: id + " is not well-formed — fix it before accepting", Findings: fs}
 	}
 	accepted := withADRStatus(doc, ADRAccepted)
+	own := p.beforeOwnEdit(ctx, p.Rel(path), p.Rel(p.decisionsJSON()))
 	if err := writeFileAtomic(path, accepted); err != nil {
 		return nil, err
 	}
@@ -219,7 +225,7 @@ func (p *Project) AcceptDecision(ctx context.Context, id, by string) (*DecisionR
 		return nil, err
 	}
 	res := &DecisionResult{ID: id, Path: p.Rel(path), Status: ADRAccepted}
-	sha, err := p.commitRecord(ctx, "apex: "+id+" accepted", "", res.Path, p.Rel(p.decisionsJSON()))
+	sha, err := p.commitOwnRecord(ctx, own, "apex: "+id+" accepted", "", res.Path, p.Rel(p.decisionsJSON()))
 	if err != nil {
 		return res, commitFailed(err, "decision accepted but its commit failed: "+err.Error())
 	}
