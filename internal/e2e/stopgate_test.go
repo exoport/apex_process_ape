@@ -65,6 +65,7 @@ while IFS= read -r more; do :; done
 const v1Change = `---
 id: add-wave
 milestone: M1
+type: feat
 touches: [greeting]
 ---
 # Add wave
