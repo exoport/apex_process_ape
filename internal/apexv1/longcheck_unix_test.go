@@ -25,7 +25,7 @@ func TestHelperProcess_RunCheck(t *testing.T) {
 	if cmd == "" {
 		t.Skip("a helper process for TestRunCheck_NoOrphanAfterSIGKILL")
 	}
-	runCheck(ctx(), os.Getenv("APEXV1_HELPER_DIR"), cmd, "", TierTimeout{Max: time.Hour}, nil)
+	runCheck(ctx(), os.Getenv("APEXV1_HELPER_DIR"), cmd, "", "", TierTimeout{Max: time.Hour}, nil)
 }
 
 // D58 2.2: a check never outlives the ape running it. ape SIGKILLed
@@ -73,7 +73,7 @@ func TestRunCheck_IdleKillAtTheDeadline(t *testing.T) {
 	t.Cleanup(func() { progressSample = old })
 	idle := 2500 * time.Millisecond // samples at 2 s and 4 s: the old kill was at 4 s
 	start := time.Now()
-	r := runCheck(ctx(), t.TempDir(), "sleep 30", "", TierTimeout{Idle: idle, Max: time.Minute}, nil)
+	r := runCheck(ctx(), t.TempDir(), "sleep 30", "", "", TierTimeout{Idle: idle, Max: time.Minute}, nil)
 	took := time.Since(start)
 	require.Equal(t, ExitTimeout, r.Exit, r.Tail)
 	require.Equal(t, ReasonIdle, r.Reason)

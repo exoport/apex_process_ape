@@ -3,6 +3,7 @@ package apexv1
 import (
 	"path"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -244,8 +245,7 @@ func readsAt(code string, tok pathTok, byName bool, frames []callFrame) bool {
 	case msg >= 0:
 		return false
 	}
-	for i := len(frames) - 1; i >= 0; i-- {
-		f := frames[i]
+	for _, f := range slices.Backward(frames) {
 		if f.open >= lineStart || f.close <= tok.at {
 			continue
 		}
@@ -282,8 +282,6 @@ type callFrame struct {
 // triple quote across lines, a " or a ' to its line's end unless an
 // echo's string carries on — and an echo ends at its line's end (no
 // trailing \), a ;, a | or a &.
-//
-//nolint:gocyclo // a hand-written lexer: one case per byte class
 func callFrames(code string) []callFrame {
 	echoAt := map[int]bool{}
 	for _, m := range echoWordRe.FindAllStringSubmatchIndex(code, -1) {
@@ -345,7 +343,7 @@ func callFrames(code string) []callFrame {
 				pop(i, true)
 			}
 		case '(':
-			frames = append(frames, callFrame{open: i + 1, close: len(code), kind: callKind(code[max(strings.LastIndexByte(code[:i], '\n')+1, i-80) : i+1])})
+			frames = append(frames, callFrame{open: i + 1, close: len(code), kind: callKind(code[max(strings.LastIndexByte(code[:i], '\n')+1, i-callKindWindow) : i+1])})
 			stack = append(stack, len(frames)-1)
 		case ')':
 			pop(i, true)
@@ -354,6 +352,10 @@ func callFrames(code string) []callFrame {
 	}
 	return frames
 }
+
+// callKindWindow is how far before a ( callKind looks for the call's
+// name, on its line.
+const callKindWindow = 80
 
 // callKind is what the call whose text ends in prefix's ( is.
 func callKind(prefix string) int {

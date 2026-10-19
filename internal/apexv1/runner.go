@@ -57,7 +57,7 @@ var progressSample = 10 * time.Second
 // would. A command that is one multi-line ( … ) block of simple commands
 // runs as its lines joined by && (checkScript, R24b).
 func RunCheck(ctx context.Context, dir, cmd, logPath string, timeout time.Duration) CheckResult {
-	return runCheck(ctx, dir, cmd, logPath, Timeouts{}.Limits(KindTask, timeout), nil)
+	return runCheck(ctx, dir, cmd, logPath, "", Timeouts{}.Limits(KindTask, timeout), nil)
 }
 
 // openCheckLog creates a check's log at logPath, nil when there is none or
@@ -93,13 +93,9 @@ func openCheckLog(logPath, note string) *os.File {
 // in its process group kills the group when ape's end of a pipe closes,
 // however ape ended (SIGKILL included) — on Linux the shell also has
 // Pdeathsig; on Windows the group is a job object that closes with ape.
-func runCheck(ctx context.Context, dir, cmd, logPath string, lim TierTimeout, vacuous []string, env ...string) CheckResult {
-	return runNotedCheck(ctx, dir, cmd, "", logPath, lim, vacuous, env...)
-}
-
-// runNotedCheck is runCheck with its log opening on logNote, when set,
-// in place of the split note.
-func runNotedCheck(ctx context.Context, dir, cmd, logNote, logPath string, lim TierTimeout, vacuous []string, env ...string) CheckResult {
+//
+// The log opens with logNote, when set, in place of the split note (R30).
+func runCheck(ctx context.Context, dir, cmd, logPath, logNote string, lim TierTimeout, vacuous []string, env ...string) CheckResult {
 	if lim.Max <= 0 {
 		lim = Timeouts{}.Limits(KindTask, 0)
 	}

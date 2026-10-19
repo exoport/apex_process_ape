@@ -78,7 +78,7 @@ func TestRunCheck_IdleAndCeiling(t *testing.T) {
 	lim := TierTimeout{Idle: 700 * time.Millisecond, Max: 20 * time.Second}
 
 	start := time.Now()
-	r := runCheck(ctx(), dir, "echo starting; sleep 30", filepath.Join(dir, "idle.log"), lim, nil)
+	r := runCheck(ctx(), dir, "echo starting; sleep 30", filepath.Join(dir, "idle.log"), "", lim, nil)
 	require.Equal(t, ExitTimeout, r.Exit)
 	require.Equal(t, ReasonIdle, r.Reason)
 	require.Contains(t, r.Detail, "no output and no CPU time for 700ms (timeouts.check.idle)")
@@ -90,15 +90,15 @@ func TestRunCheck_IdleAndCeiling(t *testing.T) {
 
 	// Silent, but busy: a shell loop for ~2.5s, three idle windows long.
 	busy := `end=$(( $(date +%s) + 3 )); i=0; while [ "$(date +%s)" -lt "$end" ]; do i=$((i+1)); done; echo done`
-	r = runCheck(ctx(), dir, busy, "", lim, nil)
+	r = runCheck(ctx(), dir, busy, "", "", lim, nil)
 	require.Equal(t, 0, r.Exit, "CPU time is progress: %+v", r)
 
 	// Printing, but asleep between lines.
-	r = runCheck(ctx(), dir, "for i in 1 2 3 4 5 6 7 8; do echo $i; sleep 0.3; done", "", lim, nil)
+	r = runCheck(ctx(), dir, "for i in 1 2 3 4 5 6 7 8; do echo $i; sleep 0.3; done", "", "", lim, nil)
 	require.Equal(t, 0, r.Exit, "output is progress: %+v", r)
 
 	start = time.Now()
-	r = runCheck(ctx(), dir, "while :; do echo tick; sleep 0.1; done", "", TierTimeout{Idle: time.Second, Max: 1500 * time.Millisecond, tier: "gate"}, nil)
+	r = runCheck(ctx(), dir, "while :; do echo tick; sleep 0.1; done", "", "", TierTimeout{Idle: time.Second, Max: 1500 * time.Millisecond, tier: "gate"}, nil)
 	require.Equal(t, ExitTimeout, r.Exit)
 	require.Equal(t, ReasonCeiling, r.Reason)
 	require.Contains(t, r.Detail, "still running at 1.5s (timeouts.gate.max)")

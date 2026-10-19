@@ -1156,8 +1156,8 @@ func (lf *lifter) liftRegression(p *Project) {
 		after = []CheckResult{p.runRegression(lf.ctx, parts[0].Cmd, p.LogDir("lift"), "", lf.opt.Run)}
 	} else {
 		checks := make([]PlannedCheck, len(parts))
-		for i, c := range parts {
-			checks[i] = PlannedCheck{Ref: liftPartRef(i), Kind: KindRegression, Cmd: c.Cmd, LogNote: c.LogNote}
+		for i := range parts {
+			checks[i] = PlannedCheck{Ref: liftPartRef(i), Kind: KindRegression, Cmd: parts[i].Cmd, LogNote: parts[i].LogNote}
 		}
 		after = p.RunChecks(lf.ctx, p.LogDir("lift"), "", checks, lf.opt.Run)
 	}

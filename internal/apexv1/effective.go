@@ -218,7 +218,7 @@ func (p *Project) runWithRetries(ctx context.Context, pc *PlannedCheck, logPath 
 		if inGit {
 			before = p.snapshot(ctx)
 		}
-		r = runNotedCheck(ctx, p.Root, pc.Cmd, pc.LogNote, path, lim, vacuous, pc.Env...)
+		r = runCheck(ctx, p.Root, pc.Cmd, path, pc.LogNote, lim, vacuous, pc.Env...)
 		if inGit {
 			strays = append(strays, p.undoStrays(ctx, before)...)
 		}

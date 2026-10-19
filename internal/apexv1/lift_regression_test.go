@@ -138,11 +138,11 @@ func TestJudgeLiftRegression_NamesWhateverTheExit(t *testing.T) {
 	require.Equal(t, []string{"TestFactCheck_LiveTree", "github.com/x/factcheck"}, fresh)
 	require.Contains(t, note, "LIFT FAILURE: red at the lift commit (exit 1: TestFactCheck_LiveTree, github.com/x/factcheck), green at apex-v0-final")
 
-	many := ""
+	var many strings.Builder
 	for i := range 60 {
-		many += fmt.Sprintf("--- FAIL: TestN%02d (0.00s)\n", i)
+		fmt.Fprintf(&many, "--- FAIL: TestN%02d (0.00s)\n", i)
 	}
-	_, note, fresh = judgeLiftRegression(tag, after, "", many)
+	_, note, fresh = judgeLiftRegression(tag, after, "", many.String())
 	require.Len(t, fresh, liftNewFailuresShown, "the cap holds")
 	require.Contains(t, note, "(60 in all, in regression_new_failures)")
 
@@ -280,8 +280,8 @@ func TestLift_RegressionAtTheTag(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "( true\nfalse\nfor f in a; do true; done\nfalse\n)", res.Gates.Regression)
 		require.Len(t, res.RegressionCommands, 4)
-		var cmds []string
-		var tag, after []int
+		cmds := make([]string, 0, len(res.RegressionCommands))
+		tag, after := make([]int, 0, len(res.RegressionCommands)), make([]int, 0, len(res.RegressionCommands))
 		for _, c := range res.RegressionCommands {
 			cmds = append(cmds, c.Cmd)
 			tag, after = append(tag, c.RegressionAtTag.Exit), append(after, c.Regression.Exit)
