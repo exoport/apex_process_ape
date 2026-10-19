@@ -1,6 +1,7 @@
 package apexv1
 
 import (
+	"bytes"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -204,6 +205,9 @@ func (lf *lifter) hashed() []LiftHashed {
 // comment) hashes nothing (R6). The lift's tokenizer finds the comments;
 // in a file it cannot read, a line opening with # or // is one.
 func codeText(rel, src string) string {
+	if strings.EqualFold(path.Ext(rel), ".sql") {
+		return sqlCodeText(src)
+	}
 	if lang := liftLangOf(rel, []byte(src[:min(len(src), 256)])); lang != langNone {
 		if code, err := blankComments(lang, src); err == nil {
 			return code
@@ -216,6 +220,49 @@ func codeText(rel, src string) string {
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+// sqlCodeText is SQL src with its -- and /* */ comments blanked (R25:
+// radix's coverage scripts name v0 files only in them), newlines kept; a
+// quoted string or identifier is not scanned for one.
+func sqlCodeText(src string) string {
+	b := []byte(src)
+	blank := func(from, to int) {
+		for k := from; k < to; k++ {
+			if b[k] != '\n' {
+				b[k] = ' '
+			}
+		}
+	}
+	for i := 0; i < len(b); {
+		switch {
+		case b[i] == '\'' || b[i] == '"':
+			// '' inside a string closes and reopens it: the same bytes.
+			j := bytes.IndexByte(b[i+1:], b[i])
+			if j < 0 {
+				return string(b)
+			}
+			i += j + 2
+		case b[i] == '-' && i+1 < len(b) && b[i+1] == '-':
+			j := bytes.IndexByte(b[i:], '\n')
+			if j < 0 {
+				j = len(b) - i
+			}
+			blank(i, i+j)
+			i += j
+		case b[i] == '/' && i+1 < len(b) && b[i+1] == '*':
+			j := bytes.Index(b[i+2:], []byte("*/"))
+			end := len(b)
+			if j >= 0 {
+				end = i + 2 + j + 2
+			}
+			blank(i, end)
+			i = end
+		default:
+			i++
+		}
+	}
+	return string(b)
 }
 
 // blankComments is src with every comment lang's tokenizer finds blanked,

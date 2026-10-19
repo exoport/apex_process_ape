@@ -119,7 +119,7 @@ type ArchiveMove struct {
 // ArchiveLayoutResult is what `ape project archive-layout` reports.
 type ArchiveLayoutResult struct {
 	// Moved are the folders moved, or under --check the ones left to move;
-	// empty when the archive is in the newer layout.
+	// [] (never null) when the archive is in the newer layout.
 	Moved []ArchiveMove `json:"moved"`
 	// Rewritten are the moved state.json files whose recorded paths
 	// (archived_to, an acceptance's evidence) named the old folder.
@@ -132,7 +132,7 @@ type ArchiveLayoutResult struct {
 // legacyArchiveMoves is every archived change folder still in the older
 // layout, with where it goes.
 func (p *Project) legacyArchiveMoves() []ArchiveMove {
-	var out []ArchiveMove
+	out := []ArchiveMove{}
 	for _, name := range dirNames(p.ArchiveDir()) {
 		if m := datedFolderRe.FindStringSubmatch(name); m != nil {
 			out = append(out, ArchiveMove{

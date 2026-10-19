@@ -127,9 +127,12 @@ The commit:
                  read-only review, then the person, who deletes it. Then "Code and
                  tests that read deleted v0 state": every kept code, test, script,
                  Makefile or CI file (not docs, not evidence) that names a path the
-                 lift deletes outside its comments — by its path (./ and ../ too), a
-                 path under a deleted folder, or the base name of a deleted file when
-                 it has an extension and no other file has it — one line per file with
+                 lift deletes outside its comments (SQL's -- and /* */ too) — by its
+                 path (./ and ../ too), a path under a deleted folder at a segment
+                 boundary, or the base name of a deleted file when it has an extension
+                 and no other file has it and its line reads it (cat, test -f, an
+                 open/read/glob/Join call, a quoted path; not an echo, a printf or a
+                 test's or logger's message) — one line per file with
                  what it reads (--json and the report: v0_state_readers, {file,
                  reads}); re-point each to v1 state or retire it. Then, as summaries:
                  other code and CI that still names removed paths (in a comment, or a

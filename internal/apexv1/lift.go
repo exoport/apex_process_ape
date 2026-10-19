@@ -954,12 +954,26 @@ func (lf *lifter) dangling() []LiftIDRef {
 			continue
 		}
 		for i, l := range strings.Split(src, "\n") {
-			for _, m := range re.FindAllStringSubmatch(l, -1) {
-				out = append(out, LiftIDRef{File: rel, Line: i + 1, Text: strings.TrimRight(m[1], ".,:;"), Where: "reference"})
+			for _, m := range re.FindAllStringSubmatchIndex(l, -1) {
+				if !atSegmentEnd(l, m[3]) {
+					continue
+				}
+				out = append(out, LiftIDRef{File: rel, Line: i + 1, Text: strings.TrimRight(l[m[2]:m[3]], ".,:;"), Where: "reference"})
 			}
 		}
 	}
 	return out
+}
+
+// atSegmentEnd reports a removed path matched in s up to end as a whole
+// path segment (R26): at the end, before a / or a byte no name has — a
+// quote, a space, a ) — or before a sentence's closing period. radix's
+// `mkdir -p development/planning-artifacts` names no development/planning.
+func atSegmentEnd(s string, end int) bool {
+	if end >= len(s) || s[end] == '/' || !isPathByte(s[end]) {
+		return true
+	}
+	return s[end] == '.' && (end+1 >= len(s) || !isPathByte(s[end+1]))
 }
 
 // readings are the v0 documents apex-plan may read at the tag: the

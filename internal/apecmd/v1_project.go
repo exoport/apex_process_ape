@@ -519,8 +519,10 @@ command any session may run (not person-only).
 (archive.legacy-layout, naming them) when some is — the migration's check: 0 applied,
 1 not applied.
 
-JSON: {"moved": [{"id", "from", "to"}], "rewritten": [<state.json>], "commit"}; under
---check, "moved" lists what would move.
+JSON: {"moved": [{"id", "from", "to"}], "rewritten": [<state.json>], "commit"}; "moved"
+is always there, [] when nothing moved. Under --check it lists what is left to move, at
+the top level beside the failure's ok/exit/diagnostics when some is (exit 1), and is []
+when nothing is (exit 0).
 
 Exit codes: 0 moved, or nothing to move (--check: nothing left) · 1 refused, or (--check)
 some left · 3 a folder's new place exists.`,
@@ -537,7 +539,9 @@ some left · 3 a folder's new place exists.`,
 			if check {
 				res, err := p.ArchiveLayoutCheck()
 				if err != nil {
-					return v1Fail(cmd, &f, err, res)
+					// R27: what is left to move at the top level, as when
+					// nothing is, not inside the failure's result.
+					return v1FailWith(cmd, &f, err, nil, map[string]any{"moved": res.Moved})
 				}
 				return v1Emit(cmd.OutOrStdout(), &f, res, func(w io.Writer) {
 					fmt.Fprintln(w, "archive layout: nothing left to move")
