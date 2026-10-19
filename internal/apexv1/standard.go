@@ -552,7 +552,7 @@ func (pl *standardPlan) paths(p *Project) []string {
 
 // refuseDirty refuses while one of rels has uncommitted changes (tree.dirty).
 func (p *Project) refuseDirty(ctx context.Context, what string, rels []string) error {
-	dirty, err := gitRaw(ctx, p.Root, append([]string{"status", "--porcelain=v1", "--untracked-files=normal", "--"}, rels...)...)
+	dirty, err := gitRaw(ctx, p.Root, append([]string{"status", "--porcelain=v1", untrackedNormal, "--"}, rels...)...)
 	if err != nil {
 		return &FailError{Code: CodeGitStatusFailed, Msg: "cannot read git status: " + err.Error()}
 	}

@@ -394,7 +394,7 @@ func (lf *lifter) preflight() []*FailError {
 	// Inside an update, file by file: a .claude/ git tracks nothing in
 	// (ignored until the update's .claude/ shape) would show as one folder,
 	// the install's skills and a settings.json in one line.
-	untrackedFiles := "--untracked-files=normal"
+	untrackedFiles := untrackedNormal
 	if lf.opt.FromUpdate {
 		untrackedFiles = "--untracked-files=all"
 	}

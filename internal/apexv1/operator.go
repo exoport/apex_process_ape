@@ -375,7 +375,7 @@ func (p *Project) OperatorInterface(ctx context.Context) (*OperatorInterfaceResu
 	if res.GitIgnore != "" {
 		paths = append(paths, ".gitignore")
 	}
-	if dirty, err := gitRaw(ctx, p.Root, append([]string{"status", "--porcelain=v1", "--untracked-files=normal", "--"}, paths...)...); err != nil {
+	if dirty, err := gitRaw(ctx, p.Root, append([]string{"status", "--porcelain=v1", untrackedNormal, "--"}, paths...)...); err != nil {
 		return res, &FailError{Code: CodeGitStatusFailed, Msg: "cannot read git status: " + err.Error()}
 	} else if strings.TrimSpace(dirty) != "" {
 		return res, &FailError{Code: "tree.dirty", Msg: "the operator interface is one commit of " + strings.Join(paths, ", ") +

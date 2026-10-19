@@ -48,6 +48,10 @@ const (
 	skillPathParts = 4
 )
 
+// untrackedNormal lists untracked files one by one under a git status
+// that is narrowed to paths.
+const untrackedNormal = "--untracked-files=normal"
+
 // v0Meta is the part of _apex/framework.yaml the lift reads.
 type v0Meta struct {
 	Framework struct {
