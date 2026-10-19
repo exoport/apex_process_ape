@@ -340,6 +340,9 @@ var secretRules = sync.OnceValues(func() (*config.Config, error) { return config
 type secretFinding struct {
 	Path, Rule, Redacted, Fingerprint string
 	Line                              int
+	// value is the secret itself: never printed, only hidden where the
+	// refusal would echo it (redactSubject).
+	value string
 }
 
 // secretScanner is the scanner for one allow list, kept for the process: a
@@ -418,7 +421,7 @@ func scanAdded(ctx context.Context, hunks []addedHunk, allow []SecretAllow) ([]s
 		}
 		s := secretFinding{
 			Path: f.Location.Path, Line: f.Location.StartLine, Rule: f.RuleID,
-			Redacted: redactSecret(f), Fingerprint: "sha256:" + f.Match.Fingerprint,
+			Redacted: redactSecret(f), Fingerprint: "sha256:" + f.Match.Fingerprint, value: f.Match.Value,
 		}
 		if s.Path == "" {
 			s.Path = f.Attributes[sources.AttrPath]
@@ -481,12 +484,32 @@ func (s addedSource) Fragments(ctx context.Context, yield sources.FragmentsFunc)
 	return nil
 }
 
+// minEchoed is the shortest start of a secret redactSubject hides.
+const minEchoed = 8
+
+// redactSubject hides each secret in the subject the refusal names, as
+// the list does: a subject made from the caller's text (`apex: next —
+// <text>`, cut at 60 characters) can hold all of one, or all but its end.
+func redactSubject(subject string, found []secretFinding) string {
+	for _, s := range found {
+		subject = strings.ReplaceAll(subject, s.value, s.Redacted)
+		for k := len(s.value) - 1; k >= minEchoed; k-- {
+			if strings.HasSuffix(strings.TrimSuffix(subject, "…"), s.value[:k]) {
+				subject = strings.TrimSuffix(strings.TrimSuffix(subject, "…"), s.value[:k]) + s.Redacted
+				break
+			}
+		}
+	}
+	return subject
+}
+
 // secretRefusal is the commit.secret error: each secret as
 // `<file>:<line> rule <id>: <redacted>`, the placeholder fix first
 // (E-R6b-2: an example never needs a real value), and the allow entries a
 // person may paste. A fingerprint in unaccepted is allowed by an entry
 // committed but not accepted (R23): its finding says so.
 func secretRefusal(subject string, found []secretFinding, unaccepted map[string]bool) error {
+	subject = redactSubject(subject, found)
 	var entries, pending []string
 	list := make([]string, 0, len(found))
 	findings := make([]Finding, 0, len(found))

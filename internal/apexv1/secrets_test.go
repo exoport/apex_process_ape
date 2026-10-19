@@ -249,6 +249,8 @@ func TestAddNext_RefusedEditIsUndone(t *testing.T) {
 	_, err := p.AddNext(ctx(), "rotate GITHUB_TOKEN="+fakeToken, "")
 	fe := secretFail(t, err)
 	require.Contains(t, fe.Msg, "ape's edit to development/roadmap.md was undone; nothing was committed")
+	require.Contains(t, fe.Msg, "nothing was committed: apex: next — rotate GITHUB_TOKEN=ghp_... adds a secret")
+	require.NotContains(t, fe.Msg, fakeToken[:12], "the subject, which holds the text, is redacted too")
 	require.Equal(t, before, run(t, p.Root, "status", "--porcelain"))
 	require.Equal(t, head, HeadSHA(ctx(), p.Root))
 	require.NotContains(t, read(t, p, "development/roadmap.md"), fakeToken)
@@ -257,6 +259,15 @@ func TestAddNext_RefusedEditIsUndone(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, res.Commit, HeadSHA(ctx(), p.Root))
 	require.Equal(t, before, run(t, p.Root, "status", "--porcelain"))
+}
+
+// A subject cut short (`apex: next — <text>`, 60 characters) that ends
+// in most of a secret is redacted as a whole one is.
+func TestRedactSubject(t *testing.T) {
+	f := []secretFinding{{Redacted: "ghp_...", value: fakeToken}}
+	require.Equal(t, "apex: next — rotate T=ghp_... now", redactSubject("apex: next — rotate T="+fakeToken+" now", f))
+	require.Equal(t, "apex: next — rotate GITHUB_TOKEN=ghp_...", redactSubject(truncate("apex: next — rotate GITHUB_TOKEN="+fakeToken+" betterleaks:allow", 72), f))
+	require.Equal(t, "apex: next — gh", redactSubject("apex: next — gh", f), "a start shorter than 8 is not a secret's")
 }
 
 // R28: a roadmap that held a person's uncommitted edits keeps its working
@@ -273,6 +284,7 @@ func TestAddNext_RefusedEditOnADirtyFileOnlyUnstages(t *testing.T) {
 
 	_, err := p.AddNext(ctx(), "rotate GITHUB_TOKEN="+fakeToken, "")
 	fe := secretFail(t, err)
+	require.NotContains(t, fe.Msg, fakeToken[:12])
 	require.Contains(t, fe.Msg, "ape's edit to "+rm+" was unstaged and left in the working tree, which held uncommitted edits before it: take it out, or `git restore --worktree -- "+rm+"` drops every unstaged edit to "+rm)
 	require.Equal(t, staged, run(t, p.Root, "diff", "--cached"), "the index is as the person left it")
 	doc := read(t, p, rm)
