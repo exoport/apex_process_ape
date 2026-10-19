@@ -364,17 +364,8 @@ func initSkeleton(ctx context.Context, root string, brownfield bool) (*InitResul
 	if err := dir(p.StateDir(), false); err != nil {
 		return nil, nil, err
 	}
-	// Next lives in next.md, the roadmap pointing at it (D217): both are
-	// laid down with a new roadmap. An existing roadmap is the project's,
-	// Next and all, until `ape next move` (seq-09) moves it, so no next.md
-	// is put beside it — the writers would split its items across two
-	// files.
-	if !fileExists(p.RoadmapMD()) {
-		if err := write(p.NextMD(), nextMDSkeleton); err != nil {
-			return nil, nil, err
-		}
-	}
-	steps := []struct{ path, content string }{
+	// next.md first: it is written only with a new roadmap (initNextMD).
+	steps := append(p.initNextMD(), []skeletonFile{
 		{p.ProjectMD(), fmt.Sprintf(projectSkeleton, name)},
 		{p.RoadmapMD(), "# Roadmap\n\n" + NextPointer + "\n"},
 		{p.AgentsMD(), agentsSkeleton(p.DevRel)},
@@ -385,7 +376,7 @@ func initSkeleton(ctx context.Context, root string, brownfield bool) (*InitResul
 		// hot/, the project's secrets (D155 Q77): its `*` ignores the
 		// .gitignore too, so nothing there is ever committed.
 		{p.HotGitignorePath(), HotGitignore},
-	}
+	}...)
 	for _, s := range steps {
 		if err := write(s.path, s.content); err != nil {
 			return nil, nil, err
@@ -579,6 +570,20 @@ func (p *Project) initCommitPaths(ctx context.Context, res *InitResult) []string
 		paths = append(paths, rel)
 	}
 	return paths
+}
+
+// skeletonFile is one file init writes where absent.
+type skeletonFile struct{ path, content string }
+
+// initNextMD is next.md, laid down with a new roadmap (D217): Next lives
+// there, the roadmap pointing at it. An existing roadmap is the project's,
+// Next and all, until `ape next move` (seq-09) moves it, so no next.md is
+// put beside it — the writers would split its items across two files.
+func (p *Project) initNextMD() []skeletonFile {
+	if fileExists(p.RoadmapMD()) {
+		return nil
+	}
+	return []skeletonFile{{p.NextMD(), nextMDSkeleton}}
 }
 
 func yamlScalar(s string) string {

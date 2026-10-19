@@ -54,7 +54,7 @@ func TestPlanNextMove(t *testing.T) {
 		},
 		"label and section, merged into next.md, each item once": {
 			roadmap:  "# Roadmap\nNext — not milestones:\n- a\n- b\n\n## M1 — A\n\n## Next\n- b\n- c\n```\n- code, carried\n```\n",
-			next:     ptr("# Next\n\n- 2026-10-01 x\n- a\n"),
+			next:     new("# Next\n\n- 2026-10-01 x\n- a\n"),
 			wantRM:   "# Roadmap\n" + NextPointer + "\n\n## M1 — A\n",
 			wantNext: "# Next\n\n- 2026-10-01 x\n- a\n- b\n- c\n```\n- code, carried\n```\n",
 			moved:    []string{"b", "c"},
@@ -72,7 +72,7 @@ func TestPlanNextMove(t *testing.T) {
 		},
 		"the pointer is there: no second one": {
 			roadmap:  "# Roadmap\n\n" + NextPointer + "\n\n## M1 — A\n\n## Next\n- a\n",
-			next:     ptr(nextMDSkeleton),
+			next:     new(nextMDSkeleton),
 			wantRM:   "# Roadmap\n\n" + NextPointer + "\n\n## M1 — A\n",
 			wantNext: nextMDSkeleton + "\n- a\n",
 			moved:    []string{"a"},
@@ -106,8 +106,6 @@ func TestPlanNextMove(t *testing.T) {
 		require.Empty(t, findingMessages(ValidateNextMD("development/next.md", nx)), name)
 	}
 }
-
-func ptr(s string) *string { return &s }
 
 // D217 Q126: `ape next move` on a project made before D217 — apex-plan's
 // label form — in one commit; idempotent; --check before and after; the

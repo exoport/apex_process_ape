@@ -132,7 +132,7 @@ func appendNextMD(next []byte, lines []string) []byte {
 		ls = ls[:len(ls)-1]
 	}
 	if len(lines) > 0 {
-		if len(ls) > 0 && !(isListLine(ls[len(ls)-1]) && isListLine(lines[0])) {
+		if len(ls) > 0 && (!isListLine(ls[len(ls)-1]) || !isListLine(lines[0])) {
 			ls = append(ls, "")
 		}
 		ls = append(ls, lines...)
@@ -193,8 +193,6 @@ func (l roadmapNextLayout) chunks(lines []mdLine) []nextChunk {
 // and — with no label to replace — NextPointer put above the first
 // milestone. A roadmap with the pointer already gets no second one. The
 // rest is kept as it is.
-//
-//nolint:gocyclo // one pass over the lines: the label, the sections, and the blank lines a removal leaves
 func (l roadmapNextLayout) moved(lines []mdLine) string {
 	type outLine struct {
 		text      string
@@ -327,18 +325,18 @@ func planNextMove(roadmap string, next []byte, res *NextMoveResult) (newRoadmap,
 }
 
 // nextMovePlan reads the two files and plans the move.
-func (p *Project) nextMovePlan() (*NextMoveResult, string, string, error) {
-	res := &NextMoveResult{Moved: []string{}, Duplicates: []string{}, Path: p.Rel(p.NextMD()), Roadmap: p.Rel(p.RoadmapMD())}
+func (p *Project) nextMovePlan() (res *NextMoveResult, roadmap, next string, err error) {
+	res = &NextMoveResult{Moved: []string{}, Duplicates: []string{}, Path: p.Rel(p.NextMD()), Roadmap: p.Rel(p.RoadmapMD())}
 	doc, err := readFileString(p.RoadmapMD())
 	if err != nil {
 		return res, "", "", &FailError{Code: "roadmap.missing", Msg: "no " + res.Roadmap + " — run `ape project init`"}
 	}
-	next, err := os.ReadFile(p.NextMD())
+	cur, err := os.ReadFile(p.NextMD())
 	if err != nil {
-		next = nil
+		cur = nil
 	}
-	roadmap, nextDoc := planNextMove(doc, next, res)
-	return res, roadmap, nextDoc, nil
+	roadmap, next = planNextMove(doc, cur, res)
+	return res, roadmap, next, nil
 }
 
 // NextMoveCheck is `ape next move --check`, the check of the framework's
