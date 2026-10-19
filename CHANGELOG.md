@@ -1,5 +1,90 @@
 # CHANGELOG
 
+## v1.0.0-rc.7 (draft)
+
+On top of rc.6e: the orchestrator split (D171, D178–D182) — the loop is `apex-loop`,
+and `/apex-orchestrator` is the operator's own Claude Code session — with person acts
+attested by the person's own words (E2, D179, OI-12), the loop's context relay (D174,
+D181), the delegate's return of a change (D188), semantic archive subjects by default
+(D193, D194), and research's rc.6e lift probes R32–R34 (D180, D184).
+
+### The loop is `apex-loop` (Q95–Q97)
+
+- **`apex-loop` is the loop skill:** its depth-1 privilege, allow list and one run per
+  project moved with it. A live run an older ape recorded as `apex-orchestrator` still
+  counts as the loop.
+- **`ape task apex-orchestrator` is refused** with `skill.renamed` (exit 2), also through
+  `ape service submit task` and an ape script's RunTask, naming `ape task apex-loop
+  --args <M>` and `/apex-orchestrator` in Claude Code.
+- Resume lines, help and messages say apex-loop; `ape costs` groups both names.
+- **init and the lift write `apex-loop: {model: sonnet, effort: high}`**, and no
+  apex-orchestrator row. An old `models.apex-orchestrator` row is read as apex-loop's until
+  seq-07 moves it; `project check` lists it as the notice `models.operator-row`.
+- **`ape project operator-interface [--check]`** (the framework's seq-07): renames the
+  models row byte for byte, re-merges ape's hooks into `.claude/settings.json` (adding
+  `UserPromptSubmit`), adds the AGENTS.md line "Talk to APEX: type `/apex-orchestrator` in
+  Claude Code.", in one commit; idempotent; `--check` exits 1 with
+  `project.operator-interface-pending` while work is left. init's and the lift's AGENTS.md
+  carry the line too.
+- **`ape status --json` gains `next_why`**, one line on why `next` is next (Q100).
+
+### Person acts from the person's own words (E2; Q98, Q99, D179, OI-12)
+
+- **`ape hook user-prompt`** (UserPromptSubmit) records each prompt of a person's own
+  Claude Code session under `_apex/state/prompts/` (git-ignored); nothing under APE_SESSION.
+- **`ape hook pre-tool` grants a person act** only when the turn's prompt, its transcript
+  message and the act's phrase agree: verb and exact target, no negation, not a question.
+  The grant is single-use, bound to the normalised command line, 120 s. The phrase grammar
+  is in `ape hook pre-tool --help`, one line per act (A12), e.g. `allow pending human on
+  <change-id>`. A `!` line fires no hook and is never granted.
+- **The act records `by: <git config user.name> (prompt <ts>: "<the sentence>")`;** a
+  different `--by` in a model session is `session.by-mismatch`.
+- **Eight person acts:** `ape change accept <id> T<n> --by` and `ape decision accept` join
+  the list (OI-4).
+- **`ape milestone approve` is a long run** (lock `M<n>`, `--wait` 9m, exit 75, attach).
+  Re-running a person act's same command attaches to its run with no new grant; a person
+  act that meets a different run is `run.busy` (D179).
+- pre-tool denies Bash that names `_apex/state/prompts` or `grants`; `ape doctor`
+  `hooks.prompt` and the `project check` notice `hooks.prompt-absent` show a missing hook.
+
+### The loop's context relay (Q101; OI-11, D174, D181)
+
+- `limits.context_relay` (default 0.6) and `limits.relays` (default 5), guarded.
+- At the loop's next child launch with its context at or over the threshold, the launch is
+  refused with `session.relay` and `ape task` starts a fresh loop session with the same
+  args (`relay_of` in its manifest), under the same lock. Past `limits.relays` the run
+  stops with `limits.relays`. An unknown window never relays. `ape status --json` shows
+  the live loop's fill and relays (`sessions[].relay`).
+
+### The delegate returns a change (D188; Q104–Q108)
+
+- The delegate's fail can name defects: `--verdict fail --defect <path>`. A fail with a
+  defect in the change's own diff, on a reviewed change, goes back to the change:
+  `delegate.returned` (action apply), in-progress, its review cleared,
+  `delegate_returns.<T>` recorded. A second fail of the task, a fail naming no in-diff
+  defect, or a fail on an archived change stays a person's (`delegate.fail`).
+
+### Commit subjects (D193, D194; Q109–Q112)
+
+- **The default archive subject is `{type}: {title}`;** init and the lift write no
+  `commit:` line, and an explicit `commit.subject` always wins. `ape status --json` gains
+  `config.commit_subject`, the effective template.
+- **`ape change new --type <t>`**; without it ape writes `fix` for `--milestone none` and
+  `feat` otherwise. `change start` refuses a change with no `type:`.
+- Under the default only, a change already in flight with no `type:` archives with its
+  title (`subject_fallback`). ape's own `apex:` commits are unchanged.
+
+### `ape project lift` and the pin (R32–R34)
+
+- **R32:** a quoted literal whose path is followed only by a sentence's closing
+  punctuation is no reader by itself.
+- **R34:** a `$( … )` inside a `"` string is code, and `git log/show/diff/…` are reading
+  commands, so `git log … -- <dir>` keeps its folder in `reads`.
+- **R33:** a v1 project with no `_apex/ape-commands.yaml` has ape floor 1.0.0, so an old
+  `.bingo` pin gets the clear exit-13 refusal; that refusal makes `ape hook pre-tool` exit
+  2, so the guard fails closed. The lift's pin line names every `git commit` and every
+  Claude session among what needs `APE_TOOLCHAIN=local`.
+
 ## v1.0.0-rc.6 (draft)
 
 On top of rc.5 and the candidates below: research's rc.5 lift findings R16–R22, the v0

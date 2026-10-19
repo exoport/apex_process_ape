@@ -1140,14 +1140,14 @@ and otherwise lives like any change: its branch, baseline, checks, a review in a
 session, the delta merged at archive. It counts toward no milestone gate, no milestone's
 regression baseline, and no milestone's spend or budget. Fixes form a queue: planned and
 approved between runs (or `ape run stop`, plan, approve, restart), never overlapping a
-run (D45). An approved fix runs ahead of milestone work, at the orchestrator's next change
-boundary; with no milestone run active, `ape task apex-orchestrator --args <id>` runs it
+run (D45). An approved fix runs ahead of milestone work, at the loop's next change
+boundary; with no milestone run active, `ape task apex-loop --args <id>` runs it
 alone. `ape status` lists approved fixes first.
 
 One checkout, one operator (D45): archive and abandon switch to the base branch (abandon
 from another change's branch commits on it without a checkout), so they refuse when another
 worktree has it checked out (exit 1, git.base-checked-out, naming that
-worktree; nothing written) — an environment problem: the orchestrator stops, it does not
+worktree; nothing written) — an environment problem: the loop stops, it does not
 re-plan.
 
 Resume after the base moved (D40): whenever a started change's base branch has moved
@@ -1157,7 +1157,7 @@ base tip, and marks the old verify stale. A conflict is left on change/<id> for
 apex-apply (H8): markers in the tree, HEAD on the branch, the change in-progress (exit 3,
 change.conflicted, the files listed); apex-apply resolves them, `git add`s and commits, verify
 refuses until it has (change.unresolved-conflict), and the review runs again. When
-apex-apply cannot resolve them it blocks the change, and the orchestrator re-plans it
+apex-apply cannot resolve them it blocks the change, and the loop re-plans it
 (D43). The model never rebases, merges or cherry-picks on a change branch
 (`ape hook pre-tool` denies it).
 
@@ -1245,7 +1245,7 @@ Flags:
 Accept a human-review task, in flight or archived — a person's act, or a delegate's (D75)
 
 ```
-ape change accept <id> [T<n>] (--task <T> --by <who> [--evidence <path|url>]... | --delegate [--wait 9m] | --verdict pass|fail --reason "<text>" [--evidence <path|url>]...) [flags]
+ape change accept <id> [T<n>] (--task <T> --by <who> [--evidence <path|url>]... | --delegate [--wait 9m] | --verdict pass|fail --reason "<text>" [--evidence <path|url>]... [--defect <path>]...) [flags]
 ```
 
 Record that a person accepted a human-review task (one whose check is "human-review"),
@@ -1282,6 +1282,13 @@ second argument (T<n>) or --task.
     usage.evidence)
 
 Accepting a task again replaces its earlier acceptance.
+
+A person's acceptance (--by) is a person's act (OI-4): refused in a model session
+(APE_SESSION or CLAUDECODE set, a `!` line inside Claude Code included) with exit 2,
+session.person-only — unless, in the person's own Claude Code session, the person typed
+"accept <T> of <id>" in that turn (E2: `ape hook pre-tool --help`): --by is then optional
+and must be git config user.name (else session.by-mismatch, exit 1), recorded with the
+prompt. --delegate and --verdict are not person acts.
 
 --delegate: autonomous acceptance (D75, D76). Off by default (D78: project init writes no
 human_review block; without one, delegate.off, action person). Only when
@@ -1339,12 +1346,27 @@ delegate may take now (changes[].delegable).
     is the verdict's --evidence, else the verdict file; its accept-* notes are committed
     with the record, which carries the trailer
     "Accepted-By: delegate:<skill> <T> run <run-id>" (and so does the archive squash).
-    On a fail nothing is accepted: the task stays awaiting_human, ape status shows the
-    verdict (JSON changes[].delegate.<T>: {verdict, reason, run, at}), exit 1
-    delegate.fail (action person). A session that records no verdict is a fail, reason
+    On a fail nothing is accepted. A session that records no verdict is a fail, reason
     "no verdict" (D78; its last message is never read for one), or, when its last Stop
     still had background work running, reason "ended with live background work:
     <tasks>" (D88; JSON outcome.background lists them)
+  - a fail goes back to the change (D188), as a review block does, when it names at
+    least one defect in the change's own diff (--defect <path>, a path its diff from
+    base_sha to its tip touches; a path outside the diff is recorded but does not count:
+    outcome.defects_outside), the change is reviewed and not archived, and the task has
+    no return since a person last answered the change or accepted the task: the change
+    goes to in-progress with its review cleared (verify and review run again), state.json
+    records delegate_returns.<T>: [{run, reason, defects, at}], committed as
+    "apex: <id> returned by delegate" where its state lives, exit 1 delegate.returned
+    (action apply); ape status shows the reason, and next names apex-change.
+    JSON outcome.returned is the return
+  - any other fail stays a person's (D78, as D188 amends it): one that names no in-diff
+    defect ("no verdict" included), a second fail of the task after a return, or a
+    fail on an archived change (ape cannot reopen it: a person accepts the task, or has
+    a fix change planned). The task stays awaiting_human, ape status shows the verdict
+    (JSON changes[].delegate.<T>: {verdict, reason, run, at, defects, returned}), exit 1
+    delegate.fail (action person); JSON outcome.to_person says why: no-defect-in-diff,
+    second-fail, archived or not-reviewed (outcome.returns lists the earlier returns)
   - no automatic retry on the same artefact (D78): after a fail, --delegate for that task
     refuses (delegate.already-failed, action person) until the change's tip moves
     (change/<id>'s tip; the archive folder's content once archived)
@@ -1352,23 +1374,28 @@ delegate may take now (changes[].delegable).
     `ape change accept <id> <T> --delegate` again — it attaches to the running session
   - JSON: {id, task, skill, args, running, detached_id, log, task_exit, launch,
     outcome: {verdict, reason, evidence, notes, violations, voided, accepted,
-    verdict_file, background}}
+    verdict_file, background, defects, defects_outside, returned, to_person, returns}}
 
---verdict pass|fail --reason "<text>" [--evidence <path|url>]...: the delegate session
+--verdict pass|fail --reason "<text>" [--evidence <path|url>]... [--defect <path>]...: the delegate session
 records its verdict — only the session --delegate started for that change and task
 (APE_DELEGATE=<id>/<T>, its run in progress; elsewhere exit 2, delegate.not-in-session).
 It writes _apex/state/runs/delegate/<run-id>.json {change, task, skill, run, verdict,
-reason, evidence, at, change_tip} — ignored state, never a commit. ape, not the session,
+reason, evidence, at, change_tip, defects} — ignored state, never a commit. ape, not the session,
 records the acceptance. --evidence (D78): a URL as given; the session's own
 assets/accept-* note as it is on disk (ape commits it with the acceptance); any other
 path must be committed at change/<id>'s tip while the change is unarchived — where its
 design artefacts live, whatever branch HEAD is on — and a file in the working tree once
 it is archived; each recorded with its SHA-256 (else exit 2, usage.evidence). With no
 --evidence the acceptance rests on the verdict file, recorded by its path and SHA-256.
+--defect <path>, repeatable, only with --verdict fail (else usage.delegate): a file of the
+change's own diff the fail found defective (the docs the change wrote, not a spec the
+delegate disagrees with), relative to the project root; ape, not the session, checks it
+is in the diff when the session ends (above).
 
 Exit codes: 0 recorded · 1 the task has a command check, a draft, or the branch it is
 recorded on is checked out elsewhere; --delegate: off, config not accepted, not
-awaiting, already failed at this tip, fail (no verdict included), voided · 2 usage (no such task, bad evidence, --verdict
+awaiting, already failed at this tip, returned to the change, fail (no verdict
+included), voided · 2 usage (no such task, bad evidence, --verdict
 outside its session) · 75 --delegate: still running, call again.
 
 Examples:
@@ -1378,6 +1405,7 @@ Examples:
   ape change accept add-tenant-delete T2 --by diego --evidence docs/review/tenant-delete.png --evidence https://ci.example.com/run/812
   ape change accept add-tenant-delete T2 --delegate --wait 9m --json
   ape change accept add-tenant-delete T2 --verdict pass --reason "matches the task" --evidence development/changes/add-tenant-delete/assets/accept-T2.md
+  ape change accept add-docs T2 --verdict fail --reason "the guide shows <TAB> where T2 asks for a literal tab" --defect docs/guide.md
 ```
 
 Flags:
@@ -1386,6 +1414,7 @@ Flags:
 | ---- | ---- | ------- | ----------- |
 | `--by` | string | `—` | who accepts (required for a person's acceptance) |
 | `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--defect` | stringArray | `[]` | --verdict fail: a file of the change's own diff the fail found defective (repeatable; D188: a fail naming one goes back to the change once) |
 | `--delegate` | bool | `false` | accept through _apex/config.yaml human_review.delegate (or, for a docs change, the docs default, D152), in its own detached session (D75) |
 | `--evidence` | stringArray | `[]` | a file in the repository or a URL the acceptance (or --verdict) rests on (repeatable) |
 | `--json` | bool | `false` | machine output (JSON on stdout) |
@@ -1410,13 +1439,15 @@ change/<id> when it has one, else the branch the draft was planned on — from a
 without a checkout when HEAD is elsewhere (refused when that branch is checked out in
 another worktree: git.base-checked-out).
 
-The orchestrator then has apex-change re-plan the change with the answer as the hint and
+The loop then has apex-change re-plan the change with the answer as the hint and
 starts it again: `ape change start` takes an answered change as it takes a blocked one (a
 re-plan is recorded as a re-start). The answer also restarts the counts limits.replans and
 limits.attempts_total judge (`ape change verify --help`).
 
 Only a person answers (D47 Q6): refused in a model session — APE_SESSION or CLAUDECODE set,
-a `!` line inside Claude Code included — with exit 2, session.person-only.
+a `!` line inside Claude Code included — with exit 2, session.person-only — unless, in
+the person's own Claude Code session, the person typed "answer <id>: <the --text>" in that
+turn (E2: `ape hook pre-tool --help`; --by is then git config user.name, recorded with the prompt).
 
 Exit codes: 0 answered · 1 not blocked, no such change, or the branch is checked out in
 another worktree · 2 usage (no --text or --by), or a model session.
@@ -1462,12 +1493,14 @@ in place of an approved milestone (else exit 1, change.not-approved).
   - re-approving the same plan is a no-op (exit 0, JSON "already": true, nothing written)
   - only a person approves (D47 Q6): refused in a model session — APE_SESSION or
     CLAUDECODE set, a `!` line inside Claude Code included — with exit 2, code
-    session.person-only; run it from a plain terminal
+    session.person-only; run it from a plain terminal, or, in the person's own Claude
+    Code session, the person types "approve <fix-id>" in that turn (E2: `ape hook pre-tool --help`;
+    --by is then git config user.name, recorded with the prompt)
 
 Fixes form a queue: planned and approved between runs (or `ape run stop`, plan, approve,
 restart), never overlapping a run (D45). An approved fix runs ahead of milestone work, at
-the orchestrator's next change boundary; with no milestone run active,
-`ape task apex-orchestrator --args <id>` runs it alone. `ape status` lists approved
+the loop's next change boundary; with no milestone run active,
+`ape task apex-loop --args <id>` runs it alone. `ape status` lists approved
 fixes first (JSON "fixes", changes[].lane "fix", changes[].approved) and points next at the
 first. A fix counts toward no milestone gate and no milestone's spend or budget.
 
@@ -1506,7 +1539,10 @@ Archive a reviewed change onto its base branch (trial decision D38):
      caps.over-ceiling (caps: holding a value above its ceiling); human-
      review tasks must be accepted, unless --allow-pending-human (recorded) — a person's
      flag only (D45): refused in a model session (APE_SESSION or CLAUDECODE set) with exit
-     2, session.person-only; the orchestrator leaves such a change reviewed and moves on.
+     2, session.person-only — unless, in the person's own Claude Code session, the person
+     typed "allow pending human on <id>" in that turn (E2: `ape hook pre-tool --help`; recorded
+     as allow_pending_human_by, and a plain archive running on the change is run.busy); the
+     loop leaves such a change reviewed and moves on.
      An archived change's unaccepted tasks stay in `ape status` and stay acceptable
      (`ape change accept --help`)
   2. runs with HEAD on change/<id>, or on another non-change branch (it switches to
@@ -1541,9 +1577,15 @@ Archive a reviewed change onto its base branch (trial decision D38):
      path and sha256) — and
      commits everything as ONE commit (H15):
      subject from _apex/config.yaml commit.subject — placeholders {type} (change.md's
-     type:), {title} (its # title) and {id}; default "{title}" — and a body holding the
+     type:), {title} (its # title, as written) and {id}; default "{type}: {title}" (D193;
+     "{title}" before rc.7: set commit.subject: "{title}" to keep it) — and a body holding the
      branch commits' own subjects (not ape's "apex:" ones) and every trailer of theirs but
-     "Change:", deduplicated, then "Change: <id>". The project's git hooks run on this
+     "Change:", deduplicated, then "Change: <id>". Under the default only (commit.subject
+     unset), a change with no type: — one in flight when the default changed — archives
+     with "{title}" alone, and says so ("subject: … the title alone"; JSON
+     "subject_fallback": true, Q111); a configured template that uses {type} refuses a
+     change with no type: (change.check-failed, change.no-type). ape's own "apex: …"
+     commits are unchanged (Q112). The project's git hooks run on this
      commit (commit.hooks: run, the default; skip opts out) — ape's status commits keep
      skipping them. A hook that refuses rolls archive back: exit 1, archive.hook-failed,
      the hook output's tail in the message. Then keeps change/<id>'s tip as
@@ -1660,10 +1702,11 @@ Validate one change and list every failure:
     with `ape change approve`), touches non-empty kebab slugs, decisions exist in
     decisions/, paths are valid globs; type: (the archive commit's {type}, D47) one of
     the project's commit types — _apex/config.yaml commit.types (D120), default feat,
-    fix, perf, refactor, docs, test, build, ci, chore — required only when
-    _apex/config.yaml commit.subject uses {type} (change.no-type; change.bad-type);
+    fix, perf, refactor, docs, test, build, ci, chore — required when the subject
+    template uses {type}, as the default "{type}: {title}" does (D193; change.no-type;
+    change.bad-type; ape change new writes one);
     review_tools: [<name>, …] names tools.review entries of _apex/config.yaml whose
-    when: the change matches (the orchestrator runs each before the review; else
+    when: the change matches (the loop runs each before the review; else
     tools.unknown, D74); docs: true marks the milestone's docs change (D130, D152: its
     human-review tasks are the docs check, a delegate's by default — `ape change accept --help`),
     a YAML boolean only (else change.frontmatter); any other key must start with x-
@@ -1760,11 +1803,11 @@ Flags:
 Validate the id and write the change.md skeleton and state.json (draft)
 
 ```
-ape change new <id> --milestone <M>|none --touches a,b [--paths globs] [flags]
+ape change new <id> --milestone <M>|none --touches a,b [--paths globs] [--type <t>] [flags]
 ```
 
 Create development/changes/<id>/ with a change.md skeleton (frontmatter id, milestone,
-touches, paths; # title; ## Why, ## Out of scope (pre-filled with the milestone's Out of
+type, touches, paths; # title; ## Why, ## Out of scope (pre-filled with the milestone's Out of
 scope bullets), ## Delta, ## Tasks, ## Notes) and state.json with status draft, and
 commit both as "apex: <id> draft" (trailer "Change: <id>"). Filling change.md in is the
 author's own commit. A change is planned on the base branch: refused while HEAD is on a
@@ -1778,6 +1821,12 @@ a person's request outside the roadmap. It needs no roadmap entry, inherits no O
 scope, is approved on its own (`ape change approve <id> --by <who>`) instead of through a
 milestone, and counts toward no milestone; it may touch capabilities and carry a delta
 like any change.
+--type is change.md's type: (Q110), the archive commit's {type} — the default subject is
+"{type}: {title}" (D193): one of the project's commit types (_apex/config.yaml
+commit.types, default feat, fix, perf, refactor, docs, test, build, ci, chore; else exit 2,
+usage.type). Without it ape writes fix for --milestone none and feat otherwise (none
+when that type is not among the project's commit types); the planner may change it
+before start. JSON "type" is the type written.
 --touches lists the capabilities the change adds to or modifies (kebab slugs; new ones
 are fine — a capability is born from its first change). --paths are globs used for
 overlap detection. Overlap (shared touches or paths) with another unarchived change
@@ -1791,19 +1840,20 @@ _apex/state/milestones.json (consecutive_blocks), committed on the base branch f
 whichever branch as "apex: <M> consecutive blocks <n> (<id>)"; an archived change of the
 milestone sets it back to 0, inside the archive's commit. At limits.consecutive_blocks
 (default 2), change new and change start of the milestone's changes and
-`ape task apex-orchestrator` for it refuse with exit 1, code milestone.blocks-exceeded,
+`ape task apex-loop` for it refuse with exit 1, code milestone.blocks-exceeded,
 action stop, and `ape status --json` reports it under milestone.diagnostics. A person deals
 with the blocked changes (answer or abandon them) and resets the count by approving the
 milestone again: `ape milestone approve <M> --by <who>`. Fixes count toward no milestone.
 
 Exit codes: 0 ok · 1 id taken (incl. archive), milestone not in roadmap, the milestone past
-limits.consecutive_blocks, or HEAD on a change branch · 2 usage.
+limits.consecutive_blocks, or HEAD on a change branch · 2 usage (incl. usage.type).
 
 Examples:
 
 ```
   ape change new add-tenant-delete --milestone M2 --touches tenants --paths 'internal/api/**'
   ape change new fix-login-redirect --milestone none --touches auth
+  ape change new document-the-api --milestone M2 --touches api --type docs
 ```
 
 Flags:
@@ -1815,6 +1865,7 @@ Flags:
 | `--milestone` | string | `—` | milestone id from roadmap.md, or none for a fix (required) |
 | `--paths` | string | `—` | comma-separated globs, for overlap detection |
 | `--touches` | string | `—` | comma-separated capability slugs (required) |
+| `--type` | string | `—` | change.md's type: (a commit type); default fix for --milestone none, feat otherwise |
 
 ## ape change review
 
@@ -1839,11 +1890,11 @@ ape starts `ape task apex-review --args <id>` detached (survives the caller's sh
 and that session writes review.md and records the verdict with --verdict/--findings.
 It counts as starting apex-review under the nesting rule (D62; see ape task --help):
 from a terminal (depth 0) always; from inside an ape session only from ape's own
-apex-orchestrator run, as its one child (exit 3, session.child-running, while
+apex-loop run, as its one child (exit 3, session.child-running, while
 another child runs, checked before the change is read); from any other session — apex-apply a person ran with ape task,
 say — refused (exit 2, session.depth); never from inside a review session. The
-review session is depth 2 under an orchestrator, its manifest records depth and
-parent_run, and it is stopped when that orchestrator's run ends.
+review session is depth 2 under a loop run, its manifest records depth and
+parent_run, and it is stopped when that loop run ends.
   - which changes: a verified one; or a reviewed one whose review is stale — the work
     changed since the review's sha, what archive refuses as review.stale (D51 Q16):
     --run first verifies it again in-process, as `ape change verify <id>` would
@@ -1882,7 +1933,7 @@ in JSON "outcome"), verdict voided, or no verdict (review.no-verdict; when the s
 last Stop still had background work running, the message says "ended with live
 background work: <tasks>" and JSON outcome.background lists them) · 2 usage
 (bad verdict, findings file missing, --run inside a review session, or the nesting
-rule: session.depth) · 3 --run: the orchestrator's child session is running
+rule: session.depth) · 3 --run: the loop's child session is running
 (session.child-running) · 75 --run: still running, call again.
 
 Examples:
@@ -1973,7 +2024,7 @@ If so ape catches the change up — the one path start, verify and archive share
     them (edit, `git add`, commit with trailer "Change: <id>"); verify refuses until no
     unmerged path or marker remains (exit 1, change.unresolved-conflict); verify and the
     review then run again. When apex-apply cannot resolve them it blocks the change, and
-    the orchestrator re-plans it (D43). A net diff that applies cleanly after all is
+    the loop re-plans it (D43). A net diff that applies cleanly after all is
     committed as "apex: <id> re-applied onto <base> as one commit", and the catch-up ends
     as a clean one
   - the baseline (task checks, effective-spec scenarios, regression command) is re-run
@@ -2451,12 +2502,15 @@ ape costs [flags]
 
 Reads <project>/_output/ape/cost-rollup.json and prints
 totals — today, this week, all-time — broken down per task, chat and (from
-an older ape) pipeline.
+an older ape) pipeline. In an APEX v1 project the loop's task runs are one
+row, "task:apex-loop (+apex-orchestrator)" when an ape before rc.7 recorded
+some of them under the loop's older name (Q95); JSON keeps both buckets as
+recorded.
 
   ape costs                          Project rollup (human / json).
   ape costs run <run-id>             Single task run (reads manifest.yaml):
                                      its own totals, its parent_run and depth
-                                     (D62), and for an orchestrator run the
+                                     (D62), and for a loop run the
                                      children it started and tree_cost_usd
                                      (its own cost plus theirs). Totals are
                                      always the run's own session, here and in
@@ -2702,11 +2756,17 @@ Accept records it as it is ("apex: ADR-NNNN accepted (recorded)"), unless its te
 since that commit (decision.accepted-edited: restore it first). The lift migration's
 records (by "lift") count as records.
 
+Only a person accepts (OI-4): refused in a model session (APE_SESSION or CLAUDECODE set,
+a `!` line inside Claude Code included) with exit 2, session.person-only — unless, in the
+person's own Claude Code session, the person typed "accept <ADR-NNNN>" in that turn (E2:
+`ape hook pre-tool --help`; --by is then git config user.name, recorded with the prompt;
+another --by is session.by-mismatch, exit 1).
+
 A person's acceptance is recorded on the base branch (D11, D38): refused on a change's
 branch, change/<id> (code branch.change-branch; `git switch <base>` first).
 
-Exit codes: 0 accepted · 1 no such ADR, not proposed, malformed, or HEAD on a change
-branch · 2 usage.
+Exit codes: 0 accepted · 1 no such ADR, not proposed, malformed, HEAD on a change
+branch, or session.by-mismatch · 2 usage, or a model session with no grant.
 
 Examples:
 
@@ -2805,6 +2865,10 @@ the project (H27):
                       when absent — a fresh clone; ape project init installs
                       it —, another tool's hook without the line, or not
                       executable
+    hooks.prompt      the UserPromptSubmit hook ape hook user-prompt missing
+                      from or altered in .claude/settings.json (project
+                      check's notice hooks.prompt-absent): WARN — without it a
+                      person act from a Claude Code session is refused (E2)
   None of v0's rows run there: --strict is green on a healthy v1 project.
 
   Anywhere else: the rows below, v0's included, plus apex.v0, which WARNs
@@ -3326,18 +3390,25 @@ the hook payload (JSON) on stdin.
                   development/specs/**, changes/*/state.json, archive/**, _apex/state/**,
                   an existing development/briefs/** file, and Bash commands that create,
                   delete or push a git tag, push at all, stop processes by name (pkill,
-                  killall), or rebase or merge on a change branch
+                  killall), or rebase or merge on a change branch; grants a person act
+                  on the person's own words (E2), and denies one without them
+  user-prompt     UserPromptSubmit: records the prompt a person typed, which is what
+                  grants a person act (E2); never blocks the prompt
 
   pre-commit      git's pre-commit hook (installed by `ape project init` and the lift):
                   the commit secret scan on the staged added lines; exit 1 refuses
                   the commit (commit.secret)
 
 Every Claude Code hook exits 0; a block or deny is expressed in its JSON output.
+When the project's ape pin cannot run (.bingo/ape.mod; exit 13 for other verbs),
+pre-tool exits 2 with the same message, so Claude Code blocks the call: the guard
+fails closed. stop and session-start keep 13, which blocks nothing.
 pre-commit is git's, not Claude Code's: its exit code is the verdict.
 
-In a session ape task launches in a v1 project, the three hooks also come inline
-in ape's --settings (with --inline), so a hand-edited settings.json cannot drop
-them; the settings.json copy then does nothing, so each event is decided once.
+In a session ape task launches in a v1 project, session-start, stop and pre-tool also
+come inline in ape's --settings (with --inline), so a hand-edited settings.json cannot
+drop them; the settings.json copy then does nothing, so each event is decided once.
+user-prompt is never inline: in a session ape launched it records nothing.
 
 Subcommands:
 
@@ -3345,6 +3416,7 @@ Subcommands:
 - `pre-tool` — PreToolUse hook: deny edits to specs, state.json, the archive, _apex/state and briefs, git tag writes, git push, pkill/killall, and rebases on a change branch
 - `session-start` — SessionStart hook: inject `ape status --brief` as additional context
 - `stop` — Stop/SubagentStop hook: block a stop while background work runs or the in-progress change's checks are red
+- `user-prompt` — UserPromptSubmit hook: record the prompt a person typed (E2)
 
 ## ape hook pre-commit
 
@@ -3442,7 +3514,52 @@ rebase it and re-take the baseline at the base tip). Allowed: rebase/merge --abo
 --quit, git merge-base, merge-file and merge-tree, and rebase or merge on any other
 branch. Parsed like the tag rule, with the same limits.
 
+Bash, too (E2, T6): denies a command that names _apex/state/prompts or
+_apex/state/grants, or runs `ape hook user-prompt`, `ape hook pre-tool` or `ape __run`:
+they write or act on the records a person act rests on.
+
+Person acts (E2; D178, D179): eight commands are a person's — from a terminal outside
+Claude Code as always, or in the person's own Claude Code session on the person's own
+words. Each line is the command, then what the person types (the phrase grammar):
+  ape milestone approve <M>                               approve <M>
+  ape change approve <fix-id>                             approve <fix-id>
+  ape change answer <change-id> --text "<answer>"         answer <change-id>: <answer>
+  ape change accept <change-id> T<n>                      accept T<n> of <change-id>
+  ape project accept-config                               accept the config
+  ape milestone close <M> --accept-red "<reason>"         accept red on <M>
+  ape change archive <change-id> --allow-pending-human    allow pending human on <change-id>
+  ape decision accept <ADR-NNNN>                          accept <ADR-NNNN>
+A Bash command that runs one is allowed only when the prompt that opened this turn — the
+tool call's prompt_id is the prompt's — is recorded by `ape hook user-prompt`, the
+session's transcript holds the person's user message with that promptId and the same
+words, and the phrase is there: its words in order, the target exact (M2, T3, the change
+id, ADR-0012; case aside), no negation word (not, no, never, don't and every n't, wait,
+hold, stop, cannot, nope) before them in their sentence nor among the three words after the
+target, and the sentence not a question; for an answer, the --text itself after the target.
+"yes", "ok", "do it" and "approve it" grant nothing. Then pre-tool writes a grant,
+_apex/state/grants/<sha256 of the command line>.json, used once, for 120s; a prompt grants
+each act and target once. The command line is normalised — the verb, its arguments and
+every flag set but --cwd, --json, --wait and --no-detach, as --name=value, sorted — and
+must be literal (no $ or backquote anywhere), one person act per command. The command
+consumes the grant and records by: <git config user.name> (prompt <ts>: "<the sentence,
+at most 160 characters, secrets redacted>"); a --by there must be git config user.name
+(else session.by-mismatch). Without a grant it is refused, session.person-only, naming the
+phrase; pre-tool denies it first, saying why. A `!` line fires no hook, so it can never be
+granted. In a session ape launched (APE_SESSION) nothing is recorded or granted.
+A long act (approve, --accept-red, --allow-pending-human; D179) that meets a run of the
+same command line on its milestone or change — still running (exit 75: run it again), or
+ended with its result not yet printed — attaches with no grant; another run there is
+run.busy; once its result is printed, the same command is a new act and needs the
+person's words again.
+
 Anything else: no output.
+
+When the project's ape pin cannot run here — it names an ape below the floor (the
+installed framework's min_ape_version, or 1.0.0 in a v1 project without
+_apex/ape-commands.yaml) or one that is not installed — this hook exits 2 with the
+pin's message, which Claude Code reads as a deny: the guard fails closed rather than
+letting every tool call through. APE_TOOLCHAIN=local in the session's environment
+runs this ape regardless.
 
 Flags:
 
@@ -3525,6 +3642,29 @@ Flags:
 | ---- | ---- | ------- | ----------- |
 | `--cwd` | string | `—` | project directory (default: the payload's cwd) |
 | `--timeout` | duration | `0s` | ceiling for each command run, overriding _apex/config.yaml timeouts.<tier>.max (default: check 2h, regression 2h, gate 4h; capped at ape's hard ceilings 4h/8h/12h); the tier's idle window still applies; exit 124 when exceeded |
+
+## ape hook user-prompt
+
+UserPromptSubmit hook: record the prompt a person typed (E2)
+
+```
+ape hook user-prompt [flags]
+```
+
+UserPromptSubmit hook (E2, D178). Appends {ts, session_id, transcript_path, prompt,
+prompt_id} — the prompt at most 64 KiB — to _apex/state/prompts/<session_id>.jsonl
+(ignored, never committed): what `ape hook pre-tool` grants a person act on (its --help
+has the phrase grammar). Records nothing in a session ape launched (APE_SESSION: ape types
+those prompts itself) or outside a v1 project. Never blocks the prompt: it prints nothing
+and exits 0, an error noted on stderr. `ape project init` registers it; missing, `ape project check`
+lists the notice hooks.prompt-absent and `ape doctor` the row hooks.prompt — and a person
+act from a Claude Code session is refused (session.person-only).
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | project directory (default: the payload's cwd) |
 
 ## ape log
 
@@ -3678,7 +3818,8 @@ approved milestone; gate and close refuse a gate that differs from the approved 
 Committed together as "apex: <M> approved".
 
 Before it records anything, approve runs the gate once against the current tree (D70 B),
-synchronously, under timeouts.gate (default 30m), with progress lines on stderr. A new
+under timeouts.gate (default 30m), in a detached run (OI-12; below), with progress lines
+in its log. A new
 gate must run and be red — it is red until the milestone's work is done:
   exit 0                                  refused, milestone.gate-green (action replan):
                                           a green gate proves nothing the milestone adds
@@ -3704,10 +3845,38 @@ Refused on a change branch (see `ape milestone --help`).
 
 Only a person approves (D47 Q6): refused in a model session — APE_SESSION or CLAUDECODE
 set, which includes a `!` line inside Claude Code — with exit 2, code
-session.person-only. Run it from a plain terminal.
+session.person-only, unless, in the person's own Claude Code session, the person typed
+"approve <M>" in this turn (E2: `ape hook pre-tool --help`): --by is then optional and must be
+git config user.name (else session.by-mismatch, exit 1), and the record's by is
+"<user.name> (prompt <ts>: \"<the person's words>\")". The run lock records the act
+(person_act): running the same command again while it runs (exit 75), or before its result
+is printed, attaches with no new grant; another run on the milestone is run.busy.
 
 Exit codes: 0 ok · 1 no such milestone, done, malformed (Gate/Goal missing), the gate green
-or broken, or HEAD on a change branch · 2 usage, or a model session.
+or broken, HEAD on a change branch, or session.by-mismatch · 2 usage, or a model session
+with no grant.
+
+Detached runs (D58 2.3): the command takes the run lock of its change (or milestone),
+_apex/state/runs/<id|M>.json, and runs in a detached worker (`ape __run`, its own
+session, output in _apex/state/runs/<id|M>.log), so the call that started it can be cut,
+backgrounded or killed without stopping it. The call waits up to --wait (default 9m, at
+most 9m30s; 0 returns at once); a run that ends in time is printed as always, with the same
+exit code and --json shape. Otherwise the call exits 75, still running: "… still running
+since <time> — run the same command again to attach" (--json: {"running": true, "verb",
+"scope", "since", "log", "pid", "log_tail"}, the shape `ape change review --run` has).
+Running the same command again attaches: it waits again and prints the run's result once it
+ends — never a second run — or exits 75 again with the log lines the run wrote since the
+last call (stderr; --json: "log_tail"). A result no call
+printed yet is printed by the next call of the same verb while HEAD has not moved. While a
+run holds the lock, another of these verbs on the same change or milestone is refused:
+run.busy (exit 3, action retry; the message names the running verb and since when). A lock
+whose process is gone (killed, the machine restarted) is removed and reported as
+run.interrupted (exit 1, action retry) — never an attempt. A run stopped by SIGTERM/SIGINT
+kills its checks and records nothing — no attempt, no state commit, no gate run — and
+reports run.interrupted. No check outlives the worker. Never run these with
+run_in_background, and never end a turn on an exit 75: run the same command again.
+Beside the exit codes above: 75 still running · 3 run.busy · 1 run.interrupted · 2 a
+--wait outside 0–9m30s (usage.wait).
 
 Examples:
 
@@ -3719,9 +3888,10 @@ Flags:
 
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
-| `--by` | string | `—` | who approves (required) |
+| `--by` | string | `—` | who approves (required from a terminal; in a Claude Code session, git config user.name) |
 | `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
 | `--json` | bool | `false` | machine output (JSON on stdout) |
+| `--wait` | duration | `9m0s` | how long this call waits for the detached run (at most 9m30s; 0 returns at once); exit 75 while it still runs — run the same command again to attach |
 
 ## ape milestone close
 
@@ -3772,8 +3942,11 @@ run}, the Status line reads "done (accepted red by <who> <ts> <sha>)", committed
 "apex: <M> done (accepted red)", and `ape status` shows it (JSON milestones[].accept_red;
 the brief names the last such milestone). A green gate closes as usual and accepts nothing.
 Only a person passes it: refused in a model session (APE_SESSION or CLAUDECODE set, a `!`
-line inside Claude Code included) with exit 2, session.person-only. A person tags after
-close.
+line inside Claude Code included) with exit 2, session.person-only — unless, in the person's
+own Claude Code session, the person typed "accept red on <M>" in this turn (E2: `ape hook pre-tool --help`;
+--by is then git config user.name, recorded with the prompt). Such a close attaches only to
+a run of the same command line: a plain close running on the milestone is run.busy (exit 3),
+never an attach that would drop the flag. A person tags after close.
 
 Exit codes: 0 done · 1 gate red (without --accept-red), changes in flight, not approved,
 no approval record, a changed gate, an archived gate/ in the way, or HEAD on a change
@@ -4031,9 +4204,9 @@ skill (.claude/skills/<skill>/SKILL.md) or user skill ($CLAUDE_CONFIG_DIR, else
 ~/.claude, /skills/<skill>/SKILL.md; a user skill wins over a project one). Each must
 be installed (tools.not-installed) and slash-invocable — not user-invocable: false
 (tools.not-invocable) — because ape task types it as a slash command; a malformed
-block is tools.invalid. The orchestrator may start these skills as children, beside
+block is tools.invalid. The loop may start these skills as children, beside
 apex-plan, apex-change, apex-apply, apex-review, apex-release and apex-accept (D62,
-D76); apex-handoff and apex-orchestrator never.
+D76); apex-handoff, apex-loop and the operator's apex-orchestrator never.
 
 ape project check reports the same findings (exit 1).
 
@@ -4137,6 +4310,7 @@ Subcommands:
 - `codes` — List the diagnostic codes v1 commands report in --json failures
 - `init` — Create the development/ skeleton and merge ape's hooks (never overwrites)
 - `lift` — Lift an APEX v0 project to v1 in one commit (the mechanical half of the migration)
+- `operator-interface` — Bring a project made before rc.7 to the operator interface (the v1.0.0_seq-07 migration)
 
 ## ape project accept-config
 
@@ -4174,7 +4348,10 @@ A person who made the change, or approves it, accepts it: this command commits a
 and every guarded change before it is clean. A later change is judged again. A git revert of the change also clears it.
 
 Only a person accepts (D47 Q6): refused in a model session — APE_SESSION or CLAUDECODE set,
-which includes a `!` line inside Claude Code — with exit 2, code session.person-only.
+which includes a `!` line inside Claude Code — with exit 2, code session.person-only,
+unless, in the person's own Claude Code session, the person typed "accept the config" in
+this turn (E2: `ape hook pre-tool --help`; --by is then git config user.name, recorded with
+the prompt; another --by is session.by-mismatch, exit 1).
 Refused on a change branch, and with staged changes in the index.
 
 Exit codes: 0 accepted (prints the commit) · 1 HEAD on a change branch, staged changes, or
@@ -4390,6 +4567,17 @@ line}; [] when none, beside the findings on a failure too), they never change th
                            another tool's hook — add `ape hook pre-commit || exit 1` to
                            it; ape never edits it —, or not executable. ape doctor reports
                            it too (hooks.pre-commit). See ape hook pre-commit --help
+  hooks.prompt-absent      .claude/settings.json does not register `ape hook user-prompt` for
+                           UserPromptSubmit (or it is altered), so the person's prompts are
+                           not recorded and a person act from a Claude Code session is
+                           refused (E2); `ape project init` merges it back. ape doctor
+                           reports it too (hooks.prompt). See ape hook pre-tool --help
+  models.operator-row      _apex/config.yaml has a models.apex-orchestrator row (Q96):
+                           with no models.apex-loop row it is read as apex-loop's (a
+                           project made before rc.7: `ape project operator-interface`
+                           renames it); beside one it is a leftover apex-loop's row
+                           overrides (drop it). The operator's apex-orchestrator runs
+                           in your own session and has no models row
 
 Exit codes: 0 green · 1 findings (listed on stderr, or under "findings" with --json) · 2 usage.
 
@@ -4462,10 +4650,16 @@ then `ape project init` (each names the other in its next:, D162). init's next: 
 for setup while no .claude/skills/apex-* exists; JSON "next" carries the same line.
 
   _apex/config.yaml                  project_name, development_folder, and the models:
-                                     defaults (D65, D93) — apex-apply, apex-orchestrator
+                                     defaults (D65, D93) — apex-apply, apex-loop
                                      and apex-release {model: sonnet, effort: high};
                                      apex-review, apex-plan, apex-change and apex-accept
-                                     {model: opus, effort: medium}. An existing config
+                                     {model: opus, effort: medium}. No row for the
+                                     operator's apex-orchestrator: it runs in your own
+                                     session, on the model you chose (D175, D176). A
+                                     models.apex-orchestrator row (a project made before
+                                     rc.7) is read as apex-loop's while there is no
+                                     apex-loop row, with a warning, until ape project
+                                     operator-interface moves it (see its --help). An existing config
                                      with no top-level models: gets that block appended,
                                      its own text kept byte for byte (restored, with a
                                      warning, if the result would not parse); the
@@ -4480,7 +4674,9 @@ for setup while no .claude/skills/apex-* exists; JSON "next" carries the same li
                                      budget: enforce|off (default off; see ape task --help),
                                      attempts: N red verifies per start (default 5; see
                                      ape change verify --help); commit: {subject,
-                                     hooks} for the archive's squash, and evidence:
+                                     hooks} for the archive's squash (no commit: line
+                                     is written: the subject defaults to
+                                     "{type}: {title}", D193), and evidence:
                                      archive|off (default off) — see ape change archive
                                      --help; notify: <command>, run on a limit stop or a
                                      blocked change — see ape task --help); see "Check
@@ -4489,7 +4685,11 @@ for setup while no .claude/skills/apex-* exists; JSON "next" carries the same li
                                      Project context: read @development/project.md before
                                      planning or changing anything.
                                      (the configured development folder; plain text, so
-                                     Claude Code imports project.md into every session).
+                                     Claude Code imports project.md into every session),
+                                     then the line naming the operator's interface (A13):
+                                     Talk to APEX: type `/apex-orchestrator` in Claude Code.
+                                     (an existing AGENTS.md is not given it: ape project
+                                     operator-interface adds it).
                                      An existing AGENTS.md whose lines carry no
                                      @development/project.md outside code gets that line
                                      after its first # heading (or at the top), and
@@ -4671,7 +4871,9 @@ pins — it is exempt from the pin swap, since a v0 pin names an ape with no v1 
 The output's first lines say which binary runs (version, path) and what becomes of the
 pin: when this ape is a release (vX.Y.Z or vX.Y.Z-rc.N) and bingo is on PATH, the lift
 commit moves the pin to it (bingo get); otherwise the lift prints the one command that
-does, and until the pin moves every other v1 command there needs APE_TOOLCHAIN=local.
+does, and until the pin moves every other v1 command there needs APE_TOOLCHAIN=local —
+every git commit too (the pre-commit hook runs ape) and every Claude session in the
+project (its hooks run ape: start it as APE_TOOLCHAIN=local claude).
 
 Pre-flight (refused, exit 1): a v0 install (_apex/framework.yaml records a v0 version,
 or did in git history) and no v1 layout or earlier lift (lift.not-v0); a version in
@@ -4752,8 +4954,10 @@ The commit:
                  shell ${…}) or a lone … — is listed, not run; Go's ./... is no
                  placeholder. A trailing " # …" shell comment is dropped first
   lays down      the v1 skeleton, as `ape project init --brownfield` (CLAUDE.md keeps its
-                 content, loses the v0 apex:managed block and gains @AGENTS.md),
-                 hot/.gitignore (`*`, when hot/ has none) included: it ignores
+                 content, loses the v0 apex:managed block and gains @AGENTS.md;
+                 AGENTS.md gains "Talk to APEX: type `/apex-orchestrator` in Claude
+                 Code." when it does not name /apex-orchestrator; models: names
+                 apex-loop, never apex-orchestrator), hot/.gitignore (`*`, when hot/ has none) included: it ignores
                  itself, so it is not in the lift commit; and git's pre-commit hook,
                  the secret scan, when the repository has none (an existing one is
                  kept; the output's "git hook" line says which; see ape hook
@@ -4875,6 +5079,77 @@ Flags:
 | `--no-verify-run` | bool | `false` | do not run the regression command (at the tag, and after the commit) |
 | `--timeout` | duration | `0s` | ceiling for each command run, overriding _apex/config.yaml timeouts.<tier>.max (default: check 2h, regression 2h, gate 4h; capped at ape's hard ceilings 4h/8h/12h); the tier's idle window still applies; exit 124 when exceeded |
 
+## ape project operator-interface
+
+Bring a project made before rc.7 to the operator interface (the v1.0.0_seq-07 migration)
+
+```
+ape project operator-interface [--check] [flags]
+```
+
+Since rc.7 (D171) apex-orchestrator is the operator's interface — a skill a person
+opens in their own Claude Code session by typing /apex-orchestrator — and the unattended
+runner of one approved milestone or fix is apex-loop. This brings a project that ape
+project init or the lift made before rc.7 there; the framework's migration
+v1.0.0_seq-07 runs it (command: ape project operator-interface; check: ape project
+operator-interface --check). A project init or the lift made with rc.7 has nothing to do.
+
+One commit, "apex: operator interface (seq-07)", of what is left of:
+  models     _apex/config.yaml's models.apex-orchestrator row renamed to apex-loop, its
+             value kept byte for byte (D176: sonnet/high unless the project chose
+             otherwise); when a models.apex-loop row exists it wins and the old row's
+             lines are removed. Every other byte of the file is kept. models: is not a
+             guarded block, so this is no config.changed. A models: written as a flow
+             mapping ({…}) whose old row must be removed is a person's to edit
+             (project.operator-interface-pending, nothing written)
+  hooks      ape's hooks merged into .claude/settings.json with ape project init's
+             merge: a missing one added, an altered one restored, every other key and
+             hook kept (hooks were only merged by init before)
+  AGENTS.md  the line
+               Talk to APEX: type `/apex-orchestrator` in Claude Code.
+             after the project-context line (else after its first # heading, else at
+             the top), when no line outside code names /apex-orchestrator (A11)
+Idempotent: with nothing left it writes nothing and says "nothing to do" (exit 0).
+
+How ape knows seq-07 ran: from the config, not a marker (a fresh clone would lose one). A
+models.apex-orchestrator row with no models.apex-loop row is the state before seq-07:
+`ape task apex-loop` reads it as apex-loop's, with a warning on stderr, and ape project
+check lists the notice models.operator-row. Beside an apex-loop row it is a leftover,
+the notice says to drop it, and apex-loop's row is the one read.
+
+Refused on a change branch (branch.change-branch), outside a git repository
+(git.not-a-repo), and while _apex/config.yaml, .claude/settings.json or AGENTS.md has
+uncommitted changes (tree.dirty): nothing is written. A command any session may run (not
+person-only).
+
+--check writes nothing: exit 0 when nothing is left, 1
+(project.operator-interface-pending, action person, naming what is left) when something
+is — the migration's check: 0 applied, 1 not applied.
+
+JSON: {"models": "moved"|"removed" (absent when there is no old row), "hooks": [<Event>:
+<command>, …], "agents_line": true|false, "commit"}; "hooks" is always there, [] when
+none. Under --check they say what is left, at the top level beside the failure's
+ok/exit/diagnostics when something is (exit 1).
+
+Exit codes: 0 applied, or nothing to do (--check: nothing left) · 1 refused, or (--check)
+something left.
+
+Examples:
+
+```
+  ape project operator-interface --check
+  ape project operator-interface
+  ape project operator-interface --json
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--check` | bool | `false` | write nothing: exit 0 when nothing is left to do, 1 when something is |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+
 ## ape prompt
 
 Drive an unattended Claude session from a prompt or a handoff file
@@ -4943,7 +5218,10 @@ _apex/config.yaml). It makes no commits of its own.
 A prompt session is a model session under the nesting rule (D62; see ape
 task --help): it starts only outside every ape session (depth 0), and is
 refused inside one (exit 2, session.depth — or session.not-allowed from an
-apex-orchestrator run, which starts only allow-listed skills with ape task).
+apex-loop run, which starts only allow-listed skills with ape task).
+--agent apex-loop is refused (it runs as ape task apex-loop), and so is
+--agent apex-orchestrator (the operator's interface opens with
+/apex-orchestrator in a person's own Claude Code session).
 
 Exit codes: 0 session completed (Stop hook) · 1 idle-timeout, session
 failed, or the typed line never submitted · 2 usage or preflight error (no _apex/config.yaml, unresolved
@@ -5076,7 +5354,7 @@ ended, and exit with the run's own exit code.
 --wait (or its older name --timeout) bounds the wait. When it expires with
 the run still going, the command exits 75 and the run is untouched: wait
 again. That is how a caller under a tool time limit waits for a run longer
-than the limit — each wait stays inside it. An orchestrator dispatches a
+than the limit — each wait stays inside it. A loop run dispatches a
 skill as `ape task <skill> --args <id> --detach` and then
 `ape run wait <id> --wait 9m` until it stops exiting 75 (D61).
 
@@ -5092,8 +5370,8 @@ stderr (its "log"), so a --output-format json envelope reads clean.
 --json prints one object instead of the lines: id, state (running, ended or
 lost), exit_code (null until it ends), log, stdout, run_id and run_dir (the
 run's own record, once it has one), depth and parent_run (the nesting rule:
-2 and the orchestrator's run for a session an orchestrator started),
-stop_reason ("parent_gone" when ape stopped it because that orchestrator
+2 and the loop's run for a session a loop run started),
+stop_reason ("parent_gone" when ape stopped it because that loop run
 ended), and result: the session's last assistant message, read from its
 transcript, at most 2048 bytes (result_truncated: true when cut). result is
 absent when there is no transcript to read. The exit codes are the same.
@@ -6078,9 +6356,9 @@ and unsafe while keeping the apescript orchestration surface fully
 available. See docs/reference/apescript.md for the per-group rules.
 
 A script is a conductor (D62): it runs at depth 0, from a terminal, and the
-sessions it starts are depth 1 — an apex-orchestrator among them holds the
-project's one orchestrator lock. It refuses inside any ape session (exit 2,
-code session.depth), the orchestrator's included, because a script starts
+sessions it starts are depth 1 — an apex-loop among them holds the
+project's one loop lock. It refuses inside any ape session (exit 2,
+code session.depth), the loop's included, because a script starts
 model sessions.
 
 Exit codes: 0 success · 1 the script returned an error, panicked, or a
@@ -6143,10 +6421,10 @@ of the session it runs in (see ape service submit --help). The daemon
 refuses a request without one (wire v2; a pre-rc.4 client's request is
 refused, never run) and one from depth 2 with session.depth (action stop),
 spawning nothing; a script job is refused from depth 1 too. From depth 1
-only an apex-orchestrator run's job runs — its run must be a running
-apex-orchestrator manifest in the job's project_root — and only a task of a
+only an apex-loop run's job runs — its run must be a running
+apex-loop manifest in the job's project_root — and only a task of a
 skill on its allow-list, one child at a time (session.not-allowed,
-session.child-running): the job's ape task runs under the orchestrator's
+session.child-running): the job's ape task runs under the loop's
 session marker, as its child (depth 2, parent_run, in its children, stopped
 when it ends). A depth-0 job runs as before. A refusal is a micro error whose
 code is the nesting code, its body {v, code, action, message}; job.status
@@ -6217,9 +6495,9 @@ computed as `ape task` computes its own nesting depth — the session marker
 widen it by scrubbing its environment. Any caller in the given body is
 replaced. The daemon refuses a request without a stamp, and one from depth
 2, with session.depth (action stop). From depth 1 it accepts only an
-apex-orchestrator run's job, a task of a skill on that project's allow-list,
+apex-loop run's job, a task of a skill on that project's allow-list,
 one child at a time (session.not-allowed, session.child-running), and runs
-it as that orchestrator's child (depth 2, parent_run, listed in its
+it as that loop run's child (depth 2, parent_run, listed in its
 children, stopped with it). From depth 0 it runs the job as before.
 
 The stamp is the client's word: a raw NATS publish can claim depth 0. The
@@ -6229,8 +6507,13 @@ The subject is ape.svc.<name>.<slug>.<kind>.run, the slug derived from the
 daemon's primary project: --service-root, by default the request's
 project_root.
 
+A task of apex-orchestrator is refused before anything is sent (exit 2,
+skill.renamed, action stop): since rc.7 it is the operator's interface, opened
+with /apex-orchestrator in a person's own Claude Code session, and the
+unattended runner is apex-loop (see ape task --help).
+
 Exit codes: 0 accepted (the reply on stdout) · 1 no daemon answered, or NATS
-failed · 2 usage, a malformed request, or a refusal (session.depth,
+failed · 2 usage, a malformed request, or a refusal (skill.renamed, session.depth,
 session.not-allowed, VALIDATION, PROJECT_NOT_ALLOWED) · 3 busy
 (session.child-running, session.orchestrator-running, BUSY_EXCLUSIVE,
 BUSY_KEY): retry later. A refusal prints the daemon's message with its code.
@@ -6239,7 +6522,7 @@ Examples:
 
 ```
   ape service submit task '{"skill":"apex-plan","args":"M2"}'
-  ape service submit task '{"project_root":"/abs/repo","skill":"apex-orchestrator","args":"M1"}' --name ci
+  ape service submit task '{"project_root":"/abs/repo","skill":"apex-loop","args":"M1"}' --name ci
 ```
 
 Flags:
@@ -6267,7 +6550,9 @@ and ape script sessions that run through them — with its run id, the skill
 ape typed, its depth and parent run (the nesting rule, D62), the ape
 process running it (PID) and the claude it spawned (claude_pid in JSON).
 ape reads those rows to tell which session a command runs under, so a
-pruned row only ever belongs to a process that is gone. Rows an older ape
+pruned row only ever belongs to a process that is gone. Rows show the skill
+as recorded: a loop run an ape before rc.7 started reads apex-orchestrator,
+and counts as apex-loop's for the nesting rule (its lock and children, Q95). Rows an older ape
 wrote for `ape pipeline`'s web mode, retired with APEX v0, carry a port and URL.
 
   ape sessions               Show one row per live session.
@@ -6363,8 +6648,8 @@ Show where the project stands, from the records ape keeps:
     changes[].lane "fix"; else "milestone"). Approved fixes (changes[].approved: {by, at,
     plan_digest}) are listed before milestone changes — started ones first, then by
     approval time — and JSON "fixes" holds the ids of those not blocked, in the order they
-    run: the first runs ahead of milestone work, at the orchestrator's next change boundary
-    (never in parallel), or alone with `ape task apex-orchestrator --args <id>`, and next
+    run: the first runs ahead of milestone work, at the loop's next change boundary
+    (never in parallel), or alone with `ape task apex-loop --args <id>`, and next
     points at it. A fix awaiting approval is listed last, with the command a person runs
     (`ape change approve <id> --by <who>`). A fix's runs (`ape task <skill> --args <fix-id>`)
     count toward no milestone's spend
@@ -6384,7 +6669,7 @@ Show where the project stands, from the records ape keeps:
     {by, at, text}, kept once it is started again); next has it re-planned and started
   - human review (H4, D47): every change lists awaiting_human (always present in JSON, []
     when none): its human-review tasks no person has accepted, once only the person is
-    left — the change is reviewed, or archived. The orchestrator skips such a change. A
+    left — the change is reviewed, or archived. The loop skips such a change. A
     reviewed change awaiting a person is not archived next — next names the accept a
     person runs. Archived changes
     with unaccepted human-review tasks (archived past them by a person) are listed after
@@ -6399,13 +6684,17 @@ Show where the project stands, from the records ape keeps:
     or by "delegate:<skill>" with its run when _apex/config.yaml human_review delegates
     them (D75; "Accepted by a delegate" in the long output); and each human-review task's
     newest delegate verdict (JSON changes[].delegate: {"T2": {verdict, reason, run, at,
-    voided}}): a fail or a voided run leaves the task awaiting a person, and the brief
-    says why. JSON changes[].delegable: [{task, reason}] (D152, omitted when none) are the
+    voided, defects, returned}}): a fail or a voided run leaves the task awaiting a
+    person, and the brief says why — unless the fail went back to the change (D188:
+    returned, it named a defect in the change's own diff; JSON changes[].delegate_returns:
+    {"T2": [{run, reason, defects, at}]}, as state.json records them): the change is
+    in-progress again, the brief shows the reason and next names apex-change, and once
+    it is reviewed again the task is the delegate's again. JSON changes[].delegable: [{task, reason}] (D152, omitted when none) are the
     awaiting tasks a delegate may take now — reason "configured" (human_review delegates)
     or "docs-default" (a docs change's docs check, change.md docs: true, its diff only
     the docs (release.docs, docs.changelog, docs.user_docs) and the development folder,
     human_review.docs not person); a task whose
-    delegate failed or was voided is a person's and not listed. next names the delegate
+    delegate failed (not returned) or was voided is a person's and not listed. next names the delegate
     for the first (`ape change accept <id> <T> --delegate --wait 9m`) before a person
   - spend so far: the sum of finished ape task/pipeline run manifests
   - red at baseline, not any change's own (JSON "pre_existing_red": [{change, kind, ref,
@@ -6429,26 +6718,36 @@ Show where the project stands, from the records ape keeps:
     "archive_running" when its process is alive; on the first line): status only reports
     it — the next writing command rolls a crashed one back (archive.interrupted; see
     `ape change archive --help`)
-  - next: what the way of working says comes next, derived from the state alone
+  - next: what the way of working says comes next, derived from the state alone; JSON
+    "next_why" beside it (and "Why next:" in the long output, not --brief) is its reason,
+    one line (Q100) — next stays one string
   - the roadmap's Next (JSON "roadmap_next": ["2026-10-16 <text> (from <id>)", …], []
     when none; a count line in the human output): the findings noticed out of scope that
     apex-plan triages, as the base branch's roadmap.md holds them (`ape next add` writes
     there from any branch). Not the same field as "next", the step above
   - JSON "docs": {changelog, user_docs} from _apex/config.yaml docs: ({} when unset), for
     the skills that keep a changelog and user docs current
-  - JSON "config": {commit_types, release_scheme, release_docs} — the project's commit
-    types (commit.types, default feat, fix, perf, refactor, docs, test, build, ci, chore),
+  - JSON "config": {commit_types, release_scheme, release_docs, commit_subject} — the
+    project's commit types (commit.types, default feat, fix, perf, refactor, docs, test,
+    build, ci, chore), the archive's subject template (commit.subject, default
+    "{type}: {title}", D193 — the effective one, for skills to read instead of guessing),
     release scheme (release.scheme: semver, the default, date or edition) and the docs a
     release brings up to date (release.docs, default README.md and docs/ where they exist;
     D129), defaults filled in, for apex-change and apex-release (D120)
   - the latest ape task run (JSON "latest_run": {skill, run_id, status, stopped,
     resets, resets_at, message, depth, parent_run}): how it ended, e.g. "stopped:
     usage-limit, resets 2026-10-16T23:00:00+02:00" when a claude.ai usage limit
-    stopped it (see ape task --help, exit 14); a session an orchestrator started
+    stopped it (see ape task --help, exit 14); a session a loop run started
     names that run ("started by <run>"; depth 2, parent_run)
   - JSON "sessions": the model sessions ape launched that run in this project now
     ([{run_id, kind, skill, depth, parent_run, pid, started_at}], [] when none): an
-    apex-orchestrator run at depth 1 and its one child at depth 2 (D62)
+    apex-loop run at depth 1 and its one child at depth 2 (D62). The loop's
+    run also carries relay (OI-11): {context_tokens, context_window, context_fill,
+    context_relay, relays, relays_cap, relay_of} — its session's context as the newest
+    turn of its transcript shows it, over the model's window (context_fill null and
+    context_window 0 when the window is unknown: no relay then), the threshold
+    (limits.context_relay), the relays so far and their cap (limits.relays), and the
+    run it relays; the brief says "context 12 % (relay at 60 %), relays 0/5"
 
 --brief renders at most 25 lines (what the SessionStart hook injects).
 
@@ -6557,7 +6856,18 @@ line (a person's call) lets sessions start again. An unparseable
 _apex/config.yaml in a v1 project refuses every session (exit 2) rather
 than run it with no limits.
 
-A session of apex-orchestrator is also refused (exit 1, code
+apex-orchestrator is refused (exit 2, code skill.renamed, action stop), and
+so is the same skill through ape service submit task and an ape script's
+RunTask: since rc.7 (D171) it is the operator's interface, a skill a person
+opens in their own Claude Code session by typing /apex-orchestrator, and the
+unattended runner of one approved milestone or fix is apex-loop. The
+refusal carries both pointers: `ape task apex-loop --args <M>` (the run's own
+--args) and /apex-orchestrator. It is no alias: a stopped run's older resume
+line fails loudly instead of starting the wrong skill. A loop run an older
+ape recorded as apex-orchestrator still counts as the loop's (its lock, its
+children; ape costs groups both names).
+
+A session of apex-loop is also refused (exit 1, code
 milestone.blocks-exceeded) when the milestone it runs — --args M<n>, else
 the current one — has had limits.consecutive_blocks (default 2) changes
 blocked in a row; a person deals with them and re-approves the milestone,
@@ -6615,7 +6925,7 @@ failure stays diagnosable after the fact.
 
 A run's commits are the range its HEAD moved over. A commit in it that was
 made while another ape session's run in the same checkout went (not this
-run's parent orchestrator, not its own children) cannot be told apart, so
+run's parent loop run, not its own children) cannot be told apart, so
 neither run claims it: both list it under commits_shared, in the JSON
 envelope and the run manifest, and it is left out of commits and of the
 commit-message check.
@@ -6645,29 +6955,47 @@ caller's stamp that ape service submit adds — see ape service --help):
   depth 0  a terminal, a Claude Code session ape did not launch, a shell,
            ape script, the service daemon: may start any session
   depth 1  a session started from depth 0: may start a child only when it is
-           ape's own apex-orchestrator run (ape task apex-orchestrator),
-           only a skill on its allow-list (apex-plan, apex-change,
-           apex-apply, apex-review, apex-release, apex-accept, the
-           human_review: delegate skill, and every skill the tools: slots
-           name), and one child at a time
-  depth 2  a session an orchestrator started: starts nothing
+           ape's own apex-loop run (ape task apex-loop), only a skill on its
+           allow-list (apex-plan, apex-change, apex-apply, apex-review,
+           apex-release, apex-accept, the human_review: delegate skill, and
+           every skill the tools: slots name), and one child at a time
+  depth 2  a session a loop run started: starts nothing
 A refusal is exit 2, code session.depth or session.not-allowed (action
 stop); a second child while one runs is exit 3, session.child-running, and
-a second apex-orchestrator run in a project exit 3,
+a second apex-loop run in a project exit 3,
 session.orchestrator-running (action retry). Deterministic ape commands are
 never limited. ape decides the depth from what it recorded, never from the
 model: the session's marker (APE_SESSION, APE_DEPTH) and the process
 ancestry — every session it launches is a row in ~/.ape/registry.json
 naming the ape process and the claude it spawned, so a scrubbed environment
 changes nothing. Every session carries APE_DEPTH, and a child also
-APE_PARENT_RUN (the orchestrator's run) and APE_PARENT_PID (the ape process
+APE_PARENT_RUN (the loop's run) and APE_PARENT_PID (the ape process
 running it); its manifest records depth and parent_run, and it is stopped,
-termination parent_gone, when that process is gone. An orchestrator's
+termination parent_gone, when that process is gone. A loop run's
 manifest lists its children and tree_cost_usd when it ends: always, $0 and
 no children included, so an absent tree_cost_usd means not computed (totals
 stay its own). There is no switch to turn the rule off.
 
-An orchestrator dispatches a skill as
+The loop relay (OI-11): an APEX v1 loop session's context grows with its
+milestone, so ape relays it. At its next child launch (ape task <skill>,
+ape change review --run, ape change tool, ape change accept --delegate)
+with its context fill at or over _apex/config.yaml
+  limits:
+    context_relay: 0.6   # 0 < x <= 0.95; default 0.6
+    relays: 5            # relays per loop run; default 5
+the launch is refused (exit 2, code session.relay, action stop): the loop
+starts nothing, replies and ends, and this process starts a fresh loop
+session with the same args — its manifest records relay_of (the run it
+relays) and relay (the count), under the same lock; the JSON envelope
+carries relays and relay_of. The fill is the newest turn of the loop
+session's transcript (input + cache read + cache creation tokens) over its
+model's context window; an unknown window is no relay, said once. Past
+limits.relays the launch is refused with limits.relays (exit 1, action
+person) and the run stops, exit 1, termination relays. Both keys are
+guarded (ape project accept-config), like every limit. ape status --json
+shows a live loop's fill and relays (sessions[].relay).
+
+A loop run dispatches a skill as
   ape task <skill> --args <id> --detach --output-format json
 which prints {"id", "wait", "log", "stdout"} (four lines without json), then
   ape run wait <id> --wait 9m --json
@@ -6676,9 +7004,11 @@ result (see ape run wait --help).
 
 Exit codes: 0 success · 1 run failed, idle timeout, the typed line
 never submitted, an APEX v1 milestone budget stopped or refused the
-session, or a v1 limit or ape floor refused it · 2 usage or
-preflight error, an APEX v0 project (run its pinned v0 ape), or the nesting
-rule refused the session (session.depth, session.not-allowed) · 3 REPL
+session, or a v1 limit or ape floor refused it, or the loop's relays ran
+out (limits.relays) · 2 usage or
+preflight error, an APEX v0 project (run its pinned v0 ape), apex-orchestrator
+(skill.renamed), or the nesting rule refused the session (session.depth,
+session.not-allowed), or the loop relay refused a child launch (session.relay) · 3 REPL
 never became ready (last pane on stderr), or a session lock another run
 holds (session.child-running, session.orchestrator-running) · 5 upstream
 API failure · 6 the dispatch violated its declared commit ownership (the run
