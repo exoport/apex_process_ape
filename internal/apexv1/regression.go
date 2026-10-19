@@ -82,6 +82,42 @@ type RegressionVerdict struct {
 	// command always fails: nothing shows it would pass.
 	Reason string `json:"reason,omitempty"`
 	Detail string `json:"detail,omitempty"`
+	// Skipped: verify did not run the command (Q87) — "docs-only", every
+	// path the change touched is docs or the development folder. Paths
+	// are the docs paths it touched (the development folder not listed;
+	// the first regressionPathsShown, paths_total counts them); exit 0,
+	// failed false.
+	Skipped    string   `json:"skipped,omitempty"`
+	Paths      []string `json:"paths,omitempty"`
+	PathsTotal int      `json:"paths_total,omitempty"`
+	// NotSkipped: the change touched only docs, yet verify ran the
+	// command — why (docs.tested, an unaccepted docs config, a command
+	// naming a touched path).
+	NotSkipped string `json:"not_skipped,omitempty"`
+}
+
+// skippedRegression is the verdict of a regression command cmd verify
+// skipped for a docs-only change that touched paths, beside the
+// change's baseline base.
+func skippedRegression(cmd string, base *RegressionBaseline, paths []string) *RegressionVerdict {
+	v := &RegressionVerdict{Cmd: cmd, Skipped: RegressionSkippedDocsOnly, Paths: paths}
+	if base != nil && base.Cmd == cmd {
+		exit := base.Exit
+		v.BaselineExit, v.BaselineSHA = &exit, base.SHA
+	}
+	if v.PathsTotal = len(paths); v.PathsTotal > regressionPathsShown {
+		v.Paths = paths[:regressionPathsShown]
+	}
+	return v
+}
+
+// skip is v when it is a skipped command's verdict, else nil: what
+// state.json's verify records.
+func (v *RegressionVerdict) skip() *RegressionVerdict {
+	if v == nil || v.Skipped == "" {
+		return nil
+	}
+	return v
 }
 
 // regressionCmd is the configured regression command's change tier — what
