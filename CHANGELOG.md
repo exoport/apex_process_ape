@@ -6,7 +6,8 @@ On top of rc.6e: the orchestrator split (D171, D178–D182) — the loop is `ape
 and `/apex-orchestrator` is the operator's own Claude Code session — with person acts
 attested by the person's own words (E2, D179, OI-12), the loop's context relay (D174,
 D181), the delegate's return of a change (D188), semantic archive subjects by default
-(D193, D194), and research's rc.6e lift probes R32–R34 (D180, D184).
+(D193, D194), and research's rc.6e lift probes R32–R34 (D180, D184); rc.7b adds the `.claude/` git split
+(D203) and the standard ADR-0001 (D205, D206, D210).
 
 ### The loop is `apex-loop` (Q95–Q97)
 
@@ -73,6 +74,37 @@ D181), the delegate's return of a change (D188), semantic archive subjects by de
   `feat` otherwise. `change start` refuses a change with no `type:`.
 - Under the default only, a change already in flight with no `type:` archives with its
   title (`subject_fallback`). ape's own `apex:` commits are unchanged.
+
+### rc.7b: what `.claude/` commits (D203, D204; Q113–Q116)
+
+- **The root `.gitignore` gets the `.claude/` shape:** `.claude/*`, `!.claude/settings.json`,
+  `!.claude/skills/` and `CLAUDE.local.md`, written by init, the lift, `ape framework
+  setup|update` (a v1 install) and seq-07. A whole-folder `.claude` ignore is rewritten in
+  place; the project's own `.claude/<x>` lines and every other line stay as they are.
+- **The lift needs no hand edit for an ignored `.claude/`:** its pre-flight judges ignores as
+  the rewrite leaves them; `lift.claude-ignored` remains only for a rule ape cannot rewrite
+  (a nested `.gitignore`, `.git/info/exclude`, `core.excludesFile`), and checks
+  `.claude/skills/` as well as `settings.json`. `project check`'s `settings.ignored` covers
+  `skills/` too.
+- Fixes `ape project init` failing with `git.commit-failed` in a repo that ignores `.claude/`.
+
+### rc.7b: the standard ADR-0001 and apex-v0/apex-v1 wording (D205, D206, D210, D211, D215)
+
+- **APEX's standard ADR-0001, "Record architecture decisions",** ships in the payload
+  (`_apex/standards/adr-0001.md`); ape embeds the same bytes as the fallback for an init
+  before setup, and `make check-framework` fails when they differ.
+- **init writes it accepted** (`by: "APEX standard (ape project init)"`, recorded with
+  `standard: {framework_version, sha256}`); **the lift** writes it as ADR-0001 in place of the
+  apex-v0 governance standard and renumbers the other ADRs from 0002. A project's own ADR-0001
+  is never replaced (`decision.standard-differs`).
+- **`ape decision standard [--check]`** (the framework's seq-08): replaces a lifted or an
+  older standard ADR-0001 in its own `apex: ADR-0001 standard <version>` commit, removes a
+  proposed supersede of the lifted standard, and leaves a project that accepted its own
+  supersede alone (opted out). `decision.accepted-edited` accepts only a recorded standard.
+  Notices `decision.standard-stale` and `decision.standard-superseded`.
+- **No bare "v0"/"v1" in what ape writes into a project:** commit messages (`apex: lift from
+  apex-v0 <ver>`), the lift's disposition and report, ADR gap texts, the pre-commit hook script
+  and the pin note say `apex-v0` / `apex-v1`. JSON keys, codes and tags are unchanged.
 
 ### `ape project lift` and the pin (R32–R34)
 

@@ -2731,10 +2731,15 @@ accepted (`ape decision accept`); an accepted decision's text is fixed — `ape 
 refuses an edit to it — and a different decision is a new ADR that supersedes it
 (`ape decision new <slug> --supersedes ADR-NNNN`).
 
+ADR-0001 is APEX's standard ADR, "Record architecture decisions" (D205): ape project
+init and the lift write it, `ape decision standard` keeps it at the installed standard,
+and a project's own decisions number from 0002.
+
 Subcommands:
 
 - `accept` — Accept a proposed ADR and fix its text
 - `new` — Allocate the next ADR number and write the skeleton
+- `standard` — Bring ADR-0001 to APEX's installed standard ADR (framework migrations run it)
 
 ## ape decision accept
 
@@ -2827,6 +2832,90 @@ Flags:
 | `--supersedes` | string | `—` | ADR-NNNN this decision replaces |
 | `--title` | string | `—` | ADR title (default: from the slug) |
 
+## ape decision standard
+
+Bring ADR-0001 to APEX's installed standard ADR (framework migrations run it)
+
+```
+ape decision standard [--check] [flags]
+```
+
+ADR-0001 of every APEX project is APEX's standard ADR, "Record architecture
+decisions" (D205): the decision file, its sections, the proposed → accepted lifecycle,
+and change only by superseding. It is framework-owned, like the payload (D206): its
+text is one shipped version of the standard — the installed payload's
+_apex/standards/adr-0001.md, else ape's own copy of it — recorded in
+_apex/state/decisions.json as accepted by "APEX standard (<the ape command>)", with
+standard: {framework_version, sha256}, the version it came from and the digest of its
+bytes. ape project init and the lift write it. This command brings a project there
+that was made before them, and follows a framework release that changes the standard:
+the framework's migration v1.0.0_seq-08 runs it, as does the entry of each release
+that changes the standard (command: ape decision standard; check: ape decision
+standard --check).
+
+In order:
+  differs    ADR-0001 is the project's own decision (neither the standard nor
+             framework-owned — the apex-v0 governance standard an earlier lift
+             converted, its Lifted from: line naming a use-markdown-adrs record, or a
+             standard ape wrote), or there are two ADR-0001 files: nothing is done; ape
+             never replaces a project's decision (ape project check:
+             decision.standard-differs)
+  opted-out  an ACCEPTED ADR has Supersedes: ADR-0001: the project opted out of the
+             standard; nothing is done, the command says so, and exits 0 (ape project
+             check: decision.standard-superseded). A proposed supersede does not opt out
+  created    there is no ADR-0001: the standard is written as
+             development/decisions/0001-record-architecture-decisions.md
+  kept       ADR-0001 is the installed standard already (compared without its
+             Status: line): nothing is done
+  replaced   ADR-0001 is framework-owned and not the installed standard: its file is
+             replaced by the standard (an old file name, 0001-use-markdown-adrs.md, is
+             removed) and the decisions.json record re-written. When it was the apex-v0
+             governance standard, each PROPOSED ADR that supersedes it is removed too —
+             an unaccepted supersede of what is replaced has nothing left to supersede
+             (pdfa's ADR-0031) — named, with the lines that still cite it, listed and
+             not rewritten. A proposed supersede of a standard ape wrote is a person's
+             pending opt-out and is left. No other ADR is renumbered
+A write is its own commit, "apex: ADR-0001 standard <framework version>" (or "… ape's
+own copy" when no payload is installed). decision.accepted-edited accepts exactly that
+change of an accepted ADR-0001 — its bytes equal the digest ape recorded for a shipped
+standard — and still refuses a hand edit. When a release changes the standard and no
+entry runs this, ape project check lists the notice decision.standard-stale.
+
+Refused on a change branch (branch.change-branch), outside a git repository
+(git.not-a-repo), and while a file it writes (ADR-0001's, decisions.json, an ADR it
+removes) has uncommitted changes (tree.dirty): nothing is written. A command any
+session may run (not person-only): it applies the framework's record, and decides
+nothing a person decides.
+
+--check writes nothing: exit 0 when nothing is due (kept, opted-out or differs), 1
+(decision.standard-pending, action person, naming what is due) when a write is — the
+migration's check: 0 applied, 1 not applied.
+
+JSON: {"action": "created"|"replaced"|"kept"|"opted-out"|"differs", "path", "source":
+"_apex/standards/adr-0001.md"|"ape", "framework_version", "replaces" (the file it
+replaced), "opted_out_by": [ADR-NNNN, …], "removed_adrs": [{id, path, citations:
+["<file>:<line>", …]}], "commit"}. Under --check it says what is due, under "result"
+beside the failure's ok/exit/diagnostics (exit 1).
+
+Exit codes: 0 written, or nothing due (--check: nothing due) · 1 refused, or (--check)
+a write due.
+
+Examples:
+
+```
+  ape decision standard --check
+  ape decision standard
+  ape decision standard --json
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--check` | bool | `false` | write nothing: exit 0 when nothing is due, 1 when a write of the standard is |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+
 ## ape doctor
 
 Probe the local environment for prerequisites
@@ -2857,9 +2946,10 @@ the project (H27):
     state.gitignore   _apex/state/'s whitelist: milestones.json and
                       decisions.json tracked, ape's run records, logs,
                       hook verdicts and counters ignored and untracked
-    settings.shared   .claude/settings.json not ignored by git: an ignored
-                      one shares ape's hooks with no other checkout (only
-                      ape task sessions get them inline)
+    settings.shared   .claude/settings.json and .claude/skills/ not ignored
+                      by git: an ignored one shares ape's hooks, or the
+                      framework's skills, with no other checkout (only
+                      ape task sessions get the hooks inline)
     hooks.pre-commit  git's pre-commit hook does not run ape's secret scan
                       (project check's notice hooks.pre-commit-absent): WARN
                       when absent — a fresh clone; ape project init installs
@@ -3131,7 +3221,14 @@ manifest's min_ape_version is 1.0.0 or later. An APEX v1 release:
     line. .aboard/ is still created
   - ends with 'next: ape project init' when the project has no v1 layout
     yet (and the JSON carries "next"). Either order works; setup first
-    keeps the install commit before the project's v1 epoch.
+    keeps the install commit before the project's v1 epoch
+  - puts the .claude/ shape in the root .gitignore, in the install commit
+    (D203; created when absent): .claude/*, !.claude/settings.json,
+    !.claude/skills/ and CLAUDE.local.md, a whole-folder .claude ignore
+    rewritten in place — so the skills it installs are committed even where
+    .claude/ was ignored. A file of yours the rewrite un-ignores (a skill of
+    your own) is listed and left out of the commit. See ape project init
+    --help; the output's "Ignore:" line and JSON "gitignore" say what it did
 
 The install is committed as 'chore(framework): install APEX framework
 vX.Y.Z' with Framework-Version / Framework-Commit trailers and
@@ -3246,7 +3343,11 @@ see 'ape framework setup --help' for what makes it APEX v1. Installing an
 APEX v1 release removes the project's APEX v0 migration entries
 (_apex/migrations/v0.*) in the update commit, and the runner never plans
 or runs an entry below 1.0.0, whatever the ledger says; the ledger keeps
-its history. v0's notices and its .gitignore lock line are skipped.
+its history. v0's notices and its .gitignore lock line are skipped. An
+APEX v1 install puts the .claude/ shape in the root .gitignore before the
+migrations run, in the update commit, as setup does (see 'ape framework
+setup --help'): the skills are committed where .claude/ was ignored, and
+the v1.0.0 lift finds the shape in place.
 
 Then any pending PROJECT-DATA migration (PLAN-25 D10), and then the
 framework's own per-version UPGRADE list from _apex/migrations/*.md.
@@ -4540,6 +4641,12 @@ Validate the whole project and list every failure, not just the first.
                            and shared through git: settings.ignored when git ignores it
                            (and does not track it), since its hooks then reach no other
                            checkout — only `ape task` sessions get them inline
+  .claude/skills/          shared through git too (D203): settings.ignored when git
+                           ignores a skill folder there (asked of one no release ships),
+                           since the framework's skills then reach no other checkout.
+                           `ape project init` puts the .claude/ shape in the root
+                           .gitignore (see its --help); an ignore elsewhere is removed
+                           by hand
   provenance               since the v1 epoch (the newest "apex: project init" or "apex: lift"
                            commit; nothing before it is judged), one git log walk: a commit
                            touching development/specs/** must be an archive squash — a
@@ -4591,6 +4698,18 @@ line}; [] when none, beside the findings on a failure too), they never change th
                            renames it); beside one it is a leftover apex-loop's row
                            overrides (drop it). The operator's apex-orchestrator runs
                            in your own session and has no models row
+  decision.standard-stale  ADR-0001, APEX's standard ADR (D205, D206), is absent, or is
+                           framework-owned and not the installed standard (an earlier
+                           text, or the apex-v0 governance standard an earlier lift
+                           converted): `ape decision standard` writes it (the
+                           framework's migration v1.0.0_seq-08 runs it, and the entry
+                           of a release that changes the standard)
+  decision.standard-superseded
+                           an accepted ADR supersedes ADR-0001: the project opted out
+                           of the standard, and updates leave ADR-0001 alone
+  decision.standard-differs
+                           ADR-0001 is the project's own decision, not the standard:
+                           ape never replaces it; a person decides
 
 Exit codes: 0 green · 1 findings (listed on stderr, or under "findings" with --json) · 2 usage.
 
@@ -4717,6 +4836,17 @@ for setup while no .claude/skills/apex-* exists; JSON "next" carries the same li
   development/changes/               the changes in flight
   development/archive/               archived and abandoned changes
   development/decisions/
+  development/decisions/0001-record-architecture-decisions.md
+                                     ADR-0001, APEX's standard ADR "Record architecture
+                                     decisions" (D205), accepted: the installed payload's
+                                     _apex/standards/adr-0001.md, else ape's own copy;
+                                     recorded in decisions.json as accepted by "APEX
+                                     standard (ape project init)" with standard:
+                                     {framework_version, sha256} — the framework's own
+                                     record, no person act. Kept when ADR-0001 is the
+                                     standard; any other ADR-0001 is left as it is (JSON
+                                     standard_adr.action differs; see ape decision
+                                     standard)
   development/briefs/                each plan's input, dated and verbatim (YYYY-MM-DD-<slug>.md,
                                      written by apex-plan; never edited — see ape project check)
   hot/.gitignore                     "*" when hot/ has no .gitignore (an existing one is kept):
@@ -4751,9 +4881,30 @@ hooks.pre-commit-absent with the line to add. The output's "git hook" line and J
 "pre_commit" ({path, status: installed|present|kept, runs_ape}) say which happened. git
 never versions .git/hooks, so a fresh clone has none: run init again, which installs it.
 
+What .claude/ commits (D203): .claude/settings.json (ape's hooks) and .claude/skills/
+(the framework's skills) are the team's and tracked; the rest of .claude/
+(settings.local.json, your own agents) and CLAUDE.local.md are personal. init puts that
+shape in the root .gitignore (created when absent):
+  # APEX (ape): .claude/settings.json and .claude/skills/ are the team's; …
+  .claude/*
+  !.claude/settings.json
+  !.claude/skills/
+  CLAUDE.local.md
+With no .claude rule the block is appended (only its missing lines when part of it is
+there); an ignore of the whole folder (.claude, .claude/, /.claude, /.claude/, .claude/**,
+/.claude/**) is rewritten in place to it, since git never reads a negation under an
+ignored folder; your own .claude/<x> lines and every other line are kept as they are.
+Idempotent. The output's ".gitignore:" line and JSON "gitignore" ({action:
+added|rewritten|already, created, uncommitted, revealed}) say which; "revealed" lists
+the files under .claude/ it un-ignored that init does not commit (a skill of your own:
+commit it or ignore it by name). A settings.json it un-ignored is committed with the
+hooks. An ignore elsewhere (a nested .gitignore, .git/info/exclude, core.excludesFile)
+is not rewritten: ape project check reports it (settings.ignored).
+
 Everything init wrote but hot/.gitignore and a hook under .git/ (and settings.json
 when it merged hooks) is committed as "apex: project init", with the files it amended (CLAUDE.md, AGENTS.md, and the config
-when it was tracked and clean); other files that existed before are not touched and
+when it was tracked and clean) and the .gitignore when it was absent or tracked and
+clean; other files that existed before are not touched and
 not committed. JSON: "amended" lists the files init changed, "amended_uncommitted"
 those it left out of the commit.
 
@@ -4875,7 +5026,7 @@ The lift checks the tag on the current branch's upstream, so the branch needs on
 (D162-5): `git push -u origin <branch>` once, if `git rev-parse @{u}` fails.
 
   git push -u origin "$(git branch --show-current)"   # only when the branch has no upstream
-  git tag -a apex-v0-final -m "APEX v0 final" && git push origin apex-v0-final
+  git tag -a apex-v0-final -m "apex-v0 final" && git push origin apex-v0-final
   ape project lift --dry-run        # the whole plan, nothing written
   ape project lift
 
@@ -4894,9 +5045,13 @@ v0.15.0–v0.31.x and a resolvable _apex/config.yaml (lift.unsupported-layout); 
 tree (lift.dirty); apex-v0-final exists (lift.no-tag), is HEAD (lift.tag-not-head),
 and is on the current branch's upstream remote at the same commit, checked with
 git ls-remote — the one network call (lift.tag-not-pushed; lift.remote-unreachable);
-and git ignores nothing the lift commits (lift.claude-ignored) — above all
-.claude/settings.json, where the v1 hooks go: un-ignore it with .claude/* and
-!.claude/settings.json, commit, and re-tag. --dry-run lists every problem, not the first.
+and git ignores nothing the v1 project commits (lift.claude-ignored) — above all
+.claude/settings.json, where the v1 hooks go, and .claude/skills/, where the framework's
+skills go — judged with the root .gitignore as the lift's commit leaves it (the .claude/
+shape below, so a whole-folder .claude ignore there is no refusal); what is refused is an
+ignore ape does not rewrite (a nested .gitignore, .git/info/exclude, core.excludesFile, a
+later line of the root .gitignore), named with its rule: remove it, commit, and re-tag.
+--dry-run lists every problem, not the first, and writes nothing.
 
 The commit:
   deletes        the v0 families, at the paths _apex/config.yaml's folder variables
@@ -4908,8 +5063,22 @@ The commit:
                  indexes, capability and feature registries, deferred records, team
                  memory, project-context. Kept: docs, CHANGELOG, evidence, research,
                  code, _apex/framework.yaml (the migration ledger)
-  converts       every ADR (accepted, superseded, proposed) into
-                 development/decisions/NNNN-<slug>.md, renumbered from 0001 in the
+  writes         ADR-0001, APEX's standard ADR "Record architecture decisions"
+                 (D205): development/decisions/0001-record-architecture-decisions.md,
+                 accepted, the installed payload's _apex/standards/adr-0001.md (else
+                 ape's own copy), recorded in decisions.json by "APEX standard (ape
+                 project lift)" with standard: {framework_version, sha256}. The
+                 apex-v0 governance standard ("Use Markdown Architectural Decision
+                 Records") is identified by its canon source — a record whose
+                 output_document is governance/adrs/adr-NNNN_use-markdown-adrs.md, or
+                 that canon record copied from the governance clone — not by its
+                 number: it is not converted (its text stays at apex-v0-final), its
+                 citations go to ADR-0001, and the disposition and the commit name it
+                 as replaced. A project with no such record gets the standard all the
+                 same. JSON: standard_adr {action: created|replaced, path, source,
+                 framework_version, replaces}
+  converts       every other ADR (accepted, superseded, proposed) into
+                 development/decisions/NNNN-<slug>.md, renumbered from 0002 in the
                  original order, with Status, Date, Supersedes and a "Lifted from:"
                  line. Nothing is invented: no date → git's first date of the file; no
                  Enforced by → "review" (what ape decision new writes); a missing
@@ -4975,6 +5144,14 @@ The commit:
                  the secret scan, when the repository has none (an existing one is
                  kept; the output's "git hook" line says which; see ape hook
                  pre-commit --help)
+  shapes         the root .gitignore's .claude/ rules (D203), as ape project init does:
+                 .claude/*, !.claude/settings.json, !.claude/skills/, CLAUDE.local.md —
+                 a whole-folder .claude ignore (pdfa's .claude/) rewritten in place, else
+                 the block appended; every other line kept. settings.json and skills/ are
+                 the team's, the rest of .claude/ personal. The output's ".gitignore:" line
+                 and JSON "gitignore" ({action: added|rewritten|already, revealed}) say
+                 which; "revealed" lists the files under .claude/ it un-ignored and did not
+                 commit (a skill of your own: commit it or ignore it by name)
   writes         development/lift-disposition.md (16 KB, unless its candidates need
                  more): the binding-rule candidates (CLAUDE.md list items,
                  project-context "don't miss" items, team-memory gotcha titles), EVERY
@@ -5068,7 +5245,9 @@ commit stands either way, and the verdict is in --json and the output.
 --from-update is how the framework's v1.0.0 migration entry runs it inside
 `ape framework update`: uncommitted changes under .claude/skills/, _apex/ (not
 config.yaml or state/), .aboard/ and .gitignore are the install's, left out of the lift
-commit for the update's own; skills the v1 install placed are never deleted.
+commit for the update's own; skills the v1 install placed are never deleted. An untracked
+.claude/settings.json (the update's .claude/ shape un-ignored it) is no refusal: the lift
+merges the v1 hooks into it and commits it.
 
 Exit codes: 0 lifted (or planned) · 1 refused or failed (code in --json) · 2 usage.
 
@@ -5105,7 +5284,7 @@ opens in their own Claude Code session by typing /apex-orchestrator — and the 
 runner of one approved milestone or fix is apex-loop. This brings a project that ape
 project init or the lift made before rc.7 there; the framework's migration
 v1.0.0_seq-07 runs it (command: ape project operator-interface; check: ape project
-operator-interface --check). A project init or the lift made with rc.7 has nothing to do.
+operator-interface --check). A project init or the lift made with rc.7b has nothing to do.
 
 One commit, "apex: operator interface (seq-07)", of what is left of:
   models     _apex/config.yaml's models.apex-orchestrator row renamed to apex-loop, its
@@ -5122,6 +5301,11 @@ One commit, "apex: operator interface (seq-07)", of what is left of:
                Talk to APEX: type `/apex-orchestrator` in Claude Code.
              after the project-context line (else after its first # heading, else at
              the top), when no line outside code names /apex-orchestrator (A11)
+  .gitignore the .claude/ shape (D203, Q114): .claude/*, !.claude/settings.json,
+             !.claude/skills/ and CLAUDE.local.md, as ape project init writes it — appended
+             (the file created when absent), or a whole-folder .claude ignore rewritten in
+             place; every other line kept. Files under .claude/ it un-ignores that are not
+             settings.json are listed ("revealed"), not committed
 Idempotent: with nothing left it writes nothing and says "nothing to do" (exit 0).
 
 How ape knows seq-07 ran: from the config, not a marker (a fresh clone would lose one). A
@@ -5131,8 +5315,9 @@ check lists the notice models.operator-row. Beside an apex-loop row it is a left
 the notice says to drop it, and apex-loop's row is the one read.
 
 Refused on a change branch (branch.change-branch), outside a git repository
-(git.not-a-repo), and while _apex/config.yaml, .claude/settings.json or AGENTS.md has
-uncommitted changes (tree.dirty): nothing is written. A command any session may run (not
+(git.not-a-repo), and while _apex/config.yaml, .claude/settings.json or AGENTS.md (or
+the .gitignore, when it has the shape to take) has uncommitted changes or is untracked
+(tree.dirty): nothing is written. A command any session may run (not
 person-only).
 
 --check writes nothing: exit 0 when nothing is left, 1
@@ -5140,8 +5325,9 @@ person-only).
 is — the migration's check: 0 applied, 1 not applied.
 
 JSON: {"models": "moved"|"removed" (absent when there is no old row), "hooks": [<Event>:
-<command>, …], "agents_line": true|false, "commit"}; "hooks" is always there, [] when
-none. Under --check they say what is left, at the top level beside the failure's
+<command>, …], "agents_line": true|false, "gitignore": "added"|"rewritten" (absent when
+the shape is there), "revealed": [files it un-ignored, not committed], "commit"}; "hooks"
+is always there, [] when none. Under --check they say what is left, at the top level beside the failure's
 ok/exit/diagnostics when something is (exit 1).
 
 Exit codes: 0 applied, or nothing to do (--check: nothing left) · 1 refused, or (--check)

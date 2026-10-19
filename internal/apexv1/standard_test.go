@@ -246,8 +246,12 @@ func TestADRStandard_OptOut(t *testing.T) {
 // still cited, in its own commit. seq-07 is frozen: it leaves ADR-0001.
 func TestDecisionStandard_ReplacesTheLiftedV0Standard(t *testing.T) {
 	p := rc7LiftedProject(t, ADRProposed)
-	_, err := p.OperatorInterfaceCheck()
-	require.NoError(t, err, "seq-07 is frozen as rc.7 built it (D210): ADR-0001 is not its")
+	// seq-07 may still be pending for its own parts (rc.7b adds the
+	// .claude/ shape, D203), but never for ADR-0001 (D210).
+	if _, err := p.OperatorInterfaceCheck(); err != nil {
+		require.NotContains(t, err.Error(), "ADR-0001", "ADR-0001 is not seq-07's (D210)")
+		require.NotContains(t, err.Error(), "decisions/", "ADR-0001 is not seq-07's (D210)")
+	}
 	require.Equal(t, []string{CodeStandardStale}, noticeCodesOf(standardNotices(p)))
 	res, err := p.DecisionStandardCheck(ctx())
 	require.Equal(t, CodeStandardPending, ErrorCode(err))
