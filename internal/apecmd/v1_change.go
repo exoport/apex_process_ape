@@ -839,11 +839,11 @@ rule: session.depth) · 3 --run: the orchestrator's child session is running
 func newChangeAcceptCmd() *cobra.Command {
 	var f v1Flags
 	var task, posTask, by, verdict, reason string
-	var evidence []string
+	var evidence, defects []string
 	var delegate bool
 	var wait time.Duration
 	cmd := v1ChangeLeaf(
-		"accept <id> [T<n>] (--task <T> --by <who> [--evidence <path|url>]... | --delegate [--wait 9m] | --verdict pass|fail --reason \"<text>\" [--evidence <path|url>]...)",
+		"accept <id> [T<n>] (--task <T> --by <who> [--evidence <path|url>]... | --delegate [--wait 9m] | --verdict pass|fail --reason \"<text>\" [--evidence <path|url>]... [--defect <path>]...)",
 		"Accept a human-review task, in flight or archived — a person's act, or a delegate's (D75)",
 		`Record that a person accepted a human-review task (one whose check is "human-review"),
 in state.json's accepted: [{task, by, at, evidence}]. Archive requires every human-review
@@ -936,12 +936,27 @@ delegate may take now (changes[].delegable).
     is the verdict's --evidence, else the verdict file; its accept-* notes are committed
     with the record, which carries the trailer
     "Accepted-By: delegate:<skill> <T> run <run-id>" (and so does the archive squash).
-    On a fail nothing is accepted: the task stays awaiting_human, ape status shows the
-    verdict (JSON changes[].delegate.<T>: {verdict, reason, run, at}), exit 1
-    delegate.fail (action person). A session that records no verdict is a fail, reason
+    On a fail nothing is accepted. A session that records no verdict is a fail, reason
     "no verdict" (D78; its last message is never read for one), or, when its last Stop
     still had background work running, reason "ended with live background work:
     <tasks>" (D88; JSON outcome.background lists them)
+  - a fail goes back to the change (D188), as a review block does, when it names at
+    least one defect in the change's own diff (--defect <path>, a path its diff from
+    base_sha to its tip touches; a path outside the diff is recorded but does not count:
+    outcome.defects_outside), the change is reviewed and not archived, and the task has
+    no return since a person last answered the change or accepted the task: the change
+    goes to in-progress with its review cleared (verify and review run again), state.json
+    records delegate_returns.<T>: [{run, reason, defects, at}], committed as
+    "apex: <id> returned by delegate" where its state lives, exit 1 delegate.returned
+    (action apply); ape status shows the reason, and next names apex-change.
+    JSON outcome.returned is the return
+  - any other fail stays a person's (D78, as D188 amends it): one that names no in-diff
+    defect ("no verdict" included), a second fail of the task after a return, or a
+    fail on an archived change (ape cannot reopen it: a person accepts the task, or has
+    a fix change planned). The task stays awaiting_human, ape status shows the verdict
+    (JSON changes[].delegate.<T>: {verdict, reason, run, at, defects, returned}), exit 1
+    delegate.fail (action person); JSON outcome.to_person says why: no-defect-in-diff,
+    second-fail, archived or not-reviewed (outcome.returns lists the earlier returns)
   - no automatic retry on the same artefact (D78): after a fail, --delegate for that task
     refuses (delegate.already-failed, action person) until the change's tip moves
     (change/<id>'s tip; the archive folder's content once archived)
@@ -949,28 +964,34 @@ delegate may take now (changes[].delegable).
     `+"`ape change accept <id> <T> --delegate`"+` again — it attaches to the running session
   - JSON: {id, task, skill, args, running, detached_id, log, task_exit, launch,
     outcome: {verdict, reason, evidence, notes, violations, voided, accepted,
-    verdict_file, background}}
+    verdict_file, background, defects, defects_outside, returned, to_person, returns}}
 
---verdict pass|fail --reason "<text>" [--evidence <path|url>]...: the delegate session
+--verdict pass|fail --reason "<text>" [--evidence <path|url>]... [--defect <path>]...: the delegate session
 records its verdict — only the session --delegate started for that change and task
 (APE_DELEGATE=<id>/<T>, its run in progress; elsewhere exit 2, delegate.not-in-session).
 It writes _apex/state/runs/delegate/<run-id>.json {change, task, skill, run, verdict,
-reason, evidence, at, change_tip} — ignored state, never a commit. ape, not the session,
+reason, evidence, at, change_tip, defects} — ignored state, never a commit. ape, not the session,
 records the acceptance. --evidence (D78): a URL as given; the session's own
 assets/accept-* note as it is on disk (ape commits it with the acceptance); any other
 path must be committed at change/<id>'s tip while the change is unarchived — where its
 design artefacts live, whatever branch HEAD is on — and a file in the working tree once
 it is archived; each recorded with its SHA-256 (else exit 2, usage.evidence). With no
 --evidence the acceptance rests on the verdict file, recorded by its path and SHA-256.
+--defect <path>, repeatable, only with --verdict fail (else usage.delegate): a file of the
+change's own diff the fail found defective (the docs the change wrote, not a spec the
+delegate disagrees with), relative to the project root; ape, not the session, checks it
+is in the diff when the session ends (above).
 
 Exit codes: 0 recorded · 1 the task has a command check, a draft, or the branch it is
 recorded on is checked out elsewhere; --delegate: off, config not accepted, not
-awaiting, already failed at this tip, fail (no verdict included), voided · 2 usage (no such task, bad evidence, --verdict
+awaiting, already failed at this tip, returned to the change, fail (no verdict
+included), voided · 2 usage (no such task, bad evidence, --verdict
 outside its session) · 75 --delegate: still running, call again.`,
 		"  ape change accept add-tenant-delete --task T2 --by diego\n"+
 			"  ape change accept add-tenant-delete T2 --by diego --evidence docs/review/tenant-delete.png --evidence https://ci.example.com/run/812\n"+
 			"  ape change accept add-tenant-delete T2 --delegate --wait 9m --json\n"+
-			"  ape change accept add-tenant-delete T2 --verdict pass --reason \"matches the task\" --evidence development/changes/add-tenant-delete/assets/accept-T2.md",
+			"  ape change accept add-tenant-delete T2 --verdict pass --reason \"matches the task\" --evidence development/changes/add-tenant-delete/assets/accept-T2.md\n"+
+			"  ape change accept add-docs T2 --verdict fail --reason \"the guide shows <TAB> where T2 asks for a literal tab\" --defect docs/guide.md",
 		&f,
 		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
 			switch {
@@ -983,16 +1004,18 @@ outside its session) · 75 --delegate: still running, call again.`,
 				return v1Fail(cmd, &f, &apexv1.UsageError{Code: "usage.task", Msg: "the task is required: `ape change accept <id> T<n> …` (or --task)"}, nil)
 			}
 			switch {
-			case delegate && (verdict != "" || by != "" || len(evidence) > 0 || reason != ""):
-				return v1Fail(cmd, &f, &apexv1.UsageError{Code: "usage.delegate", Msg: "--delegate starts the delegate session, which records its own verdict and evidence: drop --verdict, --reason, --by and --evidence"}, nil)
+			case delegate && (verdict != "" || by != "" || len(evidence) > 0 || reason != "" || len(defects) > 0):
+				return v1Fail(cmd, &f, &apexv1.UsageError{Code: "usage.delegate", Msg: "--delegate starts the delegate session, which records its own verdict and evidence: drop --verdict, --reason, --defect, --by and --evidence"}, nil)
 			case verdict != "" && by != "":
 				return v1Fail(cmd, &f, &apexv1.UsageError{Code: "usage.delegate", Msg: "--verdict is the delegate's, --by a person's: one or the other"}, nil)
 			case reason != "" && verdict == "":
 				return v1Fail(cmd, &f, &apexv1.UsageError{Code: "usage.delegate", Msg: "--reason goes with --verdict (the delegate's)"}, nil)
+			case len(defects) > 0 && verdict != "fail":
+				return v1Fail(cmd, &f, &apexv1.UsageError{Code: "usage.delegate", Msg: "--defect names what a fail found wrong in the change's own diff: it goes only with --verdict fail"}, nil)
 			case delegate:
 				return runDelegateSession(cmd, &f, p, id, task, wait)
 			case verdict != "":
-				return recordDelegateVerdict(cmd, &f, p, id, task, verdict, reason, evidence)
+				return recordDelegateVerdict(cmd, &f, p, id, task, verdict, reason, evidence, defects)
 			}
 			st, err := p.Accept(cmd.Context(), id, task, by, evidence...)
 			if err != nil {
@@ -1016,6 +1039,7 @@ outside its session) · 75 --delegate: still running, call again.`,
 	cmd.Flags().DurationVar(&wait, "wait", defaultReviewWait, "--delegate: how long this call waits for the session (exit 75 when it is still running)")
 	cmd.Flags().StringVar(&verdict, "verdict", "", "pass or fail: the delegate session's verdict (only inside that session)")
 	cmd.Flags().StringVar(&reason, "reason", "", "--verdict: why")
+	cmd.Flags().StringArrayVar(&defects, "defect", nil, "--verdict fail: a file of the change's own diff the fail found defective (repeatable; D188: a fail naming one goes back to the change once)")
 	return cmd
 }
 

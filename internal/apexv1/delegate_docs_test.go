@@ -93,7 +93,7 @@ func TestDocsDelegate_DefaultOnADocsOnlyChange(t *testing.T) {
 	require.NoError(t, p.SaveDelegateRun(dr))
 	t.Setenv(EnvDelegate, "docs-wave/T2")
 	t.Setenv(envDetachedRun, "run-d1")
-	_, err = p.RecordDelegateVerdict(ctx(), "docs-wave", "T2", "pass", "README and docs/ match the code", nil)
+	_, err = p.RecordDelegateVerdict(ctx(), "docs-wave", "T2", "pass", "README and docs/ match the code", nil, nil)
 	require.NoError(t, err)
 	leaveSession(t)
 	out, err := p.SettleDelegateRun(ctx(), dr)

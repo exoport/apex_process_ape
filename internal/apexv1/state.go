@@ -242,6 +242,11 @@ type State struct {
 	// refs/apex/archive/<id> at archive, refs/apex/abandoned/<id> at
 	// abandon. Local; pushed only by the project's own policy.
 	TipRef string `json:"tip_ref,omitempty"`
+	// DelegateReturns are, per human-review task, the delegate fails ape
+	// sent back to the change (D188): each named a defect in the change's
+	// own diff. One since a person last answered the change or accepted
+	// the task makes the task's next fail a person's.
+	DelegateReturns map[string][]DelegateReturn `json:"delegate_returns,omitempty"`
 }
 
 // Active reports whether a change is in flight: started and neither

@@ -54,12 +54,18 @@ import (
 // When the session ends ape settles it: a session that committed, switched
 // branch or left a file outside the change's assets/accept-* is voided;
 // a pass is recorded by ape exactly as a person's acceptance is, by
-// "delegate:<skill>" with the run's id — never as a person; a fail leaves
-// the task awaiting a person, its verdict shown by `ape status`. A session
-// that ends without recording a verdict is a fail, "no verdict" (D78): its
-// last message is never read for one. A fail is not retried on the same
-// artefact: --delegate refuses (delegate.already-failed) until the change's
-// tip moves.
+// "delegate:<skill>" with the run's id — never as a person. A fail that
+// names a defect in the change's own diff (--defect <path>, D188) goes
+// back to the change, as a review block does: a reviewed change returns
+// to in-progress, its review cleared, the return recorded in its state
+// (delegate_returns.<T>) — once per task until a person answers the
+// change or accepts the task. Any other fail leaves the task awaiting a
+// person, its verdict shown by `ape status`: one that names no in-diff
+// defect, a second fail after a return, a fail on an archived change. A
+// session that ends without recording a verdict is a fail, "no verdict"
+// (D78): its last message is never read for one. A fail is not retried on
+// the same artefact: --delegate refuses (delegate.already-failed) until
+// the change's tip moves.
 //
 // human_review is under the config.changed guard: a model cannot add the
 // block and accept its own work. --delegate refuses while a commit nobody
@@ -274,7 +280,35 @@ type DelegateVerdict struct {
 	Voided   []string   `json:"voided,omitempty"`
 	// ChangeTip is the change's tip the verdict judged (DelegateRun).
 	ChangeTip string `json:"change_tip,omitempty"`
+	// Defects are the paths a fail names as defective (--defect, D188),
+	// project-relative, as the session gave them: ape counts only those in
+	// the change's own diff when it settles the run.
+	Defects []string `json:"defects,omitempty"`
 }
+
+// DelegateReturn is one delegate fail ape sent back to the change (D188):
+// the run, its reason, and the defects in the change's diff it named.
+type DelegateReturn struct {
+	Run     string   `json:"run"`
+	Reason  string   `json:"reason"`
+	Defects []string `json:"defects"`
+	At      string   `json:"at"`
+}
+
+// Why a delegate fail went to a person rather than back to the change
+// (DelegateOutcome.ToPerson, D188).
+const (
+	// ToPersonNoDefect: the fail names no defect in the change's own diff
+	// ("no verdict" included).
+	ToPersonNoDefect = "no-defect-in-diff"
+	// ToPersonSecondFail: the delegate returned the task once already
+	// since a person last answered the change or accepted the task.
+	ToPersonSecondFail = "second-fail"
+	// ToPersonArchived: ape cannot reopen an archived change.
+	ToPersonArchived = "archived"
+	// ToPersonNotReviewed: the change is no longer reviewed.
+	ToPersonNotReviewed = "not-reviewed"
+)
 
 // DelegateVerdictPath is run's verdict file.
 func (p *Project) DelegateVerdictPath(run string) string {
@@ -633,7 +667,11 @@ func (p *Project) loadChangeDoc(file string) *Change {
 // (APE_DELEGATE=<id>/<task>, its run still recorded, and — when set —
 // APE_DETACHED_ID its run). Evidence paths are files in the repository (or
 // URLs), recorded with their SHA-256 as they are now.
-func (p *Project) RecordDelegateVerdict(ctx context.Context, id, task, verdict, reason string, evidence []string) (*DelegateVerdict, error) {
+//
+// defects (--defect, D188) go only with a fail: each is recorded as a
+// project-relative path; whether it is in the change's diff is settled
+// when the session ends, never here.
+func (p *Project) RecordDelegateVerdict(ctx context.Context, id, task, verdict, reason string, evidence, defects []string) (*DelegateVerdict, error) {
 	notIn := func(why string) error {
 		return &UsageError{Code: "delegate.not-in-session", Msg: "--verdict records a delegate session's verdict, and " + why +
 			" — only the session `ape change accept " + id + " " + task + " --delegate` starts records it"}
@@ -659,18 +697,42 @@ func (p *Project) RecordDelegateVerdict(ctx context.Context, id, task, verdict, 
 	if reason == "" {
 		return nil, &UsageError{Code: "usage.reason", Msg: "--reason is required: why the artefact passes or fails the task"}
 	}
+	rels := p.defectPaths(defects)
+	if len(rels) > 0 && verdict != "fail" {
+		return nil, &UsageError{Code: "usage.delegate", Msg: "--defect names what a fail found wrong in the change's own diff: it goes only with --verdict fail"}
+	}
 	ev, err := p.resolveDelegateEvidence(ctx, run, evidence)
 	if err != nil {
 		return nil, err
 	}
 	v := &DelegateVerdict{
 		Change: id, Task: task, Skill: run.Skill, Run: run.DetachedID, Verdict: verdict, Reason: reason, Evidence: ev, At: Stamp(),
-		ChangeTip: run.ChangeTip,
+		ChangeTip: run.ChangeTip, Defects: rels,
 	}
 	if err := p.saveDelegateVerdict(v); err != nil {
 		return nil, err
 	}
 	return v, nil
+}
+
+// defectPaths is a fail's --defect values as project-relative, slash-
+// separated paths, blanks and repeats dropped.
+func (p *Project) defectPaths(items []string) []string {
+	var out []string
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		abs := item
+		if !filepath.IsAbs(abs) {
+			abs = filepath.Join(p.Root, filepath.FromSlash(item))
+		}
+		if rel := p.Rel(filepath.Clean(abs)); !slices.Contains(out, rel) {
+			out = append(out, rel)
+		}
+	}
+	return out
 }
 
 // resolveDelegateEvidence resolves a delegate's --evidence (D78): a URL as
@@ -743,6 +805,18 @@ type DelegateOutcome struct {
 	// Background is the background work the session's last Stop reported
 	// still running, when it ended without a verdict (D88).
 	Background []string `json:"background,omitempty"`
+	// Defects are a fail's --defect paths in the change's own diff (base
+	// ..tip), DefectsOutside the ones that are not and so do not count
+	// (D188).
+	Defects        []string `json:"defects,omitempty"`
+	DefectsOutside []string `json:"defects_outside,omitempty"`
+	// Returned is the return ape recorded when the fail went back to the
+	// change (delegate.returned); ToPerson says why a fail went to a
+	// person instead (ToPerson*), and Returns are the task's earlier
+	// returns when that is a second fail.
+	Returned *DelegateReturn  `json:"returned,omitempty"`
+	ToPerson string           `json:"to_person,omitempty"`
+	Returns  []DelegateReturn `json:"returns,omitempty"`
 }
 
 // delegateMayTouch reports whether a delegate session may leave path
@@ -766,6 +840,8 @@ func (p *Project) delegateMayTouch(run *DelegateRun, rel string) bool {
 // the session's last main-session Stop reported still running
 // (LastStopBackground): a session with no verdict and live background
 // work fails with LiveBackgroundReason rather than "no verdict" (D88).
+// A fail is then settled by settleDelegateFail: back to the change, or a
+// person's (D188).
 func (p *Project) SettleDelegateRun(ctx context.Context, run *DelegateRun, background ...string) (*DelegateOutcome, error) {
 	var violations, notes []string
 	if run.Branch != "" {
@@ -849,7 +925,7 @@ func (p *Project) SettleDelegateRun(ctx context.Context, run *DelegateRun, backg
 		out.VerdictFile = p.Rel(p.DelegateVerdictPath(run.DetachedID))
 	}
 	if v.Verdict != "pass" {
-		return out, nil
+		return out, p.settleDelegateFail(ctx, run, v, out)
 	}
 	a, err := p.AcceptDelegated(ctx, run, v, notes)
 	if err != nil {
@@ -857,6 +933,99 @@ func (p *Project) SettleDelegateRun(ctx context.Context, run *DelegateRun, backg
 	}
 	out.Accepted = a
 	return out, nil
+}
+
+// settleDelegateFail decides where a delegate's fail of run's task goes
+// (D188). It goes back to the change — out.Returned, the caller's
+// delegate.returned — when it names at least one defect in the change's
+// own diff (base_sha..tip, changeTouched), the change is reviewed and not
+// archived, and the task has no return since a person last answered the
+// change or accepted the task (returnsSinceReset). The change goes to
+// in-progress with its review cleared, so verify and review run again,
+// and delegate_returns.<T> records the return, committed as "apex: <id>
+// returned by delegate" where the change's state lives. Otherwise the
+// task stays a person's (out.ToPerson says why; delegate.fail).
+func (p *Project) settleDelegateFail(ctx context.Context, run *DelegateRun, v *DelegateVerdict, out *DelegateOutcome) error {
+	if strings.HasPrefix(run.Folder, p.Rel(p.ArchiveDir())+"/") {
+		out.ToPerson = ToPersonArchived
+		return nil
+	}
+	if err := p.recoverArchive(ctx); err != nil {
+		return err
+	}
+	ci, err := p.requireChange(ctx, run.Change)
+	if fe, ok := errors.AsType[*FailError](err); ok && fe.Code == "change.archived" {
+		out.ToPerson = ToPersonArchived
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	st := ci.State
+	if len(v.Defects) > 0 {
+		touched, err := p.changeTouched(ctx, run.Change, st)
+		if err != nil {
+			return err
+		}
+		for _, d := range v.Defects {
+			if slices.Contains(touched, d) {
+				out.Defects = append(out.Defects, d)
+			} else {
+				out.DefectsOutside = append(out.DefectsOutside, d)
+			}
+		}
+	}
+	if prior := returnsSinceReset(p.withBaseAccepted(ctx, run.Change, st), run.Task); len(prior) > 0 {
+		out.ToPerson, out.Returns = ToPersonSecondFail, prior
+		return nil
+	}
+	if len(out.Defects) == 0 {
+		out.ToPerson = ToPersonNoDefect
+		return nil
+	}
+	if st.Status != StatusReviewed {
+		out.ToPerson = ToPersonNotReviewed
+		return nil
+	}
+	ret := DelegateReturn{Run: v.Run, Reason: v.Reason, Defects: out.Defects, At: Stamp()}
+	next := *st
+	next.Status, next.Review = StatusInProgress, nil
+	next.DelegateReturns = make(map[string][]DelegateReturn, len(st.DelegateReturns)+1)
+	for task, rs := range st.DelegateReturns {
+		next.DelegateReturns[task] = rs
+	}
+	next.DelegateReturns[run.Task] = append(slices.Clone(st.DelegateReturns[run.Task]), ret)
+	if err := p.saveChangeState(ctx, ci, &next, "apex: "+run.Change+" returned by delegate"); err != nil {
+		return err
+	}
+	*ci.State = next
+	out.Returned = &ret
+	return nil
+}
+
+// returnsSinceReset is task's delegate returns since a person last
+// answered the change or accepted the task (by anyone but a delegate):
+// the counter that makes a second fail a person's (D188 Q106).
+func returnsSinceReset(st *State, task string) []DelegateReturn {
+	if st == nil {
+		return nil
+	}
+	reset := ""
+	if st.Answer != nil {
+		reset = st.Answer.At
+	}
+	for _, a := range st.Accepted {
+		if a.Task == task && !strings.HasPrefix(a.By, DelegateByPrefix) && a.At > reset {
+			reset = a.At
+		}
+	}
+	var out []DelegateReturn
+	for _, r := range st.DelegateReturns[task] {
+		if reset == "" || r.At > reset {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // AcceptDelegated records a delegate's pass of run's task exactly as a

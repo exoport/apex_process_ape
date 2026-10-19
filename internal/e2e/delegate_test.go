@@ -20,8 +20,9 @@ import (
 // records the line and its markers in $FAKE_DIR/seen. As apex-accept
 // (a line starting /apex-accept) it writes an evidence note and records
 // its verdict with `ape change accept <id> <T> --verdict …` — FAKE_MODE
-// pass (default), fail, none (no verdict) or tamper (also commits a code
-// edit). FAKE_SLEEP delays the work.
+// pass (default), fail, return (a fail naming wave.sh, in the change's
+// diff, with --defect: D188), none (no verdict) or tamper (also commits a
+// code edit). FAKE_SLEEP delays the work.
 const fakeDelegate = `#!/bin/bash
 if [ "$1" = "--version" ]; then echo "2.1.300 (Claude Code)"; exit 0; fi
 settings=""
@@ -47,6 +48,7 @@ case "$line" in
   case "${FAKE_MODE:-pass}" in
   pass) ape change accept "$id" "$task" --verdict pass --reason "the copy reads well" --evidence "$note" > "$FAKE_DIR/verdict.out" 2>&1 ;;
   fail) ape change accept "$id" "$task" --verdict fail --reason "the copy is truncated" > "$FAKE_DIR/verdict.out" 2>&1 ;;
+  return) ape change accept "$id" "$task" --verdict fail --reason "wave.sh waves in lower case" --defect wave.sh > "$FAKE_DIR/verdict.out" 2>&1 ;;
   tamper) echo "# touched" >> wave.sh; git commit -qam "fix: sneak a code change in"
           ape change accept "$id" "$task" --verdict pass --reason "fine" > "$FAKE_DIR/verdict.out" 2>&1 ;;
   esac ;;
@@ -228,6 +230,39 @@ func TestDelegate_FailLeavesItToAPerson(t *testing.T) {
 	out, code = runApe(t, ape, project, env, "change", "accept", "add-wave", "T2", "--delegate", "--json")
 	require.Equal(t, 1, code)
 	require.Contains(t, out, `"code": "delegate.already-failed"`)
+}
+
+// D188: a fail naming a defect in the change's own diff goes back to the
+// change (delegate.returned, action apply), once: after verify and review
+// again, the next fail is a person's.
+func TestDelegate_FailOnAnInDiffDefectReturnsTheChange(t *testing.T) {
+	ape, project, _, env := delegateProject(t)
+	env = append(slices.Clone(env), "FAKE_MODE=return")
+	out, code := runApe(t, ape, project, env, "change", "accept", "add-wave", "T2", "--delegate", "--wait", "90s", "--json")
+	require.Equal(t, 1, code, "stdout: %s", out)
+	require.Contains(t, out, `"code": "delegate.returned"`)
+	require.Contains(t, out, `"action": "apply"`)
+	c := statusChange(t, ape, project, env)
+	require.Equal(t, "in-progress", c["status"])
+	returns, _ := c["delegate_returns"].(map[string]any)["T2"].([]any)
+	require.Len(t, returns, 1, "%v", c)
+	ret, _ := returns[0].(map[string]any)
+	require.Equal(t, "wave.sh waves in lower case", ret["reason"])
+	require.Equal(t, []any{"wave.sh"}, ret["defects"])
+	msg, err := exec.Command("git", "-C", project, "log", "-1", "--format=%s").Output()
+	require.NoError(t, err)
+	require.Equal(t, "apex: add-wave returned by delegate", strings.TrimSpace(string(msg)))
+
+	_, code = runApe(t, ape, project, env, "change", "verify", "add-wave")
+	require.Equal(t, 0, code)
+	_, code = runApe(t, ape, project, env, "change", "review", "add-wave", "--verdict", "pass", "--findings", "development/changes/add-wave/review.md")
+	require.Equal(t, 0, code)
+	out, code = runApe(t, ape, project, env, "change", "accept", "add-wave", "T2", "--delegate", "--wait", "90s", "--json")
+	require.Equal(t, 1, code, "stdout: %s", out)
+	require.Contains(t, out, `"code": "delegate.fail"`)
+	require.Contains(t, out, "its second fail")
+	require.Contains(t, out, `"to_person": "second-fail"`)
+	require.Equal(t, []any{"T2"}, statusChange(t, ape, project, env)["awaiting_human"])
 }
 
 // D78: a session that records no verdict failed the task.
