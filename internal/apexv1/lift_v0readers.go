@@ -217,21 +217,30 @@ var (
 // itself a path — the whole of a quoted string, or joined to a root
 // ($ROOT/x.md). A testify call's argument is a message only when it is not
 // such a string.
+//
+// R32, from tenax on rc.6d: before all of that, a path inside a sentence
+// in a quoted string — quarantinedFlake(t, "… see development/deferred/.")
+// — reads nothing, whatever call takes the string: ape cannot know a
+// project's own helper is a message. A quoted path reads only where the
+// string is the path (no whitespace in it), is joined to a root, or is
+// itself a command that reads it (sh -c "cat development/…"). An
+// unquoted path is unchanged.
 func readsAt(code string, tok pathTok, byName bool, frames []callFrame) bool {
 	lineStart := strings.LastIndexByte(code[:tok.at], '\n') + 1
+	if lit, prose := literalAt(code, lineStart, tok); prose && !tok.joined {
+		use := lastUseInString(lit)
+		if redirectRe.MatchString(lit) {
+			use = len(lit)
+		}
+		return use > lastMatch(nameMsgRe, lit)
+	}
 	before := code[lineStart:tok.at]
 	pathShaped := tok.joined
 	if tok.at > 0 && tok.end < len(code) {
 		q := code[tok.at-1]
 		pathShaped = pathShaped || strings.IndexByte("\"'`", q) >= 0 && code[tok.end] == q
 	}
-	last := func(re *regexp.Regexp) int {
-		m := re.FindAllStringIndex(before, -1)
-		if len(m) == 0 {
-			return -1
-		}
-		return m[len(m)-1][0]
-	}
+	last := func(re *regexp.Regexp) int { return lastMatch(re, before) }
 	use, msg := last(nameUseRe), last(nameMsgRe)
 	if redirectRe.MatchString(before) {
 		use = len(before)
@@ -257,6 +266,64 @@ func readsAt(code string, tok pathTok, byName bool, frames []callFrame) bool {
 		}
 	}
 	return pathShaped || !byName
+}
+
+// lastMatch is where re's last match in s starts, -1 when none.
+func lastMatch(re *regexp.Regexp, s string) int {
+	m := re.FindAllStringIndex(s, -1)
+	if len(m) == 0 {
+		return -1
+	}
+	return m[len(m)-1][0]
+}
+
+// lastUseInString is lastMatch of nameUseRe in a quoted string's text,
+// skipping a call shape with a space before its ( — a sentence's
+// "under load (see …)" is no load( call.
+func lastUseInString(lit string) int {
+	at := -1
+	for _, m := range nameUseRe.FindAllStringIndex(lit, -1) {
+		if t := lit[m[0]:m[1]]; len(t) > 1 && t[len(t)-1] == '(' && (t[len(t)-2] == ' ' || t[len(t)-2] == '\t') {
+			continue
+		}
+		at = m[0]
+	}
+	return at
+}
+
+// literalAt is the quoted string on its line that tok sits in (R32): lit
+// its text from the opening quote up to tok, and prose when the whole
+// string holds whitespace — a sentence, not a path. Line by line, as the
+// rest of the class: a string opened on an earlier line is not one here
+// (callFrames decides that case), and one left open runs to the line's
+// end. A \ escapes the next byte except in a ` string.
+func literalAt(code string, lineStart int, tok pathTok) (lit string, prose bool) {
+	var q byte
+	open := -1
+	for i := lineStart; i < tok.at; i++ {
+		switch c := code[i]; {
+		case q == 0:
+			if c == '"' || c == '\'' || c == '`' {
+				q, open = c, i+1
+			}
+		case c == '\\' && q != '`':
+			i++
+		case c == q:
+			q = 0
+		}
+	}
+	if q == 0 {
+		return "", false
+	}
+	end := tok.end
+	for end < len(code) && code[end] != '\n' && code[end] != q {
+		if code[end] == '\\' && q != '`' {
+			end++
+		}
+		end++
+	}
+	end = min(end, len(code))
+	return code[open:tok.at], strings.ContainsAny(code[open:end], " \t")
 }
 
 // The kinds of a callFrame.
