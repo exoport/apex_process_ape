@@ -174,7 +174,11 @@ regression_new_failures) · red-after-lift (green at the tag: the LIFT broke it 
 in a commit, or reset to the tag and lift with --exclude) · cannot-run (exit 126/127, or
 an output saying a command was not found — "command not found", "No such file or
 directory" — with make's "Error 127", and no failing test named: a tool it runs is
-missing here, which is not a red; read the same at both points) · red-no-baseline. Red at both, the
+missing here, which is not a red; read the same at both points) · red-no-baseline. A run
+that exits 0 but whose output names failing tests (as below) is red for the verdict, by
+those names, and its note says "exit 0, but the output names N failing tests": green at
+the tag, it is red-after-lift with the names in regression_new_failures (a ( … ) block
+without set -e passes on its last line's exit alone). Red at both, the
 failing tests are compared by name where the output names them (go test "--- FAIL:",
 gotestsum "=== FAIL: <pkg> <test>" and "✖ <pkg>", pytest "FAILED", cargo "... FAILED",
 jest "✕", flutter and dart test "<name> [E]", the counters before the name dropped);
@@ -371,7 +375,11 @@ func printLift(w io.Writer, r *apexv1.LiftResult) {
 		if c.RegressionAtTag != nil {
 			at = fmt.Sprintf("exit %d", c.RegressionAtTag.Exit)
 		}
-		fmt.Fprintf(w, "  %d [%s] %s at %s, exit %d at the lift commit — %s\n", i+1, c.Verdict, at, apexv1.LiftTag, c.Regression.Exit, c.Cmd)
+		after := fmt.Sprintf("exit %d", c.Regression.Exit)
+		if c.Regression.Exit == 0 && c.Verdict != apexv1.LiftRegressionGreen {
+			after = "exit 0 (but the output names failing tests)" // R24: red by the names
+		}
+		fmt.Fprintf(w, "  %d [%s] %s at %s, %s at the lift commit — %s\n", i+1, c.Verdict, at, apexv1.LiftTag, after, c.Cmd)
 	}
 	fmt.Fprintf(w, "next: apex-plan with %s (the judged v1.0.0 migration entry), then a fresh read-only review of it, then yours\n", r.Disposition)
 }
