@@ -42,7 +42,7 @@ Subcommands:
 - `doctor` — Probe the local environment for prerequisites
 - `event` — Publish a session progress event over NATS
 - `framework` — Install and inspect APEX framework assets in a project
-- `hook` — Claude Code hooks for APEX v1 projects (registered by `ape project init`)
+- `hook` — Claude Code and git hooks for APEX v1 projects (installed by `ape project init`)
 - `log` — Publish a structured log record over NATS
 - `metrics` — Scan and publish this session's usage metrics over NATS
 - `milestone` — Add, approve, gate and close roadmap milestones
@@ -2161,6 +2161,19 @@ now must have failed at baseline, else verify fails with the new ones in new_fai
 recorded before rc.5, or one naming more than 500, which stores none, included), red at
 both is pre-existing, as before. new_failures also lists a red run's tests against a
 green baseline.
+Docs-only (Q87): a change whose diff from base_sha to HEAD touches nothing but the
+user-facing docs — release.docs (default README.md and docs/), docs.changelog and
+docs.user_docs — and development/ skips the regression command, and only that: its task
+and scenario checks run, and the milestone gate still runs everything. JSON "regression":
+{cmd, skipped: "docs-only", paths (the docs paths it touched, development/ not listed;
+the first 50, paths_total counts them), baseline_exit, exit 0, failed false}, also
+recorded in state.json as verify.regression; results has no regression row. It runs
+anyway, JSON regression.not_skipped and a human line saying why, when a touched path is
+under docs.tested (docs the project executes), when _apex/config.yaml's release or docs
+block was changed by a commit no person accepted or has an uncommitted edit, or when the
+regression command names a touched docs path or a folder holding one as a word
+(`test -f README.md`, `markdownlint docs/`; the change's own checks run anyway). No skip when the
+change has no base_sha or its diff cannot be read.
 The working tree must hold no uncommitted changes outside development/ — commit first
 (trailer "Change: <id>"): a verify belongs to a sha. HEAD must be on the change's branch,
 change/<id> (D38; else exit 1, code change.wrong-branch).
@@ -2787,6 +2800,11 @@ the project (H27):
     settings.shared   .claude/settings.json not ignored by git: an ignored
                       one shares ape's hooks with no other checkout (only
                       ape task sessions get them inline)
+    hooks.pre-commit  git's pre-commit hook does not run ape's secret scan
+                      (project check's notice hooks.pre-commit-absent): WARN
+                      when absent — a fresh clone; ape project init installs
+                      it —, another tool's hook without the line, or not
+                      executable
   None of v0's rows run there: --strict is green on a healthy v1 project.
 
   Anywhere else: the rows below, v0's included, plus apex.v0, which WARNs
@@ -3290,13 +3308,14 @@ Global flags:
 
 ## ape hook
 
-Claude Code hooks for APEX v1 projects (registered by `ape project init`)
+Claude Code and git hooks for APEX v1 projects (installed by `ape project init`)
 
 ```
 ape hook
 ```
 
-Claude Code hook handlers. Each reads the hook payload (JSON) on stdin.
+Claude Code hook handlers, and git's pre-commit hook. Each Claude Code hook reads
+the hook payload (JSON) on stdin.
 
   session-start   SessionStart: adds `ape status --brief` as context
   stop            Stop and SubagentStop: in a session ape launched, blocks the main
@@ -3309,7 +3328,12 @@ Claude Code hook handlers. Each reads the hook payload (JSON) on stdin.
                   delete or push a git tag, push at all, stop processes by name (pkill,
                   killall), or rebase or merge on a change branch
 
-Every hook exits 0; a block or deny is expressed in its JSON output.
+  pre-commit      git's pre-commit hook (installed by `ape project init` and the lift):
+                  the commit secret scan on the staged added lines; exit 1 refuses
+                  the commit (commit.secret)
+
+Every Claude Code hook exits 0; a block or deny is expressed in its JSON output.
+pre-commit is git's, not Claude Code's: its exit code is the verdict.
 
 In a session ape task launches in a v1 project, the three hooks also come inline
 in ape's --settings (with --inline), so a hand-edited settings.json cannot drop
@@ -3317,9 +3341,49 @@ them; the settings.json copy then does nothing, so each event is decided once.
 
 Subcommands:
 
+- `pre-commit` — git pre-commit hook: refuse a commit whose staged added lines hold a secret
 - `pre-tool` — PreToolUse hook: deny edits to specs, state.json, the archive, _apex/state and briefs, git tag writes, git push, pkill/killall, and rebases on a change branch
 - `session-start` — SessionStart hook: inject `ape status --brief` as additional context
 - `stop` — Stop/SubagentStop hook: block a stop while background work runs or the in-progress change's checks are red
+
+## ape hook pre-commit
+
+git pre-commit hook: refuse a commit whose staged added lines hold a secret
+
+```
+ape hook pre-commit [flags]
+```
+
+git's pre-commit hook (Q89). `ape project init` and `ape project lift` install it
+as <hooks dir>/pre-commit — the folder `git rev-parse --git-path hooks` names: core.hooksPath
+when set, else .git/hooks (a linked worktree's is the main checkout's) — when no
+pre-commit hook is there: a POSIX sh script, marked as ape's by its
+"# ape: pre-commit secret scan" line, that runs `ape hook pre-commit` (ape resolved on PATH
+when git runs it; not on PATH, the commit is refused saying so). A hook that is not ape's
+is never touched: `ape project check` then lists the notice hooks.pre-commit-absent, naming
+the line to add to it (`ape hook pre-commit || exit 1`), and so does `ape doctor`. git never
+versions .git/hooks, so a fresh clone has no hook until `ape project init` runs again
+(idempotent: it installs only what is missing). A hook in a core.hooksPath folder inside
+the project, not ignored, is committed with the init or lift commit.
+
+The scan is the one every commit ape makes goes through: the added lines of what git is
+about to commit (the index git hands its hooks, so `git commit -a` and `git commit <paths>`
+are scanned as they commit), betterleaks' default rules plus ape's aws-access-key-id,
+the secrets.allow list at the guard's baseline (committed AND accepted), and the same
+commit.secret refusal on stderr: each secret as <file>:<line> rule <id>: <redacted>,
+the placeholder fix first, the allow entry a person may paste. Its files stay staged.
+
+Exit codes: 0 clean (prints nothing), not a v1 project, or APE_SCANNED=1 (set by ape on
+its own commits that run hooks — the archive squash, scanned already; the script checks
+it before starting ape) · 1 a secret (commit.secret), or the scan could not run
+(commit.failed): git commits nothing. `git commit --no-verify` skips the hook — a person's
+escape; the archive's scan of the squash stays the backstop.
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | project directory (default: the working directory, where git runs its hooks) |
 
 ## ape hook pre-tool
 
@@ -4319,6 +4383,13 @@ line}; [] when none, beside the findings on a failure too), they never change th
                            approved gate's script is gate drift, so it moves with the
                            milestone's next re-approval (before its approval, when
                            proposed). See ape milestone close --help for the gate folders
+  hooks.pre-commit-absent  git's pre-commit hook (core.hooksPath honoured) does not run
+                           ape's secret scan, so commits ape does not make (a session's
+                           own git commit, a person's) go unscanned until the archive:
+                           absent — a fresh clone; `ape project init` installs it —,
+                           another tool's hook — add `ape hook pre-commit || exit 1` to
+                           it; ape never edits it —, or not executable. ape doctor reports
+                           it too (hooks.pre-commit). See ape hook pre-commit --help
 
 Exit codes: 0 green · 1 findings (listed on stderr, or under "findings" with --json) · 2 usage.
 
@@ -4457,8 +4528,18 @@ A hook that was altered (another matcher, async, a shorter stop timeout) is repl
 by the one above; running init again changes nothing. ape task passes the same
 hooks inline as well, so its sessions have them even when settings.json does not.
 
-Everything init wrote but hot/.gitignore (and settings.json when it merged hooks) is
-committed as "apex: project init", with the files it amended (CLAUDE.md, AGENTS.md, and the config
+Git's pre-commit hook (Q89): in a git work tree, init installs <hooks dir>/pre-commit
+(`git rev-parse --git-path hooks`: core.hooksPath when set, else .git/hooks) when no
+pre-commit hook is there — a sh script marked "# ape: pre-commit secret scan" that runs
+`ape hook pre-commit`, the commit secret scan, so a session's own git commit and a
+person's are scanned as ape's commits are (see ape hook pre-commit --help). An existing
+hook that is not ape's is kept, never edited: ape project check then lists the notice
+hooks.pre-commit-absent with the line to add. The output's "git hook" line and JSON
+"pre_commit" ({path, status: installed|present|kept, runs_ape}) say which happened. git
+never versions .git/hooks, so a fresh clone has none: run init again, which installs it.
+
+Everything init wrote but hot/.gitignore and a hook under .git/ (and settings.json
+when it merged hooks) is committed as "apex: project init", with the files it amended (CLAUDE.md, AGENTS.md, and the config
 when it was tracked and clean); other files that existed before are not touched and
 not committed. JSON: "amended" lists the files init changed, "amended_uncommitted"
 those it left out of the commit.
@@ -4528,12 +4609,16 @@ unparseable and every command refuses it):
                                      $RADIX_DSN") while it is unset or empty, or runs
                                      docker as a command while it is not on PATH, is not
                                      run: reason "unrun" (exit -3), red, never green
-  docs: {changelog: CHANGELOG.md, user_docs: docs/}
-                                     both optional, project-relative: the changelog and
+  docs: {changelog: CHANGELOG.md, user_docs: docs/, tested: [docs/examples/]}
+                                     all optional, project-relative: the changelog and
                                      user docs a user-visible change updates (apex-change
                                      adds the task, apex-review checks it); ape project
                                      check reports a missing path (docs.missing); ape
-                                     status --json carries the block as "docs"
+                                     status --json carries the block as "docs". tested
+                                     (a list, each path once) names the docs the project
+                                     executes (doc-tests, tested examples): a change
+                                     touching one is never docs-only, so ape change
+                                     verify runs its regression command (see its help)
 
 Scope (D45): v1.0: one operator per checkout, on a local trunk; PR mode comes later. Init
 says so (JSON "scope"); change start and archive refuse while the base branch is behind its
@@ -4669,7 +4754,10 @@ The commit:
   lays down      the v1 skeleton, as `ape project init --brownfield` (CLAUDE.md keeps its
                  content, loses the v0 apex:managed block and gains @AGENTS.md),
                  hot/.gitignore (`*`, when hot/ has none) included: it ignores
-                 itself, so it is not in the lift commit
+                 itself, so it is not in the lift commit; and git's pre-commit hook,
+                 the secret scan, when the repository has none (an existing one is
+                 kept; the output's "git hook" line says which; see ape hook
+                 pre-commit --help)
   writes         development/lift-disposition.md (16 KB, unless its candidates need
                  more): the binding-rule candidates (CLAUDE.md list items,
                  project-context "don't miss" items, team-memory gotcha titles), EVERY
@@ -6268,6 +6356,8 @@ Show where the project stands, from the records ape keeps:
   - a milestone a person closed with its gate red (`ape milestone close --accept-red`):
     JSON milestones[].accept_red {reason, by, at, gate}; the brief names the last one, and
     the roadmap lines say "accepted red by <who>: <reason>"
+  - each milestone's newest gate run (D170): JSON milestones[].last_gate {sha (the commit
+    the gate ran at), exit, at, log}, absent before its gate ever ran
   - the checked-out branch (JSON branch; "(on <branch>)" in the first line)
   - fixes first (trial decision D40): a change with "milestone: none" is a fix (JSON
     changes[].lane "fix"; else "milestone"). Approved fixes (changes[].approved: {by, at,

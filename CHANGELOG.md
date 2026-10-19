@@ -6,7 +6,7 @@ On top of rc.5 and the candidates below: research's rc.5 lift findings R16–R22
 state readers (D141), the docs delegate by default (D152), and gates, archive layout,
 hot/ and the secret scan (D155), the changelog in the docs delegate's scope (D158), and no
 wall-clock kill of a run that shows progress (D159), research's rc.6 lift findings R23–R28
-and E-R6b-2's refusal text (D161), the v1 framework install order (D162, D163), and research's rc.6c lift probes R29–R31 (D166).
+and E-R6b-2's refusal text (D161), the v1 framework install order (D162, D163), research's rc.6c lift probes R29–R31 (D166), and rc.6e's docs-only verify, pre-commit scan and status fields (D168, D170).
 
 ### `ape project lift`
 
@@ -108,6 +108,40 @@ and E-R6b-2's refusal text (D161), the v1 framework install order (D162, D163), 
 - **`ape project archive-layout --json` always carries `moved`** (R27): `[]`
   when nothing is left; under `--check` the folders left to move, at the top
   level beside the diagnostics.
+
+### rc.6e: docs-only verify, the pre-commit scan, status (D168, D170; class B/C)
+
+- **A docs-only change's verify skips the regression command** (Q87): every
+  path the change touched is in the docs default's scope (release.docs, the
+  configured docs.changelog and docs.user_docs) or the development folder.
+  Its task and scenario checks still run, and the milestone gate runs
+  everything. The regression runs anyway when a touched path is under the new
+  `docs.tested: [paths]` (docs the project executes), when the `release` or
+  `docs` block is unaccepted or uncommitted, or when the regression command
+  names a touched path or its folder. Verify JSON `regression` gains
+  `skipped: "docs-only"`, `paths`, `paths_total` and `not_skipped`;
+  `state.json` gains `verify.regression` when skipped.
+- **Every commit is scanned when it is made** (Q89): `ape project init` and the
+  lift install git's pre-commit hook (`ape hook pre-commit`, marker
+  `# ape: pre-commit secret scan`; core.hooksPath respected). A model's own
+  `git commit` of a secret is refused with `commit.secret`. A foreign hook is
+  never touched: `project check` lists the notice `hooks.pre-commit-absent`
+  (exit 0) and `ape doctor` warns. **Every `git commit` in an init'd project
+  then needs an rc.6e or later `ape` on PATH** (`--no-verify` or
+  `APE_SCANNED=1` skips it). init/lift JSON gain `pre_commit`.
+- **A lone AWS access key id is refused** (Q88): betterleaks' `aws-access-token`
+  needs its secret key within 5 lines, so ape adds `aws-access-key-id` (same
+  regex and filters, no component).
+- **`ape status --json` `milestones[].last_gate`** `{sha, exit, at, log}`, the
+  commit the gate ran at (D170 A9).
+- **A model's unaccepted `human_review.docs: person`** refuses the docs
+  delegate with `delegate.unaccepted-config`, as the help says (Q90).
+- **`transcript_path` is read from any hook payload** (Q91): a step whose
+  transcript is named only on PostToolUse is costed and watched.
+- **A path inside a quoted sentence is no v0 reader** (Q92, R32): a quoted path
+  reads only when the literal is the path, is root-joined, or is a reading
+  command.
+- betterleaks stays on v2.0.0-rc.2 (v2.0.0 is not released).
 
 ### The lift's regression and readers, again (D166: R29–R31; class C)
 
