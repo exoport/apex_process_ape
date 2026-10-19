@@ -100,7 +100,13 @@ func (p *Project) configFindingsFor(ctx context.Context, epoch string, keys []st
 // lastConfigAcceptance is the newest acceptance commit since epoch, "" when
 // none.
 func (p *Project) lastConfigAcceptance(ctx context.Context, epoch string) string {
-	out, err := git(ctx, p.Root, "log", "-1", "--format=%H", "--fixed-strings", "--grep="+configAcceptedSubject, epoch+"..HEAD")
+	return p.lastConfigAcceptanceOn(ctx, epoch, "HEAD")
+}
+
+// lastConfigAcceptanceOn is lastConfigAcceptance on rev: the secret
+// scan's allow baseline for a commit on rev (R23).
+func (p *Project) lastConfigAcceptanceOn(ctx context.Context, epoch, rev string) string {
+	out, err := git(ctx, p.Root, "log", "-1", "--format=%H", "--fixed-strings", "--grep="+configAcceptedSubject, epoch+".."+rev)
 	if err != nil || out == "" {
 		return ""
 	}

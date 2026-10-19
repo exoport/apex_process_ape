@@ -285,11 +285,12 @@ func (p *Project) recordAcceptedDecision(ctx context.Context, id, path, doc, by 
 	}
 	recs := p.loadDecisionRecords()
 	recs[id] = DecisionRecord{AcceptedAt: Stamp(), By: by, BodySHA256: adrBodyDigest(doc)}
+	own := p.beforeOwnEdit(ctx, p.Rel(p.decisionsJSON()))
 	if err := p.saveDecisionRecords(recs); err != nil {
 		return nil, err
 	}
 	res := &DecisionResult{ID: id, Path: p.Rel(path), Status: ADRAccepted}
-	sha, err := p.commitRecord(ctx, "apex: "+id+" accepted (recorded)", "", p.Rel(p.decisionsJSON()))
+	sha, err := p.commitOwnRecord(ctx, own, "apex: "+id+" accepted (recorded)", "", p.Rel(p.decisionsJSON()))
 	if err != nil {
 		return res, commitFailed(err, "decision recorded but its commit failed: "+err.Error())
 	}

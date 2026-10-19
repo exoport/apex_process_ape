@@ -66,7 +66,10 @@ func TestScanCommit_RefusesAnAddedSecret(t *testing.T) {
 	require.NotContains(t, fe.Msg, fakeToken, "redacted")
 	require.NotContains(t, fe.Msg, fakeToken[:12], "about four characters shown")
 	require.Contains(t, fe.Msg, `secrets: {allow: [{fingerprint: "`+tokenFingerprint()+`", reason: "…"}]}`)
-	require.Contains(t, fe.Msg, "move each to hot/")
+	// E-R6b-2: the placeholder fix first, the allow entry second.
+	require.Contains(t, fe.Msg, " — replace each with a placeholder (`<token>`, `$TOKEN`) — an example in docs never needs a real value — or move a real secret to hot/ and read it from there; if one is not a secret, a person adds its entry")
+	require.Less(t, strings.Index(fe.Msg, "placeholder"), strings.Index(fe.Msg, "secrets: {allow:"))
+	require.Contains(t, fe.Findings[0].Message, " — replace it with a placeholder (`<token>`, `$TOKEN`)")
 	require.Len(t, fe.Findings, 1)
 	require.Equal(t, "app.sh", fe.Findings[0].File)
 	require.Equal(t, 3, fe.Findings[0].Line)
@@ -157,6 +160,40 @@ func TestScanCommit_AllowListFromTheCommittedConfig(t *testing.T) {
 	require.NoError(t, ScanCommit(ctx(), root, "apex: x", "a.sh"))
 }
 
+// R23: since the v1 epoch, secrets.allow is read from the guard's
+// baseline — the newest acceptance, else the epoch — not from HEAD: an
+// entry committed but not accepted lets nothing through, and the refusal
+// says what is missing; once a person accepts it, it does.
+func TestScanCommit_AllowListFromTheAcceptedConfig(t *testing.T) {
+	files := baseFiles()
+	files[configYAML] = "project_name: greeter\n"
+	p := fixture(t, files)
+	run(t, p.Root, "commit", "-q", "--allow-empty", "-m", "apex: project init")
+	write(t, p, configYAML, "project_name: greeter\nsecrets:\n  allow:\n    - {fingerprint: \""+tokenFingerprint()+"\", reason: a fake token in a test}\n")
+	commitAll(t, p, "chore: allow the fake token")
+	write(t, p, "a.sh", "T="+fakeToken+"\n")
+	run(t, p.Root, "add", "--", "a.sh")
+
+	fe := secretFail(t, ScanCommit(ctx(), p.Root, "apex: x", "a.sh"))
+	require.Len(t, fe.Findings, 1, "a committed, unaccepted allow entry does not count")
+	require.Contains(t, fe.Findings[0].Message, " — its allow entry is committed but not accepted: a person runs `ape project accept-config --by <who>`")
+	require.Contains(t, fe.Msg, "the allow entry for "+tokenFingerprint()+" is committed but not accepted: a person runs `ape project accept-config --by <who>`")
+	require.NotContains(t, fe.Msg, "secrets: {allow: [", "no entry to add: it is there")
+	require.Equal(t, CodeCommitSecret, ClassifyFindings(fe.Findings)[0].Code)
+
+	run(t, p.Root, "restore", "--staged", "--", "a.sh")
+	_, err := p.AcceptConfig(ctx(), "ann")
+	require.NoError(t, err)
+	run(t, p.Root, "add", "--", "a.sh")
+	require.NoError(t, ScanCommit(ctx(), p.Root, "apex: x", "a.sh"), "accepted: it counts")
+
+	// A later, unaccepted commit that drops the entry from HEAD does not
+	// take it away either: the baseline decides.
+	write(t, p, configYAML, "project_name: greeter\n")
+	run(t, p.Root, "commit", "-q", "-m", "chore: drop it", "--", configYAML)
+	require.NoError(t, ScanCommit(ctx(), p.Root, "apex: x", "a.sh"))
+}
+
 // Q78: a secret only in a deleted line, or in unchanged context, does not
 // block; a moved file adds no lines.
 func TestScanCommit_DeletedLinesContextAndMovesAreNotScanned(t *testing.T) {
@@ -188,12 +225,88 @@ func TestCommitRecord_PersonsStagedFileIsNotScanned(t *testing.T) {
 	require.Equal(t, "A  mine.env", run(t, p.Root, "status", "--porcelain", "--", "mine.env"))
 
 	// The same file in the pathspec is scanned, and nothing is committed.
+	// It is not ape's own edit: it stays staged, and the refusal says how
+	// to unstage it (R28).
 	head := HeadSHA(ctx(), p.Root)
 	_, err = p.commitRecord(ctx(), "apex: record", "", "mine.env")
 	fe := secretFail(t, err)
 	require.Len(t, fe.Findings, 1)
 	require.Equal(t, "mine.env", fe.Findings[0].File)
 	require.Equal(t, head, HeadSHA(ctx(), p.Root))
+	require.Contains(t, fe.Msg, "mine.env stays staged: `git restore --staged -- mine.env` unstages it; nothing was committed")
+	require.Equal(t, "A  mine.env", run(t, p.Root, "status", "--porcelain", "--", "mine.env"))
+}
+
+// R28: a refused `ape next add` undoes ape's own edit to the roadmap — the
+// tree exactly as before, the refusal says so — and the next harmless
+// `next add` commits (it was refused too while the edit stayed staged).
+func TestAddNext_RefusedEditIsUndone(t *testing.T) {
+	p := fixture(t, baseFiles())
+	write(t, p, "notes.txt", "a person's own work\n")
+	before := run(t, p.Root, "status", "--porcelain")
+	head := HeadSHA(ctx(), p.Root)
+
+	_, err := p.AddNext(ctx(), "rotate GITHUB_TOKEN="+fakeToken, "")
+	fe := secretFail(t, err)
+	require.Contains(t, fe.Msg, "ape's edit to development/roadmap.md was undone; nothing was committed")
+	require.Contains(t, fe.Msg, "nothing was committed: apex: next — rotate GITHUB_TOKEN=ghp_... adds a secret")
+	require.NotContains(t, fe.Msg, fakeToken[:12], "the subject, which holds the text, is redacted too")
+	require.Equal(t, before, run(t, p.Root, "status", "--porcelain"))
+	require.Equal(t, head, HeadSHA(ctx(), p.Root))
+	require.NotContains(t, read(t, p, "development/roadmap.md"), fakeToken)
+
+	res, err := p.AddNext(ctx(), "rotate the GitHub token", "")
+	require.NoError(t, err)
+	require.Equal(t, res.Commit, HeadSHA(ctx(), p.Root))
+	require.Equal(t, before, run(t, p.Root, "status", "--porcelain"))
+}
+
+// A subject cut short (`apex: next — <text>`, 60 characters) that ends
+// in most of a secret is redacted as a whole one is.
+func TestRedactSubject(t *testing.T) {
+	f := []secretFinding{{Redacted: "ghp_...", value: fakeToken}}
+	require.Equal(t, "apex: next — rotate T=ghp_... now", redactSubject("apex: next — rotate T="+fakeToken+" now", f))
+	require.Equal(t, "apex: next — rotate GITHUB_TOKEN=ghp_...", redactSubject(truncate("apex: next — rotate GITHUB_TOKEN="+fakeToken+" betterleaks:allow", 72), f))
+	require.Equal(t, "apex: next — gh", redactSubject("apex: next — gh", f), "a start shorter than 8 is not a secret's")
+}
+
+// R28: a roadmap that held a person's uncommitted edits keeps its working
+// tree (ape's line in it, beside theirs); only ape's staging is taken
+// back, the person's staged hunk kept, and the refusal names the command
+// that clears the rest.
+func TestAddNext_RefusedEditOnADirtyFileOnlyUnstages(t *testing.T) {
+	p := fixture(t, baseFiles())
+	rm := "development/roadmap.md"
+	write(t, p, rm, read(t, p, rm)+"\nstaged by a person\n")
+	run(t, p.Root, "add", "--", rm)
+	write(t, p, rm, read(t, p, rm)+"unstaged by a person\n")
+	staged := run(t, p.Root, "diff", "--cached")
+
+	_, err := p.AddNext(ctx(), "rotate GITHUB_TOKEN="+fakeToken, "")
+	fe := secretFail(t, err)
+	require.NotContains(t, fe.Msg, fakeToken[:12])
+	require.Contains(t, fe.Msg, "ape's edit to "+rm+" was unstaged and left in the working tree, which held uncommitted edits before it: take it out, or `git restore --worktree -- "+rm+"` drops every unstaged edit to "+rm)
+	require.Equal(t, staged, run(t, p.Root, "diff", "--cached"), "the index is as the person left it")
+	doc := read(t, p, rm)
+	require.Contains(t, doc, "unstaged by a person")
+	require.Contains(t, doc, fakeToken, "the working tree is left alone")
+	run(t, p.Root, "restore", "--worktree", "--", rm)
+	require.NotContains(t, read(t, p, rm), fakeToken)
+	require.Contains(t, read(t, p, rm), "staged by a person")
+}
+
+// R28: a file ape created for the refused record (an ADR skeleton) is
+// removed with its staging.
+func TestNewDecision_RefusedSkeletonIsRemoved(t *testing.T) {
+	p := fixture(t, baseFiles())
+	before := run(t, p.Root, "status", "--porcelain")
+	_, err := p.NewDecision(ctx(), "rotate-token", "Rotate "+fakeToken, "")
+	fe := secretFail(t, err)
+	require.Contains(t, fe.Msg, "ape's edit to development/decisions/0001-rotate-token.md was undone")
+	require.NoFileExists(t, filepath.Join(p.Root, "development", "decisions", "0001-rotate-token.md"))
+	require.Equal(t, before, run(t, p.Root, "status", "--porcelain"))
+	_, err = p.NewDecision(ctx(), "rotate-token", "Rotate the token", "")
+	require.NoError(t, err)
 }
 
 // A record commit — state.json through commitPaths — is scanned, and
