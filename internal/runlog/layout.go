@@ -225,6 +225,14 @@ func SessionLocksRoot(projectRoot string) string {
 	return filepath.Join(ApeRoot(projectRoot), "sessions")
 }
 
+// RelaysRoot holds one record per live loop run (APEX v1, OI-11: the
+// loop relay), <run-id>.json: the loop session's transcript and relay
+// count, which a child launch reads to judge the loop's context, and the
+// relay it asked for. Removed when the run ends; like a lock, not a run.
+func RelaysRoot(projectRoot string) string {
+	return filepath.Join(ApeRoot(projectRoot), "relays")
+}
+
 // DelegateRoot holds one verdict per human-review delegate run (APEX v1,
 // D75: `ape change accept --delegate`), <run-id>.json, written by the
 // delegate session's `ape change accept --verdict`. Like a handle, not a

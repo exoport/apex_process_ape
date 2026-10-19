@@ -62,6 +62,8 @@ func TestDiagnosticCodes_PublishedListMatchesTheCode(t *testing.T) {
 		"CodeCommitSecret": CodeCommitSecret,
 		// rc.6e (rc6e-sec).
 		"CodeHooksPreCommitAbsent": CodeHooksPreCommitAbsent,
+		// rc.7 (rc7-relay).
+		"CodeSessionRelay": CodeSessionRelay, "CodeRelaysExceeded": CodeRelaysExceeded,
 	}
 	for _, glob := range []string{"*.go", filepath.Join("..", "apecmd", "v1_*.go")} {
 		files, err := filepath.Glob(glob)

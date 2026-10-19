@@ -749,7 +749,13 @@ func newStatusCmd() *cobra.Command {
     names that run ("started by <run>"; depth 2, parent_run)
   - JSON "sessions": the model sessions ape launched that run in this project now
     ([{run_id, kind, skill, depth, parent_run, pid, started_at}], [] when none): an
-    apex-orchestrator run at depth 1 and its one child at depth 2 (D62)
+    apex-orchestrator run at depth 1 and its one child at depth 2 (D62). The loop's
+    run also carries relay (OI-11): {context_tokens, context_window, context_fill,
+    context_relay, relays, relays_cap, relay_of} — its session's context as the newest
+    turn of its transcript shows it, over the model's window (context_fill null and
+    context_window 0 when the window is unknown: no relay then), the threshold
+    (limits.context_relay), the relays so far and their cap (limits.relays), and the
+    run it relays; the brief says "context 12 % (relay at 60 %), relays 0/5"
 
 --brief renders at most 25 lines (what the SessionStart hook injects).
 
@@ -868,6 +874,9 @@ func statusLong(r *apexv1.StatusReport) string {
 		fmt.Fprintf(&b, "  %s %s %s, depth %d", s.Kind, s.RunID, s.Skill, s.Depth)
 		if s.ParentRun != "" {
 			fmt.Fprintf(&b, ", started by %s", s.ParentRun)
+		}
+		if s.Relay != nil {
+			b.WriteString(", " + s.Relay.Describe())
 		}
 		b.WriteString("\n")
 	}
