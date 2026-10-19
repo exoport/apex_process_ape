@@ -313,7 +313,19 @@ entry unapplied-and-unverifiable, which is reported and blocks nothing.
 The install and the migrations it ran are committed together as
 'chore(framework): update APEX framework to vX.Y.Z', with Framework-Version,
 Framework-Commit, Framework-Migrations and Generator trailers; an update
-that changed nothing commits nothing. When this ape is older than the
+that changed nothing commits nothing. A migration that commits on its own
+(the v1.0.0 lift) lands its commit first.
+
+A 'blocking: true' derivable migration — the lift, above all — is one the
+install is not valid without. When one fails or is not attempted (an
+earlier entry failed, its check could not run, it cannot be run), the
+update exits 1, names it and why, and commits nothing: the install is
+reverted and the tree is as the update found it, so a re-run starts from
+the release again. Its own error is printed where it ran. A commit that
+migration (or an earlier one) made itself stays. With --no-commit the
+result is left in the working tree instead. Any other failed migration
+is reported, the ledger keeps what succeeded, and the update still
+commits the install. When this ape is older than the
 release's min_ape_version, a terminal is offered an ape update first (bingo
 when the project pins ape, else 'ape update'), committed as
 'chore(ape): update ape to vA.B.C' when bingo changed, and the command
@@ -368,8 +380,9 @@ Refuses to run when:
     release, or diverged from it, is left where it is and reported. ape's
     own clones under the user cache are always overwritten
 
-Exit codes: 2 usage; 3 the framework source (no release, missing tag,
-not a release layout); 4 the project tree; 7 not installed; 11 ape below
+Exit codes: 1 a blocking migration was not applied (nothing committed);
+2 usage; 3 the framework source (no release, missing tag, not a release
+layout); 4 the project tree; 7 not installed; 11 ape below
 min_ape_version; 12 a commit failed (the changes are left staged).
 
 A migration is skipped (never forced) when ITS OWN paths have uncommitted
@@ -467,7 +480,7 @@ and unrelated work-in-progress elsewhere does not block anything.`,
 			); err != nil {
 				return err
 			}
-			if err := migrateAndCommitUpdate(cmd, projectRoot, prior, res.Metadata, untracked, noMigrate, !rf.noCommit); err != nil {
+			if err := migrateAndCommitUpdate(cmd, projectRoot, prior, res, untracked, noMigrate, !rf.noCommit); err != nil {
 				return err
 			}
 			if repair {
@@ -496,10 +509,12 @@ and unrelated work-in-progress elsewhere does not block anything.`,
 
 // migrateAndCommitUpdate is the half of `update` after the install: the
 // project-data and upgrade migrations (unless --no-migrate), then the one
-// commit recording the install and the migrations it ran.
-func migrateAndCommitUpdate(cmd *cobra.Command, projectRoot string, prior *framework.Metadata, installed framework.Metadata,
+// commit recording the install and the migrations it ran. A blocking
+// migration left unapplied commits nothing (D162-4): see refuseBlockedUpdate.
+func migrateAndCommitUpdate(cmd *cobra.Command, projectRoot string, prior *framework.Metadata, res *framework.UpdateResult,
 	untracked map[string]bool, noMigrate, commit bool,
 ) error {
+	installed := res.Metadata
 	var applied []string
 	if noMigrate {
 		fmt.Fprintln(cmd.OutOrStdout(),
@@ -508,8 +523,12 @@ func migrateAndCommitUpdate(cmd *cobra.Command, projectRoot string, prior *frame
 		if err := runProjectMigrations(cmd.Context(), cmd.OutOrStdout(), projectRoot); err != nil {
 			return err
 		}
+		start, _ := gitOut(cmd.Context(), projectRoot, "rev-parse", "-q", "--verify", "HEAD")
 		var err error
 		if applied, err = runUpgradeMigrationsApplied(cmd.Context(), cmd.OutOrStdout(), projectRoot); err != nil {
+			if be, ok := errors.AsType[*blockingMigrationError](err); ok {
+				return refuseBlockedUpdate(cmd, projectRoot, untracked, res.Summary.AboardCreated, strings.TrimSpace(start), be, commit)
+			}
 			return err
 		}
 	}
@@ -531,6 +550,42 @@ func migrateAndCommitUpdate(cmd *cobra.Command, projectRoot string, prior *frame
 	}
 	return commitInstall(cmd.Context(), cmd.OutOrStdout(), projectRoot, untracked,
 		updateSubject(prior, &meta, applied), meta, applied, generatorTrailer)
+}
+
+// refuseBlockedUpdate ends an update whose blocking migration failed or was
+// not attempted (D162-4): exit 1, nothing committed, and — in commit mode —
+// the tree reverted to how the update found it, so a re-run starts from
+// the release again rather than from v1 files on a layout they do not fit.
+// With --no-commit the result stays in the working tree, as that flag
+// promises, and the person decides.
+func refuseBlockedUpdate(cmd *cobra.Command, projectRoot string, untracked map[string]bool, aboardCreated bool,
+	start string, be *blockingMigrationError, commit bool,
+) error {
+	w := cmd.ErrOrStderr()
+	state := "the install is left in the working tree (--no-commit): reset it, or fix what stopped the migration"
+	if commit {
+		if err := revertInstall(cmd.Context(), projectRoot, untracked, aboardCreated); err != nil {
+			fmt.Fprintf(w, "Error: %s; reverting the install failed too (%v) — `git status` shows what is left\n", be, err)
+			return reportedErr(ExitRunFailed, be)
+		}
+		state = "the install is not committed, and the tree is back as this update found it: fix what stopped the migration"
+	}
+	fmt.Fprintf(w, "Error: %s — %s (above), then run `ape framework update` again\n", be, state)
+	for _, b := range be.blocked {
+		line := "  " + b.ID + ": " + b.Reason
+		if b.Summary != "" {
+			line += " — " + b.Summary
+		}
+		if b.Command != "" {
+			line += " (runs `" + b.Command + "`)"
+		}
+		fmt.Fprintln(w, line)
+	}
+	if head, _ := gitOut(cmd.Context(), projectRoot, "rev-parse", "-q", "--verify", "HEAD"); commit && start != "" &&
+		strings.TrimSpace(head) != start {
+		fmt.Fprintf(w, "note: the commits a migration made itself stay (git log %s..HEAD); the re-run carries on after them\n", short(start))
+	}
+	return reportedErr(ExitRunFailed, be)
 }
 
 // updateSubject names an update commit. One where only the governance

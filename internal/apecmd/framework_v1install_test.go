@@ -234,6 +234,52 @@ func TestFrameworkInstallV1_PlanListsNoV0Entry(t *testing.T) {
 	require.NotContains(t, buf.String(), "v0.16.0_seq-01")
 }
 
+// D162-4: a blocking migration that fails makes the update exit 1, commits
+// nothing, and leaves the tree as the update found it, so a re-run starts
+// from the release again.
+func TestFrameworkInstallV1_FailedBlockingMigrationCommitsNothing(t *testing.T) {
+	fw, root := v0Installed(t)
+	v1OnTopOf(t, fw, "v1.0.0", v1LiftEntry("exit 1", "echo lift refused >&2; exit 3"))
+	head := gitRun(t, root, "rev-parse", "HEAD")
+	skill, err := os.ReadFile(filepath.Join(root, framework.ProjectSkillsDir, "apex-foo", "SKILL.md"))
+	require.NoError(t, err)
+
+	out, err := runFramework(t, "update", fw, root, "--no-fetch", "--version", "v1.0.0")
+	require.Equal(t, ExitRunFailed, exitCodeOf(t, err), out)
+	require.Contains(t, out, "blocking migration v1.0.0_seq-01 failed (exit 3)")
+	require.Contains(t, out, "the install is not committed")
+
+	require.Equal(t, head, gitRun(t, root, "rev-parse", "HEAD"), "nothing is committed")
+	require.Equal(t, "?? notes.txt", gitRun(t, root, "status", "--porcelain"), "the tree is as the update found it")
+	after, err := os.ReadFile(filepath.Join(root, framework.ProjectSkillsDir, "apex-foo", "SKILL.md"))
+	require.NoError(t, err)
+	require.Equal(t, string(skill), string(after), "the v0 skills are back")
+	meta, err := framework.ReadMetadata(root)
+	require.NoError(t, err)
+	require.Equal(t, "v0.31.0", meta.Framework.VersionTag)
+	require.FileExists(t, filepath.Join(root, "_apex", "migrations", "v0.24.0_seq-01_backfill.md"))
+	require.NoFileExists(t, filepath.Join(root, "_apex", "migrations", "v1.0.0_seq-01_lift.md"))
+}
+
+// D162-4, not attempted: a blocking entry after a failed one is refused
+// the same way.
+func TestFrameworkInstallV1_UnattemptedBlockingMigrationCommitsNothing(t *testing.T) {
+	fw, root := v0Installed(t)
+	writeTree(t, fw, map[string]string{
+		framework.SubtreeMigrations + "/v1.0.0_seq-00_first.md": "---\nid: v1.0.0_seq-00\nversion: 1.0.0\nseq: 0\n" +
+			"kind: derivable\nblocking: false\ncheck: \"exit 1\"\ncommand: \"exit 4\"\n---\nbody\n",
+	})
+	v1OnTopOf(t, fw, "v1.0.0", v1LiftEntry("test -f lifted", "touch lifted"))
+	head := gitRun(t, root, "rev-parse", "HEAD")
+
+	out, err := runFramework(t, "update", fw, root, "--no-fetch", "--version", "v1.0.0")
+	require.Equal(t, ExitRunFailed, exitCodeOf(t, err), out)
+	require.Contains(t, out, "blocking migration v1.0.0_seq-01 not attempted")
+	require.Equal(t, head, gitRun(t, root, "rev-parse", "HEAD"))
+	require.Equal(t, "?? notes.txt", gitRun(t, root, "status", "--porcelain"))
+	require.NoFileExists(t, filepath.Join(root, "lifted"))
+}
+
 // A v0 release installs exactly as before: config seeded from its template,
 // pipelines, the lock-sidecar ignore line, no hint. A regression guard for
 // the v1 branches, so it passes on the old code by design.

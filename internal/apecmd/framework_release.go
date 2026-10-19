@@ -571,6 +571,53 @@ func isV1StatePath(rel string) bool {
 	return rel == state || strings.HasPrefix(rel, state+"/")
 }
 
+// revertInstall puts the tree back as it was before an install that will
+// not be committed (D162-4): the index and every tracked file return to
+// HEAD, and every untracked file that was not there before is removed —
+// the files the install and its migrations added. aboardCreated removes
+// the board this run created, whose contents git ignores. Only commit mode
+// reverts: its precheck proved no tracked file was modified at the start,
+// so nothing here can be the person's. A commit a migration made itself
+// stays; the revert lands on top of it.
+func revertInstall(ctx context.Context, projectRoot string, before map[string]bool, aboardCreated bool) error {
+	if _, err := gitOut(ctx, projectRoot, "reset", "-q"); err != nil {
+		return err
+	}
+	if _, err := gitOut(ctx, projectRoot, "checkout", "-q", "--", "."); err != nil {
+		return err
+	}
+	status, err := porcelain(ctx, projectRoot)
+	if err != nil {
+		return err
+	}
+	for _, e := range status {
+		if !e.untracked || before[e.path] || isV1StatePath(e.path) {
+			continue
+		}
+		full := filepath.Join(projectRoot, filepath.FromSlash(e.path))
+		if err := os.Remove(full); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		pruneEmptyDirs(projectRoot, filepath.Dir(full))
+	}
+	if aboardCreated {
+		if err := os.RemoveAll(filepath.Join(projectRoot, framework.ProjectAboardDir)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// pruneEmptyDirs removes dir and each parent that is left empty, up to root.
+func pruneEmptyDirs(root, dir string) {
+	for dir != root && strings.HasPrefix(dir, root+string(filepath.Separator)) {
+		if os.Remove(dir) != nil {
+			return
+		}
+		dir = filepath.Dir(dir)
+	}
+}
+
 // commitPaths stages paths and commits them with msg, running the
 // project's hooks. A failed commit leaves everything staged; so does one
 // whose added lines hold a secret (commit.secret, exit 1; D155), which
