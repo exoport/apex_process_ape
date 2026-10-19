@@ -24,6 +24,8 @@ type e2Session struct {
 
 func newE2Session(t *testing.T, root, session string) *e2Session {
 	t.Helper()
+	// The commands run as that session's Bash tool calls (D219).
+	t.Setenv(apexv1.EnvClaudeSessionID, session)
 	return &e2Session{root: root, session: session, transcript: filepath.Join(t.TempDir(), session+".jsonl")}
 }
 

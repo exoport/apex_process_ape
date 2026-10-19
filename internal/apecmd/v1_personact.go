@@ -171,7 +171,7 @@ func takePersonAct(ctx context.Context, p *apexv1.Project, c apexv1.PersonCall) 
 	if c.By != "" && c.By != name {
 		return nil, apexv1.ByMismatch(c.By, name)
 	}
-	a := p.ConsumeGrant(c)
+	a := p.ConsumeGrant(ctx, c)
 	if a == nil {
 		return nil, apexv1.NoGrant(c)
 	}

@@ -140,10 +140,13 @@ func appendTranscript(t *testing.T, path string, line map[string]any) {
 	require.NoError(t, f.Close())
 }
 
+// asClaudeCode is a Bash tool call in the person's Claude Code session
+// "s1": CLAUDECODE set, and CLAUDE_CODE_SESSION_ID naming the session.
 func asClaudeCode(t *testing.T) {
 	t.Helper()
 	t.Setenv(envApeSession, "")
 	t.Setenv("CLAUDECODE", "1")
+	t.Setenv(EnvClaudeSessionID, "s1")
 }
 
 // The whole path: the person types "approve M1", pre-tool grants the one
@@ -160,10 +163,10 @@ func TestE2_GrantConsumeRecord(t *testing.T) {
 	// The same call again before the command ran: still that grant.
 	require.False(t, PersonActGate(ctx(), payload, []PersonCall{c}).Deny)
 
-	a := p.ConsumeGrant(c)
+	a := p.ConsumeGrant(ctx(), c)
 	require.NotNil(t, a)
 	require.Equal(t, "approve M1", a.Quote, "the quote is the sentence holding the act")
-	require.Nil(t, p.ConsumeGrant(c), "a grant is used once")
+	require.Nil(t, p.ConsumeGrant(ctx(), c), "a grant is used once")
 	a.By = PersonBy(GitUserName(ctx(), p.Root), a.PromptTS, a.Quote)
 	require.Regexp(t, `^Ann Person \(prompt \d{4}-\d\d-\d\dT[0-9:]+Z: "approve M1"\)$`, a.By)
 
@@ -245,7 +248,7 @@ func TestE2_T3_StaleOrReusedGrant(t *testing.T) {
 	c := approveCall("M1")
 	yesterday := e2Turn(t, p, "s1", "p1", "approve M1", c.Line)
 	require.False(t, PersonActGate(ctx(), yesterday, []PersonCall{c}).Deny)
-	require.NotNil(t, p.ConsumeGrant(c))
+	require.NotNil(t, p.ConsumeGrant(ctx(), c))
 	today := e2Turn(t, p, "s1", "p2", "how is it going?", c.Line)
 	require.True(t, PersonActGate(ctx(), today, []PersonCall{c}).Deny, "an earlier turn's words grant nothing now")
 
@@ -257,7 +260,7 @@ func TestE2_T3_StaleOrReusedGrant(t *testing.T) {
 	require.NoError(t, os.Remove(p.grantPath(c.ArgvSHA256)))
 	require.NoError(t, os.Remove(p.issuedPath("s1", "p3", c)))
 	require.False(t, PersonActGate(ctx(), fresh, []PersonCall{c}).Deny)
-	require.Nil(t, p.ConsumeGrant(c), "an expired grant is no grant")
+	require.Nil(t, p.ConsumeGrant(ctx(), c), "an expired grant is no grant")
 	require.NoFileExists(t, p.grantPath(c.ArgvSHA256))
 }
 
@@ -274,8 +277,8 @@ func TestE2_T5_TargetSwap(t *testing.T) {
 	require.False(t, PersonActGate(ctx(), payload, []PersonCall{approveCall("M1")}).Deny)
 	swapped := approveCall("M2")
 	swapped.ArgvSHA256 = approveCall("M1").ArgvSHA256
-	require.Nil(t, p.ConsumeGrant(swapped), "the grant names its act and target too")
-	require.NotNil(t, p.ConsumeGrant(approveCall("M1")))
+	require.Nil(t, p.ConsumeGrant(ctx(), swapped), "the grant names its act and target too")
+	require.NotNil(t, p.ConsumeGrant(ctx(), approveCall("M1")))
 }
 
 // T6: the records are the person's and ape's: Bash naming them, an edit
@@ -313,18 +316,18 @@ func TestE2_T6_ForgedLockIsNoGrant(t *testing.T) {
 	asClaudeCode(t)
 	c := approveCall("M1")
 	forged := &RunLock{ID: "r1", Scope: "M1", Verb: "milestone approve", PersonAct: &PersonAct{Act: c.Act, Target: c.Target, ArgvSHA256: c.ArgvSHA256, By: "Ann"}}
-	require.Nil(t, p.LockPersonAct(forged, c.ArgvSHA256))
+	require.Nil(t, p.LockPersonAct(forged, c))
 	forged.PersonAct.Grant = "nothing.json"
-	require.Nil(t, p.LockPersonAct(forged, c.ArgvSHA256))
+	require.Nil(t, p.LockPersonAct(forged, c))
 
 	require.False(t, PersonActGate(ctx(), e2Turn(t, p, "s1", "p1", "approve M1", c.Line), []PersonCall{c}).Deny)
-	a := p.ConsumeGrant(c)
+	a := p.ConsumeGrant(ctx(), c)
 	require.NotNil(t, a)
 	l := &RunLock{ID: "r2", Scope: "M1", Verb: "milestone approve", PersonAct: a}
-	got := p.LockPersonAct(l, c.ArgvSHA256)
+	got := p.LockPersonAct(l, c)
 	require.NotNil(t, got)
 	require.NoError(t, requirePerson(WithPersonAct(ctx(), got), ActMilestoneApprove, "ape milestone approve"))
-	require.Nil(t, p.LockPersonAct(l, approveCall("M2").ArgvSHA256), "another command line")
+	require.Nil(t, p.LockPersonAct(l, approveCall("M2")), "another command line")
 	// Read back from a file, an act is never granted by itself.
 	data, err := json.Marshal(a)
 	require.NoError(t, err)
@@ -359,12 +362,111 @@ func TestE2_T9_QuoteRedacted(t *testing.T) {
 	c := approveCall("M1")
 	prompt := "approve M1 and use token " + fakeToken + " # for CI"
 	require.False(t, PersonActGate(ctx(), e2Turn(t, p, "s1", "p1", prompt, c.Line), []PersonCall{c}).Deny)
-	a := p.ConsumeGrant(c)
+	a := p.ConsumeGrant(ctx(), c)
 	require.NotNil(t, a)
 	require.NotContains(t, a.Quote, fakeToken)
 	require.Contains(t, a.Quote, "approve M1 and use token ghp_")
 	require.NotContains(t, a.Quote, "#")
 	require.NotContains(t, a.Quote, `"`)
+}
+
+// writeGrant writes a grant file as pre-tool would, live for GrantTTL: a
+// model's script forging one, in the D219 tests.
+func writeGrant(t *testing.T, p *Project, session, promptID string, c PersonCall) {
+	t.Helper()
+	g := grant{
+		SessionID: session, PromptID: promptID, PromptTS: "2026-10-19T10:00:00Z", Act: c.Act, Target: c.Target, Task: c.Task,
+		ArgvSHA256: c.ArgvSHA256, Quote: "forged quote", Expires: time.Now().Add(GrantTTL).UTC().Format(time.RFC3339Nano),
+	}
+	data, err := json.Marshal(g)
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(p.GrantsDir(), 0o700))
+	require.NoError(t, os.WriteFile(p.grantPath(c.ArgvSHA256), data, 0o600))
+}
+
+// D219 (a): a grant is consumed only in the session it was issued for —
+// another session's unused grant is no grant, and a caller naming no
+// session (CLAUDE_CODE_SESSION_ID absent) consumes nothing. The refused
+// grant stays for its own session.
+func TestE2_D219_AnotherSessionsGrantIsRefused(t *testing.T) {
+	p := e2Project(t)
+	asClaudeCode(t)
+	c := approveCall("M1")
+	require.False(t, PersonActGate(ctx(), e2Turn(t, p, "s1", "p1", "approve M1", c.Line), []PersonCall{c}).Deny)
+
+	t.Setenv(EnvClaudeSessionID, "s2")
+	require.False(t, p.HasGrant(c))
+	require.Nil(t, p.ConsumeGrant(ctx(), c), "another session's grant")
+	t.Setenv(EnvClaudeSessionID, "")
+	require.Nil(t, p.ConsumeGrant(ctx(), c), "no session named: fail closed")
+	err := NoGrant(c)
+	require.ErrorContains(t, err, "CLAUDE_CODE_SESSION_ID is not set")
+	ue, ok := errors.AsType[*UsageError](err)
+	require.True(t, ok)
+	require.Equal(t, CodePersonOnly, ue.Code)
+	require.FileExists(t, p.grantPath(c.ArgvSHA256), "nothing was consumed")
+
+	t.Setenv(EnvClaudeSessionID, "s1")
+	require.True(t, p.HasGrant(c))
+	require.NotNil(t, p.ConsumeGrant(ctx(), c), "its own session still uses it")
+}
+
+// D219 (b): a grant is used only while its prompt and transcript still
+// back it, by the same matcher — a forged grant file with no prompt
+// record, or with a record but no transcript message, is no grant; and the
+// act's stamp and quote come from the record, never from the file.
+func TestE2_D219_ForgedGrantIsRefused(t *testing.T) {
+	p := e2Project(t)
+	asClaudeCode(t)
+	c := approveCall("M1")
+
+	writeGrant(t, p, "s1", "p9", c)
+	require.True(t, p.HasGrant(c), "a live grant file for this session")
+	require.Nil(t, p.ConsumeGrant(ctx(), c), "no prompt record behind it")
+
+	transcript := filepath.Join(t.TempDir(), "s1.jsonl")
+	require.NoError(t, RecordPrompt(HookPayload{SessionID: "s1", TranscriptPath: transcript, Cwd: p.Root, Prompt: "approve M1", PromptID: "p9"}))
+	require.Nil(t, p.ConsumeGrant(ctx(), c), "a prompt record but no transcript message")
+	appendTranscript(t, transcript, map[string]any{"type": "user", "promptId": "p9", "message": map[string]any{"role": "user", "content": "approve M2"}})
+	require.Nil(t, p.ConsumeGrant(ctx(), c), "the transcript's message does not hold the words")
+
+	writeGrant(t, p, "s1", "p8", c)
+	require.NoError(t, RecordPrompt(HookPayload{SessionID: "s1", TranscriptPath: transcript, Cwd: p.Root, Prompt: "don't approve M1", PromptID: "p8"}))
+	appendTranscript(t, transcript, map[string]any{"type": "user", "promptId": "p8", "message": map[string]any{"role": "user", "content": "don't approve M1"}})
+	require.Nil(t, p.ConsumeGrant(ctx(), c), "the record does not ask for the act (the matcher, again)")
+
+	// The residual D219 documents: all three forged together, as a script
+	// running as the same OS user could, still pass. What the act records
+	// is the record's, not the grant file's.
+	writeGrant(t, p, "s1", "p7", c)
+	require.NoError(t, RecordPrompt(HookPayload{SessionID: "s1", TranscriptPath: transcript, Cwd: p.Root, Prompt: "approve M1", PromptID: "p7"}))
+	appendTranscript(t, transcript, map[string]any{"type": "user", "promptId": "p7", "message": map[string]any{"role": "user", "content": "approve M1"}})
+	a := p.ConsumeGrant(ctx(), c)
+	require.NotNil(t, a)
+	require.Equal(t, "approve M1", a.Quote)
+	require.NotEqual(t, "2026-10-19T10:00:00Z", a.PromptTS)
+}
+
+// D219 for the long-run worker: LockPersonAct acts on its lock's consumed
+// grant only in that grant's session and while it is still backed.
+func TestE2_D219_WorkerChecksTheGrantsSessionAndBacking(t *testing.T) {
+	p := e2Project(t)
+	asClaudeCode(t)
+	c := approveCall("M1")
+	payload := e2Turn(t, p, "s1", "p1", "approve M1", c.Line)
+	require.False(t, PersonActGate(ctx(), payload, []PersonCall{c}).Deny)
+	a := p.ConsumeGrant(ctx(), c)
+	require.NotNil(t, a)
+	l := &RunLock{ID: "r1", Scope: "M1", Verb: "milestone approve", PersonAct: a}
+	require.NotNil(t, p.LockPersonAct(l, c), "the worker, in the caller's session")
+
+	t.Setenv(EnvClaudeSessionID, "s2")
+	require.Nil(t, p.LockPersonAct(l, c), "a worker in another session")
+	t.Setenv(EnvClaudeSessionID, "")
+	require.Nil(t, p.LockPersonAct(l, c), "a worker naming no session")
+	t.Setenv(EnvClaudeSessionID, "s1")
+	require.NoError(t, os.Remove(payload.TranscriptPath))
+	require.Nil(t, p.LockPersonAct(l, c), "the transcript no longer backs it")
 }
 
 // T10: a missing or altered UserPromptSubmit hook is a notice (and
@@ -491,5 +593,5 @@ func TestE2_T8_T12_T14_Residuals(t *testing.T) {
 	appendTranscript(t, transcript, map[string]any{"type": "user", "promptId": "p1", "message": map[string]any{"role": "user", "content": "approve M1"}})
 	d := PersonActGate(ctx(), bashPayload(t, p, "s1", "p1", transcript, c.Line), []PersonCall{c})
 	require.True(t, d.Deny)
-	require.Nil(t, p.ConsumeGrant(c))
+	require.Nil(t, p.ConsumeGrant(ctx(), c))
 }
