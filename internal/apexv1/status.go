@@ -260,6 +260,10 @@ type StatusReport struct {
 	PreExistingRed []PreExistingRed `json:"pre_existing_red"`
 	Spend          Spend            `json:"spend"`
 	Next           string           `json:"next"`
+	// NextWhy is next's reason, one line (Q100, OI-7): what in the
+	// recorded state makes it the next step, so a reader explains it
+	// without re-deriving it. next stays one string.
+	NextWhy string `json:"next_why"`
 	// RoadmapNext is the roadmap's Next items (H26, D60): findings noticed
 	// out of scope, one line each without the list marker, from the base
 	// branch's roadmap.md. Always present ([] when none).
@@ -455,7 +459,7 @@ func (p *Project) Status() *StatusReport {
 	if j := p.LoadArchiveJournal(); j != nil {
 		r.ArchiveJournal, r.ArchiveRunning = j, j.Running()
 	}
-	r.Next = nextStep(r)
+	r.Next, r.NextWhy = nextStepWhy(r)
 	return r
 }
 
@@ -554,27 +558,37 @@ func milestoneLine(m *Milestone, rec *MilestoneRecord) MilestoneLine {
 // nextStep is a deterministic hint: what the way of working says comes
 // next, given only the recorded state.
 func nextStep(r *StatusReport) string {
+	next, _ := nextStepWhy(r)
+	return next
+}
+
+// nextStepWhy is nextStep with its reason, one line (Q100).
+//
+//nolint:gocyclo // one branch per state the way of working names
+func nextStepWhy(r *StatusReport) (next, why string) {
 	if !r.Initialized {
-		return "run `ape project init`"
+		return "run `ape project init`", "this directory has no APEX v1 layout yet (no _apex/state/)"
 	}
 	// An approved fix runs ahead of milestone work (D40).
 	for i := range r.Changes {
 		if c := &r.Changes[i]; c.runnableFix() {
-			return fixNext(c, r.Branch)
+			return fixNext(c, r.Branch), "an approved fix runs ahead of milestone work (D40), one at a time, in approval order"
 		}
 	}
 	m := r.Milestone
 	if m == nil {
 		if len(r.Milestones) == 0 {
-			return "plan: no milestone yet (apex-plan, then `ape milestone new`)"
+			return "plan: no milestone yet (apex-plan, then `ape milestone new`)", "the roadmap has no milestone, so nothing is planned to run"
 		}
-		return "every milestone is done — propose the next one (apex-plan)"
+		return "every milestone is done — propose the next one (apex-plan)", "every milestone in the roadmap is done"
 	}
 	if m.Status != MilestoneApproved {
-		return fmt.Sprintf("%s awaits approval: a person runs `ape milestone approve %s --by <who>`", m.ID, m.ID)
+		return fmt.Sprintf("%s awaits approval: a person runs `ape milestone approve %s --by <who>`", m.ID, m.ID),
+			"nothing of " + m.ID + " runs until a person approves its plan and its red gate"
 	}
 	if len(m.Diagnostics) > 0 {
-		return "stopped: " + m.Diagnostics[0].Message + " — " + m.Diagnostics[0].Fix
+		return "stopped: " + m.Diagnostics[0].Message + " — " + m.Diagnostics[0].Fix,
+			"a limit stopped " + m.ID + "'s run (" + m.Diagnostics[0].Code + "), and only a person resets it"
 	}
 	for i := range r.Changes {
 		c := &r.Changes[i]
@@ -590,39 +604,45 @@ func nextStep(r *StatusReport) string {
 		case StatusReviewed:
 			if len(c.AwaitingHuman) > 0 {
 				if next := r.delegateNext(c); next != "" {
-					return next
+					return next, c.ID + "'s human-review tasks may go to a delegate (D75, D152) before a person is asked"
 				}
-				continue // a person's to accept first (D45): the orchestrator moves on
+				continue // a person's to accept first (D45): the loop moves on
 			}
-			return "archive " + c.ID + ": `ape change archive " + c.ID + "` (squash-merges " + ChangeBranch(c.ID) + " into its base branch)"
+			return "archive " + c.ID + ": `ape change archive " + c.ID + "` (squash-merges " + ChangeBranch(c.ID) + " into its base branch)",
+				c.ID + " passed its review and every human-review task is accepted, so it can land"
 		case StatusVerified:
-			return "review " + c.ID + " (apex-review)" + on
+			return "review " + c.ID + " (apex-review)" + on, c.ID + "'s checks are green, and a review pass comes before the archive"
 		case StatusInProgress:
-			return "apply " + c.ID + " until `ape change verify " + c.ID + "` is green (apex-apply)" + on
+			return "apply " + c.ID + " until `ape change verify " + c.ID + "` is green (apex-apply)" + on, c.ID + " is started and its checks are not green yet"
 		case StatusDraft:
-			return "apply " + c.ID + ": `ape change check " + c.ID + "`, then `ape change start " + c.ID + "` (apex-apply)"
+			return "apply " + c.ID + ": `ape change check " + c.ID + "`, then `ape change start " + c.ID + "` (apex-apply)", c.ID + " is planned but not started"
 		}
 	}
 	for i := range r.Changes {
 		if c := &r.Changes[i]; c.Status == StatusAnswered && c.Answer != nil {
-			return "answered: " + c.ID + " — " + c.Answer.By + " answered; re-plan it with the answer as the hint (apex-change), then `ape change start " + c.ID + "`"
+			return "answered: " + c.ID + " — " + c.Answer.By + " answered; re-plan it with the answer as the hint (apex-change), then `ape change start " + c.ID + "`",
+				"a person answered " + c.ID + "'s block, and the answer changes its plan before it resumes"
 		}
 	}
 	for i := range r.Changes {
 		if c := &r.Changes[i]; c.Status == StatusBlocked {
-			return "blocked: " + c.ID + " — " + c.BlockedReason + " (re-plan, or a person answers: `ape change answer " + c.ID + " --text \"…\" --by <who>`; `ape change start " + c.ID + "` resumes)"
+			return "blocked: " + c.ID + " — " + c.BlockedReason + " (re-plan, or a person answers: `ape change answer " + c.ID + " --text \"…\" --by <who>`; `ape change start " + c.ID + "` resumes)",
+				"no other change of " + m.ID + " can go on, and " + c.ID + " is blocked"
 		}
 	}
 	for i := range r.Changes {
 		if c := &r.Changes[i]; c.Status == StatusReviewed && len(c.AwaitingHuman) > 0 {
 			return "a person reviews " + c.ID + ": `ape change accept " + c.ID + " --task " + c.AwaitingHuman[0] + " --by <who>` for each of " +
-				strings.Join(c.AwaitingHuman, ", ") + ", then `ape change archive " + c.ID + "`"
+					strings.Join(c.AwaitingHuman, ", ") + ", then `ape change archive " + c.ID + "`",
+				"what is left of " + m.ID + " waits for a person's human-review acceptance of " + c.ID
 		}
 	}
 	if m.GateLast != nil && m.GateLast.Green() && m.GateLast.SHA != "" {
-		return fmt.Sprintf("%s gate was green at %s — `ape milestone close %s`", m.ID, short(m.GateLast.SHA), m.ID)
+		return fmt.Sprintf("%s gate was green at %s — `ape milestone close %s`", m.ID, short(m.GateLast.SHA), m.ID),
+			m.ID + "'s last gate run was green and no change of it is open"
 	}
-	return fmt.Sprintf("plan the next change toward %s (apex-change), or `ape milestone gate %s` if the goal looks met", m.ID, m.ID)
+	return fmt.Sprintf("plan the next change toward %s (apex-change), or `ape milestone gate %s` if the goal looks met", m.ID, m.ID),
+		m.ID + " is approved and no change of it is open"
 }
 
 // delegateNext is the next step for a reviewed change awaiting a person

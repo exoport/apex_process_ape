@@ -853,7 +853,9 @@ func newStatusCmd() *cobra.Command {
     "archive_running" when its process is alive; on the first line): status only reports
     it — the next writing command rolls a crashed one back (archive.interrupted; see
     ` + "`ape change archive --help`" + `)
-  - next: what the way of working says comes next, derived from the state alone
+  - next: what the way of working says comes next, derived from the state alone; JSON
+    "next_why" beside it (and "Why next:" in the long output, not --brief) is its reason,
+    one line (Q100) — next stays one string
   - the roadmap's Next (JSON "roadmap_next": ["2026-10-16 <text> (from <id>)", …], []
     when none; a count line in the human output): the findings noticed out of scope that
     apex-plan triages, as the base branch's roadmap.md holds them (` + "`ape next add`" + ` writes
@@ -942,6 +944,9 @@ type statusWithBoard struct {
 func statusLong(r *apexv1.StatusReport) string {
 	var b strings.Builder
 	b.WriteString(r.Brief())
+	if r.NextWhy != "" {
+		b.WriteString("Why next: " + r.NextWhy + "\n")
+	}
 	if len(r.Milestones) > 0 {
 		b.WriteString("\nRoadmap:\n")
 		for _, m := range r.Milestones {
