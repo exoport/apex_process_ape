@@ -20,6 +20,11 @@ type Outcome struct {
 	Skipped  string `json:"skipped,omitempty" yaml:"skipped,omitempty"`
 	// AppliedAt is the stamp recorded in the ledger, on success only.
 	AppliedAt string `json:"applied_at,omitempty" yaml:"applied_at,omitempty"`
+	// Rejudged is set when the run asked the entry's check again after an
+	// earlier entry applied: the state the up-front plan gave it, the state
+	// the check gives it now, and the entry whose run prompted the question
+	// ("cannot-tell → pending, after v1.0.0_seq-01 applied").
+	Rejudged string `json:"rejudged,omitempty" yaml:"rejudged,omitempty"`
 }
 
 // ApplyResult is one run of the list.
@@ -54,6 +59,16 @@ type ApplyResult struct {
 // entry whose precondition is known not to hold. The remaining entries
 // are reported as not attempted rather than silently dropped.
 //
+// The plan's verdicts are taken before anything runs, so they describe
+// the project as the run FOUND it. Once an entry has applied, that
+// project is gone: the lift turns a v0 layout into v1, and an entry whose
+// check could not tell on v0 (or found nothing to do) may have a plain
+// answer on what the lift left (E-R7-1). So after the first success,
+// every remaining derivable row the ledger has not settled is judged
+// again, by its check, right before it would run — and the plan row is
+// replaced by the new verdict, so BlockingUnapplied reads the same one.
+// The ledger stays final: a recorded entry is never re-judged.
+//
 // stamp issues the `applied_at` value; it is called once per success so
 // the ledger's ordering matches its stamps.
 func Apply(ctx context.Context, w io.Writer, projectRoot string, plan *Plan,
@@ -61,9 +76,26 @@ func Apply(ctx context.Context, w io.Writer, projectRoot string, plan *Plan,
 ) *ApplyResult {
 	res := &ApplyResult{}
 	stopped := false
+	// lastApplied names the latest entry this run applied; empty until
+	// one has, and until then the up-front plan stands.
+	lastApplied := ""
 
 	for i := range plan.Rows {
 		r := &plan.Rows[i]
+
+		rejudged := ""
+		if !stopped && lastApplied != "" && rejudgeable(plan, r) {
+			before := r.State
+			*r = resolveRow(ctx, projectRoot, &r.Entry, nil, nil, plan.checker, true)
+			rejudged = before + " → " + r.State + ", after " + lastApplied + " applied"
+			fmt.Fprintf(w, "migration %s: judged again (%s)\n", r.Label(), rejudged)
+			if !r.Runnable {
+				res.Outcomes = append(res.Outcomes, Outcome{
+					ID: r.Label(), Command: r.Command, Skipped: rejudgedReason(r), Rejudged: rejudged,
+				})
+				continue
+			}
+		}
 
 		if r.State == StatePending && r.IsJudged() {
 			// Listed, never executed, under any flag. The skill is named
@@ -88,7 +120,7 @@ func Apply(ctx context.Context, w io.Writer, projectRoot string, plan *Plan,
 
 		fmt.Fprintf(w, "migration %s: running %s\n", r.Label(), r.Command)
 		code, err := runner.Run(ctx, projectRoot, r.Command)
-		out := Outcome{ID: r.Label(), Command: r.Command, Ran: true, ExitCode: code}
+		out := Outcome{ID: r.Label(), Command: r.Command, Ran: true, ExitCode: code, Rejudged: rejudged}
 		switch {
 		case err != nil:
 			out.Ran, out.Error = false, err.Error()
@@ -101,10 +133,33 @@ func Apply(ctx context.Context, w io.Writer, projectRoot string, plan *Plan,
 			res.Applied = append(res.Applied, Applied{
 				ID: r.ID, Version: r.Version, AppliedAt: out.AppliedAt,
 			})
+			lastApplied = r.Label()
 		}
 		res.Outcomes = append(res.Outcomes, out)
 	}
 	return res
+}
+
+// rejudgeable is a row whose up-front verdict a run may revisit: derivable,
+// runnable in principle, not superseded, and not settled by the ledger.
+// Judged rows are listed, never run, so there is nothing to decide again
+// for them; a ledger row is what makes a second run a no-op.
+func rejudgeable(plan *Plan, r *Row) bool {
+	return plan.checker != nil && !r.IsJudged() && !r.Unrunnable &&
+		r.State != StateSuperseded && r.Source != SourceLedger
+}
+
+// rejudgedReason says why a row judged again is still not run.
+func rejudgedReason(r *Row) string {
+	switch r.State {
+	case StateApplied:
+		return "not run — judged again, its check now says it is already applied"
+	case StateCannotTell:
+		return "not attempted — judged again, and its check could not tell whether it is needed (" +
+			r.CheckDetail + ")"
+	default:
+		return "not run — judged again: " + r.State
+	}
 }
 
 func judgedReason(r *Row) string {
@@ -124,8 +179,9 @@ type Blocked struct {
 }
 
 // BlockingUnapplied lists the entries the install cannot stand without
-// (D162-4): blocking, derivable, owed before the run (pending or
-// cannot-tell), and not applied by it — failed, not attempted after an
+// (D162-4): blocking, derivable, owed (pending or cannot-tell, as the
+// plan last judged it — Apply writes a re-judged verdict back into the
+// plan), and not applied by the run — failed, not attempted after an
 // earlier failure, unrunnable, or unverifiable. res is nil when nothing
 // ran. A judged blocking entry is never listed: it is a dispatch the
 // person owes after the install, not a step the install itself needs.

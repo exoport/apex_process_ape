@@ -51,6 +51,12 @@ type Plan struct {
 	// Cycle names the entries in an `after:` cycle. Non-empty means the
 	// order is undefined and every entry in it is unrunnable.
 	Cycle []string `json:"cycle,omitempty" yaml:"cycle,omitempty"`
+
+	// checker is the runner the checks were run with, kept so Apply can
+	// ask a check again once an earlier entry has changed the project
+	// (E-R7-1). Nil when the checks were not run: a plan nobody judged by
+	// check is not re-judged by one either.
+	checker Runner
 }
 
 // Counts summarises a plan for a one-line report.
@@ -125,6 +131,9 @@ func BuildPlan(ctx context.Context, dir, projectRoot string, entries []Entry, le
 ) *Plan {
 	ordered, cycle := Order(entries)
 	p := &Plan{Dir: dir, Present: dir != "", Cycle: cycle}
+	if runChecks {
+		p.checker = runner
+	}
 
 	inLedger := make(map[string]Applied, len(ledger))
 	for _, a := range ledger {
