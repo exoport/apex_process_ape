@@ -82,7 +82,7 @@ const (
 type CodeDoc struct {
 	Code string `json:"code"`
 	Exit int    `json:"exit"`
-	// Action is what the orchestrator does next (D47), so it branches on
+	// Action is what the loop does next (D47), so it branches on
 	// one field instead of carrying code tables: one of Actions.
 	Action  string `json:"action"`
 	Meaning string `json:"meaning"`
@@ -92,7 +92,7 @@ type CodeDoc struct {
 // apply: hand the change to apex-apply (code work, or re-start); review:
 // run the review again; replan: apex-change re-plans the change (or plans
 // the fix a red gate needs); stop: the run stops (a bug, the environment,
-// or nothing to do); person: a person must act — the orchestrator lists it
+// or nothing to do); person: a person must act — the loop lists it
 // and moves on to other work, or stops when there is none.
 const (
 	ActionRetry  = "retry"
@@ -148,15 +148,15 @@ var DiagnosticCodes = []CodeDoc{
 	{"delegate.not-in-session", 2, "stop", "accept --verdict outside the delegate session ape started for that change and task (APE_DELEGATE=<id>/<T> and its run): only the delegate records a verdict"},
 	{"usage.delegate", 2, "stop", "accept: --delegate, --verdict and --by are three different acts; one at a time (--reason only with --verdict, --defect only with --verdict fail)"},
 	{"project.not-initialized", 2, "person", "no development folder: run `ape project init`"},
-	{CodeSessionDepth, 2, "stop", "ape task, prompt, chat or change review --run from a model session that may not start one (D62): depth 1 that is not ape's own apex-orchestrator run, or depth 2 (a session an orchestrator started); depth comes from what ape recorded at launch (APE_DEPTH and the process ancestry), never from the model — the session finishes its own work; a person or the orchestrator starts the next session. ape script refuses at any depth >= 1"},
-	{CodeSessionNotAllowed, 2, "stop", "an apex-orchestrator run starting a session that is not `ape task <skill>` / `ape change review --run` for a skill on its allow-list (the core skills apex-plan, apex-change, apex-apply, apex-review, apex-release, plus tools: skills) (D62)"},
+	{CodeSessionDepth, 2, "stop", "ape task, prompt, chat or change review --run from a model session that may not start one (D62): depth 1 that is not ape's own apex-loop run, or depth 2 (a session a loop run started); depth comes from what ape recorded at launch (APE_DEPTH and the process ancestry), never from the model — the session finishes its own work; a person or the loop starts the next session. ape script refuses at any depth >= 1"},
+	{CodeSessionNotAllowed, 2, "stop", "an apex-loop run starting a session that is not `ape task <skill>` / `ape change review --run` for a skill on its allow-list (the core skills apex-plan, apex-change, apex-apply, apex-review, apex-release, plus tools: skills) (D62)"},
 	{"session.person-only", 2, "person", "a person-only flag or command from a model session (APE_SESSION or CLAUDECODE set): --allow-pending-human, --accept-red (D45), ape milestone approve, ape change approve, ape change answer (D47 Q6), ape change accept <id> T<n> --by, ape decision accept (OI-4) — with no grant from the person's own words (E2: in a person's own Claude Code session the person types the act's phrase, `ape hook pre-tool --help`, and the model runs the command in that turn; never under APE_SESSION). A person runs it from a terminal outside Claude Code, or types the phrase; a `!` line inside Claude Code fires no hook, so it is a model session that can never be granted"},
 	{"usage.lift-exclude", 2, "stop", "lift: an --exclude glob does not compile"},
 	{"usage.unclassified", 2, "stop", "a usage error without a code (a bug: report it)"},
 
 	// failures (exit 1)
 	{"accept.not-human-review", 1, "stop", "accept: the task has a command check; verify runs it"},
-	{"archive.pending-human", 1, "person", "archive: human-review tasks are not accepted; the orchestrator leaves the change reviewed and moves on (D45) — a person accepts them, or archives past them with --allow-pending-human (a person only)"},
+	{"archive.pending-human", 1, "person", "archive: human-review tasks are not accepted; the loop leaves the change reviewed and moves on (D45) — a person accepts them, or archives past them with --allow-pending-human (a person only)"},
 	{"branch.change-branch", 1, "stop", "change new, milestone new/approve/gate/close, decision accept: HEAD is on a change branch; their records belong on the base branch (git switch <base>)"},
 	{"branch.detached", 1, "stop", "start: HEAD is detached; a change branch is created from a branch, recorded as its base"},
 	{"change.no-branch", 1, "person", "archive: the change has no change/<id> branch with a recorded base_branch (started before D38)"},
@@ -207,7 +207,7 @@ var DiagnosticCodes = []CodeDoc{
 	{CodeLiftWriteFailed, 1, "stop", "lift: removing the v0 families or writing a file failed mid-lift; git reset --hard restores the tree"},
 	{CodeGitStatusFailed, 1, "stop", "git status could not be read"},
 	{"ape.below-floor", 1, "person", "ape task: the installed framework's _apex/ape-commands.yaml declares a min_ape_version above this ape (H1); no session starts — a person updates ape (the message carries the command)"},
-	{CodeBlocksExceeded, 1, "stop", "the milestone's changes blocked in a row reached limits.consecutive_blocks (default 2): change new and change start of its changes and ape task apex-orchestrator for it refuse, and ape status --json reports it under milestone.diagnostics; the run stops — a person deals with the blocked changes and re-approves the milestone (ape milestone approve), which resets the count (H19, D49)"},
+	{CodeBlocksExceeded, 1, "stop", "the milestone's changes blocked in a row reached limits.consecutive_blocks (default 2): change new and change start of its changes and ape task apex-loop for it refuse, and ape status --json reports it under milestone.diagnostics; the run stops — a person deals with the blocked changes and re-approves the milestone (ape milestone approve), which resets the count (H19, D49)"},
 	{"milestone.budget-exceeded", 1, "person", "ape task: the current milestone's spend is at its enforced budget (limits.budget: enforce); no session starts"},
 	{"milestone.changes-in-flight", 1, "apply", "close: changes of the milestone are in-progress, verified or reviewed; the action is person instead when one of them has a non-empty awaiting_human (reviewed, human-review tasks not accepted: D49)"},
 	{CodeStatusUnrecorded, 1, "person", "a milestone's Status says approved (or done) and ape holds no record of it in milestones.json — approved by hand, or before ape recorded approvals (H2); change start, gate and close refuse it: a person runs `ape milestone approve <M> --by <who>` (a done one: restore its Status line)"},
@@ -246,15 +246,15 @@ var DiagnosticCodes = []CodeDoc{
 	{"error.unclassified", 1, "stop", "a failure without a code (a bug: report it)"},
 
 	// conflicts (exit 3)
-	{CodeConflicted, 3, "apply", "start, verify, archive: the base branch moved and change/<id> does not rebase onto it (D40, H8); ape aborted the rebase, kept the old tip under refs/apex/pre-rebase/<id>/<n>, recreated change/<id> at the base tip and cherry-picked the branch's net diff --no-commit: conflict markers and unmerged paths are in the tree, HEAD on the branch, the change in-progress (verify stale, review to run again); apex-apply resolves and commits — when it cannot, it blocks the change and the orchestrator re-plans (D43)"},
+	{CodeConflicted, 3, "apply", "start, verify, archive: the base branch moved and change/<id> does not rebase onto it (D40, H8); ape aborted the rebase, kept the old tip under refs/apex/pre-rebase/<id>/<n>, recreated change/<id> at the base tip and cherry-picked the branch's net diff --no-commit: conflict markers and unmerged paths are in the tree, HEAD on the branch, the change in-progress (verify stale, review to run again); apex-apply resolves and commits — when it cannot, it blocks the change and the loop re-plans (D43)"},
 	{"archive.base-changed", 3, "replan", "a requirement this change modifies or removes changed in the spec since start (another branch); nothing written"},
 	{CodeDeltaConflict, 3, "replan", "the delta no longer applies to the current specs; nothing written"},
 	{CodeFolderExists, 3, "stop", "the archive folder already exists; nothing written"},
 	{CodeGateGreen, 1, "replan", "milestone approve (and a re-approval): the gate, run once against the current tree (D70 B), exits 0 — a gate must be red until the milestone's work is done; apex-plan re-plans the gate"},
 	{CodeGateBroken, 1, "replan", "milestone approve (and a re-approval): the gate cannot run (D70 B) — a script it names is missing or fails `bash -n`, it exits 126 or 127, a requires: entry is missing, or it times out (timeouts.gate); apex-plan re-plans the gate"},
 	{"change.requirement-conflict", 3, "replan", "another active change claims the same requirement"},
-	{CodeChildRunning, 3, "retry", "ape task / change review --run from an apex-orchestrator run that already has a child session running (D62: one at a time) — wait for it (`ape run wait <id> --wait 9m`), then start the next"},
-	{CodeOrchestratorRunning, 3, "retry", "ape task apex-orchestrator in a project that already has a live apex-orchestrator run (D62: one per project) — wait for it to end, or stop it, then start again"},
+	{CodeChildRunning, 3, "retry", "ape task / change review --run from an apex-loop run that already has a child session running (D62: one at a time) — wait for it (`ape run wait <id> --wait 9m`), then start the next"},
+	{CodeOrchestratorRunning, 3, "retry", "ape task apex-loop in a project that already has a live loop run — apex-loop, or apex-orchestrator as an ape before rc.7 recorded it (D62: one per project) — wait for it to end, or stop it, then start again"},
 	{CodeRunBusy, 3, "retry", "start, verify, archive, gate, close, approve (and review --run's re-verify): another of these verbs is running on the same change or milestone (its run lock, _apex/state/runs/<id|M>.json); the message names it and since when — wait for it (running that command attaches), then run this one again (D58 2.1); a person act (approve, close --accept-red, archive --allow-pending-human) attaches only to a run of that same command line, so one meeting another run of its verb there — a plain close, say — is run.busy too (D179), and its retry is a new act that needs the person's words again"},
 	{"conflict.unclassified", 3, "stop", "a conflict without a code (a bug: report it)"},
 
@@ -312,7 +312,7 @@ var DiagnosticCodes = []CodeDoc{
 	{"change.frontmatter", 1, "replan", "change.md frontmatter is missing, unparseable, or its id/milestone/touches are wrong, or docs: is not true or false (D152)"},
 	{"change.unknown-key", 1, "replan", "change.md frontmatter has a key v1 does not define (own keys: prefix x-)"},
 	{"change.spec-too-big", 1, "replan", "change check / start: merging the delta would take a spec over its caps.spec cap — split the capability first (H18)"},
-	{"change.no-type", 1, "replan", "change.md has no type: and _apex/config.yaml commit.subject uses {type} (D47)"},
+	{"change.no-type", 1, "replan", "change.md has no type: and the archive subject template uses {type} — as the default \"{type}: {title}\" does (D193), or a configured commit.subject (D47); under the default only, archive takes a change in flight with no type: with its title alone and says so (subject_fallback, Q111); project check passes a started one"},
 	{"change.bad-type", 1, "replan", "change.md type: is not one of the project's commit types — _apex/config.yaml commit.types, default feat, fix, perf, refactor, docs, test, build, ci, chore (D47, D120)"},
 	{"change.bad-id", 1, "replan", "the change folder name is not a valid id"},
 	{"change.unknown-milestone", 1, "replan", "the change's milestone is not in roadmap.md"},
@@ -386,5 +386,10 @@ var DiagnosticCodes = []CodeDoc{
 	// rc.7 (rc7-e2).
 	{CodeByMismatch, 1, "person", "a person act in a model session gave --by other than git config user.name (D178 Q-OI-2: by: is always the machine's git user.name, recorded with the prompt that granted the act): drop --by, or pass that name; nothing was written"},
 	{CodeHooksPromptAbsent, 0, "person", "a notice, never a finding (project check's notices; the exit is unchanged; ape doctor reports it too as hooks.prompt): .claude/settings.json does not register `ape hook user-prompt` for UserPromptSubmit, or it is altered (T10), so the person's prompts are not recorded and a person act from a Claude Code session is refused (session.person-only, as before E2) — `ape project init` merges the hook back"},
+	// rc.7 (rc7-rename).
+	{CodeSkillRenamed, 2, "stop", "ape task apex-orchestrator — and the same skill through ape service submit task or an ape script's RunTask — is refused before anything is read or spawned (Q95, D171): since rc.7 apex-orchestrator is the operator's interface, a skill a person opens in their own Claude Code session with /apex-orchestrator, and the unattended runner of one approved milestone or fix is apex-loop; the message names both: `ape task apex-loop --args <M>` (the run's own --args) and /apex-orchestrator. A loop run an older ape recorded as apex-orchestrator still counts as the loop's"},
+	{CodeOperatorInterfacePending, 1, "person", "`ape project operator-interface --check` (the framework's v1.0.0_seq-07 check, Q97): the operator interface is not applied — a models.apex-orchestrator row to move to models.apex-loop (or to remove beside one), an ape hook missing from or altered in .claude/settings.json, or AGENTS.md without the line naming /apex-orchestrator (A11); `ape project operator-interface` applies it in one commit. Also its refusal when ape cannot move the row itself (models: written as a flow mapping): a person edits it by hand"},
+	{"usage.type", 2, "stop", "change new: --type is not one of the project's commit types (_apex/config.yaml commit.types, default feat, fix, perf, refactor, docs, test, build, ci, chore; Q110)"},
+	{CodeModelsOperatorRow, 0, "person", "a notice, never a finding (project check's notices; the exit is unchanged): _apex/config.yaml has a models.apex-orchestrator row (Q96) — with no models.apex-loop row it is read as apex-loop's, with a warning, until `ape project operator-interface` (seq-07) renames it; beside one it is a leftover, which apex-loop's row overrides: drop it. The operator's apex-orchestrator runs in the person's own session and has no models row (D175, D176)"},
 	{UnclassifiedFinding, 1, "stop", "a finding no rule classifies (a bug: report it)"},
 }

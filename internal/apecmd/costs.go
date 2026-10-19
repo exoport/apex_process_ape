@@ -10,8 +10,10 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/exoport/apex_process_ape/internal/apexv1"
 	"github.com/exoport/apex_process_ape/internal/cost"
 	"github.com/exoport/apex_process_ape/internal/output"
+	"github.com/exoport/apex_process_ape/internal/runlog"
 	"github.com/spf13/cobra"
 )
 
@@ -22,12 +24,15 @@ func newCostsCmd() *cobra.Command {
 		Short: "Show this project's Claude cost rollup",
 		Long: `Reads <project>/_output/ape/cost-rollup.json and prints
 totals — today, this week, all-time — broken down per task, chat and (from
-an older ape) pipeline.
+an older ape) pipeline. In an APEX v1 project the loop's task runs are one
+row, "task:apex-loop (+apex-orchestrator)" when an ape before rc.7 recorded
+some of them under the loop's older name (Q95); JSON keeps both buckets as
+recorded.
 
   ape costs                          Project rollup (human / json).
   ape costs run <run-id>             Single task run (reads manifest.yaml):
                                      its own totals, its parent_run and depth
-                                     (D62), and for an orchestrator run the
+                                     (D62), and for a loop run the
                                      children it started and tree_cost_usd
                                      (its own cost plus theirs). Totals are
                                      always the run's own session, here and in
@@ -54,7 +59,7 @@ an older ape) pipeline.
 				enc.SetIndent("", "  ")
 				return enc.Encode(r)
 			}
-			printCostsHuman(r)
+			printCostsHuman(r, runlog.IsV1Project(cwd))
 			return nil
 		},
 	}
@@ -243,7 +248,9 @@ func newCostsRollCmd() *cobra.Command {
 	}
 }
 
-func printCostsHuman(r *cost.Rollup) {
+// printCostsHuman prints the rollup; v1 groups the loop's two names into
+// one task row (groupLoopTasks).
+func printCostsHuman(r *cost.Rollup, v1 bool) {
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "BUCKET\tRUNS\tCOST\tINPUT\tOUTPUT\tCACHE-R")
 	// All-time totals per pipeline.
@@ -253,7 +260,11 @@ func printCostsHuman(r *cost.Rollup) {
 			b.Totals.InputTokens, b.Totals.OutputTokens, b.Totals.CacheReadTokens)
 	}
 	// All-time totals per task skill (PLAN-11).
-	for name, b := range r.Tasks {
+	tasks := r.Tasks
+	if v1 {
+		tasks = groupLoopTasks(tasks)
+	}
+	for name, b := range tasks {
 		fmt.Fprintf(tw, "task:%s\t%d\t$%.2f\t%d\t%d\t%d\n",
 			name, len(b.Runs), b.Totals.CostUSD,
 			b.Totals.InputTokens, b.Totals.OutputTokens, b.Totals.CacheReadTokens)
@@ -310,6 +321,25 @@ func printCostsHuman(r *cost.Rollup) {
 	} else {
 		fmt.Fprintf(os.Stderr, "rollup updated %s\n", r.UpdatedAt.Format(time.RFC3339))
 	}
+}
+
+// groupLoopTasks is an APEX v1 rollup's task buckets with the loop's runs
+// in one row (Q95): apex-loop's, and apex-orchestrator's as an ape before
+// rc.7 recorded the loop, under "apex-loop (+apex-orchestrator)" when the
+// older name has runs. The rollup itself keeps both, as recorded (JSON).
+func groupLoopTasks(tasks map[string]cost.Bucket) map[string]cost.Bucket {
+	old, ok := tasks[apexv1.OperatorSkill]
+	if !ok {
+		return tasks
+	}
+	out := make(map[string]cost.Bucket, len(tasks))
+	for name, b := range tasks {
+		if name != apexv1.OperatorSkill && name != apexv1.OrchestratorSkill {
+			out[name] = b
+		}
+	}
+	out[apexv1.OrchestratorSkill+" (+"+apexv1.OperatorSkill+")"] = tasks[apexv1.OrchestratorSkill].Merge(old)
+	return out
 }
 
 // printTotalsLine renders one labelled totals row for the single-run /

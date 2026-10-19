@@ -46,7 +46,7 @@ func TestAcceptOnBase_ReviewedChange(t *testing.T) {
 	require.True(t, res.Rebased, "the evidence commit moved main: rebased, with no conflict")
 	require.Equal(t, "main", CurrentBranch(ctx(), p.Root))
 	clean(t, p, "archive")
-	require.Equal(t, []string{"Add wave", "apex: add-wave accepted T2", "docs: review evidence"}, subjects(t, p)[:3])
+	require.Equal(t, []string{"feat: Add wave", "apex: add-wave accepted T2", "docs: review evidence"}, subjects(t, p)[:3])
 	require.Equal(t, evidenceCommit, run(t, p.Root, "rev-parse", "HEAD~2"))
 
 	archived, err := LoadState(p.Root + "/" + res.ArchivedTo + "/state.json")

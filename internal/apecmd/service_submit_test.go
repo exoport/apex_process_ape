@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// orchestratorManifest writes a task manifest for apex-orchestrator run orch-run.
+// orchestratorManifest writes a task manifest for apex-loop run orch-run.
 func orchestratorManifest(t *testing.T, root, status string) {
 	t.Helper()
 	dir := filepath.Join(runlog.TasksRoot(root), apexv1.OrchestratorSkill, "orch-run")
@@ -23,7 +23,7 @@ func orchestratorManifest(t *testing.T, root, status string) {
 }
 
 // D83: the daemon's check of a depth-1 caller is a direct `ape task`'s rule
-// over the stamp. Only a running apex-orchestrator run's job, only an
+// over the stamp. Only a running apex-loop run's job, only an
 // allow-listed skill's task, only while its child slot is free; and the
 // environment it hands the job's ape makes that ape the orchestrator's
 // child, by the same gateSession a direct child goes through.
@@ -36,7 +36,7 @@ func TestServiceGate(t *testing.T) {
 
 	_, err := serviceGate(service.KindTask, job(service.KindTask, "apex-apply"))
 	requireSessionDepth(t, err)
-	require.Contains(t, err.Error(), "not a running apex-orchestrator run")
+	require.Contains(t, err.Error(), "not a running apex-loop run")
 
 	orchestratorManifest(t, root, "running")
 	env, err := serviceGate(service.KindTask, job(service.KindTask, "apex-apply"))

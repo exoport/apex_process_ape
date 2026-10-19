@@ -415,6 +415,13 @@ func main() { fmt.Println(greet("ADR-0004")) }
 	require.Contains(t, agents, "## Commands\n<!-- build / test / e2e, one line each -->\n<!-- lifted from development/project-context.md:")
 	require.Contains(t, agents, "- `sh ./check.sh`\n- `./gate.sh <board>`\n- `test -f main.go`\n")
 	require.True(t, hasProjectContext(agents, "development"), "D82: the lift's map imports project.md, as init's does")
+	// A13, Q96: the lift names the operator and writes apex-loop's row,
+	// so seq-07 has nothing left to do on a project the rc.7 lift made.
+	require.Contains(t, agents, OperatorLine)
+	require.Equal(t, SkillModel{Model: "sonnet", Effort: "high"}, cfg.Models["apex-loop"])
+	require.NotContains(t, cfg.Models, "apex-orchestrator")
+	_, err = p.OperatorInterfaceCheck()
+	require.NoError(t, err)
 	require.NotNil(t, res.Regression)
 	require.Equal(t, 0, res.Regression.Exit)
 	// L4: the same command ran at the tag first, its log kept beside —

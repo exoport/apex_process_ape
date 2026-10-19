@@ -11,7 +11,7 @@ import (
 // is validated as it parses; absent, the rc.4 list and messages exactly.
 func TestCheckChange_ProjectCommitTypes(t *testing.T) {
 	typed := func(id, typ string) string {
-		return strings.Replace(changeDoc(id, "greeting", addedWave, "- T1 x — check: true"), "milestone: M1\n", "milestone: M1\ntype: "+typ+"\n", 1)
+		return strings.Replace(changeDoc(id, "greeting", addedWave, "- T1 x — check: true"), "type: feat\n", "type: "+typ+"\n", 1)
 	}
 	files := baseFiles()
 	files["_apex/config.yaml"] = "commit:\n  types: [draft, edit, feat]\n"

@@ -19,7 +19,7 @@ import (
 //   - no stamp: refused (fail closed, Q43): a pre-rc.4 client, or a raw
 //     publish that did not say where it comes from;
 //   - depth 2 or more: refused, nothing spawned;
-//   - depth 1: allowed only from a running apex-orchestrator run in the
+//   - depth 1: allowed only from a running apex-loop run in the
 //     job's project, for a skill on its allow-list, one child at a time —
 //     the SessionGate (apecmd) checks it with the functions a direct
 //     `ape task` uses, and the job's `ape task` runs under the caller's
@@ -82,8 +82,8 @@ func admitCaller(kind Kind, req RunRequest, gate SessionGate) ([]string, *Refusa
 	case c.Depth == 0:
 		return nil, nil
 	case c.Depth >= apexv1.MaxDepth:
-		return nil, depth("the caller runs inside an ape session an orchestrator started (depth %d, run %s), and a session at that depth starts no model session"+
-			" — finish this session's own work and report back; the orchestrator starts the next session", c.Depth, c.RunID)
+		return nil, depth("the caller runs inside an ape session an apex-loop run started (depth %d, run %s), and a session at that depth starts no model session"+
+			" — finish this session's own work and report back; the loop starts the next session", c.Depth, c.RunID)
 	case kind == KindScript:
 		return nil, depth("the caller runs inside an ape session (depth 1, run %s), and a script is a conductor: it runs from a terminal, outside every ape session", c.RunID)
 	case !runIDRe.MatchString(c.RunID):

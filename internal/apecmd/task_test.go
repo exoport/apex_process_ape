@@ -345,12 +345,12 @@ func commitSubjects(commits []runCommit) []string {
 // D159 Q85: a stopped orchestrator's error ends with how to resume it,
 // and still classifies as the run's own error.
 func TestOrchestratorResumeHint(t *testing.T) {
-	require.Equal(t, "ape task apex-orchestrator --args M3", orchestratorResumeCommand(" M3 "))
-	require.Equal(t, `ape task apex-orchestrator --args "M3 --x"`, orchestratorResumeCommand("M3 --x"))
+	require.Equal(t, "ape task apex-loop --args M3", orchestratorResumeCommand(" M3 "))
+	require.Equal(t, `ape task apex-loop --args "M3 --x"`, orchestratorResumeCommand("M3 --x"))
 
 	idle := &sessiondriver.IdleTimeoutError{Label: "interactive step", Idle: time.Hour, Window: time.Hour}
-	err := &resumeHintError{err: fmt.Errorf("stage x: %w", idle), line: "resume: `ape status` shows where M3 stopped; then `ape task apex-orchestrator --args M3`"}
-	require.True(t, strings.HasSuffix(err.Error(), " — resume: `ape status` shows where M3 stopped; then `ape task apex-orchestrator --args M3`"))
+	err := &resumeHintError{err: fmt.Errorf("stage x: %w", idle), line: "resume: `ape status` shows where M3 stopped; then `ape task apex-loop --args M3`"}
+	require.True(t, strings.HasSuffix(err.Error(), " — resume: `ape status` shows where M3 stopped; then `ape task apex-loop --args M3`"))
 	_, ok := errors.AsType[*sessiondriver.IdleTimeoutError](err)
 	require.True(t, ok)
 	require.Equal(t, taskExitCode(idle), taskExitCode(err))

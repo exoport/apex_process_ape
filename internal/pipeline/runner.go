@@ -191,7 +191,7 @@ type RunOptions struct {
 
 	// ResumeCommand / ResumeWhat: how a person resumes this run when it
 	// ends without completing (D159 Q85; an APEX v1 orchestrator's
-	// `ape task apex-orchestrator --args <M>`, and <M>). Set, the
+	// `ape task apex-loop --args <M>`, and <M>). Set, the
 	// manifest's termination message ends with ResumeLine's sentence.
 	ResumeCommand string
 	ResumeWhat    string

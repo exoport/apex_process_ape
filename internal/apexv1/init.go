@@ -90,10 +90,13 @@ const projectSkeleton = `# %s
 
 // agentsSkeletonTemplate is the AGENTS.md init writes, {dev} the
 // development folder. Its first line under the title is the
-// project-context import (D82).
+// project-context import (D82), then the line naming the operator's
+// interface (A13).
 const agentsSkeletonTemplate = `# AGENTS.md
 
 {context}
+
+{operator}
 
 <!-- The project map, at most 16 KB (caps.agents_md): what this is, how to build, test and run the e2e
      checks, the NEVER rules, and pointers. Detail lives in {dev}/ and docs/. -->
@@ -118,7 +121,7 @@ const agentsSkeletonTemplate = `# AGENTS.md
 // agentsSkeleton is the AGENTS.md skeleton for a project whose
 // development folder is dev.
 func agentsSkeleton(dev string) string {
-	return strings.NewReplacer("{context}", projectContextLine(dev), "{dev}", dev).Replace(agentsSkeletonTemplate)
+	return strings.NewReplacer("{context}", projectContextLine(dev), "{operator}", OperatorLine, "{dev}", dev).Replace(agentsSkeletonTemplate)
 }
 
 // projectContextLine is the line AGENTS.md carries so every session reads
@@ -218,14 +221,15 @@ func withProjectContext(doc, dev string) string {
 
 // modelDefaultsYAML is the models: block a new _apex/config.yaml starts
 // with (D65), and the one init appends to an existing config that has
-// none (D86): the build (apex-apply, the orchestrator, and apex-release,
+// none (D86): the build (apex-apply, the loop apex-loop, and apex-release,
 // D93) on sonnet/high, review, acceptance (apex-accept, D93) and planning
-// on opus/medium. A project overrides any of them; models: is not guarded
-// (config.changed), as it loosens nothing.
+// on opus/medium. The operator's apex-orchestrator has no row: it runs in
+// the person's own session (D175, D176). A project overrides any of them;
+// models: is not guarded (config.changed), as it loosens nothing.
 const modelDefaultsYAML = `# The model and effort each skill's session runs on (D65); change them freely.
 models:
   apex-apply: {model: sonnet, effort: high}
-  apex-orchestrator: {model: sonnet, effort: high}
+  apex-loop: {model: sonnet, effort: high}
   apex-review: {model: opus, effort: medium}
   apex-plan: {model: opus, effort: medium}
   apex-change: {model: opus, effort: medium}
@@ -440,6 +444,8 @@ func (p *Project) amendConfigModels(ctx context.Context, res *InitResult) error 
 		for _, k := range mappingKeys(models) {
 			have[k] = true
 		}
+		// Before seq-07, models.apex-orchestrator is apex-loop's (Q96).
+		have[OrchestratorSkill] = have[OrchestratorSkill] || have[OperatorSkill]
 		for _, skill := range modelDefaultSkills() {
 			if !have[skill] {
 				res.Warnings = append(res.Warnings, rel+" models: has no "+skill+" entry — "+skill+

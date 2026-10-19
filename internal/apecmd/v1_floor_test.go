@@ -75,7 +75,7 @@ func TestV1ApeFloor(t *testing.T) {
 func TestDispatchTask_V1RefusesBelowTheFloor(t *testing.T) {
 	withApeVersion(t, "0.10.0")
 	root := v1FloorProject(t, "min_ape_version: 1.0.0-rc.1\n")
-	res, err := dispatchTask(context.Background(), taskOptions{skill: "apex-orchestrator", projectRoot: root})
+	res, err := dispatchTask(context.Background(), taskOptions{skill: apexv1.OrchestratorSkill, projectRoot: root})
 	var preflight *taskPreflightError
 	require.ErrorAs(t, err, &preflight)
 	require.Contains(t, err.Error(), "older than the installed framework's min_ape_version 1.0.0-rc.1")
@@ -99,7 +99,7 @@ func errorsAsFail(err error) (*apexv1.FailError, bool) {
 	return errors.AsType[*apexv1.FailError](err)
 }
 
-// H19, D49: ape task apex-orchestrator refuses a milestone past
+// H19, D49: ape task apex-loop refuses a milestone past
 // limits.consecutive_blocks, before anything spawns; other skills, and
 // another milestone, are not refused by it.
 func TestDispatchTask_OrchestratorRefusedPastConsecutiveBlocks(t *testing.T) {
@@ -115,7 +115,7 @@ func TestDispatchTask_OrchestratorRefusedPastConsecutiveBlocks(t *testing.T) {
 	require.NoError(t, os.WriteFile(path, data, 0o644))
 	v1Git(t, root, "commit", "-qam", "two blocks")
 
-	_, err = dispatchTask(context.Background(), taskOptions{skill: "apex-orchestrator", projectRoot: root, args: "M1"})
+	_, err = dispatchTask(context.Background(), taskOptions{skill: apexv1.OrchestratorSkill, projectRoot: root, args: "M1"})
 	var preflight *taskPreflightError
 	require.ErrorAs(t, err, &preflight)
 	require.Contains(t, err.Error(), "M1 has 2 changes blocked in a row")

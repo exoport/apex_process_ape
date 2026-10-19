@@ -296,14 +296,18 @@ type StatusReport struct {
 	Archived   int              `json:"archived"`
 	// Fixes are the approved fixes not archived nor blocked, in the order
 	// they run (D40): started ones first, then by approval time. The first
-	// runs ahead of milestone work, at the orchestrator's next change
-	// boundary — or alone, `ape task apex-orchestrator --args <id>`.
+	// runs ahead of milestone work, at the loop's next change boundary —
+	// or alone, `ape task apex-loop --args <id>`.
 	Fixes []string `json:"fixes"`
 	// PreExistingRed is what was red at a change's baseline that is not
 	// the change's own: the planner's to roadmap (backlog 37).
 	PreExistingRed []PreExistingRed `json:"pre_existing_red"`
 	Spend          Spend            `json:"spend"`
 	Next           string           `json:"next"`
+	// NextWhy is next's reason, one line (Q100, OI-7): what in the
+	// recorded state makes it the next step, so a reader explains it
+	// without re-deriving it. next stays one string.
+	NextWhy string `json:"next_why"`
 	// RoadmapNext is the roadmap's Next items (H26, D60): findings noticed
 	// out of scope, one line each without the list marker, from the base
 	// branch's roadmap.md. Always present ([] when none).
@@ -331,8 +335,8 @@ type StatusReport struct {
 	// stop carries its reset. Absent before the first run.
 	LatestRun *LatestRun `json:"latest_run,omitempty"`
 	// Sessions are the model sessions ape launched that run in the project
-	// now, with their depth and parent run (D62): an apex-orchestrator run
-	// at depth 1 and its one child at depth 2. Always present ([] when none).
+	// now, with their depth and parent run (D62): an apex-loop run at
+	// depth 1 and its one child at depth 2. Always present ([] when none).
 	Sessions []LiveSession `json:"sessions"`
 	// Config holds the effective values skills read from ape rather than
 	// restate (D120, Q55): the defaults filled in.
@@ -349,6 +353,9 @@ type StatusConfig struct {
 	// ReleaseDocs is release.docs, else README.md and docs/ where they
 	// exist (D129).
 	ReleaseDocs []string `json:"release_docs"`
+	// CommitSubject is the effective archive subject template (Q109):
+	// commit.subject, else DefaultSubject.
+	CommitSubject string `json:"commit_subject"`
 }
 
 // Status builds the report.
@@ -364,6 +371,7 @@ func (p *Project) Status() *StatusReport {
 	}
 	r.Docs = cfg.Docs
 	r.Config = StatusConfig{CommitTypes: cfg.Commit.TypeList(), ReleaseScheme: cfg.Release.SchemeName(), ReleaseDocs: cfg.Release.DocsList(p.Root)}
+	r.Config.CommitSubject = cfg.Commit.SubjectTemplate()
 	if cfg.HumanReview.Delegates() {
 		r.delegate = cfg.HumanReview.Skill()
 	}
@@ -500,7 +508,7 @@ func (p *Project) Status() *StatusReport {
 	if j := p.LoadArchiveJournal(); j != nil {
 		r.ArchiveJournal, r.ArchiveRunning = j, j.Running()
 	}
-	r.Next = nextStep(r)
+	r.Next, r.NextWhy = nextStepWhy(r)
 	return r
 }
 
@@ -599,27 +607,37 @@ func milestoneLine(m *Milestone, rec *MilestoneRecord) MilestoneLine {
 // nextStep is a deterministic hint: what the way of working says comes
 // next, given only the recorded state.
 func nextStep(r *StatusReport) string {
+	next, _ := nextStepWhy(r)
+	return next
+}
+
+// nextStepWhy is nextStep with its reason, one line (Q100).
+//
+//nolint:gocyclo // one branch per state the way of working names
+func nextStepWhy(r *StatusReport) (next, why string) {
 	if !r.Initialized {
-		return "run `ape project init`"
+		return "run `ape project init`", "this directory has no APEX v1 layout yet (no _apex/state/)"
 	}
 	// An approved fix runs ahead of milestone work (D40).
 	for i := range r.Changes {
 		if c := &r.Changes[i]; c.runnableFix() {
-			return fixNext(c, r.Branch)
+			return fixNext(c, r.Branch), "an approved fix runs ahead of milestone work (D40), one at a time, in approval order"
 		}
 	}
 	m := r.Milestone
 	if m == nil {
 		if len(r.Milestones) == 0 {
-			return "plan: no milestone yet (apex-plan, then `ape milestone new`)"
+			return "plan: no milestone yet (apex-plan, then `ape milestone new`)", "the roadmap has no milestone, so nothing is planned to run"
 		}
-		return "every milestone is done — propose the next one (apex-plan)"
+		return "every milestone is done — propose the next one (apex-plan)", "every milestone in the roadmap is done"
 	}
 	if m.Status != MilestoneApproved {
-		return fmt.Sprintf("%s awaits approval: a person runs `ape milestone approve %s --by <who>`", m.ID, m.ID)
+		return fmt.Sprintf("%s awaits approval: a person runs `ape milestone approve %s --by <who>`", m.ID, m.ID),
+			"nothing of " + m.ID + " runs until a person approves its plan and its red gate"
 	}
 	if len(m.Diagnostics) > 0 {
-		return "stopped: " + m.Diagnostics[0].Message + " — " + m.Diagnostics[0].Fix
+		return "stopped: " + m.Diagnostics[0].Message + " — " + m.Diagnostics[0].Fix,
+			"a limit stopped " + m.ID + "'s run (" + m.Diagnostics[0].Code + "), and only a person resets it"
 	}
 	for i := range r.Changes {
 		c := &r.Changes[i]
@@ -635,43 +653,49 @@ func nextStep(r *StatusReport) string {
 		case StatusReviewed:
 			if len(c.AwaitingHuman) > 0 {
 				if next := r.delegateNext(c); next != "" {
-					return next
+					return next, c.ID + "'s human-review tasks may go to a delegate (D75, D152) before a person is asked"
 				}
-				continue // a person's to accept first (D45): the orchestrator moves on
+				continue // a person's to accept first (D45): the loop moves on
 			}
-			return "archive " + c.ID + ": `ape change archive " + c.ID + "` (squash-merges " + ChangeBranch(c.ID) + " into its base branch)"
+			return "archive " + c.ID + ": `ape change archive " + c.ID + "` (squash-merges " + ChangeBranch(c.ID) + " into its base branch)",
+				c.ID + " passed its review and every human-review task is accepted, so it can land"
 		case StatusVerified:
-			return "review " + c.ID + " (apex-review)" + on
+			return "review " + c.ID + " (apex-review)" + on, c.ID + "'s checks are green, and a review pass comes before the archive"
 		case StatusInProgress:
 			if ret := c.returned; ret != nil {
 				return "returned by the delegate: " + c.ID + " " + ret.task + " — " + ret.Reason + " (defects: " + strings.Join(ret.Defects, ", ") +
-					"); re-plan it with the reason as the hint if its plan is wrong (apex-change), then apply the fix until `ape change verify " + c.ID + "` is green (apex-apply)" + on
+					"); re-plan it with the reason as the hint if its plan is wrong (apex-change), then apply the fix until `ape change verify " + c.ID + "` is green (apex-apply)" + on, c.ID + " came back from the delegate on " + ret.task + ": its fail names a defect in the change's own diff"
 			}
-			return "apply " + c.ID + " until `ape change verify " + c.ID + "` is green (apex-apply)" + on
+			return "apply " + c.ID + " until `ape change verify " + c.ID + "` is green (apex-apply)" + on, c.ID + " is started and its checks are not green yet"
 		case StatusDraft:
-			return "apply " + c.ID + ": `ape change check " + c.ID + "`, then `ape change start " + c.ID + "` (apex-apply)"
+			return "apply " + c.ID + ": `ape change check " + c.ID + "`, then `ape change start " + c.ID + "` (apex-apply)", c.ID + " is planned but not started"
 		}
 	}
 	for i := range r.Changes {
 		if c := &r.Changes[i]; c.Status == StatusAnswered && c.Answer != nil {
-			return "answered: " + c.ID + " — " + c.Answer.By + " answered; re-plan it with the answer as the hint (apex-change), then `ape change start " + c.ID + "`"
+			return "answered: " + c.ID + " — " + c.Answer.By + " answered; re-plan it with the answer as the hint (apex-change), then `ape change start " + c.ID + "`",
+				"a person answered " + c.ID + "'s block, and the answer changes its plan before it resumes"
 		}
 	}
 	for i := range r.Changes {
 		if c := &r.Changes[i]; c.Status == StatusBlocked {
-			return "blocked: " + c.ID + " — " + c.BlockedReason + " (re-plan, or a person answers: `ape change answer " + c.ID + " --text \"…\" --by <who>`; `ape change start " + c.ID + "` resumes)"
+			return "blocked: " + c.ID + " — " + c.BlockedReason + " (re-plan, or a person answers: `ape change answer " + c.ID + " --text \"…\" --by <who>`; `ape change start " + c.ID + "` resumes)",
+				"no other change of " + m.ID + " can go on, and " + c.ID + " is blocked"
 		}
 	}
 	for i := range r.Changes {
 		if c := &r.Changes[i]; c.Status == StatusReviewed && len(c.AwaitingHuman) > 0 {
 			return "a person reviews " + c.ID + ": `ape change accept " + c.ID + " --task " + c.AwaitingHuman[0] + " --by <who>` for each of " +
-				strings.Join(c.AwaitingHuman, ", ") + ", then `ape change archive " + c.ID + "`"
+					strings.Join(c.AwaitingHuman, ", ") + ", then `ape change archive " + c.ID + "`",
+				"what is left of " + m.ID + " waits for a person's human-review acceptance of " + c.ID
 		}
 	}
 	if m.GateLast != nil && m.GateLast.Green() && m.GateLast.SHA != "" {
-		return fmt.Sprintf("%s gate was green at %s — `ape milestone close %s`", m.ID, short(m.GateLast.SHA), m.ID)
+		return fmt.Sprintf("%s gate was green at %s — `ape milestone close %s`", m.ID, short(m.GateLast.SHA), m.ID),
+			m.ID + "'s last gate run was green and no change of it is open"
 	}
-	return fmt.Sprintf("plan the next change toward %s (apex-change), or `ape milestone gate %s` if the goal looks met", m.ID, m.ID)
+	return fmt.Sprintf("plan the next change toward %s (apex-change), or `ape milestone gate %s` if the goal looks met", m.ID, m.ID),
+		m.ID + " is approved and no change of it is open"
 }
 
 // delegateNext is the next step for a reviewed change awaiting a person
@@ -722,8 +746,8 @@ func fixNext(c *ChangeStatus, branch string) string {
 	if c.Branch != "" && branch != c.Branch {
 		what += ", on " + c.Branch
 	}
-	return what + ") runs ahead of milestone work: the orchestrator takes it at its next change boundary; " +
-		"with no milestone run active, `ape task apex-orchestrator --args " + c.ID + "` runs it alone"
+	return what + ") runs ahead of milestone work: the loop takes it at its next change boundary; " +
+		"with no milestone run active, `ape task " + OrchestratorSkill + " --args " + c.ID + "` runs it alone"
 }
 
 // briefReasonMax caps a blocked reason in the brief, so a long question

@@ -11,7 +11,11 @@ import (
 
 // noticeCodes are the codes of project check's notices (D155 Q73): the
 // only ones published with exit 0, as a notice never fails.
-var noticeCodes = []string{CodeGateOutsideGates, CodeHooksPreCommitAbsent, CodeHooksPromptAbsent}
+var noticeCodes = []string{
+	CodeGateOutsideGates, CodeHooksPreCommitAbsent, CodeHooksPromptAbsent,
+	// rc.7 (rc7-rename).
+	CodeModelsOperatorRow,
+}
 
 // The published list and the code agree: every code the source sets or a
 // finding rule yields is published with one exit, and every published code
@@ -66,6 +70,8 @@ func TestDiagnosticCodes_PublishedListMatchesTheCode(t *testing.T) {
 		"CodeSessionRelay": CodeSessionRelay, "CodeRelaysExceeded": CodeRelaysExceeded,
 		// rc.7 (rc7-e2).
 		"CodeByMismatch": CodeByMismatch, "CodeHooksPromptAbsent": CodeHooksPromptAbsent,
+		// rc.7 (rc7-rename).
+		"CodeSkillRenamed": CodeSkillRenamed, "CodeOperatorInterfacePending": CodeOperatorInterfacePending, "CodeModelsOperatorRow": CodeModelsOperatorRow,
 	}
 	for _, glob := range []string{"*.go", filepath.Join("..", "apecmd", "v1_*.go")} {
 		files, err := filepath.Glob(glob)

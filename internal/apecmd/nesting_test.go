@@ -67,8 +67,7 @@ func withAncestors(t *testing.T, pids ...int) {
 	parentOf = func(pid int) (int, bool) { pp, ok := table[pid]; return pp, ok }
 }
 
-// An orchestrator run, orch-run: a live registry row for ape task
-// apex-orchestrator.
+// A loop run, orch-run: a live registry row for ape task apex-loop.
 func orchestratorRow() sessions.Session {
 	return sessions.Session{PID: os.Getppid(), ClaudePID: 7000, Command: "task", RunID: "orch-run", Skill: apexv1.OrchestratorSkill, Depth: 1, StartedAt: time.Now()}
 }
@@ -361,18 +360,27 @@ func requireSessionDepth(t *testing.T, err error) {
 	require.Equal(t, apexv1.CodeSessionDepth, ue.Code)
 }
 
-// The orchestrator conducts ape runs as `ape task apex-orchestrator`, where
-// ape knows it as one; as an `ape prompt` agent it would not be. Refused at
-// preflight, before any spawn.
+// The loop conducts ape runs as `ape task apex-loop`, where ape knows it as
+// one; as an `ape prompt` agent it would not be. Refused at preflight,
+// before any spawn — and so is the operator's apex-orchestrator (Q95),
+// which opens only in a person's own session.
 func TestPrompt_RefusesTheOrchestratorAgent(t *testing.T) {
 	_, code, err := runPromptCore(context.Background(), promptOptions{
-		agent: "apex-orchestrator", text: "build it", projectRoot: t.TempDir(),
+		agent: "apex-loop", text: "build it", projectRoot: t.TempDir(),
 	})
 	require.Equal(t, ExitUsage, code)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "ape task apex-orchestrator")
-	require.Contains(t, err.Error(), "/apex-orchestrator <request>")
-	require.NotContains(t, err.Error(), "--autonomous", "the orchestrator has no unattended prompt mode")
+	require.Contains(t, err.Error(), "ape task apex-loop")
+	require.Contains(t, err.Error(), "/apex-loop <M>")
+	require.NotContains(t, err.Error(), "--autonomous", "the loop has no unattended prompt mode")
+
+	_, code, err = runPromptCore(context.Background(), promptOptions{
+		agent: "apex-orchestrator", text: "where are we?", projectRoot: t.TempDir(),
+	})
+	require.Equal(t, ExitUsage, code)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "type `/apex-orchestrator`")
+	require.Contains(t, err.Error(), "`ape task apex-loop --args <M> --detach`")
 }
 
 // Every session carries its marker and its lineage, and never passes on the

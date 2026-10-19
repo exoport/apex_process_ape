@@ -16,6 +16,7 @@ import (
 const v1Fix = `---
 id: fix-hug
 milestone: none
+type: fix
 touches: [greeting]
 ---
 # Hug fix
@@ -88,7 +89,7 @@ func TestV1_FixLaneAndResumeAfterTheBaseMoved(t *testing.T) {
 	require.Equal(t, "add-wave", status.Changes[1].ID)
 	require.Equal(t, "milestone", status.Changes[1].Lane)
 	require.Equal(t, "verified", status.Changes[1].Status)
-	require.Contains(t, status.Next, "`ape task apex-orchestrator --args fix-hug`")
+	require.Contains(t, status.Next, "`ape task apex-loop --args fix-hug`")
 	mainBefore := git("rev-parse", base)
 
 	// The fix runs alone: its branch, checks, review, archive.
@@ -149,7 +150,7 @@ func TestV1_FixLaneAndResumeAfterTheBaseMoved(t *testing.T) {
 	apeOK("change", "archive", "add-wave")
 
 	require.Equal(t, base, git("branch", "--show-current"))
-	require.Equal(t, "Add wave\nHug fix", git("log", "--format=%s", mainBefore+".."+base), "exactly two commits: the fix, then the change")
+	require.Equal(t, "feat: Add wave\nfix: Hug fix", git("log", "--format=%s", mainBefore+".."+base), "exactly two commits: the fix, then the change")
 	require.Empty(t, git("branch", "--list", "change/*"))
 	require.FileExists(t, filepath.Join(project, "hug.sh"))
 	require.FileExists(t, filepath.Join(project, "wave.sh"))

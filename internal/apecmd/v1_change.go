@@ -65,14 +65,14 @@ and otherwise lives like any change: its branch, baseline, checks, a review in a
 session, the delta merged at archive. It counts toward no milestone gate, no milestone's
 regression baseline, and no milestone's spend or budget. Fixes form a queue: planned and
 approved between runs (or ` + "`ape run stop`" + `, plan, approve, restart), never overlapping a
-run (D45). An approved fix runs ahead of milestone work, at the orchestrator's next change
-boundary; with no milestone run active, ` + "`ape task apex-orchestrator --args <id>`" + ` runs it
+run (D45). An approved fix runs ahead of milestone work, at the loop's next change
+boundary; with no milestone run active, ` + "`ape task apex-loop --args <id>`" + ` runs it
 alone. ` + "`ape status`" + ` lists approved fixes first.
 
 One checkout, one operator (D45): archive and abandon switch to the base branch (abandon
 from another change's branch commits on it without a checkout), so they refuse when another
 worktree has it checked out (exit 1, git.base-checked-out, naming that
-worktree; nothing written) — an environment problem: the orchestrator stops, it does not
+worktree; nothing written) — an environment problem: the loop stops, it does not
 re-plan.
 
 Resume after the base moved (D40): whenever a started change's base branch has moved
@@ -82,7 +82,7 @@ base tip, and marks the old verify stale. A conflict is left on change/<id> for
 apex-apply (H8): markers in the tree, HEAD on the branch, the change in-progress (exit 3,
 change.conflicted, the files listed); apex-apply resolves them, ` + "`git add`" + `s and commits, verify
 refuses until it has (change.unresolved-conflict), and the review runs again. When
-apex-apply cannot resolve them it blocks the change, and the orchestrator re-plans it
+apex-apply cannot resolve them it blocks the change, and the loop re-plans it
 (D43). The model never rebases, merges or cherry-picks on a change branch
 (` + "`ape hook pre-tool`" + ` denies it).
 
@@ -169,12 +169,12 @@ func v1ChangeLeaf(use, short, long, example string, f *v1Flags, run func(cmd *co
 
 func newChangeNewCmd() *cobra.Command {
 	var f v1Flags
-	var milestone, touches, paths string
+	var milestone, touches, paths, typ string
 	cmd := v1ChangeLeaf(
-		"new <id> --milestone <M>|none --touches a,b [--paths globs]",
+		"new <id> --milestone <M>|none --touches a,b [--paths globs] [--type <t>]",
 		"Validate the id and write the change.md skeleton and state.json (draft)",
 		`Create development/changes/<id>/ with a change.md skeleton (frontmatter id, milestone,
-touches, paths; # title; ## Why, ## Out of scope (pre-filled with the milestone's Out of
+type, touches, paths; # title; ## Why, ## Out of scope (pre-filled with the milestone's Out of
 scope bullets), ## Delta, ## Tasks, ## Notes) and state.json with status draft, and
 commit both as "apex: <id> draft" (trailer "Change: <id>"). Filling change.md in is the
 author's own commit. A change is planned on the base branch: refused while HEAD is on a
@@ -188,6 +188,12 @@ a person's request outside the roadmap. It needs no roadmap entry, inherits no O
 scope, is approved on its own (`+"`ape change approve <id> --by <who>`"+`) instead of through a
 milestone, and counts toward no milestone; it may touch capabilities and carry a delta
 like any change.
+--type is change.md's type: (Q110), the archive commit's {type} — the default subject is
+"{type}: {title}" (D193): one of the project's commit types (_apex/config.yaml
+commit.types, default feat, fix, perf, refactor, docs, test, build, ci, chore; else exit 2,
+usage.type). Without it ape writes fix for --milestone none and feat otherwise (none
+when that type is not among the project's commit types); the planner may change it
+before start. JSON "type" is the type written.
 --touches lists the capabilities the change adds to or modifies (kebab slugs; new ones
 are fine — a capability is born from its first change). --paths are globs used for
 overlap detection. Overlap (shared touches or paths) with another unarchived change
@@ -201,21 +207,22 @@ _apex/state/milestones.json (consecutive_blocks), committed on the base branch f
 whichever branch as "apex: <M> consecutive blocks <n> (<id>)"; an archived change of the
 milestone sets it back to 0, inside the archive's commit. At limits.consecutive_blocks
 (default 2), change new and change start of the milestone's changes and
-`+"`ape task apex-orchestrator`"+` for it refuse with exit 1, code milestone.blocks-exceeded,
+`+"`ape task apex-loop`"+` for it refuse with exit 1, code milestone.blocks-exceeded,
 action stop, and `+"`ape status --json`"+` reports it under milestone.diagnostics. A person deals
 with the blocked changes (answer or abandon them) and resets the count by approving the
 milestone again: `+"`ape milestone approve <M> --by <who>`"+`. Fixes count toward no milestone.
 
 Exit codes: 0 ok · 1 id taken (incl. archive), milestone not in roadmap, the milestone past
-limits.consecutive_blocks, or HEAD on a change branch · 2 usage.`,
+limits.consecutive_blocks, or HEAD on a change branch · 2 usage (incl. usage.type).`,
 		"  ape change new add-tenant-delete --milestone M2 --touches tenants --paths 'internal/api/**'\n"+
-			"  ape change new fix-login-redirect --milestone none --touches auth",
+			"  ape change new fix-login-redirect --milestone none --touches auth\n"+
+			"  ape change new document-the-api --milestone M2 --touches api --type docs",
 		&f,
 		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
 			if milestone == "" {
 				return v1Fail(cmd, &f, &apexv1.UsageError{Code: "usage.milestone", Msg: "--milestone is required (e.g. M1, or none for a fix)"}, nil)
 			}
-			res, err := p.NewChange(cmd.Context(), id, milestone, splitList(touches), splitList(paths))
+			res, err := p.NewChangeOfType(cmd.Context(), id, milestone, typ, splitList(touches), splitList(paths))
 			if err != nil {
 				return v1Fail(cmd, &f, err, nil)
 			}
@@ -231,6 +238,7 @@ limits.consecutive_blocks, or HEAD on a change branch · 2 usage.`,
 	cmd.Flags().StringVar(&milestone, "milestone", "", "milestone id from roadmap.md, or none for a fix (required)")
 	cmd.Flags().StringVar(&touches, "touches", "", "comma-separated capability slugs (required)")
 	cmd.Flags().StringVar(&paths, "paths", "", "comma-separated globs, for overlap detection")
+	cmd.Flags().StringVar(&typ, "type", "", "change.md's type: (a commit type); default fix for --milestone none, feat otherwise")
 	return cmd
 }
 
@@ -245,10 +253,11 @@ func newChangeCheckCmd() *cobra.Command {
     with `+"`ape change approve`"+`), touches non-empty kebab slugs, decisions exist in
     decisions/, paths are valid globs; type: (the archive commit's {type}, D47) one of
     the project's commit types — _apex/config.yaml commit.types (D120), default feat,
-    fix, perf, refactor, docs, test, build, ci, chore — required only when
-    _apex/config.yaml commit.subject uses {type} (change.no-type; change.bad-type);
+    fix, perf, refactor, docs, test, build, ci, chore — required when the subject
+    template uses {type}, as the default "{type}: {title}" does (D193; change.no-type;
+    change.bad-type; ape change new writes one);
     review_tools: [<name>, …] names tools.review entries of _apex/config.yaml whose
-    when: the change matches (the orchestrator runs each before the review; else
+    when: the change matches (the loop runs each before the review; else
     tools.unknown, D74); docs: true marks the milestone's docs change (D130, D152: its
     human-review tasks are the docs check, a delegate's by default — `+"`ape change accept --help`"+`),
     a YAML boolean only (else change.frontmatter); any other key must start with x-
@@ -341,8 +350,8 @@ in place of an approved milestone (else exit 1, change.not-approved).
 
 Fixes form a queue: planned and approved between runs (or `+"`ape run stop`"+`, plan, approve,
 restart), never overlapping a run (D45). An approved fix runs ahead of milestone work, at
-the orchestrator's next change boundary; with no milestone run active,
-`+"`ape task apex-orchestrator --args <id>`"+` runs it alone. `+"`ape status`"+` lists approved
+the loop's next change boundary; with no milestone run active,
+`+"`ape task apex-loop --args <id>`"+` runs it alone. `+"`ape status`"+` lists approved
 fixes first (JSON "fixes", changes[].lane "fix", changes[].approved) and points next at the
 first. A fix counts toward no milestone gate and no milestone's spend or budget.
 
@@ -363,7 +372,7 @@ checked out in another worktree · 2 usage (no --by), or a model session.`,
 					fmt.Fprintf(w, "fix %s: already approved by %s at %s (nothing written)\n", id, res.Approved.By, res.Approved.At)
 					return
 				}
-				fmt.Fprintf(w, "fix %s: approved by %s — it runs ahead of milestone work: `ape task apex-orchestrator --args %s`, or the orchestrator's next change boundary\n",
+				fmt.Fprintf(w, "fix %s: approved by %s — it runs ahead of milestone work: `ape task apex-loop --args %s`, or the loop's next change boundary\n",
 					id, res.Approved.By, id)
 			})
 		})
@@ -436,7 +445,7 @@ If so ape catches the change up — the one path start, verify and archive share
     them (edit, `+"`git add`"+`, commit with trailer "Change: <id>"); verify refuses until no
     unmerged path or marker remains (exit 1, change.unresolved-conflict); verify and the
     review then run again. When apex-apply cannot resolve them it blocks the change, and
-    the orchestrator re-plans it (D43). A net diff that applies cleanly after all is
+    the loop re-plans it (D43). A net diff that applies cleanly after all is
     committed as "apex: <id> re-applied onto <base> as one commit", and the catch-up ends
     as a clean one
   - the baseline (task checks, effective-spec scenarios, regression command) is re-run
@@ -766,11 +775,11 @@ ape starts `+"`ape task apex-review --args <id>`"+` detached (survives the calle
 and that session writes review.md and records the verdict with --verdict/--findings.
 It counts as starting apex-review under the nesting rule (D62; see ape task --help):
 from a terminal (depth 0) always; from inside an ape session only from ape's own
-apex-orchestrator run, as its one child (exit 3, session.child-running, while
+apex-loop run, as its one child (exit 3, session.child-running, while
 another child runs, checked before the change is read); from any other session — apex-apply a person ran with ape task,
 say — refused (exit 2, session.depth); never from inside a review session. The
-review session is depth 2 under an orchestrator, its manifest records depth and
-parent_run, and it is stopped when that orchestrator's run ends.
+review session is depth 2 under a loop run, its manifest records depth and
+parent_run, and it is stopped when that loop run ends.
   - which changes: a verified one; or a reviewed one whose review is stale — the work
     changed since the review's sha, what archive refuses as review.stale (D51 Q16):
     --run first verifies it again in-process, as `+"`ape change verify <id>`"+` would
@@ -809,7 +818,7 @@ in JSON "outcome"), verdict voided, or no verdict (review.no-verdict; when the s
 last Stop still had background work running, the message says "ended with live
 background work: <tasks>" and JSON outcome.background lists them) · 2 usage
 (bad verdict, findings file missing, --run inside a review session, or the nesting
-rule: session.depth) · 3 --run: the orchestrator's child session is running
+rule: session.depth) · 3 --run: the loop's child session is running
 (session.child-running) · 75 --run: still running, call again.`,
 		"  ape change review add-tenant-delete --verdict pass --findings development/changes/add-tenant-delete/review.md\n"+
 			"  ape change review add-tenant-delete --run --wait 9m --json",
@@ -1105,7 +1114,7 @@ change/<id> when it has one, else the branch the draft was planned on — from a
 without a checkout when HEAD is elsewhere (refused when that branch is checked out in
 another worktree: git.base-checked-out).
 
-The orchestrator then has apex-change re-plan the change with the answer as the hint and
+The loop then has apex-change re-plan the change with the answer as the hint and
 starts it again: `+"`ape change start`"+` takes an answered change as it takes a blocked one (a
 re-plan is recorded as a re-start). The answer also restarts the counts limits.replans and
 limits.attempts_total judge (`+"`ape change verify --help`"+`).
@@ -1128,7 +1137,7 @@ another worktree · 2 usage (no --text or --by), or a model session.`,
 				return v1Fail(cmd, &f, err, nil)
 			}
 			return v1Emit(cmd.OutOrStdout(), &f, st, func(w io.Writer) {
-				fmt.Fprintf(w, "change %s: answered by %s — the orchestrator re-plans it with the answer, then `ape change start %s`\n", id, st.Answer.By, id)
+				fmt.Fprintf(w, "change %s: answered by %s — the loop re-plans it with the answer, then `ape change start %s`\n", id, st.Answer.By, id)
 			})
 		})
 	cmd.Flags().StringVar(&text, "text", "", "the answer (required)")
@@ -1239,7 +1248,7 @@ func newChangeArchiveCmd() *cobra.Command {
      2, session.person-only — unless, in the person's own Claude Code session, the person
      typed "allow pending human on <id>" in that turn (E2: `+"`ape hook pre-tool --help`"+`; recorded
      as allow_pending_human_by, and a plain archive running on the change is run.busy); the
-     orchestrator leaves such a change reviewed and moves on.
+     loop leaves such a change reviewed and moves on.
      An archived change's unaccepted tasks stay in `+"`ape status`"+` and stay acceptable
      (`+"`ape change accept --help`"+`)
   2. runs with HEAD on change/<id>, or on another non-change branch (it switches to
@@ -1274,9 +1283,15 @@ func newChangeArchiveCmd() *cobra.Command {
      path and sha256) — and
      commits everything as ONE commit (H15):
      subject from _apex/config.yaml commit.subject — placeholders {type} (change.md's
-     type:), {title} (its # title) and {id}; default "{title}" — and a body holding the
+     type:), {title} (its # title, as written) and {id}; default "{type}: {title}" (D193;
+     "{title}" before rc.7: set commit.subject: "{title}" to keep it) — and a body holding the
      branch commits' own subjects (not ape's "apex:" ones) and every trailer of theirs but
-     "Change:", deduplicated, then "Change: <id>". The project's git hooks run on this
+     "Change:", deduplicated, then "Change: <id>". Under the default only (commit.subject
+     unset), a change with no type: — one in flight when the default changed — archives
+     with "{title}" alone, and says so ("subject: … the title alone"; JSON
+     "subject_fallback": true, Q111); a configured template that uses {type} refuses a
+     change with no type: (change.check-failed, change.no-type). ape's own "apex: …"
+     commits are unchanged (Q112). The project's git hooks run on this
      commit (commit.hooks: run, the default; skip opts out) — ape's status commits keep
      skipping them. A hook that refuses rolls archive back: exit 1, archive.hook-failed,
      the hook output's tail in the message. Then keeps change/<id>'s tip as
@@ -1345,6 +1360,9 @@ func renderArchive(cmd *cobra.Command, f *v1Flags, id string, res *apexv1.Archiv
 			fmt.Fprintln(w)
 		}
 		fmt.Fprintf(w, "archived %s → %s\ncommit %.7s %s (on %s; %s deleted)\n", id, res.ArchivedTo, res.Commit, res.Subject, res.BaseBranch, apexv1.ChangeBranch(id))
+		if res.SubjectFallback {
+			fmt.Fprintf(w, "subject: %s has no type:, so the default %q fell back to the title alone (Q111)\n", id, apexv1.DefaultSubject)
+		}
 		if res.AllowPendingHuman {
 			fmt.Fprintf(w, "recorded: archived with human-review pending (%s)\n", strings.Join(res.PendingHuman, ", "))
 		}

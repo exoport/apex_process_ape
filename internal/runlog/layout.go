@@ -216,7 +216,7 @@ func DetachedRoot(projectRoot string) string {
 	return filepath.Join(ApeRoot(projectRoot), "detached")
 }
 
-// SessionLocksRoot holds the nesting rule's locks (D62): one apex-orchestrator
+// SessionLocksRoot holds the nesting rule's locks (D62): one apex-loop
 // run per project, one child session at a time per orchestrator run. In a
 // v1 project that is _apex/state/runs/sessions/, beside the run locks of
 // long checks (_apex/state/runs/<scope>.json) and never colliding with

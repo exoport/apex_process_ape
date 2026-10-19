@@ -1067,7 +1067,13 @@ func (lf *lifter) apply() error {
 	lf.res.Init = initRes
 	commit = append(commit, p.initCommitPaths(ctx, initRes)...)
 	if doc, err := readFileString(p.AgentsMD()); err == nil {
-		if out := withCommands(doc, lf.res.Gates); out != doc {
+		// A13: the lifted project's AGENTS.md names the operator's
+		// interface, as init's skeleton does, so nothing of seq-07 is left.
+		out := withCommands(doc, lf.res.Gates)
+		if !hasOperatorLine(out) {
+			out = withOperatorLine(out, p.DevRel)
+		}
+		if out != doc {
 			if err := liftWrite(p.AgentsMD(), out); err != nil {
 				return err
 			}

@@ -186,7 +186,7 @@ type Manifest struct {
 
 	// Depth is the session's place in the nesting rule (D62): 1 for a run
 	// a terminal, a script or the service daemon started, 2 for one an
-	// apex-orchestrator run started. ParentRun is that orchestrator's run
+	// apex-loop run started. ParentRun is that orchestrator's run
 	// id. Absent on runs older than the rule. Additive under
 	// schema_version 2.
 	Depth     int    `yaml:"depth,omitempty"`
@@ -299,7 +299,7 @@ const (
 	// ended the run. resets / resets_at say when the limit resets, when the
 	// line named it.
 	TerminationUsageLimit = "usage_limit"
-	// TerminationParentGone — the apex-orchestrator run that started this
+	// TerminationParentGone — the apex-loop run that started this
 	// session ended first (D62: a child dies with its parent), and ape
 	// stopped the session.
 	TerminationParentGone = "parent_gone"

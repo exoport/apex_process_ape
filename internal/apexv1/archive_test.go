@@ -155,13 +155,14 @@ func TestArchive(t *testing.T) {
 	require.NoDirExists(t, p.ChangeDir("add-wave"))
 
 	// D38: archive lands the change on its base branch as ONE commit,
-	// subject the change's title, and deletes the change's branch.
+	// subject the change's type and title (D193), and deletes the change's
+	// branch.
 	require.Equal(t, "main", CurrentBranch(ctx(), p.Root))
 	require.Equal(t, "main", res.BaseBranch)
 	require.Equal(t, res.Commit, HeadSHA(ctx(), p.Root))
 	require.Equal(t, mainBefore, run(t, p.Root, "rev-parse", "HEAD~1"), "exactly one new commit on main")
 	require.Equal(t, "1", run(t, p.Root, "rev-list", "--count", "--no-merges", "HEAD~1..HEAD"))
-	require.Equal(t, "Add wave", subjects(t, p)[0])
+	require.Equal(t, "feat: Add wave", subjects(t, p)[0])
 	require.Equal(t, "- feat: wave\n\nChange: add-wave", run(t, p.Root, "log", "-1", "--format=%b"),
 		"the body carries the branch's own commit subjects, not ape's, then the trailer (H15)")
 	require.NotContains(t, strings.Join(subjects(t, p), "\n"), "apex: add-wave in-progress", "no change-branch status commit reaches main")
@@ -207,7 +208,7 @@ func TestArchive_FromTheBaseBranch(t *testing.T) {
 	res, err := p.Archive(ctx(), "add-wave", false, RunOptions{})
 	require.NoError(t, err)
 	require.Equal(t, "main", CurrentBranch(ctx(), p.Root))
-	require.Equal(t, "Add wave", subjects(t, p)[0])
+	require.Equal(t, "feat: Add wave", subjects(t, p)[0])
 	require.NotEmpty(t, res.Commit)
 }
 
@@ -233,7 +234,7 @@ func TestArchive_BaseMovedRebasesAndReverifies(t *testing.T) {
 	require.True(t, res.Verify.Green)
 	require.Equal(t, StatusReviewed, res.Verify.Status, "a green re-verify keeps the review")
 	require.Equal(t, mainBefore, run(t, p.Root, "rev-parse", "HEAD~1"), "one commit on top of main's")
-	require.Equal(t, []string{"Add wave", "feat: hug"}, subjects(t, p)[:2])
+	require.Equal(t, []string{"feat: Add wave", "feat: hug"}, subjects(t, p)[:2])
 	require.FileExists(t, filepath.Join(p.Root, "hug.sh"))
 	require.FileExists(t, filepath.Join(p.Root, "wave.sh"))
 	require.Empty(t, run(t, p.Root, "status", "--porcelain"))
@@ -384,8 +385,7 @@ func TestArchive_CommitSubjectHooksAndBody(t *testing.T) {
 	files := baseFiles()
 	files["_apex/config.yaml"] = "project_name: greeter\ncommit:\n  subject: \"{type}: {title} ({id})\"\n"
 	p := fixture(t, files)
-	doc := strings.Replace(waveChange("add-wave"), "milestone: M1\n", "milestone: M1\ntype: feat\n", 1)
-	addChange(t, p, "add-wave", doc)
+	addChange(t, p, "add-wave", waveChange("add-wave"))
 	commitAll(t, p, "plan: add-wave")
 	_, err := p.Start(ctx(), "add-wave", RunOptions{})
 	require.NoError(t, err)
@@ -437,7 +437,7 @@ func TestArchive_CommitHooksSkip(t *testing.T) {
 	res, err := p.Archive(ctx(), "add-wave", false, RunOptions{})
 	require.NoError(t, err)
 	require.False(t, res.Hooks)
-	require.Equal(t, "Add wave", res.Subject, "the default subject is the title")
+	require.Equal(t, "feat: Add wave", res.Subject, "the default subject is {type}: {title} (D193)")
 }
 
 // D47: type: is checked against the list, and required when the subject
@@ -446,11 +446,11 @@ func TestCheckChange_Type(t *testing.T) {
 	files := baseFiles()
 	files["_apex/config.yaml"] = "commit:\n  subject: \"{type}: {title}\"\n"
 	p := fixture(t, files)
-	addChange(t, p, "add-wave", waveChange("add-wave"))
+	addChange(t, p, "add-wave", untyped(waveChange("add-wave")))
 	got := findingMessages(p.CheckChange("add-wave"))
 	require.Contains(t, got, "frontmatter has no `type:`")
 	require.Equal(t, "change.no-type", ClassifyFindings(p.CheckChange("add-wave"))[0].Code)
-	addChange(t, p, "add-hug", strings.Replace(changeDoc("add-hug", "greeting", addedWave, "- T1 x — check: true"), "milestone: M1\n", "milestone: M1\ntype: feature\n", 1))
+	addChange(t, p, "add-hug", strings.Replace(changeDoc("add-hug", "greeting", addedWave, "- T1 x — check: true"), "type: feat\n", "type: feature\n", 1))
 	fs := ClassifyFindings(p.CheckChange("add-hug"))
 	require.Len(t, fs, 1)
 	require.Equal(t, "change.bad-type", fs[0].Code)

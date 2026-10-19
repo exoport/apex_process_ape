@@ -188,5 +188,5 @@ func notice(d Diagnostic) Diagnostic {
 // Notices are `ape project check`'s notices (D155 Q73): what is worth a
 // person's attention but is not a finding, so it never fails the check.
 func (p *Project) Notices() []Diagnostic {
-	return append(append(p.gateNotices(), p.preCommitNotices(context.Background())...), p.promptHookNotices()...)
+	return append(append(append(p.gateNotices(), p.preCommitNotices(context.Background())...), p.promptHookNotices()...), p.operatorRowNotices()...)
 }

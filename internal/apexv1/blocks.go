@@ -25,7 +25,7 @@ import (
 //     counted in milestones.json (consecutive_blocks, on the base branch)
 //     — one more at every block of one of its changes, back to 0 when one
 //     of its changes archives. At the cap, change new and change start of
-//     the milestone's changes and `ape task apex-orchestrator` for it
+//     the milestone's changes and `ape task apex-loop` for it
 //     refuse (milestone.blocks-exceeded, action stop: the run stops), and
 //     `ape status --json` reports it on the milestone. A person resets it
 //     by approving the milestone again (`ape milestone approve`), after
@@ -147,16 +147,16 @@ func (p *Project) blocksExceeded(ctx context.Context, m string) error {
 		return nil
 	}
 	return &FailError{Code: CodeBlocksExceeded, Msg: fmt.Sprintf(
-		"%s has %d changes blocked in a row (limits.consecutive_blocks %d): no change of it is planned or started, and no orchestrator runs it"+
+		"%s has %d changes blocked in a row (limits.consecutive_blocks %d): no change of it is planned or started, and no loop runs it"+
 			" — the run stops; a person deals with the blocked changes (`ape status`: answer or abandon them) and approves %s again to reset the count: `ape milestone approve %s --by <who>`",
 		m, n, capN, m, m)}
 }
 
 var milestoneIDRe = regexp.MustCompile(`^M\d+$`)
 
-// OrchestratorLimits refuses an orchestrator session for a milestone
-// past limits.consecutive_blocks (milestone.blocks-exceeded): the
-// milestone args names (`ape task apex-orchestrator --args M2`), else
+// OrchestratorLimits refuses a loop session for a milestone past
+// limits.consecutive_blocks (milestone.blocks-exceeded): the milestone
+// args names (`ape task apex-loop --args M2`), else
 // the current one. A fix's run (args names a fix) is not refused.
 func (p *Project) OrchestratorLimits(ctx context.Context, args string) error {
 	if p.IsFixRun(ctx, args) {

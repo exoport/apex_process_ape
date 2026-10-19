@@ -4,7 +4,7 @@ package apecmd
 //
 // Why: Claude Code 2.1.285 stops a Bash tool's background command after at
 // most 2 h (30 min by default), SIGTERM then SIGKILL ~3 s later, and it
-// stops setsid'd and nohup'd descendants too. The apex-orchestrator runs
+// stops setsid'd and nohup'd descendants too. The apex-loop runs
 // every `ape task|change` from such a shell, so a long dispatch
 // was killed mid-run. The framework measured that a process ORPHANED at
 // launch survives, and worked around it in shell. This gives it a
@@ -72,7 +72,7 @@ type detachedHandle struct {
 	ExitCode      *int       `json:"exit_code,omitempty"`
 	Error         string     `json:"error,omitempty"`
 
-	// The nesting rule (D62), for a session an apex-orchestrator run
+	// The nesting rule (D62), for a session an apex-loop run
 	// started: the session's depth, its parent run, and the pid of the ape
 	// process running the parent, which the supervisor watches (the child
 	// dies with it). Locks are the session lock files the run holds under
@@ -334,7 +334,7 @@ ended, and exit with the run's own exit code.
 --wait (or its older name --timeout) bounds the wait. When it expires with
 the run still going, the command exits 75 and the run is untouched: wait
 again. That is how a caller under a tool time limit waits for a run longer
-than the limit — each wait stays inside it. An orchestrator dispatches a
+than the limit — each wait stays inside it. A loop run dispatches a
 skill as ` + "`ape task <skill> --args <id> --detach`" + ` and then
 ` + "`ape run wait <id> --wait 9m`" + ` until it stops exiting 75 (D61).
 
@@ -350,8 +350,8 @@ stderr (its "log"), so a --output-format json envelope reads clean.
 --json prints one object instead of the lines: id, state (running, ended or
 lost), exit_code (null until it ends), log, stdout, run_id and run_dir (the
 run's own record, once it has one), depth and parent_run (the nesting rule:
-2 and the orchestrator's run for a session an orchestrator started),
-stop_reason ("parent_gone" when ape stopped it because that orchestrator
+2 and the loop's run for a session a loop run started),
+stop_reason ("parent_gone" when ape stopped it because that loop run
 ended), and result: the session's last assistant message, read from its
 transcript, at most 2048 bytes (result_truncated: true when cut). result is
 absent when there is no transcript to read. The exit codes are the same.`,
@@ -677,7 +677,7 @@ func newRunSuperviseCmd() *cobra.Command {
 // A signal to the supervisor is passed on to the command, whose own
 // shutdown then decides the exit code that gets recorded.
 //
-// A session an apex-orchestrator run started dies with it (D62, RC3-PLAN
+// A session an apex-loop run started dies with it (D62, RC3-PLAN
 // Q4): the supervisor checks the parent's ape process every
 // parentPollInterval, and when it is gone stops the run the way `ape run
 // stop` does, records stop_reason parent_gone on the handle and, once the
@@ -792,7 +792,7 @@ func markParentGone(path, parentRun string, parentPID int) {
 			m.Status = pipeline.StatusCancelled
 		}
 		m.Termination = &pipeline.TerminationRecord{Kind: pipeline.TerminationParentGone, Message: fmt.Sprintf(
-			"the orchestrator run %s that started this session ended (its ape process, pid %d, is gone), and ape stopped the session", parentRun, parentPID)}
+			"the loop run %s that started this session ended (its ape process, pid %d, is gone), and ape stopped the session", parentRun, parentPID)}
 	})
 }
 

@@ -131,12 +131,12 @@ func changeState(t *testing.T, project string) map[string]any {
 	return st
 }
 
-// asOrchestrator makes run the project's apex-orchestrator run as ape's own
+// asOrchestrator makes run the project's apex-loop run as ape's own
 // record shows it: a task run of the skill, still running. A session whose
 // marker names it may start one allow-listed child (D62).
 func asOrchestrator(t *testing.T, project, run string) {
 	t.Helper()
-	dir := filepath.Join(project, "_apex", "state", "runs", "tasks", "apex-orchestrator", run)
+	dir := filepath.Join(project, "_apex", "state", "runs", "tasks", "apex-loop", run)
 	require.NoError(t, os.MkdirAll(dir, 0o755))
 	require.NoError(t, writeFile(filepath.Join(dir, "manifest.yaml"), "run_id: "+run+"\nstatus: running\n"))
 }

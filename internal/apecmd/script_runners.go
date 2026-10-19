@@ -109,7 +109,10 @@ func (r *scriptRunner) runTask(ctx context.Context, o apescript.TaskOpts) (apesc
 	cfg.maxDuration = resolveMaxDuration(o.MaxDuration)
 
 	// The nesting rule (D62): a script is a depth-0 conductor, and an
-	// apex-orchestrator it starts holds the project's one orchestrator lock.
+	// apex-loop it starts holds the project's one loop lock.
+	if err := refuseRenamed("apescript.RunTask", o.Skill, o.Args, root); err != nil {
+		return apescript.RunResult{}, err
+	}
 	launch, err := gateSession("apescript.RunTask", o.Skill, root)
 	if err != nil {
 		return apescript.RunResult{}, err

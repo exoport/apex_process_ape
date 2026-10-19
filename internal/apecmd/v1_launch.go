@@ -42,6 +42,13 @@ func decideV1TaskLaunch(p *apexv1.Project, skill, flagModel, flagEffort string) 
 		return v1TaskLaunch{}, fmt.Errorf("%s: %w", apexv1.ConfigPath(p.Root), err)
 	}
 	entry := cfg.Models[skill]
+	if skill == apexv1.OrchestratorSkill {
+		// Q96: before seq-07, models.apex-orchestrator is the loop's.
+		var legacy bool
+		if entry, legacy = apexv1.LoopModel(cfg.Models); legacy {
+			fmt.Fprintln(os.Stderr, apexv1.LoopModelWarning)
+		}
+	}
 	if entry.Model != "" {
 		entry.Model = resolveModelArg(entry.Model)
 	}

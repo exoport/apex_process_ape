@@ -20,6 +20,8 @@ func newProjectCmd() *cobra.Command {
 	}
 	cmd.AddCommand(newProjectInitCmd(), newProjectCheckCmd(), newProjectCodesCmd(), newProjectLiftCmd(), newProjectAcceptConfigCmd(),
 		newProjectArchiveLayoutCmd())
+	// rc.7 (rc7-rename).
+	cmd.AddCommand(newProjectOperatorInterfaceCmd())
 	return cmd
 }
 
@@ -39,10 +41,16 @@ then ` + "`ape project init`" + ` (each names the other in its next:, D162). ini
 for setup while no .claude/skills/apex-* exists; JSON "next" carries the same line.
 
   _apex/config.yaml                  project_name, development_folder, and the models:
-                                     defaults (D65, D93) — apex-apply, apex-orchestrator
+                                     defaults (D65, D93) — apex-apply, apex-loop
                                      and apex-release {model: sonnet, effort: high};
                                      apex-review, apex-plan, apex-change and apex-accept
-                                     {model: opus, effort: medium}. An existing config
+                                     {model: opus, effort: medium}. No row for the
+                                     operator's apex-orchestrator: it runs in your own
+                                     session, on the model you chose (D175, D176). A
+                                     models.apex-orchestrator row (a project made before
+                                     rc.7) is read as apex-loop's while there is no
+                                     apex-loop row, with a warning, until ape project
+                                     operator-interface moves it (see its --help). An existing config
                                      with no top-level models: gets that block appended,
                                      its own text kept byte for byte (restored, with a
                                      warning, if the result would not parse); the
@@ -57,7 +65,9 @@ for setup while no .claude/skills/apex-* exists; JSON "next" carries the same li
                                      budget: enforce|off (default off; see ape task --help),
                                      attempts: N red verifies per start (default 5; see
                                      ape change verify --help); commit: {subject,
-                                     hooks} for the archive's squash, and evidence:
+                                     hooks} for the archive's squash (no commit: line
+                                     is written: the subject defaults to
+                                     "{type}: {title}", D193), and evidence:
                                      archive|off (default off) — see ape change archive
                                      --help; notify: <command>, run on a limit stop or a
                                      blocked change — see ape task --help); see "Check
@@ -66,7 +76,11 @@ for setup while no .claude/skills/apex-* exists; JSON "next" carries the same li
                                      Project context: read @development/project.md before
                                      planning or changing anything.
                                      (the configured development folder; plain text, so
-                                     Claude Code imports project.md into every session).
+                                     Claude Code imports project.md into every session),
+                                     then the line naming the operator's interface (A13):
+                                     Talk to APEX: type ` + "`/apex-orchestrator`" + ` in Claude Code.
+                                     (an existing AGENTS.md is not given it: ape project
+                                     operator-interface adds it).
                                      An existing AGENTS.md whose lines carry no
                                      @development/project.md outside code gets that line
                                      after its first # heading (or at the top), and
@@ -465,6 +479,12 @@ line}; [] when none, beside the findings on a failure too), they never change th
                            not recorded and a person act from a Claude Code session is
                            refused (E2); ` + "`ape project init`" + ` merges it back. ape doctor
                            reports it too (hooks.prompt). See ape hook pre-tool --help
+  models.operator-row      _apex/config.yaml has a models.apex-orchestrator row (Q96):
+                           with no models.apex-loop row it is read as apex-loop's (a
+                           project made before rc.7: ` + "`ape project operator-interface`" + `
+                           renames it); beside one it is a leftover apex-loop's row
+                           overrides (drop it). The operator's apex-orchestrator runs
+                           in your own session and has no models row
 
 Exit codes: 0 green · 1 findings (listed on stderr, or under "findings" with --json) · 2 usage.`,
 		Example: "  ape project check\n  ape project check --json",
@@ -637,6 +657,111 @@ some left · 3 a folder's new place exists.`,
 	return cmd
 }
 
+func newProjectOperatorInterfaceCmd() *cobra.Command {
+	var f v1Flags
+	var check bool
+	cmd := &cobra.Command{
+		Use:   "operator-interface [--check]",
+		Short: "Bring a project made before rc.7 to the operator interface (the v1.0.0_seq-07 migration)",
+		Long: `Since rc.7 (D171) apex-orchestrator is the operator's interface — a skill a person
+opens in their own Claude Code session by typing /apex-orchestrator — and the unattended
+runner of one approved milestone or fix is apex-loop. This brings a project that ape
+project init or the lift made before rc.7 there; the framework's migration
+v1.0.0_seq-07 runs it (command: ape project operator-interface; check: ape project
+operator-interface --check). A project init or the lift made with rc.7 has nothing to do.
+
+One commit, "apex: operator interface (seq-07)", of what is left of:
+  models     _apex/config.yaml's models.apex-orchestrator row renamed to apex-loop, its
+             value kept byte for byte (D176: sonnet/high unless the project chose
+             otherwise); when a models.apex-loop row exists it wins and the old row's
+             lines are removed. Every other byte of the file is kept. models: is not a
+             guarded block, so this is no config.changed. A models: written as a flow
+             mapping ({…}) whose old row must be removed is a person's to edit
+             (project.operator-interface-pending, nothing written)
+  hooks      ape's hooks merged into .claude/settings.json with ape project init's
+             merge: a missing one added, an altered one restored, every other key and
+             hook kept (hooks were only merged by init before)
+  AGENTS.md  the line
+               Talk to APEX: type ` + "`/apex-orchestrator`" + ` in Claude Code.
+             after the project-context line (else after its first # heading, else at
+             the top), when no line outside code names /apex-orchestrator (A11)
+Idempotent: with nothing left it writes nothing and says "nothing to do" (exit 0).
+
+How ape knows seq-07 ran: from the config, not a marker (a fresh clone would lose one). A
+models.apex-orchestrator row with no models.apex-loop row is the state before seq-07:
+` + "`ape task apex-loop`" + ` reads it as apex-loop's, with a warning on stderr, and ape project
+check lists the notice models.operator-row. Beside an apex-loop row it is a leftover,
+the notice says to drop it, and apex-loop's row is the one read.
+
+Refused on a change branch (branch.change-branch), outside a git repository
+(git.not-a-repo), and while _apex/config.yaml, .claude/settings.json or AGENTS.md has
+uncommitted changes (tree.dirty): nothing is written. A command any session may run (not
+person-only).
+
+--check writes nothing: exit 0 when nothing is left, 1
+(project.operator-interface-pending, action person, naming what is left) when something
+is — the migration's check: 0 applied, 1 not applied.
+
+JSON: {"models": "moved"|"removed" (absent when there is no old row), "hooks": [<Event>:
+<command>, …], "agents_line": true|false, "commit"}; "hooks" is always there, [] when
+none. Under --check they say what is left, at the top level beside the failure's
+ok/exit/diagnostics when something is (exit 1).
+
+Exit codes: 0 applied, or nothing to do (--check: nothing left) · 1 refused, or (--check)
+something left.`,
+		Example: "  ape project operator-interface --check\n  ape project operator-interface\n  ape project operator-interface --json",
+		Args:    cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			p, err := v1Project(&f)
+			if err != nil {
+				return err
+			}
+			if err := v1RequireInit(cmd, &f, p); err != nil {
+				return err
+			}
+			if check {
+				res, err := p.OperatorInterfaceCheck()
+				if err != nil {
+					left := map[string]any{"hooks": res.Hooks, "agents_line": res.AgentsLine}
+					if res.Models != "" {
+						left["models"] = res.Models
+					}
+					return v1FailWith(cmd, &f, err, nil, left)
+				}
+				return v1Emit(cmd.OutOrStdout(), &f, res, func(w io.Writer) {
+					fmt.Fprintln(w, "operator interface: nothing left to do")
+				})
+			}
+			res, err := p.OperatorInterface(cmd.Context())
+			if err != nil {
+				return v1Fail(cmd, &f, err, res)
+			}
+			return v1Emit(cmd.OutOrStdout(), &f, res, func(w io.Writer) {
+				if res.Commit == "" {
+					fmt.Fprintln(w, "operator interface: nothing to do")
+					return
+				}
+				switch res.Models {
+				case "moved":
+					fmt.Fprintln(w, "models.apex-orchestrator → models.apex-loop (value kept)")
+				case "removed":
+					fmt.Fprintln(w, "models.apex-orchestrator removed (models.apex-loop wins)")
+				}
+				for _, h := range res.Hooks {
+					fmt.Fprintf(w, "hook added: %s\n", h)
+				}
+				if res.AgentsLine {
+					fmt.Fprintf(w, "AGENTS.md: added %q\n", apexv1.OperatorLine)
+				}
+				fmt.Fprintf(w, "commit %.7s %s\n", res.Commit, apexv1.OperatorInterfaceSubject)
+			})
+		},
+	}
+	addV1Flags(cmd, &f)
+	cmd.Flags().BoolVar(&check, "check", false, "write nothing: exit 0 when nothing is left to do, 1 when something is")
+	return cmd
+}
+
 func newStatusCmd() *cobra.Command {
 	var f v1Flags
 	var brief, board bool
@@ -669,8 +794,8 @@ func newStatusCmd() *cobra.Command {
     changes[].lane "fix"; else "milestone"). Approved fixes (changes[].approved: {by, at,
     plan_digest}) are listed before milestone changes — started ones first, then by
     approval time — and JSON "fixes" holds the ids of those not blocked, in the order they
-    run: the first runs ahead of milestone work, at the orchestrator's next change boundary
-    (never in parallel), or alone with ` + "`ape task apex-orchestrator --args <id>`" + `, and next
+    run: the first runs ahead of milestone work, at the loop's next change boundary
+    (never in parallel), or alone with ` + "`ape task apex-loop --args <id>`" + `, and next
     points at it. A fix awaiting approval is listed last, with the command a person runs
     (` + "`ape change approve <id> --by <who>`" + `). A fix's runs (` + "`ape task <skill> --args <fix-id>`" + `)
     count toward no milestone's spend
@@ -690,7 +815,7 @@ func newStatusCmd() *cobra.Command {
     {by, at, text}, kept once it is started again); next has it re-planned and started
   - human review (H4, D47): every change lists awaiting_human (always present in JSON, []
     when none): its human-review tasks no person has accepted, once only the person is
-    left — the change is reviewed, or archived. The orchestrator skips such a change. A
+    left — the change is reviewed, or archived. The loop skips such a change. A
     reviewed change awaiting a person is not archived next — next names the accept a
     person runs. Archived changes
     with unaccepted human-review tasks (archived past them by a person) are listed after
@@ -739,26 +864,30 @@ func newStatusCmd() *cobra.Command {
     "archive_running" when its process is alive; on the first line): status only reports
     it — the next writing command rolls a crashed one back (archive.interrupted; see
     ` + "`ape change archive --help`" + `)
-  - next: what the way of working says comes next, derived from the state alone
+  - next: what the way of working says comes next, derived from the state alone; JSON
+    "next_why" beside it (and "Why next:" in the long output, not --brief) is its reason,
+    one line (Q100) — next stays one string
   - the roadmap's Next (JSON "roadmap_next": ["2026-10-16 <text> (from <id>)", …], []
     when none; a count line in the human output): the findings noticed out of scope that
     apex-plan triages, as the base branch's roadmap.md holds them (` + "`ape next add`" + ` writes
     there from any branch). Not the same field as "next", the step above
   - JSON "docs": {changelog, user_docs} from _apex/config.yaml docs: ({} when unset), for
     the skills that keep a changelog and user docs current
-  - JSON "config": {commit_types, release_scheme, release_docs} — the project's commit
-    types (commit.types, default feat, fix, perf, refactor, docs, test, build, ci, chore),
+  - JSON "config": {commit_types, release_scheme, release_docs, commit_subject} — the
+    project's commit types (commit.types, default feat, fix, perf, refactor, docs, test,
+    build, ci, chore), the archive's subject template (commit.subject, default
+    "{type}: {title}", D193 — the effective one, for skills to read instead of guessing),
     release scheme (release.scheme: semver, the default, date or edition) and the docs a
     release brings up to date (release.docs, default README.md and docs/ where they exist;
     D129), defaults filled in, for apex-change and apex-release (D120)
   - the latest ape task run (JSON "latest_run": {skill, run_id, status, stopped,
     resets, resets_at, message, depth, parent_run}): how it ended, e.g. "stopped:
     usage-limit, resets 2026-10-16T23:00:00+02:00" when a claude.ai usage limit
-    stopped it (see ape task --help, exit 14); a session an orchestrator started
+    stopped it (see ape task --help, exit 14); a session a loop run started
     names that run ("started by <run>"; depth 2, parent_run)
   - JSON "sessions": the model sessions ape launched that run in this project now
     ([{run_id, kind, skill, depth, parent_run, pid, started_at}], [] when none): an
-    apex-orchestrator run at depth 1 and its one child at depth 2 (D62). The loop's
+    apex-loop run at depth 1 and its one child at depth 2 (D62). The loop's
     run also carries relay (OI-11): {context_tokens, context_window, context_fill,
     context_relay, relays, relays_cap, relay_of} — its session's context as the newest
     turn of its transcript shows it, over the model's window (context_fill null and
@@ -834,6 +963,9 @@ type statusWithBoard struct {
 func statusLong(r *apexv1.StatusReport) string {
 	var b strings.Builder
 	b.WriteString(r.Brief())
+	if r.NextWhy != "" {
+		b.WriteString("Why next: " + r.NextWhy + "\n")
+	}
 	if len(r.Milestones) > 0 {
 		b.WriteString("\nRoadmap:\n")
 		for _, m := range r.Milestones {

@@ -45,7 +45,7 @@ var taskLongHelp = strings.Replace(taskLongHelpText, "{{depth1}}", depthOneHelp(
 // depthOneHelp is the nesting table's depth-1 row of `ape task --help`.
 func depthOneHelp() string {
 	return hangingWrap("  depth 1  ", "           ", "a session started from depth 0: may start a child only when it is ape's own"+
-		" apex-orchestrator run (ape task apex-orchestrator), only a skill on its allow-list ("+
+		" apex-loop run (ape task apex-loop), only a skill on its allow-list ("+
 		strings.Join(apexv1.CoreChildSkills, ", ")+", the human_review: delegate skill, and every skill"+
 		" the tools: slots name), and one child at a time", taskHelpWidth)
 }
@@ -136,7 +136,18 @@ line (a person's call) lets sessions start again. An unparseable
 _apex/config.yaml in a v1 project refuses every session (exit 2) rather
 than run it with no limits.
 
-A session of apex-orchestrator is also refused (exit 1, code
+apex-orchestrator is refused (exit 2, code skill.renamed, action stop), and
+so is the same skill through ape service submit task and an ape script's
+RunTask: since rc.7 (D171) it is the operator's interface, a skill a person
+opens in their own Claude Code session by typing /apex-orchestrator, and the
+unattended runner of one approved milestone or fix is apex-loop. The
+refusal carries both pointers: ` + "`ape task apex-loop --args <M>`" + ` (the run's own
+--args) and /apex-orchestrator. It is no alias: a stopped run's older resume
+line fails loudly instead of starting the wrong skill. A loop run an older
+ape recorded as apex-orchestrator still counts as the loop's (its lock, its
+children; ape costs groups both names).
+
+A session of apex-loop is also refused (exit 1, code
 milestone.blocks-exceeded) when the milestone it runs — --args M<n>, else
 the current one — has had limits.consecutive_blocks (default 2) changes
 blocked in a row; a person deals with them and re-approves the milestone,
@@ -194,7 +205,7 @@ failure stays diagnosable after the fact.
 
 A run's commits are the range its HEAD moved over. A commit in it that was
 made while another ape session's run in the same checkout went (not this
-run's parent orchestrator, not its own children) cannot be told apart, so
+run's parent loop run, not its own children) cannot be told apart, so
 neither run claims it: both list it under commits_shared, in the JSON
 envelope and the run manifest, and it is left out of commits and of the
 commit-message check.
@@ -224,19 +235,19 @@ caller's stamp that ape service submit adds — see ape service --help):
   depth 0  a terminal, a Claude Code session ape did not launch, a shell,
            ape script, the service daemon: may start any session
 {{depth1}}
-  depth 2  a session an orchestrator started: starts nothing
+  depth 2  a session a loop run started: starts nothing
 A refusal is exit 2, code session.depth or session.not-allowed (action
 stop); a second child while one runs is exit 3, session.child-running, and
-a second apex-orchestrator run in a project exit 3,
+a second apex-loop run in a project exit 3,
 session.orchestrator-running (action retry). Deterministic ape commands are
 never limited. ape decides the depth from what it recorded, never from the
 model: the session's marker (APE_SESSION, APE_DEPTH) and the process
 ancestry — every session it launches is a row in ~/.ape/registry.json
 naming the ape process and the claude it spawned, so a scrubbed environment
 changes nothing. Every session carries APE_DEPTH, and a child also
-APE_PARENT_RUN (the orchestrator's run) and APE_PARENT_PID (the ape process
+APE_PARENT_RUN (the loop's run) and APE_PARENT_PID (the ape process
 running it); its manifest records depth and parent_run, and it is stopped,
-termination parent_gone, when that process is gone. An orchestrator's
+termination parent_gone, when that process is gone. A loop run's
 manifest lists its children and tree_cost_usd when it ends: always, $0 and
 no children included, so an absent tree_cost_usd means not computed (totals
 stay its own). There is no switch to turn the rule off.
@@ -260,7 +271,7 @@ person) and the run stops, exit 1, termination relays. Both keys are
 guarded (ape project accept-config), like every limit. ape status --json
 shows a live loop's fill and relays (sessions[].relay).
 
-An orchestrator dispatches a skill as
+A loop run dispatches a skill as
   ape task <skill> --args <id> --detach --output-format json
 which prints {"id", "wait", "log", "stdout"} (four lines without json), then
   ape run wait <id> --wait 9m --json
@@ -271,9 +282,9 @@ Exit codes: 0 success · 1 run failed, idle timeout, the typed line
 never submitted, an APEX v1 milestone budget stopped or refused the
 session, or a v1 limit or ape floor refused it, or the loop's relays ran
 out (limits.relays) · 2 usage or
-preflight error, an APEX v0 project (run its pinned v0 ape), or the nesting
-rule refused the session (session.depth, session.not-allowed), or the loop
-relay refused a child launch (session.relay) · 3 REPL
+preflight error, an APEX v0 project (run its pinned v0 ape), apex-orchestrator
+(skill.renamed), or the nesting rule refused the session (session.depth,
+session.not-allowed), or the loop relay refused a child launch (session.relay) · 3 REPL
 never became ready (last pane on stderr), or a session lock another run
 holds (session.child-running, session.orchestrator-running) · 5 upstream
 API failure · 6 the dispatch violated its declared commit ownership (the run
@@ -326,6 +337,11 @@ func newTaskCmd() *cobra.Command {
 					return fmt.Errorf("cannot determine working directory: %w", err)
 				}
 				projectRoot = wd
+			}
+			// Q95: apex-orchestrator is the operator's now, never a task;
+			// said with the run's own args, before the nesting rule.
+			if err := refuseRenamed("ape task", args[0], argsFlag, projectRoot); err != nil {
+				return sessionRefusal(err)
 			}
 			// The nesting rule (D62), before anything else is read or
 			// started: what the session this runs in may start.
