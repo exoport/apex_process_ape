@@ -133,9 +133,13 @@ The commit:
                  lift deletes outside its comments (SQL's -- and /* */ too) — by its
                  path (./ and ../ too), a path under a deleted folder at a segment
                  boundary, or the base name of a deleted file when it has an extension
-                 and no other file has it and its line reads it (cat, test -f, an
-                 open/read/glob/Join call, a quoted path; not an echo, a printf or a
-                 test's or logger's message) — one line per file with
+                 and no other file has it and its line reads it (cat, test -f, a
+                 redirection, an open/read/glob/Join call, a quoted path). Neither
+                 counts in an echo's or a printf's words or a test's or logger's
+                 message (t.Errorf, fmt.Errorf, log.*, console.*, print(, a testify
+                 message), a message string a call opens on one line and carries on
+                 the next included, unless a reading call or command on its line
+                 takes it — one line per file with
                  what it reads (--json and the report: v0_state_readers, {file,
                  reads}); re-point each to v1 state or retire it. Then, as summaries:
                  other code and CI that still names removed paths (in a comment, or a

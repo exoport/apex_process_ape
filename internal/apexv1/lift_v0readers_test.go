@@ -215,6 +215,58 @@ func TestLift_V0StateReadersNotByNameInProse(t *testing.T) {
 	require.Equal(t, []string{"development/planning/data-layer.md"}, got["internal/progress/joined_layer.go"], "joined to a root")
 }
 
+// R31, from radix, tenax and mdpdf on rc.6c: R25's message rule covers a
+// whole removed path too — in an echo, a test's message, a message string
+// a call opens on one line and carries on the next — while a whole path
+// cat reads stays a reader.
+func TestLift_V0StateReadersNotByPathInProse(t *testing.T) {
+	root := liftFixture(t, true)
+	files := map[string]string{
+		"development/planning/data-architecture.md": "# Data architecture\n",
+		// radix's bench/hot-paths/parser.sh.
+		"bench/hot-paths/parser.sh": "#!/bin/bash\nreport() {\n" +
+			"    echo \"(development/planning/data-architecture.md §4 sizes the hot paths)\"\n}\n",
+		// radix's internal/archtest/exit_test.go.
+		"internal/archtest/exit_test.go": "package archtest\n\nfunc TestExit(t *testing.T) {\n" +
+			"\tif got != 2 {\n\t\tt.Errorf(\"exitCodeUsage = %d, want 2 (the stable map in development/project-context.md)\", got)\n\t}\n}\n",
+		// tenax's test/integration/remote_call_redrive_test.go.
+		"test/integration/remote_call_redrive_test.go": "package integration\n\nfunc TestRedrive(t *testing.T) {\n" +
+			"\tt.Fatalf(\"redrive: want the ledger row development/implementation/sprint-status.yaml pins, got %v\", err)\n}\n",
+		// tenax's obs_test.go: a message carried onto the next line.
+		"test/integration/obs_test.go": "package integration\n\nfunc TestObs(t *testing.T) {\n" +
+			"\tt.Errorf(\n\t\t\"obs: %d spans, want %d (development/team-memory.md G12)\",\n\t\tgot, want)\n}\n",
+		// mdpdf's collect-evidence-bundle.sh.
+		"scripts/collect-evidence-bundle.sh": "#!/bin/sh\n" +
+			"echo \"bundle: the retrospective was development/team-memory.md\"\n",
+		// A reader all the same.
+		"scripts/reader.sh": "#!/bin/sh\ncat development/implementation/sprint-status.yaml | wc -l\n",
+	}
+	for rel, content := range files {
+		p := filepath.Join(root, filepath.FromSlash(rel))
+		require.NoError(t, os.MkdirAll(filepath.Dir(p), 0o755))
+		require.NoError(t, os.WriteFile(p, []byte(content), 0o644))
+	}
+	run(t, root, "add", "-A")
+	run(t, root, "commit", "-q", "-m", "paths in prose")
+	run(t, root, "tag", "-f", "-a", LiftTag, "-m", "APEX v0 final")
+	run(t, root, "push", "-q", "-f", "origin", LiftTag)
+
+	res, err := Lift(ctx(), root, LiftOptions{DryRun: true})
+	require.NoError(t, err)
+	got := map[string][]string{}
+	for _, r := range res.V0StateReaders {
+		got[r.File] = r.Reads
+	}
+	var members []string
+	for _, f := range []string{"bench/hot-paths/parser.sh", "internal/archtest/exit_test.go", "test/integration/remote_call_redrive_test.go", "test/integration/obs_test.go", "scripts/collect-evidence-bundle.sh"} {
+		if _, ok := got[f]; ok {
+			members = append(members, f)
+		}
+	}
+	require.Empty(t, members, "a whole path in a message reads nothing")
+	require.Equal(t, []string{"development/implementation/sprint-status.yaml"}, got["scripts/reader.sh"])
+}
+
 func TestReadsByName(t *testing.T) {
 	for line, want := range map[string]bool{
 		`cat NAME.md`:                                 true,
@@ -246,7 +298,57 @@ func TestReadsByName(t *testing.T) {
 			}
 		}
 		require.NotEmpty(t, tok.s, line)
-		require.Equal(t, want, readsByName(code, tok), line)
+		require.Equal(t, want, readsAt(code, tok, true, callFrames(code)), line)
+	}
+}
+
+// R31: a whole removed path in a message's text reads nothing — on its
+// line, or in a message string a call opened on an earlier line — and
+// one a reading call or command takes still reads.
+func TestReadsAt_WholePath(t *testing.T) {
+	const p = "development/x/y.md"
+	for code, want := range map[string]bool{
+		"cat " + p:                                        true,
+		"data, _ := os.ReadFile(\"" + p + "\")":           true,
+		"var p = \"" + p + "\"":                           true,
+		"msg := \"update " + p + " first\"":               true,
+		"for f in " + p + "; do":                          true,
+		"require.FileExists(t, \"" + p + "\")":            true,
+		"echo hi > " + p:                                  true,
+		"echo hi | tee " + p:                              true,
+		"while read l; do :; done < " + p:                 true,
+		"print(len(os.listdir('" + p + "')))":             true,
+		"t.Errorf(\"%s\", os.ReadFile(\"" + p + "\"))":    true,
+		"echo \"$(cat " + p + ")\"":                       true,
+		"echo \"(" + p + " is the plan)\"":                false,
+		"printf '%s\\n' '" + p + "'":                      false,
+		"t.Errorf(\"want 2 (" + p + ")\")":                false,
+		"t.Fatalf(\"" + p + "\")":                         false,
+		"log.Printf(\"see " + p + "\")":                   false,
+		"console.log(`see " + p + "`)":                    false,
+		"require.Equal(t, 3, n, \"(" + p + "'s count)\")": false,
+		// A message string a call opened on an earlier line.
+		"t.Errorf(\n\t\"down: (" + p + ")\",\n\ta)":                false,
+		"t.Errorf(\"want %d, got %d \"+\n\t\"(" + p + ")\", a, b)": false,
+		"t.Fatalf(`first line\n" + p + " is gone\n`)":              false,
+		"echo \"first line\n" + p + " second\"":                    false,
+		"logger.Error(\n  fmt.Sprintf(\"%s\", \"" + p + "\"))":     false,
+		"log.Printf(\n\t\"%s\",\n\tos.ReadFile(\"" + p + "\"))":    true,
+		"os.ReadFile(\n\t\"" + p + "\")":                           true,
+		"t.Errorf(\"x\")\nf(\n\t\"" + p + "\")":                    true,
+		"echo first\n" + p:                                         true,
+		"echo first \\\n  " + p:                                    false,
+		"subprocess.run(\n    \"cat " + p + "\", shell=True)":      true,
+	} {
+		code = "x\n" + code + "\n"
+		var tok pathTok
+		for _, tk := range pathTokenSpans(code) {
+			if tk.s == p {
+				tok = tk
+			}
+		}
+		require.NotEmpty(t, tok.s, code)
+		require.Equal(t, want, readsAt(code, tok, false, callFrames(code)), code)
 	}
 }
 
