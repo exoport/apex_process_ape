@@ -29,6 +29,9 @@ var boardRefreshVerbs = map[string]bool{
 	"change new": true, "change approve": true, "change start": true, "change verify": true,
 	"change review": true, "change accept": true, "change block": true, "change answer": true,
 	"change archive": true, "change abandon": true, "change tool": true,
+	// rc.7b (rc7b-adr): it writes ADR-0001 and decisions.json, as decision
+	// new and accept do.
+	"decision standard": true,
 }
 
 // boardSkipVerbs are the v1 leaves that do not refresh: they write nothing

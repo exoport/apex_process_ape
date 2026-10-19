@@ -63,8 +63,22 @@ The commit:
                  indexes, capability and feature registries, deferred records, team
                  memory, project-context. Kept: docs, CHANGELOG, evidence, research,
                  code, _apex/framework.yaml (the migration ledger)
-  converts       every ADR (accepted, superseded, proposed) into
-                 development/decisions/NNNN-<slug>.md, renumbered from 0001 in the
+  writes         ADR-0001, APEX's standard ADR "Record architecture decisions"
+                 (D205): development/decisions/0001-record-architecture-decisions.md,
+                 accepted, the installed payload's _apex/standards/adr-0001.md (else
+                 ape's own copy), recorded in decisions.json by "APEX standard (ape
+                 project lift)" with standard: {framework_version, sha256}. The
+                 apex-v0 governance standard ("Use Markdown Architectural Decision
+                 Records") is identified by its canon source — a record whose
+                 output_document is governance/adrs/adr-NNNN_use-markdown-adrs.md, or
+                 that canon record copied from the governance clone — not by its
+                 number: it is not converted (its text stays at apex-v0-final), its
+                 citations go to ADR-0001, and the disposition and the commit name it
+                 as replaced. A project with no such record gets the standard all the
+                 same. JSON: standard_adr {action: created|replaced, path, source,
+                 framework_version, replaces}
+  converts       every other ADR (accepted, superseded, proposed) into
+                 development/decisions/NNNN-<slug>.md, renumbered from 0002 in the
                  original order, with Status, Date, Supersedes and a "Lifted from:"
                  line. Nothing is invented: no date → git's first date of the file; no
                  Enforced by → "review" (what ape decision new writes); a missing
@@ -331,6 +345,13 @@ func printLift(w io.Writer, r *apexv1.LiftResult) {
 			family += "; untracked, so not archived by " + apexv1.LiftTag
 		}
 		fmt.Fprintf(w, "%-9s %s  (%s)\n", verb("deleted", "delete"), d.Path, family)
+	}
+	if sa := r.StandardADR; sa != nil {
+		old := "(none)"
+		if sa.Replaces != "" {
+			old, _, _ = strings.Cut(sa.Replaces, ",")
+		}
+		fmt.Fprintf(w, "adr       %s -> %s  %s  [accepted]  APEX's standard ADR (%s)\n", old, apexv1.StandardADRID, sa.Path, adrStandardSource(sa))
 	}
 	for i := range r.ADRs {
 		a := &r.ADRs[i]

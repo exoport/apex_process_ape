@@ -1,6 +1,7 @@
 package apecmd
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/exoport/apex_process_ape/internal/apexv1"
 	"github.com/exoport/apex_process_ape/internal/framework"
 	"github.com/stretchr/testify/require"
 )
@@ -194,6 +196,30 @@ func TestFrameworkV1_Floor(t *testing.T) {
 	case framework.ApeVersionNoMinimum:
 		t.Fatal("no min_ape_version") // unreachable after the NotEmpty above
 	}
+}
+
+// D205 Q117: the framework's payload ships APEX's standard ADR-0001 as
+// _apex/standards/adr-0001.md, and ape embeds the same bytes for a project
+// with no payload installed. The two must not drift: a project init'd
+// before setup would get one text, and one init'd after the other. This
+// judges the source tree's embedded copy (with APE_BIN too: a binary's
+// copy is its source tree's).
+func TestFrameworkV1_StandardADR(t *testing.T) {
+	tree := strings.TrimSpace(os.Getenv("APEX_FRAMEWORK_V1"))
+	if tree == "" {
+		t.Skip("set APEX_FRAMEWORK_V1 to a v1 framework tree")
+	}
+	payload := filepath.Join(tree, filepath.FromSlash(apexv1.StandardADRPayload))
+	data, err := os.ReadFile(payload)
+	if errors.Is(err, os.ErrNotExist) {
+		t.Skipf("standard ADR-0001 NOT verified — this is a skip, not a pass: %s has no %s (the framework adds it, D205); ape writes its own copy meanwhile",
+			tree, apexv1.StandardADRPayload)
+	}
+	require.NoError(t, err)
+	if string(data) != apexv1.EmbeddedStandardADR() {
+		t.Fatalf("%s differs from ape's embedded copy (internal/apexv1/standards/adr-0001.md): copy the framework's bytes into ape, or fix the payload — a project init'd before setup and one init'd after would record different standards", payload)
+	}
+	t.Logf("standard ADR-0001: %s equals ape's embedded copy (%d bytes)", payload, len(data))
 }
 
 // The extractor reads code, never prose: a sentence that starts with "ape"

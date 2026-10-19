@@ -154,8 +154,26 @@ Use TLS.
 Certificates.
 `
 
+// liftADR1 is the apex-v0 governance standard as a project's copy of the
+// canon record carries it: output_document names its path in the
+// governance repository (D205 Q119).
+const liftADR1 = `---
+id: ADR-0001
+title: "Use Markdown Architectural Decision Records"
+status: accepted
+type: pattern
+output_document: "governance/adrs/adr-0001_use-markdown-adrs.md"
+pattern_ids: [PAT-0002]
+---
+
+# Use Markdown Architectural Decision Records
+
+Body.
+`
+
 func liftFiles() map[string]string {
 	return map[string]string{
+		"development/governance/adrs/adr-0001_use-markdown-adrs.md": liftADR1,
 		"_apex/framework.yaml":                                   liftFrameworkYAML,
 		"_apex/apex-operating-rules.md":                          "# Operating rules\n",
 		"_apex/terminal-contracts.csv":                           "skill,pattern\n",
@@ -261,8 +279,15 @@ func requireLiftedADRs(t *testing.T, p *Project, root string, res *LiftResult) {
 		olds = append(olds, a.Old)
 		news = append(news, a.New+" "+a.Status)
 	}
-	require.Equal(t, []string{"ADR-0001", "ADR-0002", "ADR-0004", "ADR-0006", "ADR-0007"}, olds)
-	require.Equal(t, []string{"ADR-0001 accepted", "ADR-0002 accepted", "ADR-0003 superseded by ADR-0004", "ADR-0004 accepted", "ADR-0005 proposed"}, news)
+	// ADR-0001 is the standard, not converted (D205 Q119).
+	require.Equal(t, []string{"ADR-0002", "ADR-0004", "ADR-0006", "ADR-0007"}, olds)
+	require.Equal(t, []string{"ADR-0002 accepted", "ADR-0003 superseded by ADR-0004", "ADR-0004 accepted", "ADR-0005 proposed"}, news)
+	require.Equal(t, &StandardADRResult{
+		Action: StandardReplaced, Path: "development/decisions/" + StandardADRFile(), Source: StandardSourceApe,
+		Replaces: "ADR-0001, development/governance/adrs/adr-0001_use-markdown-adrs.md",
+	}, res.StandardADR)
+	require.Equal(t, EmbeddedStandardADR(), read(t, p, "development/decisions/"+StandardADRFile()))
+	require.NoFileExists(t, filepath.Join(root, "development", "decisions", "0001-use-markdown-adrs.md"))
 	d2 := read(t, p, "development/decisions/0003-limit-names.md")
 	require.Equal(t, "# ADR-0003: Limit names\nStatus: superseded by ADR-0004\nDate: "+gitFirstDate(ctx(), root, "development/governance/adrs/adr-0004_limit-names.md")+"\n"+
 		"Lifted from: ADR-0004, development/governance/adrs/adr-0004_limit-names.md at apex-v0-final\n\n"+
@@ -490,7 +515,8 @@ func TestLift_DryRunWritesNothing(t *testing.T) {
 	require.True(t, res.DryRun)
 	require.Equal(t, []LiftProblem{{Code: "lift.no-tag", Message: res.Preflight[0].Message}}, res.Preflight)
 	require.NotEmpty(t, res.Deleted)
-	require.Len(t, res.ADRs, 5)
+	require.Len(t, res.ADRs, 4, "ADR-0001 is the standard, not converted (D205 Q119)")
+	require.Equal(t, StandardReplaced, res.StandardADR.Action)
 	require.Contains(t, res.CommitMessage, "apex: lift from APEX v0 v0.30.0")
 	require.Equal(t, head, run(t, root, "rev-parse", "HEAD"))
 	require.Empty(t, run(t, root, "status", "--porcelain", "--ignored"))
@@ -594,6 +620,8 @@ func TestLift_FromUpdate(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(root, "_apex", "ape-commands.yaml"), []byte("min_ape_version: 1.0.0\n"), 0o644))
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "_apex", "migrations"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(root, "_apex", "migrations", "v1.0.0_seq-01_lift.md"), []byte("---\nid: x\n---\n"), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "_apex", "standards"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, filepath.FromSlash(StandardADRPayload)), []byte(payloadStandard), 0o644))
 
 	_, err := Lift(ctx(), root, LiftOptions{NoVerifyRun: true})
 	require.Equal(t, "lift.dirty", liftCode(err), "a person's lift needs a clean tree")
@@ -614,11 +642,18 @@ func TestLift_FromUpdate(t *testing.T) {
 	}
 	slices.Sort(status)
 	require.Equal(t, []string{
-		"?? .claude/skills/apex-plan/", "?? _apex/migrations/",
+		"?? .claude/skills/apex-plan/", "?? _apex/migrations/", "?? _apex/standards/",
 		"M .claude/skills/apex-orchestrator/SKILL.md", "M _apex/ape-commands.yaml", "M _apex/framework.yaml",
 	}, status)
 	require.FileExists(t, filepath.Join(root, ".claude", "skills", "apex-plan", "SKILL.md"))
-	require.Equal(t, "lift", mustRecord(t, root, "ADR-0001").By)
+	require.Equal(t, "lift", mustRecord(t, root, "ADR-0002").By)
+	// The standard is the installed payload's, recorded with its version;
+	// the payload file itself is the install's to commit (D205 Q117, D206).
+	std := mustRecord(t, root, "ADR-0001")
+	require.Equal(t, StandardBy("ape project lift"), std.By)
+	require.Equal(t, &StandardRecord{FrameworkVersion: "v1.0.0", SHA256: bytesSHA256(payloadStandard)}, std.Standard)
+	require.Equal(t, payloadStandard, read(t, &Project{Root: root}, "development/decisions/"+StandardADRFile()))
+	require.Equal(t, StandardADRPayload, res.StandardADR.Source)
 }
 
 func mustRecord(t *testing.T, root, id string) DecisionRecord {

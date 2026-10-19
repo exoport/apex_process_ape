@@ -47,6 +47,9 @@ type v0ADR struct {
 	superBy    int
 	body       string
 	canon      bool
+	// source is the record's output_document: for a canon import, its
+	// path in the governance repository (isV0Standard).
+	source string
 }
 
 var (
@@ -172,6 +175,7 @@ func parseV0ADR(rel, name, data string) (v0ADR, bool) {
 		a.title = titleFromSlug(a.slug)
 	}
 	a.status = strings.ToLower(fmScalar(m, "status"))
+	a.source = fmScalar(m, "output_document")
 	for _, k := range []string{"date", "created_at", "accepted_at"} {
 		if dm := dateValueRe.FindStringSubmatch(fmScalar(m, k)); dm != nil {
 			a.date = dm[1] + "-" + dm[2] + "-" + dm[3]
@@ -406,4 +410,48 @@ func recordLiftedDecisions(p *Project, adrs []LiftADR) error {
 		return nil
 	}
 	return p.saveDecisionRecords(recs)
+}
+
+// numberADRs gives each record its new number (D36, D205 Q119): the
+// apex-v0 governance standard — the first record isV0Standard names,
+// stdAt, -1 when there is none — becomes ADR-0001, APEX's standard,
+// which is written instead of converted; every other record numbers on
+// from 0002 in its order, a second record of an id included.
+func (lf *lifter) numberADRs(all []v0ADR, firstOf map[int]int) (stdAt int, newNum []int) {
+	stdAt = -1
+	for i := range all {
+		if _, dup := firstOf[i]; !dup && isV0Standard(&all[i]) {
+			stdAt = i
+			break
+		}
+	}
+	newNum = make([]int, len(all))
+	next := 2
+	for i := range all {
+		if i == stdAt {
+			newNum[i] = 1
+			continue
+		}
+		newNum[i] = next
+		next++
+	}
+	return stdAt, newNum
+}
+
+// planStandardADR plans the standard ADR-0001 the lift writes, in place
+// of all[stdAt] when there is one: its text stays at the tag.
+func (lf *lifter) planStandardADR(all []v0ADR, stdAt int) {
+	lf.std = standardADR(lf.root)
+	rel := lf.devRel + "/decisions/" + StandardADRFile()
+	res := &StandardADRResult{Action: StandardCreated, Path: rel, Source: lf.std.source, FrameworkVersion: lf.std.version}
+	if stdAt >= 0 {
+		a := &all[stdAt]
+		res.Action = StandardReplaced
+		res.Replaces = "ADR-" + fmtNum4(a.num) + ", " + a.rel
+		if a.canon {
+			res.Replaces += " (canon)"
+		}
+	}
+	lf.writes[rel] = lf.std.doc
+	lf.res.StandardADR = res
 }

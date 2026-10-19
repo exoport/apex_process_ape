@@ -70,6 +70,9 @@ type DecisionRecord struct {
 	AcceptedAt string `json:"accepted_at"`
 	By         string `json:"by"`
 	BodySHA256 string `json:"body_sha256"`
+	// Standard is set for ADR-0001, APEX's standard, when ape wrote it:
+	// the shipped version it holds and the digest of its bytes (D206).
+	Standard *StandardRecord `json:"standard,omitempty"`
 }
 
 func (p *Project) decisionsJSON() string { return filepath.Join(p.StateDir(), "decisions.json") }
@@ -247,7 +250,7 @@ func (p *Project) acceptedBodyChanged(ctx context.Context, id, path, doc string)
 		return false
 	}
 	if rec, ok := p.loadDecisionRecords()[id]; ok {
-		return rec.BodySHA256 != adrBodyDigest(doc)
+		return rec.BodySHA256 != adrBodyDigest(doc) && !standardADRUnchanged(id, doc, rec)
 	}
 	first, err := p.firstAcceptedVersion(ctx, path)
 	if err != nil || first == "" {

@@ -320,6 +320,10 @@ func (lf *lifter) dispositionWith(lim dispLimits) string {
 	}
 
 	p("## ADRs\n\n")
+	if sa := r.StandardADR; sa != nil {
+		p("[%s](%s) is APEX's standard ADR, Record architecture decisions (%s), written by the lift%s.\n\n",
+			StandardADRID, strings.TrimPrefix(sa.Path, lf.devRel+"/"), standardSourceNote(sa), standardReplacesNote(sa))
+	}
 	if len(r.ADRs) == 0 {
 		p("No ADRs.\n\n")
 	} else {
@@ -652,4 +656,15 @@ func writeV0Readers(b *strings.Builder, readers []LiftV0Reader, counts bool, rep
 		p("- `%s` — %s\n", r, nFiles(n[r]))
 	}
 	p("\n")
+}
+
+// standardSourceNote names where the standard's text came from.
+func standardSourceNote(sa *StandardADRResult) string {
+	if sa.Source == StandardSourceApe {
+		return "ape's own copy: no framework payload was installed"
+	}
+	if sa.FrameworkVersion != "" {
+		return sa.Source + ", framework " + sa.FrameworkVersion
+	}
+	return sa.Source
 }
