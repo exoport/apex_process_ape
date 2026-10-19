@@ -54,7 +54,8 @@ var progressSample = 10 * time.Second
 // idle window, timeout its ceiling (the default when zero). The full output
 // goes to logPath when it is non-empty; the result carries its SHA-256 and
 // last lines. A command that cannot start records exit 127, as a shell
-// would.
+// would. A command that is one multi-line ( … ) block of simple commands
+// runs as its lines joined by && (checkScript, R24b).
 func RunCheck(ctx context.Context, dir, cmd, logPath string, timeout time.Duration) CheckResult {
 	return runCheck(ctx, dir, cmd, logPath, Timeouts{}.Limits(KindTask, timeout), nil)
 }
@@ -82,12 +83,15 @@ func runCheck(ctx context.Context, dir, cmd, logPath string, lim TierTimeout, va
 	runCtx, idle := context.WithCancelCause(ctx)
 	defer idle(nil)
 
-	c := exec.CommandContext(runCtx, "sh", "-c", cmd) //nolint:gosec // a check is a shell command the project's own change.md or config names, by design
+	// A multi-line ( … ) block of simple commands runs as its lines joined
+	// by && (R24b); the result keeps the command as configured.
+	script, note := checkScript(cmd)
+	c := exec.CommandContext(runCtx, "sh", "-c", script) //nolint:gosec // a check is a shell command the project's own change.md or config names, by design
 	c.Dir = dir
 	c.Stdin = nil
 	// A check is a test, not a session: it must not inherit a terminal.
 	c.Env = append(os.Environ(), env...)
-	g, err := prepareCheck(c, cmd)
+	g, err := prepareCheck(c, script)
 	if err != nil {
 		return CheckResult{Cmd: cmd, Exit: exitNotFound, Tail: []string{"[ape] " + err.Error()}}
 	}
@@ -105,6 +109,11 @@ func runCheck(ctx context.Context, dir, cmd, logPath string, lim TierTimeout, va
 			if f, err := os.Create(logPath); err == nil {
 				logFile = f
 				sinks = append(sinks, f)
+				// The split note opens the log only: the output's hash
+				// and tail are the command's own.
+				if note != "" {
+					_, _ = io.WriteString(f, note+"\n")
+				}
 			}
 		}
 	}
