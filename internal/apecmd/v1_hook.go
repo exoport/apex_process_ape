@@ -340,7 +340,13 @@ has the phrase grammar). Records nothing in a session ape launched (APE_SESSION:
 those prompts itself) or outside a v1 project. Never blocks the prompt: it prints nothing
 and exits 0, an error noted on stderr. ` + "`ape project init`" + ` registers it; missing, ` + "`ape project check`" + `
 lists the notice hooks.prompt-absent and ` + "`ape doctor`" + ` the row hooks.prompt — and a person
-act from a Claude Code session is refused (session.person-only).`,
+act from a Claude Code session is refused (session.person-only).
+
+The phrase grammar (A12; the same lines as ` + "`ape hook pre-tool --help`" + `, which says how a
+grant is decided): each line is the command, then what the person types for it.
+` + apexv1.PersonActGrammar() + `
+Run the command as a literal line (no $ or backquote, one act per command) and without
+--by: ape records by: <git config user.name> with the person's quoted words.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			payload := readHookPayload(cmd)
