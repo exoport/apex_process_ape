@@ -19,7 +19,7 @@ import (
 // trailers binding artifacts to the change that moved them. _apex/config.yaml
 //
 //	commit:
-//	  subject: "{type}: {title}"   # {type}, {title}, {id}; default "{title}"
+//	  subject: "{type}: {title}"   # {type}, {title}, {id}; default "{type}: {title}" (D193)
 //	  hooks: run                   # run (default) | skip
 //	  types: [feat, fix, draft]    # change.md's type: values (D120); default CommitTypes
 //
@@ -31,9 +31,16 @@ import (
 // commit.types is not set; a set commit.types replaces them (D120).
 var CommitTypes = []string{"feat", "fix", "perf", "refactor", "docs", "test", "build", "ci", "chore"}
 
-// DefaultSubject is the squash subject when commit.subject is not set:
-// the change's title.
-const DefaultSubject = "{title}"
+// DefaultSubject is the squash subject when commit.subject is not set: a
+// conventional commit, the change's type and title (D193, Q109). It was
+// "{title}" before rc.7; a project that wants that sets commit.subject:
+// "{title}". init and the lift write no commit: line (D163).
+const DefaultSubject = "{type}: {title}"
+
+// FallbackSubject is the default template's subject for a change with no
+// type: (Q111): the title alone, so a change in flight when DefaultSubject
+// changed still archives. A configured {type} template refuses instead.
+const FallbackSubject = "{title}"
 
 // CommitConfig is _apex/config.yaml's commit block.
 type CommitConfig struct {
@@ -136,17 +143,42 @@ func (p *Project) commitConfig() CommitConfig {
 
 // typeFindings checks change.md's `type:`: one of the project's commit
 // types (cc.TypeList) when set, and set when the subject template uses
-// {type}.
+// {type} — the default does (D193).
 func typeFindings(file string, c *Change, cc CommitConfig) []Finding {
 	t, tmpl, types := strings.TrimSpace(c.Meta.Type), cc.SubjectTemplate(), cc.TypeList()
 	switch {
 	case t == "" && strings.Contains(tmpl, "{type}"):
-		return []Finding{{File: file, Line: 1, Message: "frontmatter has no `type:`, and _apex/config.yaml's commit.subject " + fmt.Sprintf("%q", tmpl) +
+		which := "_apex/config.yaml's commit.subject"
+		if strings.TrimSpace(cc.Subject) == "" {
+			which = "the default archive subject (D193)"
+		}
+		return []Finding{{File: file, Line: 1, Message: "frontmatter has no `type:`, and " + which + " " + fmt.Sprintf("%q", tmpl) +
 			" uses {type} — add `type: <" + strings.Join(types, "|") + ">`"}}
 	case t != "" && !slices.Contains(types, t):
 		return []Finding{{File: file, Line: 1, Message: "frontmatter type \"" + t + "\" is not one of " + strings.Join(types, ", ") + " — pick the one that fits"}}
 	}
 	return nil
+}
+
+// subjectFallback reports whether the archive of c takes FallbackSubject
+// (Q111): only under the default template (commit.subject unset), and
+// only for a change with no type:.
+func subjectFallback(c *Change, cc CommitConfig) bool {
+	return strings.TrimSpace(cc.Subject) == "" && strings.TrimSpace(c.Meta.Type) == ""
+}
+
+// DefaultChangeType is the type: `ape change new` writes when --type is
+// not given (Q110): fix for a fix (milestone none), feat otherwise — or
+// none when that type is not among the project's commit types.
+func DefaultChangeType(milestone string, types []string) string {
+	t := "feat"
+	if milestone == MilestoneNone {
+		t = "fix"
+	}
+	if !slices.Contains(types, t) {
+		return ""
+	}
+	return t
 }
 
 // archiveSubject renders the squash commit's subject from the template.

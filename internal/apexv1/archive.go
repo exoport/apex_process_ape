@@ -169,6 +169,10 @@ type ArchiveResult struct {
 	// the delta merged into specs/ and the archive move (D38).
 	Commit  string `json:"commit"`
 	Subject string `json:"subject,omitempty"`
+	// SubjectFallback: the change has no type:, and under the default
+	// template ({type}: {title}, commit.subject unset) its subject is the
+	// title alone (Q111) — a change in flight when the default changed.
+	SubjectFallback bool `json:"subject_fallback,omitempty"`
 	// Hooks: the project's git hooks ran on the squash (commit.hooks).
 	Hooks      bool   `json:"hooks"`
 	BaseBranch string `json:"base_branch,omitempty"`
@@ -265,7 +269,11 @@ func (p *Project) Archive(ctx context.Context, id string, allowPendingHuman bool
 	}
 	res.ArchivedTo, res.Specs = p.Rel(dest), updates
 	cc := p.commitConfig()
-	res.Subject = archiveSubject(cc.SubjectTemplate(), ci.Doc, id)
+	tmpl := cc.SubjectTemplate()
+	if subjectFallback(ci.Doc, cc) {
+		tmpl, res.SubjectFallback = FallbackSubject, true
+	}
+	res.Subject = archiveSubject(tmpl, ci.Doc, id)
 	res.Hooks = cc.RunHooks()
 	return res, p.squashOntoBase(ctx, ci, updates, dest, pending, res, j)
 }
@@ -333,8 +341,10 @@ func (p *Project) planArchive(ci ChangeInfo) (updates []SpecUpdate, dest string,
 		return nil, "", &ConflictError{Code: "archive.base-changed", Msg: "requirements this change modifies or removes were changed by another change since it started — nothing was written; " +
 			"re-plan against the current spec and re-start (`ape change start " + id + "`)", Conflicts: fc}
 	}
-	// The subject template may have come to use {type} since start.
-	if fs := typeFindings(p.Rel(p.ChangeMD(id)), ci.Doc, p.commitConfig()); len(fs) > 0 {
+	// The subject template may have come to use {type} since start — a
+	// configured one; under the default a change with no type: archives
+	// with the title alone (Q111).
+	if fs := typeFindings(p.Rel(p.ChangeMD(id)), ci.Doc, p.commitConfig()); len(fs) > 0 && !subjectFallback(ci.Doc, p.commitConfig()) {
 		return nil, "", &FailError{Code: CodeCheckFailed, Msg: "change " + id + " cannot be archived with the configured commit subject — fix change.md's type: (a plan change: re-start), then archive", Findings: fs}
 	}
 	updates, conflicts := p.MergeDelta(ci.Doc)

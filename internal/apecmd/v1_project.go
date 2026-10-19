@@ -65,7 +65,9 @@ for setup while no .claude/skills/apex-* exists; JSON "next" carries the same li
                                      budget: enforce|off (default off; see ape task --help),
                                      attempts: N red verifies per start (default 5; see
                                      ape change verify --help); commit: {subject,
-                                     hooks} for the archive's squash, and evidence:
+                                     hooks} for the archive's squash (no commit: line
+                                     is written: the subject defaults to
+                                     "{type}: {title}", D193), and evidence:
                                      archive|off (default off) — see ape change archive
                                      --help; notify: <command>, run on a limit stop or a
                                      blocked change — see ape task --help); see "Check
@@ -862,8 +864,10 @@ func newStatusCmd() *cobra.Command {
     there from any branch). Not the same field as "next", the step above
   - JSON "docs": {changelog, user_docs} from _apex/config.yaml docs: ({} when unset), for
     the skills that keep a changelog and user docs current
-  - JSON "config": {commit_types, release_scheme, release_docs} — the project's commit
-    types (commit.types, default feat, fix, perf, refactor, docs, test, build, ci, chore),
+  - JSON "config": {commit_types, release_scheme, release_docs, commit_subject} — the
+    project's commit types (commit.types, default feat, fix, perf, refactor, docs, test,
+    build, ci, chore), the archive's subject template (commit.subject, default
+    "{type}: {title}", D193 — the effective one, for skills to read instead of guessing),
     release scheme (release.scheme: semver, the default, date or edition) and the docs a
     release brings up to date (release.docs, default README.md and docs/ where they exist;
     D129), defaults filled in, for apex-change and apex-release (D120)

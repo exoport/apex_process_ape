@@ -37,7 +37,7 @@ func TestCheckChange_MalformedHumanReview(t *testing.T) {
 			require.Len(t, fs, 1)
 			require.Equal(t, CodeMalformedHumanReview, fs[0].Code)
 			require.Equal(t, ActionReplan, ActionFor(fs[0].Code))
-			require.Equal(t, 21, fs[0].Line, "the T2 line")
+			require.Equal(t, 22, fs[0].Line, "the T2 line")
 			require.Contains(t, fs[0].Message, "task T2's check `"+check+"` is not exactly human-review")
 			require.Contains(t, fs[0].Fix, "write the task as `- T2 <what> — check: human-review`, the artefact and the criteria in <what>, before ` — check:`")
 		})

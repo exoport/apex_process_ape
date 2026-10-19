@@ -312,7 +312,7 @@ var DiagnosticCodes = []CodeDoc{
 	{"change.frontmatter", 1, "replan", "change.md frontmatter is missing, unparseable, or its id/milestone/touches are wrong, or docs: is not true or false (D152)"},
 	{"change.unknown-key", 1, "replan", "change.md frontmatter has a key v1 does not define (own keys: prefix x-)"},
 	{"change.spec-too-big", 1, "replan", "change check / start: merging the delta would take a spec over its caps.spec cap — split the capability first (H18)"},
-	{"change.no-type", 1, "replan", "change.md has no type: and _apex/config.yaml commit.subject uses {type} (D47)"},
+	{"change.no-type", 1, "replan", "change.md has no type: and the archive subject template uses {type} — as the default \"{type}: {title}\" does (D193), or a configured commit.subject (D47); under the default only, archive takes a change in flight with no type: with its title alone and says so (subject_fallback, Q111); project check passes a started one"},
 	{"change.bad-type", 1, "replan", "change.md type: is not one of the project's commit types — _apex/config.yaml commit.types, default feat, fix, perf, refactor, docs, test, build, ci, chore (D47, D120)"},
 	{"change.bad-id", 1, "replan", "the change folder name is not a valid id"},
 	{"change.unknown-milestone", 1, "replan", "the change's milestone is not in roadmap.md"},
@@ -381,6 +381,7 @@ var DiagnosticCodes = []CodeDoc{
 	// rc.7 (rc7-rename).
 	{CodeSkillRenamed, 2, "stop", "ape task apex-orchestrator — and the same skill through ape service submit task or an ape script's RunTask — is refused before anything is read or spawned (Q95, D171): since rc.7 apex-orchestrator is the operator's interface, a skill a person opens in their own Claude Code session with /apex-orchestrator, and the unattended runner of one approved milestone or fix is apex-loop; the message names both: `ape task apex-loop --args <M>` (the run's own --args) and /apex-orchestrator. A loop run an older ape recorded as apex-orchestrator still counts as the loop's"},
 	{CodeOperatorInterfacePending, 1, "person", "`ape project operator-interface --check` (the framework's v1.0.0_seq-07 check, Q97): the operator interface is not applied — a models.apex-orchestrator row to move to models.apex-loop (or to remove beside one), an ape hook missing from or altered in .claude/settings.json, or AGENTS.md without the line naming /apex-orchestrator (A11); `ape project operator-interface` applies it in one commit. Also its refusal when ape cannot move the row itself (models: written as a flow mapping): a person edits it by hand"},
+	{"usage.type", 2, "stop", "change new: --type is not one of the project's commit types (_apex/config.yaml commit.types, default feat, fix, perf, refactor, docs, test, build, ci, chore; Q110)"},
 	{CodeModelsOperatorRow, 0, "person", "a notice, never a finding (project check's notices; the exit is unchanged): _apex/config.yaml has a models.apex-orchestrator row (Q96) — with no models.apex-loop row it is read as apex-loop's, with a warning, until `ape project operator-interface` (seq-07) renames it; beside one it is a leftover, which apex-loop's row overrides: drop it. The operator's apex-orchestrator runs in the person's own session and has no models row (D175, D176)"},
 	{UnclassifiedFinding, 1, "stop", "a finding no rule classifies (a bug: report it)"},
 }

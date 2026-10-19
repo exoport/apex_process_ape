@@ -182,12 +182,16 @@ func baseFiles() map[string]string {
 	}
 }
 
-// changeDoc renders a change.md with the given delta and tasks bodies.
+// changeDoc renders a change.md with the given delta and tasks bodies,
+// typed feat: the default archive subject is "{type}: {title}" (D193).
 func changeDoc(id, touches, delta, tasks string) string {
-	return "---\nid: " + id + "\nmilestone: M1\ntouches: [" + touches + "]\n---\n# " + titleFromSlug(id) +
+	return "---\nid: " + id + "\nmilestone: M1\ntype: feat\ntouches: [" + touches + "]\n---\n# " + titleFromSlug(id) +
 		"\n## Why\nBecause the greeter must change.\n\n## Out of scope\n- farewells\n## Delta\n" + delta +
 		"\n## Tasks\n" + tasks + "\n## Notes\n"
 }
+
+// untyped is a change.md of changeDoc's without its type: line.
+func untyped(doc string) string { return strings.Replace(doc, "type: feat\n", "", 1) }
 
 // addChange writes a change folder with a draft state.
 func addChange(t *testing.T, p *Project, id, doc string) {

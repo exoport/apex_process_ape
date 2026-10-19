@@ -169,12 +169,12 @@ func v1ChangeLeaf(use, short, long, example string, f *v1Flags, run func(cmd *co
 
 func newChangeNewCmd() *cobra.Command {
 	var f v1Flags
-	var milestone, touches, paths string
+	var milestone, touches, paths, typ string
 	cmd := v1ChangeLeaf(
-		"new <id> --milestone <M>|none --touches a,b [--paths globs]",
+		"new <id> --milestone <M>|none --touches a,b [--paths globs] [--type <t>]",
 		"Validate the id and write the change.md skeleton and state.json (draft)",
 		`Create development/changes/<id>/ with a change.md skeleton (frontmatter id, milestone,
-touches, paths; # title; ## Why, ## Out of scope (pre-filled with the milestone's Out of
+type, touches, paths; # title; ## Why, ## Out of scope (pre-filled with the milestone's Out of
 scope bullets), ## Delta, ## Tasks, ## Notes) and state.json with status draft, and
 commit both as "apex: <id> draft" (trailer "Change: <id>"). Filling change.md in is the
 author's own commit. A change is planned on the base branch: refused while HEAD is on a
@@ -188,6 +188,12 @@ a person's request outside the roadmap. It needs no roadmap entry, inherits no O
 scope, is approved on its own (`+"`ape change approve <id> --by <who>`"+`) instead of through a
 milestone, and counts toward no milestone; it may touch capabilities and carry a delta
 like any change.
+--type is change.md's type: (Q110), the archive commit's {type} — the default subject is
+"{type}: {title}" (D193): one of the project's commit types (_apex/config.yaml
+commit.types, default feat, fix, perf, refactor, docs, test, build, ci, chore; else exit 2,
+usage.type). Without it ape writes fix for --milestone none and feat otherwise (none
+when that type is not among the project's commit types); the planner may change it
+before start. JSON "type" is the type written.
 --touches lists the capabilities the change adds to or modifies (kebab slugs; new ones
 are fine — a capability is born from its first change). --paths are globs used for
 overlap detection. Overlap (shared touches or paths) with another unarchived change
@@ -207,15 +213,16 @@ with the blocked changes (answer or abandon them) and resets the count by approv
 milestone again: `+"`ape milestone approve <M> --by <who>`"+`. Fixes count toward no milestone.
 
 Exit codes: 0 ok · 1 id taken (incl. archive), milestone not in roadmap, the milestone past
-limits.consecutive_blocks, or HEAD on a change branch · 2 usage.`,
+limits.consecutive_blocks, or HEAD on a change branch · 2 usage (incl. usage.type).`,
 		"  ape change new add-tenant-delete --milestone M2 --touches tenants --paths 'internal/api/**'\n"+
-			"  ape change new fix-login-redirect --milestone none --touches auth",
+			"  ape change new fix-login-redirect --milestone none --touches auth\n"+
+			"  ape change new document-the-api --milestone M2 --touches api --type docs",
 		&f,
 		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
 			if milestone == "" {
 				return v1Fail(cmd, &f, &apexv1.UsageError{Code: "usage.milestone", Msg: "--milestone is required (e.g. M1, or none for a fix)"}, nil)
 			}
-			res, err := p.NewChange(cmd.Context(), id, milestone, splitList(touches), splitList(paths))
+			res, err := p.NewChangeOfType(cmd.Context(), id, milestone, typ, splitList(touches), splitList(paths))
 			if err != nil {
 				return v1Fail(cmd, &f, err, nil)
 			}
@@ -231,6 +238,7 @@ limits.consecutive_blocks, or HEAD on a change branch · 2 usage.`,
 	cmd.Flags().StringVar(&milestone, "milestone", "", "milestone id from roadmap.md, or none for a fix (required)")
 	cmd.Flags().StringVar(&touches, "touches", "", "comma-separated capability slugs (required)")
 	cmd.Flags().StringVar(&paths, "paths", "", "comma-separated globs, for overlap detection")
+	cmd.Flags().StringVar(&typ, "type", "", "change.md's type: (a commit type); default fix for --milestone none, feat otherwise")
 	return cmd
 }
 
@@ -245,8 +253,9 @@ func newChangeCheckCmd() *cobra.Command {
     with `+"`ape change approve`"+`), touches non-empty kebab slugs, decisions exist in
     decisions/, paths are valid globs; type: (the archive commit's {type}, D47) one of
     the project's commit types — _apex/config.yaml commit.types (D120), default feat,
-    fix, perf, refactor, docs, test, build, ci, chore — required only when
-    _apex/config.yaml commit.subject uses {type} (change.no-type; change.bad-type);
+    fix, perf, refactor, docs, test, build, ci, chore — required when the subject
+    template uses {type}, as the default "{type}: {title}" does (D193; change.no-type;
+    change.bad-type; ape change new writes one);
     review_tools: [<name>, …] names tools.review entries of _apex/config.yaml whose
     when: the change matches (the loop runs each before the review; else
     tools.unknown, D74); docs: true marks the milestone's docs change (D130, D152: its
@@ -1226,9 +1235,15 @@ func newChangeArchiveCmd() *cobra.Command {
      path and sha256) — and
      commits everything as ONE commit (H15):
      subject from _apex/config.yaml commit.subject — placeholders {type} (change.md's
-     type:), {title} (its # title) and {id}; default "{title}" — and a body holding the
+     type:), {title} (its # title, as written) and {id}; default "{type}: {title}" (D193;
+     "{title}" before rc.7: set commit.subject: "{title}" to keep it) — and a body holding the
      branch commits' own subjects (not ape's "apex:" ones) and every trailer of theirs but
-     "Change:", deduplicated, then "Change: <id>". The project's git hooks run on this
+     "Change:", deduplicated, then "Change: <id>". Under the default only (commit.subject
+     unset), a change with no type: — one in flight when the default changed — archives
+     with "{title}" alone, and says so ("subject: … the title alone"; JSON
+     "subject_fallback": true, Q111); a configured template that uses {type} refuses a
+     change with no type: (change.check-failed, change.no-type). ape's own "apex: …"
+     commits are unchanged (Q112). The project's git hooks run on this
      commit (commit.hooks: run, the default; skip opts out) — ape's status commits keep
      skipping them. A hook that refuses rolls archive back: exit 1, archive.hook-failed,
      the hook output's tail in the message. Then keeps change/<id>'s tip as
@@ -1296,6 +1311,9 @@ func renderArchive(cmd *cobra.Command, f *v1Flags, id string, res *apexv1.Archiv
 			fmt.Fprintln(w)
 		}
 		fmt.Fprintf(w, "archived %s → %s\ncommit %.7s %s (on %s; %s deleted)\n", id, res.ArchivedTo, res.Commit, res.Subject, res.BaseBranch, apexv1.ChangeBranch(id))
+		if res.SubjectFallback {
+			fmt.Fprintf(w, "subject: %s has no type:, so the default %q fell back to the title alone (Q111)\n", id, apexv1.DefaultSubject)
+		}
 		if res.AllowPendingHuman {
 			fmt.Fprintf(w, "recorded: archived with human-review pending (%s)\n", strings.Join(res.PendingHuman, ", "))
 		}

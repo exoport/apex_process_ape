@@ -87,6 +87,7 @@ func v1ExecIn(t *testing.T, build func() *cobra.Command, stdin string, args ...s
 const v1ChangeMD = `---
 id: add-wave
 milestone: M1
+type: feat
 touches: [greeting]
 ---
 # Add wave
@@ -199,7 +200,7 @@ func TestV1Commands_ExitCodes(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(stdout), &arch))
 	require.Len(t, arch.Specs, 1)
 	require.True(t, arch.Specs[0].Created)
-	require.Equal(t, "Add wave", v1Git(t, root, "log", "-1", "--format=%s"), "D38: one squash commit, titled by the change")
+	require.Equal(t, "feat: Add wave", v1Git(t, root, "log", "-1", "--format=%s"), "D38: one squash commit, titled by the change; D193: {type}: {title} by default")
 	require.Equal(t, base, v1Git(t, root, "branch", "--show-current"))
 
 	// milestone gate red → 1; close after the gate goes green → 0

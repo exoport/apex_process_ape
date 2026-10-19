@@ -309,6 +309,9 @@ type StatusConfig struct {
 	// ReleaseDocs is release.docs, else README.md and docs/ where they
 	// exist (D129).
 	ReleaseDocs []string `json:"release_docs"`
+	// CommitSubject is the effective archive subject template (Q109):
+	// commit.subject, else DefaultSubject.
+	CommitSubject string `json:"commit_subject"`
 }
 
 // Status builds the report.
@@ -324,6 +327,7 @@ func (p *Project) Status() *StatusReport {
 	}
 	r.Docs = cfg.Docs
 	r.Config = StatusConfig{CommitTypes: cfg.Commit.TypeList(), ReleaseScheme: cfg.Release.SchemeName(), ReleaseDocs: cfg.Release.DocsList(p.Root)}
+	r.Config.CommitSubject = cfg.Commit.SubjectTemplate()
 	if cfg.HumanReview.Delegates() {
 		r.delegate = cfg.HumanReview.Skill()
 	}

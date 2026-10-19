@@ -8,6 +8,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -152,7 +153,8 @@ func (p *Project) checkChange(id string, withCaps bool) []Finding {
 			Message: "design.md is " + sizeKB(int(d.Size())) + ", over the " + capSize(caps.DesignMD) + " cap (caps.design_md) — split this change, or move bulk to assets/",
 		})
 	}
-	if _, err := LoadState(p.StateFile(id)); err != nil {
+	st, err := LoadState(p.StateFile(id))
+	if err != nil {
 		if errors.Is(err, ErrNoState) {
 			add(0, "no state.json beside it — changes are created with `ape change new`")
 		} else {
@@ -169,7 +171,12 @@ func (p *Project) checkChange(id string, withCaps bool) []Finding {
 	if c.BadDocs != "" {
 		add(1, "frontmatter docs: is "+c.BadDocs+", not true or false — docs: true marks the milestone's docs change (D152); drop the key on any other change")
 	}
-	out = append(out, typeFindings(file, c, p.commitConfig())...)
+	// Q111: project check passes a started change with no type: under the
+	// default template, which its archive takes with the title alone;
+	// change check and start still refuse it.
+	if cc := p.commitConfig(); withCaps || st == nil || st.Status == StatusDraft || !subjectFallback(c, cc) {
+		out = append(out, typeFindings(file, c, cc)...)
+	}
 	if c.Meta.ID != id {
 		add(1, fmt.Sprintf("frontmatter id %q does not match the folder name %q", c.Meta.ID, id))
 	}
@@ -508,12 +515,15 @@ func globsOverlap(a, b string) bool {
 	return strings.HasPrefix(la, lb) || strings.HasPrefix(lb, la)
 }
 
-// changeSkeleton renders a fresh change.md.
-func changeSkeleton(id, milestone string, touches, paths, outOfScope []string) string {
+// changeSkeleton renders a fresh change.md; typ "" writes no type: line.
+func changeSkeleton(id, milestone, typ string, touches, paths, outOfScope []string) string {
 	var b strings.Builder
 	b.WriteString("---\n")
 	b.WriteString("id: " + id + "\n")
 	b.WriteString("milestone: " + milestone + "\n")
+	if typ != "" {
+		b.WriteString("type: " + typ + "\n")
+	}
 	b.WriteString("touches: [" + strings.Join(touches, ", ") + "]\n")
 	if len(paths) > 0 {
 		quoted := make([]string, len(paths))
@@ -552,10 +562,20 @@ type NewChangeResult struct {
 	State    string    `json:"state"`
 	Commit   string    `json:"commit,omitempty"`
 	Overlaps []Overlap `json:"overlaps,omitempty"`
+	// Type is the type: change.md was written with (Q110): --type, else
+	// DefaultChangeType; "" when neither is one of the project's types.
+	Type string `json:"type,omitempty"`
 }
 
-// NewChange validates id and writes the change skeleton and a draft state.
+// NewChange is NewChangeOfType with the default type (DefaultChangeType).
 func (p *Project) NewChange(ctx context.Context, id, milestone string, touches, paths []string) (*NewChangeResult, error) {
+	return p.NewChangeOfType(ctx, id, milestone, "", touches, paths)
+}
+
+// NewChangeOfType validates id and writes the change skeleton and a draft
+// state. typ is change.md's type: (Q110), one of the project's commit
+// types (else usage.type); "" takes DefaultChangeType.
+func (p *Project) NewChangeOfType(ctx context.Context, id, milestone, typ string, touches, paths []string) (*NewChangeResult, error) {
 	if err := p.recoverArchive(ctx); err != nil {
 		return nil, err
 	}
@@ -609,11 +629,19 @@ func (p *Project) NewChange(ctx context.Context, id, milestone string, touches, 
 			return nil, &UsageError{Code: "usage.paths", Msg: "--paths entry \"" + g + "\" is not a valid glob"}
 		}
 	}
+	types := p.commitConfig().TypeList()
+	switch typ = strings.TrimSpace(typ); {
+	case typ == "":
+		typ = DefaultChangeType(milestone, types)
+	case !slices.Contains(types, typ):
+		return nil, &UsageError{Code: "usage.type", Msg: "--type \"" + typ + "\" is not one of the project's commit types — pick one of " + strings.Join(types, ", ") +
+			" (_apex/config.yaml commit.types)"}
+	}
 	own := p.beforeOwnEdit(ctx, p.Rel(p.ChangeDir(id)))
 	if err := os.MkdirAll(p.ChangeDir(id), 0o755); err != nil {
 		return nil, err
 	}
-	if err := writeFileAtomic(p.ChangeMD(id), changeSkeleton(id, milestone, touches, paths, outOfScope)); err != nil {
+	if err := writeFileAtomic(p.ChangeMD(id), changeSkeleton(id, milestone, typ, touches, paths, outOfScope)); err != nil {
 		return nil, err
 	}
 	st := &State{ID: id, Status: StatusDraft, CreatedAt: Stamp()}
@@ -633,7 +661,7 @@ func (p *Project) NewChange(ctx context.Context, id, milestone string, touches, 
 	}
 	return &NewChangeResult{
 		ID: id, Path: p.Rel(p.ChangeMD(id)), State: StatusDraft, Commit: commit,
-		Overlaps: p.overlaps(ctx, id, touches, paths),
+		Overlaps: p.overlaps(ctx, id, touches, paths), Type: typ,
 	}, nil
 }
 
