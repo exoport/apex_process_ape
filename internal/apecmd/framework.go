@@ -1,12 +1,14 @@
 package apecmd
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"strings"
 
+	"github.com/exoport/apex_process_ape/internal/apexv1"
 	"github.com/exoport/apex_process_ape/internal/bridge/config"
 	"github.com/exoport/apex_process_ape/internal/framework"
 	"github.com/exoport/apex_process_ape/internal/migration"
@@ -74,6 +76,9 @@ type frameworkUpdateOutput struct {
 	// init` after a setup of an APEX v1 release into a project with no v1
 	// skeleton yet.
 	Next string `json:"next,omitempty" yaml:"next,omitempty"`
+	// GitIgnore is what an APEX v1 install did to the root .gitignore's
+	// .claude/ rules (D203, Q113), in its commit.
+	GitIgnore *apexv1.ClaudeIgnoreResult `json:"gitignore,omitempty" yaml:"gitignore,omitempty"`
 }
 
 // v1SetupNext is setup's hint after an APEX v1 install into a project that
@@ -124,7 +129,14 @@ manifest's min_ape_version is 1.0.0 or later. An APEX v1 release:
     line. .aboard/ is still created
   - ends with 'next: ape project init' when the project has no v1 layout
     yet (and the JSON carries "next"). Either order works; setup first
-    keeps the install commit before the project's v1 epoch.
+    keeps the install commit before the project's v1 epoch
+  - puts the .claude/ shape in the root .gitignore, in the install commit
+    (D203; created when absent): .claude/*, !.claude/settings.json,
+    !.claude/skills/ and CLAUDE.local.md, a whole-folder .claude ignore
+    rewritten in place — so the skills it installs are committed even where
+    .claude/ was ignored. A file of yours the rewrite un-ignores (a skill of
+    your own) is listed and left out of the commit. See ape project init
+    --help; the output's "Ignore:" line and JSON "gitignore" say what it did
 
 The install is committed as 'chore(framework): install APEX framework
 vX.Y.Z' with Framework-Version / Framework-Commit trailers and
@@ -230,6 +242,13 @@ For subsequent refreshes against a framework version bump, use
 			if _, isV1 := v1ProjectAt(projectRoot); res.Summary.V1Release && !isV1 {
 				out.Next = v1SetupNext
 			}
+			// Q113: setup comes before init (D162), and it is the first
+			// command that commits .claude/skills/.
+			if res.Summary.V1Release {
+				if out.GitIgnore, err = applyClaudeIgnore(cmd.Context(), projectRoot, untracked); err != nil {
+					return err
+				}
+			}
 			if err := printFrameworkUpdate(out, format); err != nil {
 				return err
 			}
@@ -291,7 +310,11 @@ see 'ape framework setup --help' for what makes it APEX v1. Installing an
 APEX v1 release removes the project's APEX v0 migration entries
 (_apex/migrations/v0.*) in the update commit, and the runner never plans
 or runs an entry below 1.0.0, whatever the ledger says; the ledger keeps
-its history. v0's notices and its .gitignore lock line are skipped.
+its history. v0's notices and its .gitignore lock line are skipped. An
+APEX v1 install puts the .claude/ shape in the root .gitignore before the
+migrations run, in the update commit, as setup does (see 'ape framework
+setup --help'): the skills are committed where .claude/ was ignored, and
+the v1.0.0 lift finds the shape in place.
 
 Then any pending PROJECT-DATA migration (PLAN-25 D10), and then the
 framework's own per-version UPGRADE list from _apex/migrations/*.md.
@@ -501,9 +524,16 @@ func finishFrameworkUpdate(cmd *cobra.Command, format output.Format, projectRoot
 	res *framework.UpdateResult, untracked map[string]bool, noMigrate, commit, repair bool,
 ) error {
 	warnOperatingRulesSkew(res.Summary)
-	if err := printFrameworkUpdate(
-		&frameworkUpdateOutput{Metadata: res.Metadata, Summary: res.Summary}, format,
-	); err != nil {
+	out := &frameworkUpdateOutput{Metadata: res.Metadata, Summary: res.Summary}
+	// Q113: before the migrations, so the v1.0.0 lift finds the shape in
+	// place and the update commit carries the skills.
+	if res.Summary.V1Release {
+		var err error
+		if out.GitIgnore, err = applyClaudeIgnore(cmd.Context(), projectRoot, untracked); err != nil {
+			return err
+		}
+	}
+	if err := printFrameworkUpdate(out, format); err != nil {
 		return err
 	}
 	if err := migrateAndCommitUpdate(cmd, projectRoot, prior, res, untracked, noMigrate, commit); err != nil {
@@ -923,6 +953,11 @@ func printFrameworkUpdate(out *frameworkUpdateOutput, format output.Format) erro
 			fmt.Printf("Migrations: %d APEX v0 entr%s removed from %s/ (the ledger keeps their ids)\n",
 				n, pluralY(n), framework.ProjectMigrationsDir)
 		}
+		if gi := out.GitIgnore; gi.Changed() {
+			for _, l := range apexv1.ClaudeIgnoreLines(gi) {
+				fmt.Printf("Ignore:    %s\n", l)
+			}
+		}
 		if out.Summary.GitignoreLockAdded {
 			// Reported only when it wrote. ape edited a file the operator
 			// owns, so it says so; on every subsequent run the entry is
@@ -949,6 +984,28 @@ func printFrameworkUpdate(out *frameworkUpdateOutput, format output.Format) erro
 		fmt.Printf("Metadata:  %s\n", framework.ProjectMetadata)
 		return nil
 	}
+}
+
+// applyClaudeIgnore puts the .claude/ shape in the root .gitignore of a
+// project an APEX v1 release is installed into (D203, Q113), for the
+// install's commit: with .claude/ ignored, the skills it installed would
+// never be committed. The skills it installed (.claude/skills/apex-*) are
+// committed; any other file the rewrite un-ignored is the person's, so it
+// joins before — the install commit leaves it, and a reverted install
+// does not remove it.
+func applyClaudeIgnore(ctx context.Context, projectRoot string, before map[string]bool) (*apexv1.ClaudeIgnoreResult, error) {
+	gi, err := apexv1.EnsureClaudeIgnoreShape(ctx, projectRoot)
+	if err != nil {
+		return nil, err
+	}
+	installed := func(rel string) bool { return strings.HasPrefix(rel, ".claude/skills/apex-") }
+	for _, f := range gi.RevealedFiles {
+		if !installed(f) && before != nil {
+			before[f] = true
+		}
+	}
+	gi.SetRevealed(installed)
+	return gi, nil
 }
 
 // printV0Tables reports the APEX v0 surfaces an install carried or lacked:
