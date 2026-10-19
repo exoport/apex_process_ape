@@ -208,7 +208,7 @@ func v1ApeFloor(root string, warn io.Writer) error {
 func taskPreflightExit(err error) int {
 	if fe, ok := errors.AsType[*apexv1.FailError](err); ok {
 		switch fe.Code {
-		case "milestone.budget-exceeded", "milestone.blocks-exceeded", "ape.below-floor":
+		case "milestone.budget-exceeded", "milestone.blocks-exceeded", "ape.below-floor", apexv1.CodeRelaysExceeded:
 			return ExitRunFailed
 		}
 	}
