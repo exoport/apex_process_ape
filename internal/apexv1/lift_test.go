@@ -292,7 +292,7 @@ func requireLiftedADRs(t *testing.T, p *Project, root string, res *LiftResult) {
 	require.Equal(t, "# ADR-0003: Limit names\nStatus: superseded by ADR-0004\nDate: "+gitFirstDate(ctx(), root, "development/governance/adrs/adr-0004_limit-names.md")+"\n"+
 		"Lifted from: ADR-0004, development/governance/adrs/adr-0004_limit-names.md at apex-v0-final\n\n"+
 		"## Context\nNames can be long.\n\n## Decision\nCap at 32.\n\n"+
-		"## Consequences\n_Not recorded in the v0 ADR; the section was added at the lift so the record has the v1 shape._\n\nEnforced by: review\n", d2)
+		"## Consequences\n_Not recorded in the apex-v0 ADR; the section was added at the lift so the record has the apex-v1 shape._\n\nEnforced by: review\n", d2)
 	d4 := read(t, p, "development/decisions/0004-limit-64.md")
 	require.Contains(t, d4, "# ADR-0004: Limit names to 64\nStatus: accepted\nDate: 2026-09-01\nSupersedes: ADR-0003\n")
 	require.Contains(t, d4, "32 was too short; see ADR-0003.")
@@ -315,7 +315,7 @@ func TestLift_FullRun(t *testing.T) {
 	require.NoError(t, err)
 
 	// One commit on the tag, the tree clean.
-	require.Equal(t, "apex: lift from APEX v0 v0.30.0", subjects(t, p)[0])
+	require.Equal(t, "apex: lift from apex-v0 v0.30.0", subjects(t, p)[0])
 	require.Equal(t, tagSHA, run(t, root, "rev-parse", "HEAD~1"))
 	require.Empty(t, run(t, root, "status", "--porcelain"))
 	msg := run(t, root, "log", "-1", "--format=%B")
@@ -517,7 +517,7 @@ func TestLift_DryRunWritesNothing(t *testing.T) {
 	require.NotEmpty(t, res.Deleted)
 	require.Len(t, res.ADRs, 4, "ADR-0001 is the standard, not converted (D205 Q119)")
 	require.Equal(t, StandardReplaced, res.StandardADR.Action)
-	require.Contains(t, res.CommitMessage, "apex: lift from APEX v0 v0.30.0")
+	require.Contains(t, res.CommitMessage, "apex: lift from apex-v0 v0.30.0")
 	require.Equal(t, head, run(t, root, "rev-parse", "HEAD"))
 	require.Empty(t, run(t, root, "status", "--porcelain", "--ignored"))
 	require.FileExists(t, filepath.Join(root, "development", "project-context.md"))
@@ -700,6 +700,6 @@ func TestLiftDisposition_PendingOnlyAfterALift(t *testing.T) {
 	p := fixture(t, baseFiles())
 	write(t, p, "development/"+LiftDisposition, "# notes\n")
 	require.NotContains(t, findingMessages(p.Check()), "disposition")
-	commitAll(t, p, LiftSubjectPrefix+" from APEX v0 v0.30.0")
+	commitAll(t, p, LiftSubjectPrefix+" from apex-v0 v0.30.0")
 	require.Contains(t, findingMessages(p.Check()), "development/lift-disposition.md: the lift's disposition list awaits review")
 }

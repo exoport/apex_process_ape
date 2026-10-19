@@ -83,7 +83,7 @@ func TestProjectLift_CLI(t *testing.T) {
 	stdout, _, err = v1Exec(t, newProjectCmd, "lift", "--cwd", root)
 	require.NoError(t, err)
 	require.Contains(t, stdout, "adr       ADR-0003 -> ADR-0002  development/decisions/0002-use-go.md  [accepted]")
-	require.Contains(t, stdout, "apex: lift from APEX v0 v0.29.3")
+	require.Contains(t, stdout, "apex: lift from apex-v0 v0.29.3")
 	require.Contains(t, stdout, "no ## Code Validation found")
 	main, err := os.ReadFile(filepath.Join(root, "main.go"))
 	require.NoError(t, err)

@@ -39,7 +39,7 @@ const (
 
 // preCommitScript is the hook ape installs.
 const preCommitScript = "#!/bin/sh\n" +
-	preCommitMarker + " (APEX v1; installed by `ape project init`, which never edits a hook without this line)\n" +
+	preCommitMarker + " (apex-v1; installed by `ape project init`, which never edits a hook without this line)\n" +
 	`[ "$` + EnvScanned + `" = 1 ] && exit 0` + "\n" +
 	`command -v ape >/dev/null 2>&1 || { echo "pre-commit: ape is not on PATH, so the APEX secret scan cannot run — put ape on PATH, or skip the scan with git commit --no-verify" >&2; exit 1; }` + "\n" +
 	"exec " + HookCmdPreCommit + "\n"

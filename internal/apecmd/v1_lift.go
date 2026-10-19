@@ -30,7 +30,7 @@ The lift checks the tag on the current branch's upstream, so the branch needs on
 (D162-5): ` + "`git push -u origin <branch>`" + ` once, if ` + "`git rev-parse @{u}`" + ` fails.
 
   git push -u origin "$(git branch --show-current)"   # only when the branch has no upstream
-  git tag -a apex-v0-final -m "APEX v0 final" && git push origin apex-v0-final
+  git tag -a apex-v0-final -m "apex-v0 final" && git push origin apex-v0-final
   ape project lift --dry-run        # the whole plan, nothing written
   ape project lift
 

@@ -74,7 +74,7 @@ type LiftApe struct {
 // runs the pin, and that is what git's pre-commit hook and a Claude
 // session's hooks call — so every commit and every session, not only the
 // commands a person types.
-const LiftPinLocal = "run every v1 command here with APE_TOOLCHAIN=local — every git commit too " +
+const LiftPinLocal = "run every apex-v1 command here with APE_TOOLCHAIN=local — every git commit too " +
 	"(the pre-commit hook runs ape) and every Claude session in the project (its hooks run ape: " +
 	"start it as APE_TOOLCHAIN=local claude)"
 
@@ -422,7 +422,7 @@ func (lf *lifter) preflight() []*FailError {
 	if err != nil || tagSHA == "" {
 		tagSHA = ""
 		out = append(out, &FailError{Code: "lift.no-tag", Msg: "no tag " + LiftTag + " — the tag is the archive of everything the lift deletes: " +
-			"`git tag -a " + LiftTag + " -m \"APEX v0 final\"` on this commit, push it, then lift"})
+			"`git tag -a " + LiftTag + " -m \"apex-v0 final\"` on this commit, push it, then lift"})
 	} else {
 		lf.res.TagSHA = tagSHA
 		if head := HeadSHA(lf.ctx, lf.root); head != tagSHA {
@@ -606,7 +606,7 @@ func (lf *lifter) plan() error {
 		}
 	}
 	for _, s := range lf.untracked {
-		lf.res.Deleted = append(lf.res.Deleted, LiftDeletion{Path: s, Family: "v0 skills", Untracked: true})
+		lf.res.Deleted = append(lf.res.Deleted, LiftDeletion{Path: s, Family: "apex-v0 skills", Untracked: true})
 	}
 	lf.res.SkillsSource = lf.layout.SkillsSource
 	lf.listKeptApex()
@@ -707,7 +707,7 @@ func (lf *lifter) plan() error {
 		la := convertADR(*a, newNum[i], rw, date)
 		la.Path = decisionsRel + "/" + la.Path
 		if first, ok := firstOf[i]; ok {
-			la.Gaps = append(la.Gaps, "a second v0 record with id "+la.Old+": citations of that id were rewritten to ADR-"+fmtNum4(newNum[first]))
+			la.Gaps = append(la.Gaps, "a second apex-v0 record with id "+la.Old+": citations of that id were rewritten to ADR-"+fmtNum4(newNum[first]))
 		}
 		for _, u := range la.unresolved {
 			lf.res.UnresolvedCitations = append(lf.res.UnresolvedCitations, LiftIDRef{File: la.Path, Text: u, Where: "decision"})
@@ -1401,8 +1401,8 @@ func (lf *lifter) movePin() bool {
 	}
 	a.PinMoved = true
 	a.PinNote = "the lift commit moves " + a.PinFile + " from " + a.Pinned + " to " + to
-	lf.res.CommitMessage = strings.Replace(lf.res.CommitMessage, "- lays down the v1 skeleton",
-		"- moves the ape pin ("+a.PinFile+") from "+a.Pinned+" to "+to+"\n- lays down the v1 skeleton", 1)
+	lf.res.CommitMessage = strings.Replace(lf.res.CommitMessage, "- lays down the apex-v1 skeleton",
+		"- moves the ape pin ("+a.PinFile+") from "+a.Pinned+" to "+to+"\n- lays down the apex-v1 skeleton", 1)
 	return true
 }
 
@@ -1542,8 +1542,8 @@ func uniqueStrings(in []string) []string {
 func (lf *lifter) commitMessage() string {
 	r := lf.res
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s from APEX v0 %s\n\n", LiftSubjectPrefix, r.Version)
-	fmt.Fprintf(&b, "The v0 state is archived at %s (%s). This commit:\n", LiftTag, short(r.TagSHA))
+	fmt.Fprintf(&b, "%s from apex-v0 %s\n\n", LiftSubjectPrefix, r.Version)
+	fmt.Fprintf(&b, "The apex-v0 state is archived at %s (%s). This commit:\n", LiftTag, short(r.TagSHA))
 	fams := map[string]int{}
 	var order []string
 	for _, d := range r.Deleted {
@@ -1564,11 +1564,11 @@ func (lf *lifter) commitMessage() string {
 		stripped += c.IDsRemoved
 		cited += c.ADRsRewritten
 	}
-	fmt.Fprintf(&b, "- rewrites %d ADR citation(s) and strips v0 ids from %d comment(s), in %d file(s)\n", cited, stripped, len(r.Changed))
+	fmt.Fprintf(&b, "- rewrites %d ADR citation(s) and strips apex-v0 ids from %d comment(s), in %d file(s)\n", cited, stripped, len(r.Changed))
 	if r.Gates.Regression != "" {
 		fmt.Fprintf(&b, "- carries %d gate command(s) from %s into AGENTS.md and regression:\n", len(r.Gates.Commands), r.Gates.Source)
 	}
-	b.WriteString("- lays down the v1 skeleton (ape project init --brownfield)\n")
+	b.WriteString("- lays down the apex-v1 skeleton (ape project init --brownfield)\n")
 	fmt.Fprintf(&b, "- writes %s for apex-plan and the person (its full lists in %s, not committed)\n", r.Disposition, r.Report)
 	if len(r.ADRs) > 0 || r.StandardADR != nil && r.StandardADR.Replaces != "" {
 		b.WriteString("\nADRs, old -> new:\n")

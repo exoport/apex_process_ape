@@ -294,14 +294,14 @@ func (lf *lifter) families(ctx context.Context) []liftFamily {
 		}
 	}
 	if len(skKeep) > 0 {
-		fams = append(fams, liftFamily{Name: "v0 skills", Paths: skKeep})
+		fams = append(fams, liftFamily{Name: "apex-v0 skills", Paths: skKeep})
 	}
 
 	tables := append([]string(nil), v0Tables...)
 	if !lf.layout.V1Install {
 		tables = append(tables, v1SharedTables...)
 	}
-	add("v0 _apex tables", tables...)
+	add("apex-v0 _apex tables", tables...)
 	add("pipelines", "_apex/pipelines")
 	add("stories, retrospectives and the sprint tracker", whole(rel(paths.Implementation)))
 	add("planning: PRD, architecture, epics, proposals, readiness reports, release records", whole(rel(paths.Planning)))

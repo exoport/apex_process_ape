@@ -313,8 +313,8 @@ func convertADR(a v0ADR, newNum int, rw *adrRewriter, gitDate string) LiftADR {
 	sb.WriteString(strings.Join(raw, "\n"))
 	for _, want := range []string{"Context", "Decision", "Consequences"} {
 		if !have[strings.ToLower(want)] {
-			sb.WriteString("\n\n## " + want + "\n_Not recorded in the v0 ADR; the section was added at the lift so the record has the v1 shape._")
-			gap("no `## " + want + "` in the v0 record: marked not recorded")
+			sb.WriteString("\n\n## " + want + "\n_Not recorded in the apex-v0 ADR; the section was added at the lift so the record has the apex-v1 shape._")
+			gap("no `## " + want + "` in the apex-v0 record: marked not recorded")
 		}
 	}
 	body = sb.String()
@@ -326,7 +326,7 @@ func convertADR(a v0ADR, newNum int, rw *adrRewriter, gitDate string) LiftADR {
 	}
 	if !enforced {
 		body += "\n\nEnforced by: review"
-		gap("Enforced by: review (the v1 default; name the command or hook where a gate enforces it)")
+		gap("Enforced by: review (the apex-v1 default; name the command or hook where a gate enforces it)")
 	}
 
 	status := a.status
@@ -341,21 +341,21 @@ func convertADR(a v0ADR, newNum int, rw *adrRewriter, gitDate string) LiftADR {
 			status = "superseded by ADR-" + fmtNum4(nb)
 		} else {
 			status = "superseded"
-			gap("superseded, but by no ADR the lift could map: Status left `superseded` (not a v1 status)")
+			gap("superseded, but by no ADR the lift could map: Status left `superseded` (not an apex-v1 status)")
 		}
 	case status == "":
-		gap("no status in the v0 record: Status left empty (not a v1 status)")
+		gap("no status in the apex-v0 record: Status left empty (not an apex-v1 status)")
 	default:
-		gap("v0 status `" + status + "` kept as written (not a v1 status)")
+		gap("apex-v0 status `" + status + "` kept as written (not an apex-v1 status)")
 	}
 	res.Status = status
 	date := a.date
 	if date == "" {
 		date = gitDate
 		if date != "" {
-			gap("no date in the v0 record: Date is the day git first recorded the file")
+			gap("no date in the apex-v0 record: Date is the day git first recorded the file")
 		} else {
-			gap("no date in the v0 record and none in git")
+			gap("no date in the apex-v0 record and none in git")
 		}
 	}
 	var head strings.Builder

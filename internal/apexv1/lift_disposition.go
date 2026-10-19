@@ -254,7 +254,7 @@ func (lf *lifter) dispositionWith(lim dispLimits) string {
 	var b strings.Builder
 	p := func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }
 	p("# Lift disposition\n\n")
-	p("Lifted from APEX v0 %s; the v0 state is archived at the tag `%s` (%s), read it as `git show %s:<path>`.\n\n", r.Version, LiftTag, short(r.TagSHA), LiftTag)
+	p("Lifted from apex-v0 %s; the apex-v0 state is archived at the tag `%s` (%s), read it as `git show %s:<path>`.\n\n", r.Version, LiftTag, short(r.TagSHA), LiftTag)
 	p("This file is the lift's hand-off. apex-plan fills the Disposition column and carries each kept rule to its one home;\n")
 	p("a fresh read-only session reviews the result; then the person does, and deletes this file.\n")
 	p("Long lists are summarised here; `%s` holds every one whole. Git ignores it: it is in the checkout that lifted, never committed.\n\n", report)
@@ -361,7 +361,7 @@ func (lf *lifter) dispositionWith(lim dispLimits) string {
 		writeCounts(&b, records, nil, lim.files, report)
 	}
 	if len(r.KeptApex) > 0 {
-		p("Left under `_apex/` (not v0 framework tables): %s\n\n", "`"+strings.Join(r.KeptApex, "`, `")+"`")
+		p("Left under `_apex/` (not apex-v0 framework tables): %s\n\n", "`"+strings.Join(r.KeptApex, "`, `")+"`")
 	}
 
 	p("## Readings at %s\n\n", LiftTag)
@@ -612,12 +612,12 @@ const v0ReaderReadsShown = 10
 // to fit the cap; as counts, saying so, past the ceiling.
 func writeV0Readers(b *strings.Builder, readers []LiftV0Reader, counts bool, report string) {
 	p := func(format string, args ...any) { fmt.Fprintf(b, format, args...) }
-	p("## Code and tests that read deleted v0 state\n\n")
+	p("## Code and tests that read deleted apex-v0 state\n\n")
 	if len(readers) == 0 {
 		p("None.\n\n")
 		return
 	}
-	p("Kept code, tests, scripts and CI files that name v0 state the lift deletes outside their comments — the tracker, ADR folders, deferred records — so they fail once it is gone: re-point each to its v1 state, or retire it (%s; it reads it at %s):\n\n",
+	p("Kept code, tests, scripts and CI files that name apex-v0 state the lift deletes outside their comments — the tracker, ADR folders, deferred records — so they fail once it is gone: re-point each to its apex-v1 state, or retire it (%s; it reads it at %s):\n\n",
 		nFiles(len(readers)), LiftTag)
 	if !counts {
 		for _, v := range readers {
