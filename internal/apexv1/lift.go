@@ -157,8 +157,10 @@ type LiftResult struct {
 	RegressionVerdict string `json:"regression_verdict,omitempty"`
 	RegressionNote    string `json:"regression_note,omitempty"`
 	// RegressionNewFailures are the failing tests after the lift that the
-	// run at the tag did not have (red-at-tag-new-failures; at most
-	// liftNewFailuresShown, the note counts them all) (R4).
+	// run at the tag did not have (red-at-tag-new-failures, and
+	// red-after-lift whenever the output names them, whatever the exit
+	// code, R29; at most liftNewFailuresShown, the note counts them all)
+	// (R4).
 	RegressionNewFailures []string `json:"regression_new_failures,omitempty"`
 	// RegressionCommands: the regression command is a top-level && chain,
 	// so each of its commands ran on its own at both points, past a red
@@ -1319,7 +1321,8 @@ func (lf *lifter) movePin() bool {
 // judgeLiftRegression compares the regression command at the lift commit
 // (after) with its run at the tag (before, nil when it did not run);
 // beforeOut and afterOut are their outputs. A run that exits 0 but whose
-// output names failing tests is red here, by those names (R24).
+// output names failing tests is red here, by those names (R24); green at
+// the tag, a red run's names are the lift's whatever its exit (R29).
 func judgeLiftRegression(before, after *CheckResult, beforeOut, afterOut string) (verdict, note string, fresh []string) {
 	afterNamed, beforeNamed := failingDespiteZero(after, afterOut), failingDespiteZero(before, beforeOut)
 	beforeRed := before != nil && (before.Exit != 0 || len(beforeNamed) > 0)
@@ -1344,12 +1347,18 @@ func judgeLiftRegression(before, after *CheckResult, beforeOut, afterOut string)
 		return LiftRegressionNoBaseline, fmt.Sprintf("red at the lift commit (%s); at %s it could not run (%s), so nothing says whose red it is: output in %s", exit, LiftTag, tag, after.Log), nil
 	case beforeRed:
 		return judgeRedAtTag(before, after, tag, exit, beforeOut, afterOut)
-	case len(afterNamed) > 0:
-		shown := afterNamed[:min(len(afterNamed), liftNewFailuresShown)]
-		return LiftRegressionRedAfterLift, fmt.Sprintf("LIFT FAILURE: red at the lift commit (%s: %s), green at %s — the lift broke them (an edited file a test or CI pins, a removed path code still reads); output in %s. Fix them in a commit of their own, or `git reset --hard %s` and lift again with --exclude", exit, failureList(afterNamed), LiftTag, after.Log, LiftTag), shown
-	default:
-		return LiftRegressionRedAfterLift, fmt.Sprintf("LIFT FAILURE: red at the lift commit (%s), green at %s — the lift broke it (an edited file a test or CI pins, a removed path code still reads); output in %s. Fix it in a commit of its own, or `git reset --hard %s` and lift again with --exclude", exit, LiftTag, after.Log, LiftTag), nil
 	}
+	// Green at the tag: the failing tests the output names are the lift's,
+	// whatever the exit code (R29), less any the tag's run named too.
+	named := afterNamed
+	if after.Exit != 0 {
+		named = failingTests(afterOut)
+	}
+	if named = namesNotIn(named, failingTests(beforeOut)); len(named) > 0 {
+		shown := named[:min(len(named), liftNewFailuresShown)]
+		return LiftRegressionRedAfterLift, fmt.Sprintf("LIFT FAILURE: red at the lift commit (%s: %s), green at %s — the lift broke them (an edited file a test or CI pins, a removed path code still reads); output in %s. Fix them in a commit of their own, or `git reset --hard %s` and lift again with --exclude", exit, failureList(named), LiftTag, after.Log, LiftTag), shown
+	}
+	return LiftRegressionRedAfterLift, fmt.Sprintf("LIFT FAILURE: red at the lift commit (%s), green at %s — the lift broke it (an edited file a test or CI pins, a removed path code still reads); output in %s. Fix it in a commit of its own, or `git reset --hard %s` and lift again with --exclude", exit, LiftTag, after.Log, LiftTag), nil
 }
 
 // R24: cortex's regression block exited 0 with seven lift-caused tests

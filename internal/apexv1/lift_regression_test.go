@@ -126,6 +126,31 @@ func TestJudgeLiftRegression_ExitZeroNamingFailures(t *testing.T) {
 	require.Contains(t, note, "red at the lift commit (exit 0, but the output names 2 failing tests), with no run")
 }
 
+// R29, cortex on rc.6c: red-after-lift with exit 1 and seven failing
+// tests in the output, and regression_new_failures null — the names were
+// read only for an exit-0 run. They are the lift's whatever the exit.
+func TestJudgeLiftRegression_NamesWhateverTheExit(t *testing.T) {
+	tag := &CheckResult{Exit: 0, Log: "t.log"}
+	after := &CheckResult{Exit: 1, Log: "a.log"}
+	out := "--- FAIL: TestFactCheck_LiveTree (0.00s)\nFAIL\tgithub.com/x/factcheck\t0.1s\nok  \tgithub.com/x/other\t0.2s\n"
+	v, note, fresh := judgeLiftRegression(tag, after, "ok  \tgithub.com/x/factcheck\t0.1s\n", out)
+	require.Equal(t, LiftRegressionRedAfterLift, v)
+	require.Equal(t, []string{"TestFactCheck_LiveTree", "github.com/x/factcheck"}, fresh)
+	require.Contains(t, note, "LIFT FAILURE: red at the lift commit (exit 1: TestFactCheck_LiveTree, github.com/x/factcheck), green at apex-v0-final")
+
+	many := ""
+	for i := range 60 {
+		many += fmt.Sprintf("--- FAIL: TestN%02d (0.00s)\n", i)
+	}
+	_, note, fresh = judgeLiftRegression(tag, after, "", many)
+	require.Len(t, fresh, liftNewFailuresShown, "the cap holds")
+	require.Contains(t, note, "(60 in all, in regression_new_failures)")
+
+	v, _, fresh = judgeLiftRegression(tag, after, "", "make: *** [test] Error 1\n")
+	require.Equal(t, LiftRegressionRedAfterLift, v)
+	require.Empty(t, fresh, "no names to read: none")
+}
+
 func liftWithGates(t *testing.T, gates string) string {
 	t.Helper()
 	return liftWithGatesAt(t, liftFixture(t, false), gates)
@@ -268,6 +293,22 @@ func TestLift_RegressionAtTheTag(t *testing.T) {
 		require.Equal(t, LiftRegressionRedAfterLift, res.RegressionVerdict)
 		require.Equal(t, []string{"TestPinAgreement_LiveTree", "github.com/x/pinlint"}, res.RegressionNewFailures)
 		require.Contains(t, res.RegressionNote, "LIFT FAILURE: red at the lift commit (exit 0, but the output names 2 failing tests: TestPinAgreement_LiveTree, github.com/x/pinlint), green at apex-v0-final")
+	})
+	t.Run("exit 1 with failing tests named", func(t *testing.T) {
+		// R29, cortex on rc.6c: the names reach regression_new_failures
+		// when the run exits non-zero too.
+		root := liftFixture(t, false)
+		script := "#!/bin/sh\ntest -f development/team-memory.md && exit 0\n" +
+			"echo '--- FAIL: TestPinAgreement_LiveTree (0.00s)'\necho '--- FAIL: TestLedgerLifecycle_LiveTree (0.00s)'\nexit 1\n"
+		require.NoError(t, os.WriteFile(filepath.Join(root, "gotest.sh"), []byte(script), 0o755))
+		run(t, root, "add", "gotest.sh")
+		root = liftWithGatesAt(t, root, "sh ./gotest.sh")
+		res, err := Lift(ctx(), root, LiftOptions{})
+		require.NoError(t, err)
+		require.Equal(t, 0, res.RegressionAtTag.Exit)
+		require.Equal(t, 1, res.Regression.Exit)
+		require.Equal(t, LiftRegressionRedAfterLift, res.RegressionVerdict)
+		require.Equal(t, []string{"TestPinAgreement_LiveTree", "TestLedgerLifecycle_LiveTree"}, res.RegressionNewFailures)
 	})
 	t.Run("not run", func(t *testing.T) {
 		root := liftWithGates(t, "test -f nowhere.txt")

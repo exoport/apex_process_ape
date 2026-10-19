@@ -184,7 +184,9 @@ missing here, which is not a red; read the same at both points) · red-no-baseli
 that exits 0 but whose output names failing tests (as below) is red for the verdict, by
 those names, and its note says "exit 0, but the output names N failing tests": green at
 the tag, it is red-after-lift with the names in regression_new_failures (a ( … ) block
-without set -e passes on its last line's exit alone). Red at both, the
+without set -e passes on its last line's exit alone). A run red at the lift commit and
+green at the tag lists the failing tests its output names in regression_new_failures
+whatever its exit code (less any the tag's run named), at most 50. Red at both, the
 failing tests are compared by name where the output names them (go test "--- FAIL:",
 gotestsum "=== FAIL: <pkg> <test>" and "✖ <pkg>", pytest "FAILED", cargo "... FAILED",
 jest "✕", flutter and dart test "<name> [E]", the counters before the name dropped);
