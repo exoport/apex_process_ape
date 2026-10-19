@@ -2,6 +2,7 @@ package apexv1
 
 import (
 	"context"
+	"slices"
 	"strings"
 )
 
@@ -18,6 +19,12 @@ import (
 // base outside any change. It is not outside the flow when the only code
 // path it touches is the changelog (docs.changelog, else CHANGELOG.md). A
 // release commit that touches anything else is listed like any other.
+//
+// And `ape framework setup|update`'s install commit (trailer
+// `Framework-Version:`, D162-6): the framework's own files, not work. It is
+// not outside the flow when every code path it touches is one an install
+// writes (frameworkInstallPath); a trailer on a commit that also touches
+// anything else exempts nothing.
 
 // OutsideFlow is one such commit.
 type OutsideFlow struct {
@@ -29,6 +36,18 @@ type OutsideFlow struct {
 }
 
 const outsideFlowFiles = 10
+
+// frameworkInstallPath reports whether rel (project-relative) is a path a
+// framework install writes outside _apex/: the skills and settings under
+// .claude/, the board, the managed blocks of CLAUDE.md and AGENTS.md, and
+// .gitignore.
+func frameworkInstallPath(rel string) bool {
+	switch rel {
+	case ".gitignore", "CLAUDE.md", "AGENTS.md":
+		return true
+	}
+	return strings.HasPrefix(rel, ".claude/") || strings.HasPrefix(rel, ".aboard/")
+}
 
 // v1EpochSubjects start the commit that makes a project v1.
 var v1EpochSubjects = []string{"apex: project init", "apex: lift"}
@@ -53,7 +72,7 @@ func (p *Project) v1Epoch(ctx context.Context, rev string) string {
 
 // outsideFlowFields are a log record's fields: sha, subject, Change
 // trailer, files.
-const outsideFlowFields = 5
+const outsideFlowFields = 6
 
 // outsideFlow lists base's commits outside the change flow, newest first.
 func (p *Project) outsideFlow(ctx context.Context, base string) []OutsideFlow {
@@ -68,7 +87,7 @@ func (p *Project) outsideFlow(ctx context.Context, base string) []OutsideFlow {
 	}
 	// --relative: paths relative to the project, which may sit below the
 	// repository's root.
-	log, err := gitRaw(ctx, p.Root, "log", "--format=%x1e%H%x1f%s%x1f%(trailers:key=Change,valueonly,separator=%x2C)%x1f%(trailers:key=Release,valueonly,separator=%x2C)%x1f",
+	log, err := gitRaw(ctx, p.Root, "log", "--format=%x1e%H%x1f%s%x1f%(trailers:key=Change,valueonly,separator=%x2C)%x1f%(trailers:key=Release,valueonly,separator=%x2C)%x1f%(trailers:key=Framework-Version,valueonly,separator=%x2C)%x1f",
 		"--name-only", "--relative", epoch+".."+rev)
 	if err != nil {
 		return out
@@ -81,9 +100,10 @@ func (p *Project) outsideFlow(ctx context.Context, base string) []OutsideFlow {
 			continue
 		}
 		sha, subject, change, release := f[0], f[1], strings.TrimSpace(f[2]), strings.TrimSpace(f[3])
+		framework := strings.TrimSpace(f[4])
 		var files []string
 		squash := false
-		for path := range strings.SplitSeq(f[4], "\n") {
+		for path := range strings.SplitSeq(f[5], "\n") {
 			path = strings.TrimSpace(path)
 			switch {
 			case path == "":
@@ -101,6 +121,9 @@ func (p *Project) outsideFlow(ctx context.Context, base string) []OutsideFlow {
 		}
 		if release != "" && len(files) == 1 && files[0] == changelog {
 			continue // apex-release's changelog commit
+		}
+		if framework != "" && !slices.ContainsFunc(files, func(f string) bool { return !frameworkInstallPath(f) }) {
+			continue // ape framework setup|update's install commit
 		}
 		out = append(out, OutsideFlow{SHA: sha, Subject: subject, Files: limit(files, outsideFlowFiles)})
 	}
