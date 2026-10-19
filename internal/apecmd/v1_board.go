@@ -41,7 +41,7 @@ var boardRefreshVerbs = map[string]bool{
 var boardSkipVerbs = map[string]bool{
 	"project check": true, "project codes": true, "status": true,
 	"change check": true, "change diff": true,
-	"hook session-start": true, "hook stop": true, "hook pre-tool": true, "hook pre-commit": true,
+	"hook session-start": true, "hook stop": true, "hook pre-tool": true, "hook pre-commit": true, "hook user-prompt": true,
 	"plugins sync": true, "plugins status": true,
 	// The archive layout move changes where archived changes live, not
 	// what status counts or lists.

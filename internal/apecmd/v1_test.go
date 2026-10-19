@@ -217,11 +217,13 @@ func TestV1Commands_ExitCodes(t *testing.T) {
 	require.Equal(t, ExitRunFailed, exitCodeOf(t, err))
 	require.Contains(t, stdout, `"code": "milestone.gate-changed"`)
 	require.Contains(t, stdout, `"action": "person"`)
-	stdout, stderr, err = v1Exec(t, newMilestoneCmd, "approve", "M1", "--by", "eval", "--json", "--cwd", root)
+	stdout, _, err = v1Exec(t, newMilestoneCmd, "approve", "M1", "--by", "eval", "--json", "--cwd", root)
 	require.Equal(t, ExitRunFailed, exitCodeOf(t, err))
 	require.Contains(t, stdout, `"code": "milestone.gate-green"`)
 	require.Contains(t, stdout, `"action": "replan"`)
-	require.Contains(t, stderr, "M1: running the gate once against")
+	// A long run since OI-12: the self-check's progress goes to the run's
+	// log (detached), its output to the approve log.
+	require.FileExists(t, filepath.Join(root, "_apex", "state", "logs", "gate-M1-approve.log"))
 	require.NoError(t, os.WriteFile(filepath.Join(root, "gate.sh"), []byte(v1Gate), 0o755))
 	stdout, _, err = v1Exec(t, newMilestoneCmd, "close", "M1", "--cwd", root)
 	require.NoError(t, err)

@@ -19,7 +19,8 @@ import (
 )
 
 // Long runs (D58 2.1–2.3): `ape change start|verify|archive` and `ape
-// milestone gate|close` run their checks in a DETACHED worker and wait for
+// milestone gate|close|approve` (approve since OI-12: its self-check runs
+// the gate) run their checks in a DETACHED worker and wait for
 // it at most --wait. Claude Code cuts, backgrounds or reaps a Bash call
 // that outlives its timeout — and a synchronous sub-agent's backgrounded
 // call is killed when the sub-agent replies — so the call that runs the
@@ -53,7 +54,7 @@ const (
 	maxLongWait     = 9*time.Minute + 30*time.Second
 )
 
-// v1DetachDefault: the five verbs run in a detached worker unless
+// v1DetachDefault: the six verbs run in a detached worker unless
 // --no-detach. The package's tests run them in-process (their binary is
 // not ape); the detach tests turn it back on.
 var v1DetachDefault = true
@@ -136,7 +137,7 @@ func stillRunning(cmd *cobra.Command, f *v1Flags, payload any, msg string) error
 	return reportedErr(exitCodeStillRunning, errors.New(msg))
 }
 
-// runLong runs one of the five long verbs on scope: as the worker when
+// runLong runs one of the six long verbs on scope: as the worker when
 // this process is one, else under the scope's run lock — attached to a
 // run of the same verb, detached (the default), or in this process.
 func runLong(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, scope string, compute longCompute) error {
@@ -156,13 +157,35 @@ func runLong(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, scope string, co
 		if held.Verb != verb {
 			return v1Fail(cmd, f, apexv1.RunBusy(held), nil)
 		}
+		// A person act attaches only to a run of that very act (D179,
+		// T13): never to a plain run that would drop the person's flag.
+		if f.person != nil && !held.PersonAct.Same(*f.person) {
+			return v1Fail(cmd, f, apexv1.RunBusyPersonAct(held, *f.person), nil)
+		}
 		return awaitRun(cmd, f, p, held)
 	}
 	// A run that ended after its call stopped waiting: its result is the
-	// answer while nothing moved since.
-	if r := p.LoadRunResult(scope); r != nil && !r.Reported && r.Verb == verb && r.HeadAfter == apexv1.HeadSHA(ctx, p.Root) {
+	// answer while nothing moved since (a person act's, only to that act).
+	if r := p.LoadRunResult(scope); r != nil && !r.Reported && r.Verb == verb && r.HeadAfter == apexv1.HeadSHA(ctx, p.Root) &&
+		(f.person == nil || r.PersonAct.Same(*f.person)) {
 		p.ReleaseRunLock(lock)
 		return deliverRun(cmd, f, p, r)
+	}
+	// A new run of a person act: its grant is taken now, under the lock —
+	// never on pre-tool's verdict alone (the allow → print race) — and the
+	// act recorded in the lock, for a re-run to attach by and the worker
+	// to act on.
+	if f.person != nil {
+		a, err := takePersonAct(ctx, p, *f.person)
+		if err != nil {
+			p.ReleaseRunLock(lock)
+			return v1Fail(cmd, f, err, nil)
+		}
+		if a != nil {
+			lock.PersonAct = a
+			p.UpdateRunLock(lock)
+			cmd.SetContext(apexv1.WithPersonAct(ctx, a))
+		}
 	}
 	if f.noDetach || !v1DetachDefault {
 		r, _ := runHere(cmd, f, p, lock, compute, nil) // printed here: a record that failed to save is not needed
@@ -189,6 +212,7 @@ func runHere(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, lock *apexv1.Run
 	r := &apexv1.RunResult{
 		ID: lock.ID, Verb: lock.Verb, Scope: lock.Scope, SHA: lock.SHA, Started: lock.Started,
 		Ended: apexv1.Stamp(), HeadAfter: apexv1.HeadSHA(context.WithoutCancel(cmd.Context()), p.Root),
+		PersonAct: lock.PersonAct,
 	}
 	var err error
 	r.Human, err = renderAs(cmd, f, render, false)
@@ -367,6 +391,13 @@ func runAsWorker(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, verb, scope,
 	lock.PID, lock.PGID = os.Getpid(), apexv1.ProcessGroup()
 	if !p.UpdateRunLock(lock) {
 		return failErr(fmt.Errorf("run %s of `ape %s %s`: its run lock changed — not running", id, verb, scope))
+	}
+	// A person act's worker acts on its lock's record of it (E2, OI-12):
+	// in a model session, only one resting on its caller's consumed grant.
+	if f.person != nil {
+		if a := p.LockPersonAct(lock, f.person.ArgvSHA256); a != nil {
+			cmd.SetContext(apexv1.WithPersonAct(cmd.Context(), a))
+		}
 	}
 	fmt.Fprintf(cmd.ErrOrStderr(), "[ape] %s `ape %s %s` started (run %s, pid %d, at %.7s)\n", apexv1.Stamp(), verb, scope, id, os.Getpid(), lock.SHA)
 	r, err := runHere(cmd, f, p, lock, compute, cmd.ErrOrStderr())
