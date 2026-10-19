@@ -647,7 +647,10 @@ func (d *Driver) FeedHook(h orchestrator.HookEvent) {
 			}
 			d.mu.Unlock()
 		}
-	case ipc.HookStop:
+	default:
+		// Stop, and any other event naming the session's transcript
+		// (eval Q23: a PostToolUse carries transcript_path too), seeds it
+		// when no UserPromptSubmit did; it never replaces one.
 		if env.TranscriptPath != "" {
 			d.mu.Lock()
 			if d.activeTranscript == "" {

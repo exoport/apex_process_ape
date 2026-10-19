@@ -313,3 +313,38 @@ func TestStepTelemetry_MissingSourceNote(t *testing.T) {
 	require.Zero(t, tele.NumTurns)
 	require.Contains(t, tele.Note, "transcript missing at scan time")
 }
+
+// Eval Q23's note: a step whose transcript_path arrives only on a
+// PostToolUse (no UserPromptSubmit or Stop carried one) still has its
+// transcript scanned and watched; a later event never replaces the one
+// a UserPromptSubmit named.
+func TestStepTelemetry_TranscriptPathFromPostToolUse(t *testing.T) {
+	shortFlushGrace(t)
+	dir := t.TempDir()
+	mainPath := filepath.Join(dir, "sess-q23.jsonl")
+	writeTranscript(t, mainPath, "sess-q23", "claude-opus-4-8", 3)
+
+	core := newInteractiveCore(func() {}, func() *runlog.Writer { return nil })
+	core.OnStepStart(pipeline.InteractiveStepInfo{Stage: "stage", StepIdx: 0, Skill: "apex-x"})
+	core.FeedHook(orchestrator.HookEvent{
+		Event:   ipc.HookUserPromptSubmit,
+		Payload: mustJSON(t, map[string]string{"session_id": "sess-q23", "prompt": "/apex-x --autonomous"}),
+	})
+	core.FeedHook(orchestrator.HookEvent{
+		Event:   ipc.HookPostToolUse,
+		Payload: mustJSON(t, map[string]string{"session_id": "sess-q23", "transcript_path": mainPath, "tool_name": "Bash"}),
+	})
+	require.Equal(t, mainPath, core.driver.TranscriptPath(), "the driver watches it for growth")
+	core.FeedHook(orchestrator.HookEvent{
+		Event:   ipc.HookPreToolUse,
+		Payload: mustJSON(t, map[string]string{"session_id": "other", "transcript_path": filepath.Join(dir, "other.jsonl")}),
+	})
+	core.FeedHook(orchestrator.HookEvent{Event: ipc.HookStop})
+
+	tele := core.StepTelemetry("stage", 0)
+	require.NotNil(t, tele)
+	require.Empty(t, tele.Note, "no 'no transcript captured' note")
+	require.Equal(t, 3, tele.NumTurns)
+	require.Len(t, tele.Sessions, 1)
+	require.Equal(t, "sess-q23", tele.Sessions[0].SessionID)
+}

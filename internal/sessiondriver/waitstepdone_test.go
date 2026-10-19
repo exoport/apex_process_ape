@@ -362,3 +362,66 @@ func TestWaitStepDone_WorkProbeCountsAsProgress(t *testing.T) {
 	require.ErrorAs(t, err, &ite)
 	require.Contains(t, ite.Diagnostic, "ape run lock")
 }
+
+// Eval Q23: a session whose only progress is PostToolUse hooks, stopped
+// at an explicit cap, names the hook as its last progress — the hook
+// column reads the newest hook event of any kind, not "none". (The eval's
+// "hook none for 15s" was its probe's: no PostToolUse ever reached ape.)
+func TestWaitStepDone_PostToolUseOnlyReadsInTheHookColumn(t *testing.T) {
+	d := newTestDriver(1500 * time.Millisecond) // poll floors at 1s
+	d.SetMaxDuration(2500 * time.Millisecond)
+	d.SetIdleErrLabel("interactive step")
+	d.Begin()
+
+	stop := make(chan struct{})
+	go func() {
+		tk := time.NewTicker(300 * time.Millisecond)
+		defer tk.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-tk.C:
+				d.FeedHook(orchestrator.HookEvent{
+					Event: ipc.HookPostToolUse, At: time.Now(),
+					Payload: []byte(`{"session_id":"s1","hook_event_name":"PostToolUse","tool_name":"Bash"}`),
+				})
+			}
+		}
+	}()
+	defer close(stop)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
+	defer cancel()
+	err := d.WaitStepDone(ctx)
+
+	var mde *MaxDurationError
+	require.ErrorAs(t, err, &mde)
+	require.Regexp(t, `^last progress hook \d+s ago \(hook \d+s ago; transcript n/a; pty n/a\)`, mde.Diagnostic)
+	require.NotContains(t, mde.Diagnostic, "hook none")
+}
+
+// Eval Q23's note: a transcript_path in any hook payload seeds the
+// session's transcript when no UserPromptSubmit named one; it never
+// replaces the one a UserPromptSubmit named.
+func TestFeedHook_TranscriptPathFromAnyHook(t *testing.T) {
+	d := newTestDriver(time.Minute)
+	d.FeedHook(orchestrator.HookEvent{
+		Event:   ipc.HookPostToolUse,
+		Payload: []byte(`{"session_id":"s1","transcript_path":"/t/one.jsonl","hook_event_name":"PostToolUse"}`),
+	})
+	require.Equal(t, "/t/one.jsonl", d.TranscriptPath(), "a PostToolUse-only transcript_path is picked up")
+	require.Equal(t, "s1", d.SessionID())
+
+	d.FeedHook(orchestrator.HookEvent{
+		Event:   ipc.HookUserPromptSubmit,
+		Payload: []byte(`{"session_id":"s2","transcript_path":"/t/two.jsonl","prompt":"x"}`),
+	})
+	require.Equal(t, "/t/two.jsonl", d.TranscriptPath(), "UserPromptSubmit names the session's transcript")
+	d.FeedHook(orchestrator.HookEvent{
+		Event:   ipc.HookPreToolUse,
+		Payload: []byte(`{"session_id":"s3","transcript_path":"/t/three.jsonl"}`),
+	})
+	require.Equal(t, "/t/two.jsonl", d.TranscriptPath(), "another event never replaces it")
+	require.Equal(t, "s2", d.SessionID())
+}
