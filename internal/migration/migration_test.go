@@ -442,3 +442,14 @@ func joinAll(findings []string) string {
 	all += allSb425.String()
 	return all
 }
+
+// A v1 install plans nothing below 1.0.0 (D162-3); an unparseable version
+// is kept so its finding is still reported.
+func TestDropBelow_KeepsOnlyTheFloorAndAbove(t *testing.T) {
+	in := []Entry{{ID: "a", Version: "0.24.0"}, {ID: "b", Version: "v1.0.0"}, {ID: "c", Version: "1.2.0"}, {ID: "d", Version: "soon"}}
+	var ids []string
+	for _, e := range DropBelow(in, "1.0.0") {
+		ids = append(ids, e.ID)
+	}
+	require.Equal(t, []string{"b", "c", "d"}, ids)
+}

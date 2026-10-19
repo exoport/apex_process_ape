@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"golang.org/x/mod/semver"
 )
 
 // Applied is one row of the ledger in `_apex/framework.yaml`.
@@ -225,4 +227,22 @@ func runCheck(ctx context.Context, projectRoot string, e *Entry, runner Runner, 
 		return CheckCannotRun, fmt.Sprintf(
 			"exit %d — 1 means \"not applied\"; anything above it means the check itself failed", code)
 	}
+}
+
+// DropBelow returns the entries whose version is at least floor (vX.Y.Z or
+// X.Y.Z). An APEX v1 install plans nothing below 1.0.0 (D162-3), whatever
+// the folder or the ledger holds: those entries maintained v0 families the
+// lift removes, and call v0 verbs a v1 ape no longer has. An entry whose
+// version does not parse is kept, so its finding is still reported.
+func DropBelow(entries []Entry, floor string) []Entry {
+	lo := "v" + strings.TrimPrefix(floor, "v")
+	out := make([]Entry, 0, len(entries))
+	for i := range entries {
+		v := "v" + strings.TrimPrefix(entries[i].Version, "v")
+		if semver.IsValid(v) && semver.Compare(v, lo) < 0 {
+			continue
+		}
+		out = append(out, entries[i])
+	}
+	return out
 }

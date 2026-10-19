@@ -68,6 +68,12 @@ func loadMigrationPlanWith(ctx context.Context, projectRoot, repo string, runner
 		}
 		entries = overlayMigrations(entries, incoming)
 	}
+	// An APEX v1 install never plans an entry below 1.0.0 (D162-3), whatever
+	// the folder or the ledger holds. Judged by the release being installed
+	// — the repo for `--plan`, else the project's installed manifest.
+	if v1Install(projectRoot, repo) && entries != nil {
+		entries = migration.DropBelow(entries, v1MigrationFloor)
+	}
 	if entries == nil {
 		// An absent folder is a normal state on a framework that ships no
 		// list, and is reported as such rather than as an empty plan that
@@ -82,6 +88,18 @@ func loadMigrationPlanWith(ctx context.Context, projectRoot, repo string, runner
 		}
 	}
 	return migration.BuildPlan(ctx, dir, projectRoot, entries, ledger, runner, runChecks), nil
+}
+
+// v1MigrationFloor is the lowest version an APEX v1 install plans.
+const v1MigrationFloor = "1.0.0"
+
+// v1Install reports whether the framework the plan is for is APEX v1: the
+// incoming release when repo is set, else the project's installed copy.
+func v1Install(projectRoot, repo string) bool {
+	if repo != "" {
+		return framework.IsV1Release(repo)
+	}
+	return framework.IsV1Release(projectRoot)
 }
 
 // overlayMigrations is install's copy applied to the parsed lists: an

@@ -42,6 +42,9 @@ const (
 
 	apeModulePath    = "github.com/exoport/apex_process_ape/cmd/ape"
 	generatorTrailer = "Generator: ape framework update"
+	// generatorSetup is setup's own: the install commit names the command
+	// that made it (D162-7), so a setup is never recorded as an update.
+	generatorSetup = "Generator: ape framework setup"
 )
 
 // releaseFlags are the flags setup and update share.
@@ -104,13 +107,18 @@ func readableSource(ctx context.Context, repo string, sel *framework.ReleaseSele
 //
 // updateApe is `--update-ape`: above the minimum too, move ape to the
 // newest release before installing.
+//
+// v1 reports that the release is an APEX v1 framework
+// (framework.IsV1Release): setup reads it before choosing a bootstrapper,
+// because a v1 release seeds no config (D162-2).
 func prepareInstall(ctx context.Context, repo, projectRoot string, sel *framework.ReleaseSelector, commit, newest, updateApe bool) (
-	*framework.ReleaseSelector, func(), error,
+	_ *framework.ReleaseSelector, _ func(), v1 bool, _ error,
 ) {
 	src, tag, cleanup, err := readableSource(ctx, repo, sel)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, false, err
 	}
+	v1 = framework.IsV1Release(src)
 	// A default update never goes backwards: a candidate installed by
 	// name, newer than the newest final release, stays until --version
 	// says otherwise.
@@ -120,17 +128,17 @@ func prepareInstall(ctx context.Context, repo, projectRoot string, sel *framewor
 			cleanup()
 			fmt.Fprintf(os.Stdout, "framework: installed %s is newer than the newest release %s (a candidate, installed by "+
 				"name); keeping it. Pass --version %s to go back to the release.\n", meta.Framework.VersionTag, tag, tag)
-			return nil, nil, errKeepInstalled
+			return nil, nil, v1, errKeepInstalled
 		}
 	}
 	if err := checkApeMinimum(ctx, os.Stdout, src, tag, projectRoot, commit, updateApe); err != nil {
 		cleanup()
-		return nil, nil, err
+		return nil, nil, v1, err
 	}
 	if sel == nil {
-		return nil, cleanup, nil
+		return nil, cleanup, v1, nil
 	}
-	return &framework.ReleaseSelector{Version: tag}, cleanup, nil
+	return &framework.ReleaseSelector{Version: tag}, cleanup, v1, nil
 }
 
 // errKeepInstalled ends an update that has nothing to do because the
@@ -515,9 +523,9 @@ func commitPrecheck(ctx context.Context, projectRoot string) (map[string]bool, e
 // commitInstall stages what the install and its migrations changed — every
 // tracked change (the precheck proved there were none before) and every
 // untracked file that was not there before — and commits it. No change,
-// no commit.
+// no commit. generator is the Generator: trailer naming the command.
 func commitInstall(ctx context.Context, w io.Writer, projectRoot string, before map[string]bool,
-	subject string, meta framework.Metadata, migrations []string,
+	subject string, meta framework.Metadata, migrations []string, generator string,
 ) error {
 	status, err := porcelain(ctx, projectRoot)
 	if err != nil {
@@ -548,7 +556,7 @@ func commitInstall(ctx context.Context, w io.Writer, projectRoot string, before 
 	if g := meta.Governance; g != nil && g.GitHash != "" {
 		msg += "\nGovernance-Version: " + g.VersionTag + "\nGovernance-Commit: " + g.GitHash
 	}
-	msg += "\n" + generatorTrailer + "\n"
+	msg += "\n" + generator + "\n"
 	if err := commitPaths(ctx, projectRoot, paths, msg); err != nil {
 		return err
 	}
