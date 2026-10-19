@@ -28,13 +28,14 @@ They are found in one place.
 Enforced by: ape project check
 `
 
-// installPayload writes the payload's standard and a framework.yaml naming
-// version, as `ape framework setup|update` installs them, committed.
-func installPayload(t *testing.T, p *Project, doc, version string) {
+// installPayload writes payloadStandard as the payload's standard and a
+// framework.yaml naming v1.0.1, as `ape framework update` installs them,
+// committed: a release that changes the standard.
+func installPayload(t *testing.T, p *Project) {
 	t.Helper()
-	write(t, p, StandardADRPayload, doc)
-	write(t, p, frameworkYAML, "framework:\n  version_tag: "+version+"\n")
-	commitAll(t, p, "chore(apex): update APEX framework to "+version)
+	write(t, p, StandardADRPayload, payloadStandard)
+	write(t, p, frameworkYAML, "framework:\n  version_tag: v1.0.1\n")
+	commitAll(t, p, "chore(apex): update APEX framework to v1.0.1")
 }
 
 // initProject is a git repository `ape project init` made, with ape's
@@ -154,7 +155,7 @@ func TestInit_LeavesTheProjectsOwnADR0001(t *testing.T) {
 func TestADRStandard_UpdateReplacesAndCommits(t *testing.T) {
 	p := initProject(t)
 	path := "development/decisions/" + StandardADRFile()
-	installPayload(t, p, payloadStandard, "v1.0.1")
+	installPayload(t, p)
 
 	ns := standardNotices(p)
 	require.Equal(t, []string{CodeStandardStale}, noticeCodesOf(ns))
@@ -215,7 +216,7 @@ func TestADRStandard_HandEditRefused(t *testing.T) {
 // the verb does nothing and says so; a proposed one does not opt out.
 func TestADRStandard_OptOut(t *testing.T) {
 	p := initProject(t)
-	installPayload(t, p, payloadStandard, "v1.0.1")
+	installPayload(t, p)
 	own, err := p.NewDecision(ctx(), "our-adr-format", "Our ADR format", StandardADRID)
 	require.NoError(t, err)
 	res, err := p.DecisionStandardCheck(ctx())
@@ -305,7 +306,7 @@ func TestDecisionStandard_KeepsAProposedOptOut(t *testing.T) {
 	p := initProject(t)
 	prop, err := p.NewDecision(ctx(), "our-format", "Our format", StandardADRID)
 	require.NoError(t, err)
-	installPayload(t, p, payloadStandard, "v1.0.1")
+	installPayload(t, p)
 	res, err := p.DecisionStandard(ctx())
 	require.NoError(t, err)
 	require.Equal(t, StandardReplaced, res.Action)
@@ -360,7 +361,7 @@ func TestLift_StandardADR(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, StandardCreated, res.StandardADR.Action)
 		require.Empty(t, res.StandardADR.Replaces)
-		var pairs []string
+		pairs := make([]string, 0, len(res.ADRs))
 		for i := range res.ADRs {
 			pairs = append(pairs, res.ADRs[i].Old+">"+res.ADRs[i].New)
 		}

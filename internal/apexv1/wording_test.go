@@ -119,7 +119,7 @@ func TestWording_StandardCommitsSayNoBareV01(t *testing.T) {
 	p := rc7LiftedProject(t, ADRProposed)
 	_, err := p.DecisionStandard(ctx())
 	require.NoError(t, err)
-	installPayload(t, p, payloadStandard, "v1.0.1")
+	installPayload(t, p)
 	_, err = p.DecisionStandard(ctx())
 	require.NoError(t, err)
 	require.Empty(t, bareV01(run(t, p.Root, "log", "--format=%B", "-2")))

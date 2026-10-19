@@ -346,13 +346,7 @@ func printLift(w io.Writer, r *apexv1.LiftResult) {
 		}
 		fmt.Fprintf(w, "%-9s %s  (%s)\n", verb("deleted", "delete"), d.Path, family)
 	}
-	if sa := r.StandardADR; sa != nil {
-		old := "(none)"
-		if sa.Replaces != "" {
-			old, _, _ = strings.Cut(sa.Replaces, ",")
-		}
-		fmt.Fprintf(w, "adr       %s -> %s  %s  [accepted]  APEX's standard ADR (%s)\n", old, apexv1.StandardADRID, sa.Path, adrStandardSource(sa))
-	}
+	printLiftStandard(w, r.StandardADR)
 	for i := range r.ADRs {
 		a := &r.ADRs[i]
 		line := fmt.Sprintf("adr       %s -> %s  %s  [%s]", a.Old, a.New, a.Path, a.Status)
@@ -440,4 +434,17 @@ func printLiftPreCommit(w io.Writer, r *apexv1.LiftResult) {
 	if pc := preCommitLine(r.Init.PreCommit); pc != "" {
 		fmt.Fprintln(w, pc)
 	}
+}
+
+// printLiftStandard is the lift's line for ADR-0001, APEX's standard
+// (D205 Q119): what it replaces, if anything, and where its text came from.
+func printLiftStandard(w io.Writer, sa *apexv1.StandardADRResult) {
+	if sa == nil {
+		return
+	}
+	old := "(none)"
+	if sa.Replaces != "" {
+		old, _, _ = strings.Cut(sa.Replaces, ",")
+	}
+	fmt.Fprintf(w, "adr       %s -> %s  %s  [accepted]  APEX's standard ADR (%s)\n", old, apexv1.StandardADRID, sa.Path, adrStandardSource(sa))
 }

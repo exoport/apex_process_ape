@@ -100,19 +100,18 @@ func (s installedStandard) label() string {
 // the installed payload's copy when there is one that is a well-formed
 // accepted ADR-0001, else ape's own.
 func standardADR(root string) installedStandard {
-	if data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(StandardADRPayload))); err == nil {
-		d := string(data)
-		if len(ValidateDecision(StandardADRPayload, StandardADRFile(), d)) == 0 && adrStatus(d) == ADRAccepted {
-			s := installedStandard{doc: d, source: StandardADRPayload}
-			if meta, err := os.ReadFile(filepath.Join(root, frameworkYAML)); err == nil {
-				if m := readMeta(string(meta)); m != nil {
-					s.version = m.Framework.VersionTag
-				}
-			}
-			return s
+	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(StandardADRPayload)))
+	d := string(data)
+	if err != nil || len(ValidateDecision(StandardADRPayload, StandardADRFile(), d)) > 0 || adrStatus(d) != ADRAccepted {
+		return installedStandard{doc: embeddedStandardADR, source: StandardSourceApe}
+	}
+	s := installedStandard{doc: d, source: StandardADRPayload}
+	if meta, err := os.ReadFile(filepath.Join(root, frameworkYAML)); err == nil {
+		if m := readMeta(string(meta)); m != nil {
+			s.version = m.Framework.VersionTag
 		}
 	}
-	return installedStandard{doc: embeddedStandardADR, source: StandardSourceApe}
+	return s
 }
 
 // isStandardText reports whether doc is the standard std: the same text
@@ -294,13 +293,13 @@ func (p *Project) initStandardADR(res *InitResult) error {
 	res.StandardADR = &pl.StandardADRResult
 	recs := p.decisionsJSON()
 	recsExisted := fileExists(recs)
-	switch {
-	case pl.Action == StandardCreated:
+	switch pl.Action {
+	case StandardCreated:
 		if err := p.writeStandardADR(pl.dst, pl.std, "ape project init"); err != nil {
 			return err
 		}
 		res.Created = append(res.Created, pl.Path)
-	case pl.Action == StandardKept:
+	case StandardKept:
 		if _, ok := p.loadDecisionRecords()[StandardADRID]; ok {
 			return nil
 		}
@@ -436,7 +435,7 @@ func (p *Project) supersedersOfStandard() []adrRef {
 	var out []adrRef
 	for _, e := range entries {
 		m := adrFileRe.FindStringSubmatch(e.Name())
-		if m == nil || m[1] == "0001" {
+		if len(m) < 2 || m[1] == "0001" {
 			continue
 		}
 		path := filepath.Join(p.DecisionsDir(), e.Name())
@@ -471,14 +470,14 @@ func (p *Project) DecisionStandardCheck(ctx context.Context) (*StandardADRResult
 	if !pl.Due() {
 		return &pl.StandardADRResult, nil
 	}
-	what := "ADR-0001 is absent"
+	what := []string{"ADR-0001 is absent"}
 	if pl.Action == StandardReplaced {
-		what = pl.Replaces + " is not the installed standard (" + pl.std.label() + ")"
+		what[0] = pl.Replaces + " is not the installed standard (" + pl.std.label() + ")"
 	}
 	for _, r := range pl.Removed {
-		what += ", and the proposed " + r.ID + " (" + r.Path + "), which supersedes it, is to remove"
+		what = append(what, "the proposed "+r.ID+" ("+r.Path+"), which supersedes it, is to remove")
 	}
-	return &pl.StandardADRResult, &FailError{Code: CodeStandardPending, Msg: "the standard ADR-0001 is due: " + what +
+	return &pl.StandardADRResult, &FailError{Code: CodeStandardPending, Msg: "the standard ADR-0001 is due: " + strings.Join(what, ", and ") +
 		" — `ape decision standard` writes it in its own commit"}
 }
 
