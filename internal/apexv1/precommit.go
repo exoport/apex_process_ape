@@ -130,7 +130,7 @@ func (p *Project) installPreCommitHook(ctx context.Context) (*PreCommitHook, err
 	case !errors.Is(err, os.ErrNotExist):
 		// A folder, a dangling link, an unreadable file: someone's.
 		h.Status = PreCommitKept
-		return h, nil //nolint:nilerr // not ape's to replace
+		return h, nil
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
@@ -175,7 +175,7 @@ func (p *Project) preCommitNotices(ctx context.Context) []Diagnostic {
 	}
 	rel := p.hookRel(path)
 	const unscanned = ": a commit ape does not make (a session's own git commit, a person's) is not scanned for secrets until the archive"
-	msg := ""
+	var msg string
 	data, err := os.ReadFile(path)
 	st, serr := os.Stat(path)
 	switch {

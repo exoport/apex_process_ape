@@ -394,17 +394,23 @@ func initSkeleton(ctx context.Context, root string, brownfield bool) (*InitResul
 	} else {
 		res.Kept = append(res.Kept, p.Rel(p.ProjectJSON()))
 	}
-	added, err := MergeHooks(p.SettingsJSON())
-	if err != nil {
-		return nil, nil, err
-	}
-	res.HooksAdded = added
-	// Git's pre-commit hook, ape's secret scan (Q89): installed when
-	// absent, so re-running init on a fresh clone installs it.
-	if res.PreCommit, err = p.installPreCommitHook(ctx); err != nil {
+	if err := p.initHooks(ctx, res); err != nil {
 		return nil, nil, err
 	}
 	return res, p, nil
+}
+
+// initHooks merges ape's hooks into .claude/settings.json and installs
+// git's pre-commit hook, ape's secret scan (Q89), when absent — so
+// re-running init on a fresh clone installs it.
+func (p *Project) initHooks(ctx context.Context, res *InitResult) error {
+	added, err := MergeHooks(p.SettingsJSON())
+	if err != nil {
+		return err
+	}
+	res.HooksAdded = added
+	res.PreCommit, err = p.installPreCommitHook(ctx)
+	return err
 }
 
 // amendConfigModels appends modelDefaultsYAML to an existing

@@ -164,7 +164,7 @@ func TestPreCommitScan(t *testing.T) {
 	require.Equal(t, CodeCommitSecret, ClassifyFindings(fe.Findings)[0].Code)
 	// From a subfolder too: git runs hooks at the top, a person may not.
 	require.NoError(t, os.MkdirAll(filepath.Join(p.Root, "sub"), 0o755))
-	secretFail(t, PreCommitScan(ctx(), filepath.Join(p.Root, "sub")))
+	_ = secretFail(t, PreCommitScan(ctx(), filepath.Join(p.Root, "sub")))
 
 	t.Setenv(EnvScanned, "1")
 	require.NoError(t, PreCommitScan(ctx(), p.Root), "ape's own commit, scanned already")
