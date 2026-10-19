@@ -311,7 +311,7 @@ func TestReadsAt_WholePath(t *testing.T) {
 		"cat " + p:                                        true,
 		"data, _ := os.ReadFile(\"" + p + "\")":           true,
 		"var p = \"" + p + "\"":                           true,
-		"msg := \"update " + p + " first\"":               true,
+		"msg := \"update " + p + " first\"":               false, // R32: a sentence
 		"for f in " + p + "; do":                          true,
 		"require.FileExists(t, \"" + p + "\")":            true,
 		"echo hi > " + p:                                  true,
@@ -350,6 +350,80 @@ func TestReadsAt_WholePath(t *testing.T) {
 		require.NotEmpty(t, tok.s, code)
 		require.Equal(t, want, readsAt(code, tok, false, callFrames(code)), code)
 	}
+}
+
+// R32, from tenax on rc.6d: a path inside a sentence in a quoted string
+// reads nothing, whatever call takes it — a project's own skip helper
+// included — while a quoted string that is the path, one joined to a
+// root, one that is itself a reading command, and an unquoted path still
+// read.
+func TestReadsAt_PathInQuotedProse(t *testing.T) {
+	const p = "development/deferred/"
+	for code, want := range map[string]bool{
+		"quarantinedFlake(t, \"… (see closing condition above and " + p + ").\")": false,
+		"skipUnless(t, `waiting on " + p + " to land`)":                           false,
+		"loadFixture(t, \"see " + p + " for why\")":                               false,
+		"skipf(t, \"drifts under load (see " + p + ")\")":                         false,
+		"run(\"python3 -c 'import os; os.listdir(\\\"" + p + "\\\")'\")":          true,
+		"helper('the records in " + p + " moved')":                                false,
+		"x := \"a\\\" " + p + "\"":                                                false,
+		"f(\"it's in " + p + "\")":                                                false,
+		"os.ReadFile(\"" + p + "x.md\")":                                          true,
+		"filepath.Join(root, \"" + p + "\")":                                      true,
+		"quarantinedFlake(t, \"" + p + "\")":                                      true,
+		"loadFixture(t, \"$ROOT/" + p + " for why\")":                             true,
+		"exec.Command(\"sh\", \"-c\", \"cat " + p + "x.md\")":                     true,
+		"subprocess.run(\"sort < " + p + "x.md\", shell=True)":                    true,
+		"run(\"echo hi\"); cat " + p + "x.md":                                     true,
+		"grep -r 'see' " + p:                                                      true,
+	} {
+		code = "x\n" + code + "\n"
+		var tok pathTok
+		for _, tk := range pathTokenSpans(code) {
+			if strings.HasPrefix(tk.s, p) {
+				tok = tk
+			}
+		}
+		require.NotEmpty(t, tok.s, code)
+		require.Equal(t, want, readsAt(code, tok, false, callFrames(code)), code)
+	}
+}
+
+// R32 end to end: tenax's obs_test.go passes a sentence naming the
+// deferred folder to its own skip helper — not a reader; the same folder
+// read or path-joined is.
+func TestLift_V0StateReadersNotByPathInQuotedSentence(t *testing.T) {
+	root := liftFixture(t, true)
+	files := map[string]string{
+		"test/integration/obs_test.go": "package integration\n\nfunc TestObs(t *testing.T) {\n" +
+			"\tquarantinedFlake(t, \"obs: spans drift under load (see closing condition above and development/deferred/).\")\n}\n",
+		"test/integration/invocation_list_52_1_test.go": "package integration\n\nfunc TestList(t *testing.T) {\n" +
+			"\tquarantinedFlake(t,\n\t\t\"list: flaky (see closing condition above and development/deferred/).\")\n}\n",
+		"tools/dr/read_test.go": "package dr\n\nfunc TestRead(t *testing.T) {\n" +
+			"\t_, _ = os.ReadFile(\"development/deferred/x.md\")\n}\n",
+		"tools/dr/join_test.go": "package dr\n\nfunc TestJoin(t *testing.T) {\n" +
+			"\t_ = filepath.Join(root, \"development/deferred\")\n}\n",
+	}
+	for rel, content := range files {
+		p := filepath.Join(root, filepath.FromSlash(rel))
+		require.NoError(t, os.MkdirAll(filepath.Dir(p), 0o755))
+		require.NoError(t, os.WriteFile(p, []byte(content), 0o644))
+	}
+	run(t, root, "add", "-A")
+	run(t, root, "commit", "-q", "-m", "a path in a sentence")
+	run(t, root, "tag", "-f", "-a", LiftTag, "-m", "APEX v0 final")
+	run(t, root, "push", "-q", "-f", "origin", LiftTag)
+
+	res, err := Lift(ctx(), root, LiftOptions{DryRun: true})
+	require.NoError(t, err)
+	got := map[string][]string{}
+	for _, r := range res.V0StateReaders {
+		got[r.File] = r.Reads
+	}
+	require.NotContains(t, got, "test/integration/obs_test.go", "a sentence passed to a project's helper")
+	require.NotContains(t, got, "test/integration/invocation_list_52_1_test.go", "the same, on the next line")
+	require.Equal(t, []string{"development/deferred/x.md"}, got["tools/dr/read_test.go"])
+	require.Equal(t, []string{"development/deferred"}, got["tools/dr/join_test.go"])
 }
 
 func TestSQLCodeText(t *testing.T) {

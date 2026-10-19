@@ -386,6 +386,24 @@ func (c *interactiveCore) FeedHook(h orchestrator.HookEvent) {
 			c.transcriptMu.Unlock()
 			c.driver.SetActiveTranscript(env.TranscriptPath)
 		}
+	default:
+		// Any other event naming the session's transcript (eval Q23: a
+		// PostToolUse carries transcript_path too) seeds it when neither
+		// UserPromptSubmit nor Stop has; it never replaces one.
+		if env := parseHookEnvelope(h.Payload); env.TranscriptPath != "" {
+			c.transcriptMu.Lock()
+			seeded := c.activeTranscript == ""
+			if seeded {
+				c.activeTranscript = env.TranscriptPath
+				if env.SessionID != "" {
+					c.activeSessionID = env.SessionID
+				}
+			}
+			c.transcriptMu.Unlock()
+			if seeded {
+				c.driver.SetActiveTranscript(env.TranscriptPath)
+			}
+		}
 	}
 	if writer != nil {
 		_ = writer.Hook(runlog.HookEntry{
