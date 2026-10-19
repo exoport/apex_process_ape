@@ -577,8 +577,8 @@ recorded in state.json as verify.regression; results has no regression row. It r
 anyway, JSON regression.not_skipped and a human line saying why, when a touched path is
 under docs.tested (docs the project executes), when _apex/config.yaml's release or docs
 block was changed by a commit no person accepted or has an uncommitted edit, or when the
-regression command or one of the change's check commands names a touched docs path or a
-folder holding one as a word (`+"`test -f README.md`"+`, `+"`markdownlint docs/`"+`). No skip when the
+regression command names a touched docs path or a folder holding one as a word
+(`+"`test -f README.md`"+`, `+"`markdownlint docs/`"+`; the change's own checks run anyway). No skip when the
 change has no base_sha or its diff cannot be read.
 The working tree must hold no uncommitted changes outside development/ — commit first
 (trailer "Change: <id>"): a verify belongs to a sha. HEAD must be on the change's branch,

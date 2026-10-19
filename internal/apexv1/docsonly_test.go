@@ -161,11 +161,13 @@ func TestVerify_CommandNamingADocRunsTheRegression(t *testing.T) {
 	require.Nil(t, regressionRow(v))
 	require.Equal(t, RegressionSkippedDocsOnly, v.Regression.Skipped)
 
+	// The change's own check naming the doc it edits does not end the skip:
+	// it runs anyway.
 	p = docsOnlyWave(t, "regression: ./suite.sh\n", "grep -q wave README.md", nil)
 	v, err = p.Verify(ctx(), "docs-wave", RunOptions{})
 	require.NoError(t, err)
-	require.NotNil(t, regressionRow(v))
-	require.Equal(t, "check T1 (`grep -q wave README.md`) names README.md", v.Regression.NotSkipped)
+	require.Nil(t, regressionRow(v))
+	require.Equal(t, RegressionSkippedDocsOnly, v.Regression.Skipped)
 }
 
 func TestNamedPath(t *testing.T) {

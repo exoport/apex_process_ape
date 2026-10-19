@@ -20,9 +20,11 @@ import (
 //   - _apex/config.yaml's release or docs block — which bound the scope —
 //     is not a person's (refuseUnacceptedConfig, as for the docs delegate);
 //   - a touched path is under docs.tested (docs the project executes);
-//   - the regression command or one of the change's planned check commands
-//     names a touched docs path, or a folder holding one, as a word
-//     (`markdownlint docs/`, `test -f README.md`) (D170).
+//   - the regression command names a touched docs path, or a folder
+//     holding one, as a word (`markdownlint docs/`, `test -f README.md`)
+//     (D170). The change's own checks are not consulted: they run anyway,
+//     and a docs change's task check names the doc it edits (`grep -q wave
+//     README.md`), which would end every skip.
 //
 // There is no skip when the change has no base_sha or its diff cannot be
 // read.
@@ -36,12 +38,12 @@ const RegressionSkippedDocsOnly = "docs-only"
 const regressionPathsShown = 50
 
 // docsOnlyRegression decides the docs-only skip for ci, whose verify runs
-// checks and the regression command cmd. skip: the change is docs-only and
+// the regression command cmd. skip: the change is docs-only and
 // nothing stops the skip; paths are then its touched docs paths (outside
 // the development folder and ape's state). notSkipped: the change is
 // docs-only, yet the command runs — why. Both empty: the change is not
 // docs-only.
-func (p *Project) docsOnlyRegression(ctx context.Context, ci ChangeInfo, cmd string, checks []PlannedCheck) (skip bool, paths []string, notSkipped string) {
+func (p *Project) docsOnlyRegression(ctx context.Context, ci ChangeInfo, cmd string) (skip bool, paths []string, notSkipped string) {
 	cfg, err := LoadConfig(p.Root)
 	if err != nil {
 		return false, nil, ""
@@ -69,11 +71,6 @@ func (p *Project) docsOnlyRegression(ctx context.Context, ci ChangeInfo, cmd str
 	}
 	if w := namedPath(cmd, paths); w != "" {
 		return false, paths, "the regression command names " + w
-	}
-	for i := range checks {
-		if w := namedPath(checks[i].Cmd, paths); w != "" {
-			return false, paths, "check " + checks[i].Ref + " (`" + checks[i].Cmd + "`) names " + w
-		}
 	}
 	return true, paths, ""
 }

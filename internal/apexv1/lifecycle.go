@@ -534,7 +534,7 @@ func (p *Project) verify(ctx context.Context, ci ChangeInfo, opt RunOptions, kee
 	var skipped *RegressionVerdict
 	var notSkipped string
 	if regressionCmd != "" {
-		skip, paths, why := p.docsOnlyRegression(ctx, ci, regressionCmd, checks)
+		skip, paths, why := p.docsOnlyRegression(ctx, ci, regressionCmd)
 		notSkipped = why
 		if skip {
 			skipped = skippedRegression(regressionCmd, st.Regression, paths)
