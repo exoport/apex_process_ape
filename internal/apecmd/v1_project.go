@@ -20,6 +20,8 @@ func newProjectCmd() *cobra.Command {
 	}
 	cmd.AddCommand(newProjectInitCmd(), newProjectCheckCmd(), newProjectCodesCmd(), newProjectLiftCmd(), newProjectAcceptConfigCmd(),
 		newProjectArchiveLayoutCmd())
+	// rc.7 (rc7-rename).
+	cmd.AddCommand(newProjectOperatorInterfaceCmd())
 	return cmd
 }
 
@@ -42,7 +44,13 @@ for setup while no .claude/skills/apex-* exists; JSON "next" carries the same li
                                      defaults (D65, D93) — apex-apply, apex-loop
                                      and apex-release {model: sonnet, effort: high};
                                      apex-review, apex-plan, apex-change and apex-accept
-                                     {model: opus, effort: medium}. An existing config
+                                     {model: opus, effort: medium}. No row for the
+                                     operator's apex-orchestrator: it runs in your own
+                                     session, on the model you chose (D175, D176). A
+                                     models.apex-orchestrator row (a project made before
+                                     rc.7) is read as apex-loop's while there is no
+                                     apex-loop row, with a warning, until ape project
+                                     operator-interface moves it (see its --help). An existing config
                                      with no top-level models: gets that block appended,
                                      its own text kept byte for byte (restored, with a
                                      warning, if the result would not parse); the
@@ -66,7 +74,11 @@ for setup while no .claude/skills/apex-* exists; JSON "next" carries the same li
                                      Project context: read @development/project.md before
                                      planning or changing anything.
                                      (the configured development folder; plain text, so
-                                     Claude Code imports project.md into every session).
+                                     Claude Code imports project.md into every session),
+                                     then the line naming the operator's interface (A13):
+                                     Talk to APEX: type ` + "`/apex-orchestrator`" + ` in Claude Code.
+                                     (an existing AGENTS.md is not given it: ape project
+                                     operator-interface adds it).
                                      An existing AGENTS.md whose lines carry no
                                      @development/project.md outside code gets that line
                                      after its first # heading (or at the top), and
@@ -460,6 +472,12 @@ line}; [] when none, beside the findings on a failure too), they never change th
                            another tool's hook — add ` + "`ape hook pre-commit || exit 1`" + ` to
                            it; ape never edits it —, or not executable. ape doctor reports
                            it too (hooks.pre-commit). See ape hook pre-commit --help
+  models.operator-row      _apex/config.yaml has a models.apex-orchestrator row (Q96):
+                           with no models.apex-loop row it is read as apex-loop's (a
+                           project made before rc.7: ` + "`ape project operator-interface`" + `
+                           renames it); beside one it is a leftover apex-loop's row
+                           overrides (drop it). The operator's apex-orchestrator runs
+                           in your own session and has no models row
 
 Exit codes: 0 green · 1 findings (listed on stderr, or under "findings" with --json) · 2 usage.`,
 		Example: "  ape project check\n  ape project check --json",
@@ -629,6 +647,111 @@ some left · 3 a folder's new place exists.`,
 	}
 	addV1Flags(cmd, &f)
 	cmd.Flags().BoolVar(&check, "check", false, "write nothing: exit 0 when nothing is left in the older layout, 1 when some is")
+	return cmd
+}
+
+func newProjectOperatorInterfaceCmd() *cobra.Command {
+	var f v1Flags
+	var check bool
+	cmd := &cobra.Command{
+		Use:   "operator-interface [--check]",
+		Short: "Bring a project made before rc.7 to the operator interface (the v1.0.0_seq-07 migration)",
+		Long: `Since rc.7 (D171) apex-orchestrator is the operator's interface — a skill a person
+opens in their own Claude Code session by typing /apex-orchestrator — and the unattended
+runner of one approved milestone or fix is apex-loop. This brings a project that ape
+project init or the lift made before rc.7 there; the framework's migration
+v1.0.0_seq-07 runs it (command: ape project operator-interface; check: ape project
+operator-interface --check). A project init or the lift made with rc.7 has nothing to do.
+
+One commit, "apex: operator interface (seq-07)", of what is left of:
+  models     _apex/config.yaml's models.apex-orchestrator row renamed to apex-loop, its
+             value kept byte for byte (D176: sonnet/high unless the project chose
+             otherwise); when a models.apex-loop row exists it wins and the old row's
+             lines are removed. Every other byte of the file is kept. models: is not a
+             guarded block, so this is no config.changed. A models: written as a flow
+             mapping ({…}) whose old row must be removed is a person's to edit
+             (project.operator-interface-pending, nothing written)
+  hooks      ape's hooks merged into .claude/settings.json with ape project init's
+             merge: a missing one added, an altered one restored, every other key and
+             hook kept (hooks were only merged by init before)
+  AGENTS.md  the line
+               Talk to APEX: type ` + "`/apex-orchestrator`" + ` in Claude Code.
+             after the project-context line (else after its first # heading, else at
+             the top), when no line outside code names /apex-orchestrator (A11)
+Idempotent: with nothing left it writes nothing and says "nothing to do" (exit 0).
+
+How ape knows seq-07 ran: from the config, not a marker (a fresh clone would lose one). A
+models.apex-orchestrator row with no models.apex-loop row is the state before seq-07:
+` + "`ape task apex-loop`" + ` reads it as apex-loop's, with a warning on stderr, and ape project
+check lists the notice models.operator-row. Beside an apex-loop row it is a leftover,
+the notice says to drop it, and apex-loop's row is the one read.
+
+Refused on a change branch (branch.change-branch), outside a git repository
+(git.not-a-repo), and while _apex/config.yaml, .claude/settings.json or AGENTS.md has
+uncommitted changes (tree.dirty): nothing is written. A command any session may run (not
+person-only).
+
+--check writes nothing: exit 0 when nothing is left, 1
+(project.operator-interface-pending, action person, naming what is left) when something
+is — the migration's check: 0 applied, 1 not applied.
+
+JSON: {"models": "moved"|"removed" (absent when there is no old row), "hooks": [<Event>:
+<command>, …], "agents_line": true|false, "commit"}; "hooks" is always there, [] when
+none. Under --check they say what is left, at the top level beside the failure's
+ok/exit/diagnostics when something is (exit 1).
+
+Exit codes: 0 applied, or nothing to do (--check: nothing left) · 1 refused, or (--check)
+something left.`,
+		Example: "  ape project operator-interface --check\n  ape project operator-interface\n  ape project operator-interface --json",
+		Args:    cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			p, err := v1Project(&f)
+			if err != nil {
+				return err
+			}
+			if err := v1RequireInit(cmd, &f, p); err != nil {
+				return err
+			}
+			if check {
+				res, err := p.OperatorInterfaceCheck()
+				if err != nil {
+					left := map[string]any{"hooks": res.Hooks, "agents_line": res.AgentsLine}
+					if res.Models != "" {
+						left["models"] = res.Models
+					}
+					return v1FailWith(cmd, &f, err, nil, left)
+				}
+				return v1Emit(cmd.OutOrStdout(), &f, res, func(w io.Writer) {
+					fmt.Fprintln(w, "operator interface: nothing left to do")
+				})
+			}
+			res, err := p.OperatorInterface(cmd.Context())
+			if err != nil {
+				return v1Fail(cmd, &f, err, res)
+			}
+			return v1Emit(cmd.OutOrStdout(), &f, res, func(w io.Writer) {
+				if res.Commit == "" {
+					fmt.Fprintln(w, "operator interface: nothing to do")
+					return
+				}
+				switch res.Models {
+				case "moved":
+					fmt.Fprintln(w, "models.apex-orchestrator → models.apex-loop (value kept)")
+				case "removed":
+					fmt.Fprintln(w, "models.apex-orchestrator removed (models.apex-loop wins)")
+				}
+				for _, h := range res.Hooks {
+					fmt.Fprintf(w, "hook added: %s\n", h)
+				}
+				if res.AgentsLine {
+					fmt.Fprintf(w, "AGENTS.md: added %q\n", apexv1.OperatorLine)
+				}
+				fmt.Fprintf(w, "commit %.7s %s\n", res.Commit, apexv1.OperatorInterfaceSubject)
+			})
+		},
+	}
+	addV1Flags(cmd, &f)
+	cmd.Flags().BoolVar(&check, "check", false, "write nothing: exit 0 when nothing is left to do, 1 when something is")
 	return cmd
 }
 

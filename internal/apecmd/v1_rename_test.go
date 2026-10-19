@@ -3,6 +3,10 @@ package apecmd
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/exoport/apex_process_ape/apescript"
@@ -101,4 +105,75 @@ func TestRename_CostsGroupTheLoopsNames(t *testing.T) {
 	data, err := json.Marshal(tasks)
 	require.NoError(t, err)
 	require.Contains(t, string(data), `"apex-orchestrator"`)
+}
+
+// Q96: before seq-07, apex-loop's session reads models.apex-orchestrator
+// (with a warning on stderr); once apex-loop has its own row, that row.
+func TestRename_TheLoopReadsTheOldRowUntilSeq07(t *testing.T) {
+	outsideEverySession(t)
+	root := v1Repo(t)
+	cfgPath := filepath.Join(root, "_apex", "config.yaml")
+	data, err := os.ReadFile(cfgPath)
+	require.NoError(t, err)
+	old := strings.Replace(string(data), "  apex-loop: {model: sonnet, effort: high}", "  apex-orchestrator: {model: haiku, effort: low}", 1)
+	require.NotEqual(t, string(data), old, "rc.7 init writes apex-loop's row")
+	require.NoError(t, os.WriteFile(cfgPath, []byte(old), 0o644))
+	p, ok := v1ProjectAt(root)
+	require.True(t, ok)
+
+	stderr := captureStderr(t, func() {
+		l, err := decideV1TaskLaunch(p, "apex-loop", "", "")
+		require.NoError(t, err)
+		require.Equal(t, resolveModelArg("haiku"), l.launch.Model)
+		require.Equal(t, "low", l.launch.Effort)
+	})
+	require.Contains(t, stderr, "models.apex-orchestrator row and none for apex-loop")
+	require.Contains(t, stderr, "`ape project operator-interface`")
+
+	// After seq-07 (here: through the command), apex-loop's own row.
+	_, _, err = v1Exec(t, newProjectCmd, "operator-interface", "--check", "--cwd", root)
+	require.Error(t, err, "pending: the old row is there")
+	v1Git(t, root, "commit", "-qam", "back to rc.6e's row")
+	stdout, _, err := v1Exec(t, newProjectCmd, "operator-interface", "--check", "--json", "--cwd", root)
+	require.Equal(t, ExitRunFailed, exitCodeOf(t, err))
+	var left struct {
+		Models      string              `json:"models"`
+		Diagnostics []apexv1.Diagnostic `json:"diagnostics"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &left), stdout)
+	require.Equal(t, "moved", left.Models)
+	require.Equal(t, apexv1.CodeOperatorInterfacePending, left.Diagnostics[0].Code)
+	require.Equal(t, apexv1.ActionPerson, left.Diagnostics[0].Action)
+
+	stdout, _, err = v1Exec(t, newProjectCmd, "operator-interface", "--cwd", root)
+	require.NoError(t, err)
+	require.Contains(t, stdout, "models.apex-orchestrator → models.apex-loop (value kept)")
+	require.Contains(t, stdout, "commit ")
+	require.Contains(t, v1Git(t, root, "log", "-1", "--format=%s"), apexv1.OperatorInterfaceSubject)
+	stdout, _, err = v1Exec(t, newProjectCmd, "operator-interface", "--cwd", root)
+	require.NoError(t, err)
+	require.Contains(t, stdout, "nothing to do")
+
+	stderr = captureStderr(t, func() {
+		l, err := decideV1TaskLaunch(p, "apex-loop", "", "")
+		require.NoError(t, err)
+		require.Equal(t, resolveModelArg("haiku"), l.launch.Model, "the value moved byte for byte")
+	})
+	require.Empty(t, stderr)
+}
+
+// captureStderr runs fn with os.Stderr redirected, and returns what it
+// wrote there.
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	old := os.Stderr
+	os.Stderr = w
+	defer func() { os.Stderr = old }()
+	fn()
+	require.NoError(t, w.Close())
+	data, err := io.ReadAll(r)
+	require.NoError(t, err)
+	return string(data)
 }

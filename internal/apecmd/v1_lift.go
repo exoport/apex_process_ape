@@ -120,8 +120,10 @@ The commit:
                  shell ${…}) or a lone … — is listed, not run; Go's ./... is no
                  placeholder. A trailing " # …" shell comment is dropped first
   lays down      the v1 skeleton, as ` + "`ape project init --brownfield`" + ` (CLAUDE.md keeps its
-                 content, loses the v0 apex:managed block and gains @AGENTS.md),
-                 hot/.gitignore (` + "`*`" + `, when hot/ has none) included: it ignores
+                 content, loses the v0 apex:managed block and gains @AGENTS.md;
+                 AGENTS.md gains "Talk to APEX: type ` + "`/apex-orchestrator`" + ` in Claude
+                 Code." when it does not name /apex-orchestrator; models: names
+                 apex-loop, never apex-orchestrator), hot/.gitignore (` + "`*`" + `, when hot/ has none) included: it ignores
                  itself, so it is not in the lift commit; and git's pre-commit hook,
                  the secret scan, when the repository has none (an existing one is
                  kept; the output's "git hook" line says which; see ape hook

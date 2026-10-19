@@ -29,7 +29,7 @@ func TestProjectCheck_UnknownModels(t *testing.T) {
 		"a model key": {config: "models:\n  model: opus\n", want: []want{{CodeModelsUnknownSkill, "models.model is not a skill — a skill's model goes inside its entry"}}},
 		"a typo'd skill": {config: "models:\n  apex-aply: sonnet\n", want: []want{{
 			CodeModelsUnknownSkill,
-			"models.apex-aply names no skill installed in the project (.claude/skills/apex-aply/SKILL.md) nor one of ape's defaults (apex-apply, apex-orchestrator, apex-review, apex-plan, apex-change, apex-accept, apex-release), so it pins nothing — fix the skill name, or drop the entry",
+			"models.apex-aply names no skill installed in the project (.claude/skills/apex-aply/SKILL.md) nor one of ape's defaults (apex-apply, apex-loop, apex-review, apex-plan, apex-change, apex-accept, apex-release), so it pins nothing — fix the skill name, or drop the entry",
 		}}},
 		"an unknown entry field": {config: "models:\n  apex-apply: {model: sonnet, efort: high, budget: 3}\n", want: []want{
 			{CodeModelsUnknownField, "models.apex-apply.efort is not a field of a models entry, so it does nothing — an entry is a model name or {model, effort}: fix or drop efort"},

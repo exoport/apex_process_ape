@@ -32,8 +32,11 @@ func TestInit_Greenfield(t *testing.T) {
 	clean(t, p, "project init")
 	require.Equal(t, "@AGENTS.md\n", read(t, p, "CLAUDE.md"))
 	require.True(t, strings.HasPrefix(read(t, p, "AGENTS.md"), "# AGENTS.md\n\n"+
-		"Project context: read @development/project.md before planning or changing anything.\n\n<!--"),
-		"D82: the project-context line, plain text, right under the title")
+		"Project context: read @development/project.md before planning or changing anything.\n\n"+
+		"Talk to APEX: type `/apex-orchestrator` in Claude Code.\n\n<!--"),
+		"D82: the project-context line, plain text, right under the title; A13: then the operator's line")
+	_, err = p.OperatorInterfaceCheck()
+	require.NoError(t, err, "a project rc.7 init made leaves seq-07 nothing to do")
 	require.FileExists(t, filepath.Join(root, filepath.FromSlash("development/specs/.gitkeep")))
 	// Backlog 26: a whitelist, so anything ape adds there later is ignored
 	// by default; init commits it, and project.json stays local.
@@ -48,14 +51,14 @@ func TestInit_Greenfield(t *testing.T) {
 	require.Equal(t, "development", cfg.DevelopmentFolder)
 	// D65: a new config starts with the model defaults.
 	require.Equal(t, map[string]SkillModel{
-		"apex-apply":        {Model: "sonnet", Effort: "high"},
-		"apex-orchestrator": {Model: "sonnet", Effort: "high"},
-		"apex-review":       {Model: "opus", Effort: "medium"},
-		"apex-plan":         {Model: "opus", Effort: "medium"},
-		"apex-change":       {Model: "opus", Effort: "medium"},
-		"apex-accept":       {Model: "opus", Effort: "medium"},
-		"apex-release":      {Model: "sonnet", Effort: "high"},
-	}, cfg.Models, "D93: apex-accept and apex-release too")
+		"apex-apply":   {Model: "sonnet", Effort: "high"},
+		"apex-loop":    {Model: "sonnet", Effort: "high"},
+		"apex-review":  {Model: "opus", Effort: "medium"},
+		"apex-plan":    {Model: "opus", Effort: "medium"},
+		"apex-change":  {Model: "opus", Effort: "medium"},
+		"apex-accept":  {Model: "opus", Effort: "medium"},
+		"apex-release": {Model: "sonnet", Effort: "high"},
+	}, cfg.Models, "D93: apex-accept and apex-release too; Q96: the loop's row is apex-loop's, the operator has none")
 	require.Empty(t, res.Warnings)
 	require.Contains(t, committed, "_apex/config.yaml")
 
@@ -163,7 +166,7 @@ func TestInit_ExistingConfigBlocksAreKept(t *testing.T) {
 		// D86: each skill init has a default for and models: does not
 		// name is a warning, apex-apply's own entry aside.
 		require.Len(t, res.Warnings, 6)
-		for i, skill := range []string{"apex-orchestrator", "apex-review", "apex-plan", "apex-change", "apex-accept", "apex-release"} {
+		for i, skill := range []string{"apex-loop", "apex-review", "apex-plan", "apex-change", "apex-accept", "apex-release"} {
 			require.Equal(t, "_apex/config.yaml models: has no "+skill+" entry — "+skill+" runs on claude's default model; "+
 				"add one to models: to choose its model and effort (see ape project init --help)", res.Warnings[i])
 		}
@@ -521,5 +524,5 @@ func TestInit_AppendsModelDefaultsOutsideGit(t *testing.T) {
 }
 
 func TestModelDefaultSkills(t *testing.T) {
-	require.Equal(t, []string{"apex-apply", "apex-orchestrator", "apex-review", "apex-plan", "apex-change", "apex-accept", "apex-release"}, modelDefaultSkills())
+	require.Equal(t, []string{"apex-apply", "apex-loop", "apex-review", "apex-plan", "apex-change", "apex-accept", "apex-release"}, modelDefaultSkills())
 }
