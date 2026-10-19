@@ -163,10 +163,11 @@ type LiftResult struct {
 	// (R4).
 	RegressionNewFailures []string `json:"regression_new_failures,omitempty"`
 	// RegressionCommands: the regression command is a top-level && chain,
-	// so each of its commands ran on its own at both points, past a red
-	// one, and was judged on its own (R12); the regression_* fields above
-	// are then the worst command's. Absent for a command that does not
-	// split, which runs and is judged whole.
+	// or a ( … ) block that splits (one command per line, R30), so each
+	// of its commands ran on its own at both points, past a red one, and
+	// was judged on its own (R12); the regression_* fields above are then
+	// the worst command's. Absent for a command that does not split,
+	// which runs and is judged whole.
 	RegressionCommands []LiftRegressionCommand `json:"regression_commands,omitempty"`
 }
 
@@ -1138,8 +1139,8 @@ func (lf *lifter) removals() []string {
 // liftRegression runs the regression command at the lift commit and
 // judges it against its run at the tag: the baseline red gates are
 // judged against (backlog 37), and the one way to tell a red the lift
-// caused from one it found (L4). A top-level && chain runs and is judged
-// command by command (R12).
+// caused from one it found (L4). A top-level && chain, and a ( … ) block
+// in it that splits, runs and is judged command by command (R12, R30).
 func (lf *lifter) liftRegression(p *Project) {
 	switch {
 	case lf.res.Gates.Regression == "":
@@ -1149,14 +1150,14 @@ func (lf *lifter) liftRegression(p *Project) {
 		lf.res.RegressionNote = "not run (--no-verify-run)"
 		return
 	}
-	parts := splitTopLevelAnd(lf.res.Gates.Regression)
+	parts := liftParts(lf.res.Gates.Regression)
 	var after []CheckResult
 	if len(parts) == 1 {
-		after = []CheckResult{p.runRegression(lf.ctx, parts[0], p.LogDir("lift"), "", lf.opt.Run)}
+		after = []CheckResult{p.runRegression(lf.ctx, parts[0].Cmd, p.LogDir("lift"), "", lf.opt.Run)}
 	} else {
 		checks := make([]PlannedCheck, len(parts))
 		for i, c := range parts {
-			checks[i] = PlannedCheck{Ref: liftPartRef(i), Kind: KindRegression, Cmd: c}
+			checks[i] = PlannedCheck{Ref: liftPartRef(i), Kind: KindRegression, Cmd: c.Cmd, LogNote: c.LogNote}
 		}
 		after = p.RunChecks(lf.ctx, p.LogDir("lift"), "", checks, lf.opt.Run)
 	}
@@ -1186,7 +1187,7 @@ func (lf *lifter) liftRegression(p *Project) {
 			tag = &lf.tagRuns[i]
 		}
 		c := &cmds[i]
-		c.Cmd, c.Regression, c.RegressionAtTag = parts[i], &after[i], tag
+		c.Cmd, c.Regression, c.RegressionAtTag = parts[i].Cmd, &after[i], tag
 		c.Verdict, c.Note, c.NewFailures = judgeLiftRegression(tag, &after[i], readLog(tag), readLog(&after[i]))
 		if liftVerdictRank(c.Verdict) > liftVerdictRank(cmds[worst].Verdict) {
 			worst = i
@@ -1197,12 +1198,40 @@ func (lf *lifter) liftRegression(p *Project) {
 	lf.res.RegressionVerdict, lf.res.RegressionNote, lf.res.RegressionNewFailures = w.Verdict, w.Note, w.NewFailures
 	if len(parts) > 1 {
 		lf.res.RegressionCommands = cmds
-		lf.res.RegressionNote = splitNote(cmds, worst)
+		lf.res.RegressionNote = splitNote(cmds, worst, parts)
 	}
 }
 
 // liftPartRef is the ref, and log name, of a split chain's i-th command.
 func liftPartRef(i int) string { return regressionRef + "-" + strconv.Itoa(i+1) }
+
+// R30, cortex on rc.6c: its regression block's lines ran joined by &&
+// (R24b), so once go test, line 3, failed after the lift, lines 4–9 — the
+// builds, the vets, migrate-check — ran at the tag but not after: R12's
+// masking inside the block. In the lift's two comparison runs a block
+// that splits is a run of the chain's commands, one per line, each run
+// past a red one. A change's verify, a gate and a check keep the join.
+
+// liftParts are the commands the lift's two comparison runs run, each on
+// its own: a top-level && chain's (R12), with each ( … ) block among them
+// that splitSubshell splits replaced by its lines (R30), each line's log
+// opening with a note that says so. A block splitSubshell refuses stays
+// one command, run as written.
+func liftParts(cmd string) []PlannedCheck {
+	var parts []PlannedCheck
+	for _, c := range splitTopLevelAnd(cmd) {
+		lines, _ := splitSubshell(c)
+		if len(lines) == 0 {
+			parts = append(parts, PlannedCheck{Cmd: c})
+			continue
+		}
+		note := fmt.Sprintf("[ape] split into %d commands: the lift runs each line of the ( … ) block on its own, past a red one, and judges each in regression_commands", len(lines))
+		for _, l := range lines {
+			parts = append(parts, PlannedCheck{Cmd: l, LogNote: note})
+		}
+	}
+	return parts
+}
 
 // The lift's verdicts in rank order, worst highest (liftVerdictRank).
 const (
@@ -1231,16 +1260,29 @@ func liftVerdictRank(v string) int {
 }
 
 // splitNote is a split chain's note: the worst command's, naming it, and
-// every other command's verdict.
-func splitNote(cmds []LiftRegressionCommand, worst int) string {
+// every other command's verdict. parts say which came from a ( … ) block.
+func splitNote(cmds []LiftRegressionCommand, worst int, parts []PlannedCheck) string {
 	var others []string
 	for i := range cmds {
 		if i != worst {
 			others = append(others, fmt.Sprintf("%d %#q %s", i+1, cmds[i].Cmd, cmds[i].Verdict))
 		}
 	}
-	return fmt.Sprintf("command %d of %d, %#q (each command of the && chain ran on its own, past a red one; the worst verdict is this one's): %s — the others: %s; each in regression_commands",
-		worst+1, len(cmds), cmds[worst].Cmd, cmds[worst].Note, strings.Join(others, ", "))
+	block := 0
+	for i := range parts {
+		if parts[i].LogNote != "" {
+			block++
+		}
+	}
+	what := "each command of the && chain"
+	switch {
+	case block == len(parts):
+		what = "each line of the ( … ) block"
+	case block > 0:
+		what = "each command of the && chain, and each line of its ( … ) block,"
+	}
+	return fmt.Sprintf("command %d of %d, %#q (%s ran on its own, past a red one; the worst verdict is this one's): %s — the others: %s; each in regression_commands",
+		worst+1, len(cmds), cmds[worst].Cmd, what, cmds[worst].Note, strings.Join(others, ", "))
 }
 
 // removeUntracked removes the manifest's v0 skills git never tracked (an
@@ -1257,9 +1299,10 @@ func (lf *lifter) removeUntracked() error {
 
 // regressionAtTag runs the regression command at the tag, first, before
 // anything is written: HEAD is the tag (pre-flight) and the tree is
-// clean. A top-level && chain runs command by command, past a red one
-// (R12). Its logs stay outside the tree until the lift's state folder
-// exists; cleanup removes them. No command, or --no-verify-run: nothing.
+// clean. A top-level && chain, and a ( … ) block in it that splits, runs
+// command by command, past a red one (R12, R30). Its logs stay outside
+// the tree until the lift's state folder exists; cleanup removes them. No
+// command, or --no-verify-run: nothing.
 func (lf *lifter) regressionAtTag() (cleanup func(), err error) {
 	cleanup = func() {}
 	if lf.res.Gates.Regression == "" || lf.opt.NoVerifyRun {
@@ -1271,18 +1314,20 @@ func (lf *lifter) regressionAtTag() (cleanup func(), err error) {
 	}
 	cleanup = func() { _ = os.RemoveAll(tmp) }
 	p := &Project{Root: lf.root, DevRel: lf.devRel}
-	parts := splitTopLevelAnd(lf.res.Gates.Regression)
+	parts := liftParts(lf.res.Gates.Regression)
 	inGit := p.isWorkTree(lf.ctx)
 	lf.tagRuns = make([]CheckResult, 0, len(parts))
-	for i, c := range parts {
+	for i := range parts {
+		c := &parts[i]
 		ref, name := regressionRef, "regression-at-tag.log"
 		if len(parts) > 1 {
 			ref = liftPartRef(i)
 			name = ref + "-at-tag.log"
 		}
 		logPath := filepath.Join(tmp, name)
-		progressf(lf.opt.Run.Progress, "%s %s at %s started: %s", Stamp(), ref, LiftTag, c)
-		r := p.runWithRetries(lf.ctx, &PlannedCheck{Ref: ref, Kind: KindRegression, Cmd: c}, logPath,
+		progressf(lf.opt.Run.Progress, "%s %s at %s started: %s", Stamp(), ref, LiftTag, c.Cmd)
+		c.Ref, c.Kind = ref, KindRegression
+		r := p.runWithRetries(lf.ctx, c, logPath,
 			Timeouts{}.Limits(KindRegression, lf.opt.Run.Timeout), nil, 0, inGit)
 		r.Task, r.Kind = ref, KindRegression
 		lf.tagRuns = append(lf.tagRuns, r)

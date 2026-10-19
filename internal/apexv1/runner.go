@@ -94,6 +94,12 @@ func openCheckLog(logPath, note string) *os.File {
 // however ape ended (SIGKILL included) — on Linux the shell also has
 // Pdeathsig; on Windows the group is a job object that closes with ape.
 func runCheck(ctx context.Context, dir, cmd, logPath string, lim TierTimeout, vacuous []string, env ...string) CheckResult {
+	return runNotedCheck(ctx, dir, cmd, "", logPath, lim, vacuous, env...)
+}
+
+// runNotedCheck is runCheck with its log opening on logNote, when set,
+// in place of the split note.
+func runNotedCheck(ctx context.Context, dir, cmd, logNote, logPath string, lim TierTimeout, vacuous []string, env ...string) CheckResult {
 	if lim.Max <= 0 {
 		lim = Timeouts{}.Limits(KindTask, 0)
 	}
@@ -106,6 +112,9 @@ func runCheck(ctx context.Context, dir, cmd, logPath string, lim TierTimeout, va
 	// A multi-line ( … ) block of simple commands runs as its lines joined
 	// by && (R24b); the result keeps the command as configured.
 	script, note := checkScript(cmd)
+	if logNote != "" {
+		note = logNote
+	}
 	c := exec.CommandContext(runCtx, "sh", "-c", script) //nolint:gosec // a check is a shell command the project's own change.md or config names, by design
 	c.Dir = dir
 	c.Stdin = nil

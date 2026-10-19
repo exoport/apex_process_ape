@@ -151,6 +151,31 @@ func TestJudgeLiftRegression_NamesWhateverTheExit(t *testing.T) {
 	require.Empty(t, fresh, "no names to read: none")
 }
 
+// R30: the lift's comparison runs split a ( … ) block into its lines as
+// commands of the && chain; a block splitSubshell refuses stays whole.
+func TestLiftParts(t *testing.T) {
+	cmds := func(ps []PlannedCheck) (out []string) {
+		for _, p := range ps {
+			out = append(out, p.Cmd)
+		}
+		return out
+	}
+	ps := liftParts("( true\nfalse\ntrue\nfalse )")
+	require.Equal(t, []string{"true", "false", "true", "false"}, cmds(ps))
+	for _, p := range ps {
+		require.Equal(t, "[ape] split into 4 commands: the lift runs each line of the ( … ) block on its own, past a red one, and judges each in regression_commands", p.LogNote)
+	}
+	ps = liftParts("make lint && ( go test ./...\ngo vet ./... )")
+	require.Equal(t, []string{"make lint", "go test ./...", "go vet ./..."}, cmds(ps))
+	require.Empty(t, ps[0].LogNote)
+	require.Equal(t, "[ape] split into 2 commands: the lift runs each line of the ( … ) block on its own, past a red one, and judges each in regression_commands", ps[1].LogNote)
+	for _, c := range []string{"( cd x\nmake )", "( true && false )", "make test"} {
+		ps = liftParts(c)
+		require.Equal(t, []string{c}, cmds(ps), c)
+		require.Empty(t, ps[0].LogNote, c)
+	}
+}
+
 func liftWithGates(t *testing.T, gates string) string {
 	t.Helper()
 	return liftWithGatesAt(t, liftFixture(t, false), gates)
@@ -244,6 +269,44 @@ func TestLift_RegressionAtTheTag(t *testing.T) {
 		data, err := json.Marshal(res)
 		require.NoError(t, err)
 		require.Contains(t, string(data), `"regression_commands":[{"cmd":"sh ./lint.sh","verdict":"red-at-tag"`)
+	})
+	t.Run("a ( … ) block runs line by line", func(t *testing.T) {
+		// R30, cortex on rc.6c: its block's lines ran joined by &&, so
+		// once go test failed after the lift the lines after it ran at
+		// the tag only. In the lift each line runs on its own, past a red
+		// one. The same-line for … done makes the fence a block.
+		root := liftWithGates(t, "true\nfalse\nfor f in a; do true; done\nfalse")
+		res, err := Lift(ctx(), root, LiftOptions{})
+		require.NoError(t, err)
+		require.Equal(t, "( true\nfalse\nfor f in a; do true; done\nfalse\n)", res.Gates.Regression)
+		require.Len(t, res.RegressionCommands, 4)
+		var cmds []string
+		var tag, after []int
+		for _, c := range res.RegressionCommands {
+			cmds = append(cmds, c.Cmd)
+			tag, after = append(tag, c.RegressionAtTag.Exit), append(after, c.Regression.Exit)
+		}
+		require.Equal(t, []string{"true", "false", "for f in a; do true; done", "false"}, cmds)
+		require.Equal(t, []int{0, 1, 0, 1}, tag, "every line ran at the tag, past the red one")
+		require.Equal(t, []int{0, 1, 0, 1}, after, "and after the lift")
+		require.Equal(t, LiftRegressionRedAtTag, res.RegressionVerdict)
+		require.Contains(t, res.RegressionNote, "each line of the ( … ) block ran on its own, past a red one")
+		for _, log := range []string{"regression-3.log", "regression-3-at-tag.log"} {
+			data, err := os.ReadFile(filepath.Join(root, "_apex", "state", "logs", "lift", log))
+			require.NoError(t, err)
+			require.True(t, strings.HasPrefix(string(data), "[ape] split into 4 commands: the lift runs each line of the ( … ) block on its own, past a red one, and judges each in regression_commands\n"), log+": "+string(data))
+		}
+	})
+	t.Run("a ( … ) block that does not split runs whole", func(t *testing.T) {
+		root := liftWithGates(t, "cd .\nfalse\nfor f in a; do true; done")
+		res, err := Lift(ctx(), root, LiftOptions{})
+		require.NoError(t, err)
+		require.Equal(t, "( cd .\nfalse\nfor f in a; do true; done\n)", res.Gates.Regression)
+		require.Empty(t, res.RegressionCommands, "one command")
+		require.Equal(t, res.Gates.Regression, res.Regression.Cmd)
+		data, err := os.ReadFile(filepath.Join(root, "_apex", "state", "logs", "lift", "regression.log"))
+		require.NoError(t, err)
+		require.True(t, strings.HasPrefix(string(data), "[ape] the ( … ) block runs as written, not split into commands: its line 1 changes shell state (cd)\n"), string(data))
 	})
 	t.Run("a command with no top-level && runs whole", func(t *testing.T) {
 		root := liftWithGates(t, "( test -f nowhere.txt && true )")

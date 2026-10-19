@@ -37,6 +37,10 @@ type PlannedCheck struct {
 	// Env is added to the check's environment: a gate's milestone and
 	// its start (D130 Q60, gateEnv).
 	Env []string
+	// LogNote, when set, is the line the check's log opens with in place
+	// of its split note: the lift's note on a ( … ) block's line run on
+	// its own (R30).
+	LogNote string
 }
 
 func scenarioRef(capName, req, scen string) string { return capName + "/" + req + "/" + scen }
@@ -214,7 +218,7 @@ func (p *Project) runWithRetries(ctx context.Context, pc *PlannedCheck, logPath 
 		if inGit {
 			before = p.snapshot(ctx)
 		}
-		r = runCheck(ctx, p.Root, pc.Cmd, path, lim, vacuous, pc.Env...)
+		r = runNotedCheck(ctx, p.Root, pc.Cmd, pc.LogNote, path, lim, vacuous, pc.Env...)
 		if inGit {
 			strays = append(strays, p.undoStrays(ctx, before)...)
 		}

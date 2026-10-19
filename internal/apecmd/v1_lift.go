@@ -200,7 +200,13 @@ each command is judged on its own, regression_verdict and the regression_* field
 the worst one's, and --json lists every command in regression_commands (cmd, verdict,
 note, new_failures, regression, regression_at_tag; logs regression-<n>.log and
 regression-<n>-at-tag.log). From a command that changes the shell's state (cd, export,
-source, NAME=value, …) on, the chain stays one command. The exit code stays 0: the
+source, NAME=value, …) on, the chain stays one command. A ( … ) block of several lines
+that splits (each line a simple command, as a change's verify splits it) is, for these
+two runs, one command per line in that chain, not its lines joined by &&: each line runs
+past a red one and is judged on its own in regression_commands, and its log opens with
+"split into N commands: the lift runs each line of the ( … ) block on its own"; a block
+that does not split (a line that changes the shell's state, a construct left open) stays
+one command, run as written. The exit code stays 0: the
 commit stands either way, and the verdict is in --json and the output.
 
 --from-update is how the framework's v1.0.0 migration entry runs it inside
