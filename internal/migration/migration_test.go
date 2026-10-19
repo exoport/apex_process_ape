@@ -483,3 +483,144 @@ func TestBlockingUnapplied(t *testing.T) {
 	plan = BuildPlan(t.Context(), "dir", t.TempDir(), entries[:2], nil, r, true)
 	require.Empty(t, BlockingUnapplied(plan, Apply(t.Context(), io.Discard, "", plan, r, func() string { return "now" })))
 }
+
+// layoutRunner is fakeRunner on a project that changes: once a command in
+// then has run, the check answers it lists replace the current ones — the
+// lift turning a v0 layout into v1, in the shape E-R7-1 needs.
+type layoutRunner struct {
+	fakeRunner
+	then map[string]map[string]int
+}
+
+func (l *layoutRunner) Run(ctx context.Context, dir, line string) (int, error) {
+	code, err := l.fakeRunner.Run(ctx, dir, line)
+	for check, c := range l.then[line] {
+		l.codes[check] = c
+		delete(l.errs, check)
+	}
+	return code, err
+}
+
+func newLayoutRunner() *layoutRunner {
+	return &layoutRunner{fakeRunner: *newRunner(), then: map[string]map[string]int{}}
+}
+
+func countRuns(ran []string, line string) int {
+	n := 0
+	for _, l := range ran {
+		if l == line {
+			n++
+		}
+	}
+	return n
+}
+
+// liftThenOI is E-R7-1's pair: the blocking lift, then a blocking entry
+// whose check cannot tell on the v0 layout (exit 2) and answers once the
+// lift has run.
+func liftThenOI() []Entry {
+	return []Entry{
+		{ID: "v1.0.0_seq-01", Version: "1.0.0", Seq: 1, Kind: KindDerivable, Blocking: true, Check: "lifted?", Command: "lift"},
+		{
+			ID: "v1.0.0_seq-07", Version: "1.0.0", Seq: 7, Kind: KindDerivable, Blocking: true, Check: "oi?", Command: "oi",
+			After: []string{"v1.0.0_seq-01"},
+		},
+	}
+}
+
+// E-R7-1: a check that could not tell before the lift is asked again after
+// it, and the entry runs in the same update — on the old code the row
+// stayed cannot-tell and blocked the install.
+func TestApply_RejudgesARowAfterAnEarlierEntryApplied(t *testing.T) {
+	r := newLayoutRunner()
+	r.codes["lifted?"], r.codes["oi?"] = 1, 2
+	r.then["lift"] = map[string]int{"oi?": 1}
+	plan := BuildPlan(t.Context(), "/d", "/p", liftThenOI(), nil, r, true)
+	require.Equal(t, StateCannotTell, rowByID(t, plan, "v1.0.0_seq-07").State)
+
+	var out strings.Builder
+	res := Apply(t.Context(), &out, "/p", plan, r, fixedStamp)
+	require.Equal(t, []string{"lifted?", "oi?", "lift", "oi?", "oi"}, r.ran, "the check is asked again right before its entry")
+	require.Len(t, res.Applied, 2)
+	require.Equal(t, "v1.0.0_seq-07", res.Applied[1].ID)
+	require.Equal(t, "cannot-tell → pending, after v1.0.0_seq-01 applied", res.Outcomes[1].Rejudged)
+	require.Empty(t, res.Outcomes[0].Rejudged, "nothing had applied before the first entry")
+	require.Contains(t, out.String(), "migration v1.0.0_seq-07: judged again (cannot-tell → pending, after v1.0.0_seq-01 applied)")
+	require.Empty(t, BlockingUnapplied(plan, res))
+}
+
+// A row the earlier entry made unnecessary is not run, says why, and is
+// not written to the ledger (ape records what ape did).
+func TestApply_RejudgedSatisfiedIsNotRun(t *testing.T) {
+	r := newLayoutRunner()
+	r.codes["lifted?"], r.codes["oi?"] = 1, 1
+	r.then["lift"] = map[string]int{"oi?": 0}
+	plan := BuildPlan(t.Context(), "/d", "/p", liftThenOI(), nil, r, true)
+
+	res := Apply(t.Context(), io.Discard, "/p", plan, r, fixedStamp)
+	require.Zero(t, countRuns(r.ran, "oi"))
+	require.Len(t, res.Applied, 1)
+	require.Equal(t, "pending → applied, after v1.0.0_seq-01 applied", res.Outcomes[1].Rejudged)
+	require.Contains(t, res.Outcomes[1].Skipped, "already applied")
+	require.Empty(t, BlockingUnapplied(plan, res))
+}
+
+// "Not needed" before the lift is not final either: a row its check found
+// applied on the old layout runs when the new one says it is owed.
+func TestApply_RejudgedNotNeededBecomesNeeded(t *testing.T) {
+	r := newLayoutRunner()
+	r.codes["lifted?"], r.codes["oi?"] = 1, 0
+	r.then["lift"] = map[string]int{"oi?": 1}
+	plan := BuildPlan(t.Context(), "/d", "/p", liftThenOI(), nil, r, true)
+	require.Equal(t, StateApplied, rowByID(t, plan, "v1.0.0_seq-07").State)
+
+	res := Apply(t.Context(), io.Discard, "/p", plan, r, fixedStamp)
+	require.Equal(t, 1, countRuns(r.ran, "oi"))
+	require.Len(t, res.Applied, 2)
+}
+
+// Still unverifiable after the lift: blocking, and the reason says it was
+// asked again.
+func TestApply_RejudgedStillCannotTellBlocks(t *testing.T) {
+	r := newLayoutRunner()
+	r.codes["lifted?"], r.codes["oi?"] = 1, 2
+	plan := BuildPlan(t.Context(), "/d", "/p", liftThenOI(), nil, r, true)
+
+	res := Apply(t.Context(), io.Discard, "/p", plan, r, fixedStamp)
+	require.Zero(t, countRuns(r.ran, "oi"))
+	got := BlockingUnapplied(plan, res)
+	require.Len(t, got, 1)
+	require.Equal(t, "v1.0.0_seq-07", got[0].ID)
+	require.Contains(t, got[0].Reason, "judged again, and its check could not tell")
+}
+
+// Before anything applies the up-front plan stands (each check runs once),
+// a ledger row is never asked again, and a plan built without checks is
+// not re-judged by one.
+func TestApply_RejudgesOnlyAfterASuccessAndNeverTheLedger(t *testing.T) {
+	r := newLayoutRunner()
+	r.codes["c0"], r.codes["cmd0"], r.codes["c1"], r.codes["c2"] = 1, 3, 1, 1
+	entries := []Entry{
+		{ID: "a", Version: "1.0.0", Seq: 1, Kind: KindDerivable, Check: "c0", Command: "cmd0"},
+		{ID: "b", Version: "1.0.0", Seq: 2, Kind: KindDerivable, Check: "c1", Command: "cmd1"},
+	}
+	plan := BuildPlan(t.Context(), "/d", "/p", entries, nil, r, true)
+	Apply(t.Context(), io.Discard, "/p", plan, r, fixedStamp)
+	require.Equal(t, 1, countRuns(r.ran, "c1"), "a failed first entry changes nothing to re-judge")
+
+	r = newLayoutRunner()
+	r.codes["c0"], r.codes["c2"] = 1, 1
+	entries = []Entry{
+		{ID: "a", Version: "1.0.0", Seq: 1, Kind: KindDerivable, Check: "c0", Command: "cmd0"},
+		{ID: "c", Version: "1.0.0", Seq: 3, Kind: KindDerivable, Check: "c2", Command: "cmd2"},
+	}
+	plan = BuildPlan(t.Context(), "/d", "/p", entries, []Applied{{ID: "c"}}, r, true)
+	Apply(t.Context(), io.Discard, "/p", plan, r, fixedStamp)
+	require.Equal(t, 1, countRuns(r.ran, "c2"), "the ledger settles a row; it is not asked again")
+	require.Zero(t, countRuns(r.ran, "cmd2"))
+
+	r = newLayoutRunner()
+	plan = BuildPlan(t.Context(), "/d", "/p", liftThenOI(), nil, r, false)
+	Apply(t.Context(), io.Discard, "/p", plan, r, fixedStamp)
+	require.Equal(t, []string{"lift", "oi"}, r.ran, "no check was run up front, so none is run later")
+}

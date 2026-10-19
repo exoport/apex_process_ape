@@ -395,7 +395,7 @@ func runAsWorker(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, verb, scope,
 	// A person act's worker acts on its lock's record of it (E2, OI-12):
 	// in a model session, only one resting on its caller's consumed grant.
 	if f.person != nil {
-		if a := p.LockPersonAct(lock, f.person.ArgvSHA256); a != nil {
+		if a := p.LockPersonAct(lock, *f.person); a != nil {
 			cmd.SetContext(apexv1.WithPersonAct(cmd.Context(), a))
 		}
 	}

@@ -315,9 +315,17 @@ func emitMigrationFindings(w io.Writer, plan *migration.Plan) {
 					"post-condition does not hold.\n", r.Label(), r.AppliedAt)
 		}
 		if r.State == migration.StateCannotTell {
+			// Not final (E-R7-1): an update asks again once an earlier entry
+			// in its run has applied, on the layout that entry left.
+			blocks := "blocking nothing"
+			if r.Blocking {
+				blocks = "it is blocking"
+			}
 			fmt.Fprintf(w,
 				"  %s: CANNOT TELL — its check could not run (%s), so it is unapplied and "+
-					"unverifiable. Not run, and blocking nothing.\n", r.Label(), r.CheckDetail)
+					"unverifiable. Not run as the project stands, and %s; `ape framework update` "+
+					"asks the check again once an earlier entry in its run applies.\n",
+				r.Label(), r.CheckDetail, blocks)
 		}
 	}
 }

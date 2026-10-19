@@ -170,7 +170,7 @@ func TestE2_WorkerActsOnTheLocksGrant(t *testing.T) {
 	s := newE2Session(t, root, "s1")
 	s.say(t, "p1", "approve M2")
 	require.Empty(t, s.preTool(t, "p1", "ape milestone approve M2"))
-	a := p.ConsumeGrant(call)
+	a := p.ConsumeGrant(t.Context(), call)
 	require.NotNil(t, a)
 	a.By = apexv1.PersonBy("Ann Person", a.PromptTS, a.Quote)
 	lock, _, err = p.TakeRunLock(t.Context(), "milestone approve", "M2")

@@ -37,7 +37,18 @@ import (
 //  3. The command consumes the grant (ConsumeGrant) and records
 //     `by: <git config user.name> (prompt <ts>: "<quote>")`. No grant is
 //     session.person-only, as before: it fails closed — no hook, no
-//     record, no grant, no act.
+//     record, no grant, no act. A grant counts only for the session that
+//     earned it (its session_id is the caller's CLAUDE_CODE_SESSION_ID,
+//     which Claude Code sets in every Bash tool call) and only while it
+//     is still backed: its prompt record and the transcript's message for
+//     that promptId pass the same matcher again, for this act and target
+//     (D219). So a grant file alone — forged, or another session's — is
+//     no grant.
+//
+// What stays open (D219): a script the model writes and runs as the same
+// OS user can forge the grant, the prompt record and the transcript line
+// together. E2 attests the person's words; it is not a sandbox, and
+// pre-tool sees direct calls only.
 //
 // A long act (milestone approve, close --accept-red, archive
 // --allow-pending-human; D179, OI-12) records its PersonAct in the run
@@ -87,6 +98,12 @@ func PersonActGrammar() string {
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
+
+// EnvClaudeSessionID is the session id Claude Code sets in every Bash
+// tool call's environment, equal to the hook payload's session_id
+// (measured on claude 2.1.303). A grant is consumed only by a caller in
+// the session it was issued for; with the variable absent nothing is.
+const EnvClaudeSessionID = "CLAUDE_CODE_SESSION_ID"
 
 // GrantTTL is how long a grant waits for its command: the moment between
 // the pre-tool hook and the command's start.
@@ -356,17 +373,50 @@ func (g *grant) matches(c PersonCall) bool {
 	return g.Act == c.Act && g.Target == c.Target && g.Task == c.Task && g.ArgvSHA256 == c.ArgvSHA256
 }
 
-// HasGrant reports whether a live grant for c waits to be consumed.
+// HasGrant reports whether a live grant for c, issued in the caller's own
+// session, waits to be consumed.
 func (p *Project) HasGrant(c PersonCall) bool {
 	g := loadGrant(p.grantPath(c.ArgvSHA256))
-	return g != nil && g.matches(c) && g.live()
+	return g != nil && g.matches(c) && g.live() && g.ownSession()
+}
+
+// ownSession reports whether the grant was issued in the calling session:
+// its session_id is this process's CLAUDE_CODE_SESSION_ID. False when the
+// variable is absent — fail closed (D219).
+func (g *grant) ownSession() bool {
+	sid := os.Getenv(EnvClaudeSessionID)
+	return sid != "" && g.SessionID == sid
+}
+
+// backing re-checks, at the moment of use, what grantVerdict checked when
+// it wrote the grant (D219): the recorded prompt for the grant's
+// (session_id, prompt_id) asks for c by the matcher, and the transcript's
+// user message with that promptId holds the same words. It returns the
+// prompt record and the matched sentence; ok false when either is gone or
+// does not match — a grant file nobody's words stand behind.
+func (p *Project) backing(g *grant, c PersonCall) (rec *PromptRecord, clause string, ok bool) {
+	if g.SessionID == "" || g.PromptID == "" {
+		return nil, "", false
+	}
+	rec = p.promptRecord(g.SessionID, g.PromptID)
+	if rec == nil {
+		return nil, "", false
+	}
+	quote, raw, matched := matchAct(rec.Prompt, c)
+	if !matched || rec.TranscriptPath == "" || !transcriptHolds(rec.TranscriptPath, g.PromptID, raw) {
+		return nil, "", false
+	}
+	return rec, quote, true
 }
 
 // ConsumeGrant takes the grant pre-tool wrote for c, once: nil (and no
-// error) when there is none, it expired, or another call took it first.
-// The grant moves to grants/consumed/, where a long run's worker finds it
-// (LockPersonAct). The act's By is the caller's to fill in.
-func (p *Project) ConsumeGrant(c PersonCall) *PersonAct {
+// error) when there is none, it expired, another call took it first, it
+// was issued in another session (or this process names none), or its
+// prompt and transcript no longer back it (D219). The grant moves to
+// grants/consumed/, where a long run's worker finds it (LockPersonAct).
+// The act's prompt stamp and quote come from the backing prompt record,
+// not from the grant file. The act's By is the caller's to fill in.
+func (p *Project) ConsumeGrant(ctx context.Context, c PersonCall) *PersonAct {
 	path := p.grantPath(c.ArgvSHA256)
 	g := loadGrant(path)
 	if g == nil || !g.matches(c) {
@@ -374,6 +424,13 @@ func (p *Project) ConsumeGrant(c PersonCall) *PersonAct {
 	}
 	if !g.live() {
 		_ = os.Remove(path)
+		return nil
+	}
+	if !g.ownSession() {
+		return nil
+	}
+	rec, quote, ok := p.backing(g, c)
+	if !ok {
 		return nil
 	}
 	if err := os.MkdirAll(p.consumedDir(), 0o700); err != nil {
@@ -386,16 +443,18 @@ func (p *Project) ConsumeGrant(c PersonCall) *PersonAct {
 	}
 	return &PersonAct{
 		Act: c.Act, Target: c.Target, ArgvSHA256: c.ArgvSHA256,
-		PromptTS: g.PromptTS, Quote: g.Quote, Grant: name, granted: true,
+		PromptTS: rec.TS, Quote: quoteFor(ctx, quote), Grant: name, granted: true,
 	}
 }
 
-// LockPersonAct is the person act a long run's worker carries out: its
-// lock's, when the lock records one for this very command line and, in a
-// model session, it rests on a grant its caller consumed. nil otherwise:
-// the worker's own requirePerson then refuses in a model session.
-func (p *Project) LockPersonAct(l *RunLock, argvSHA string) *PersonAct {
-	if l == nil || l.PersonAct == nil || l.PersonAct.ArgvSHA256 != argvSHA {
+// LockPersonAct is the person act a long run's worker carries out for c:
+// its lock's, when the lock records one for this very command line and,
+// in a model session, it rests on a grant its caller consumed — issued in
+// this session and still backed by its prompt and transcript (D219), as
+// ConsumeGrant required. nil otherwise: the worker's own requirePerson
+// then refuses in a model session.
+func (p *Project) LockPersonAct(l *RunLock, c PersonCall) *PersonAct {
+	if l == nil || l.PersonAct == nil || l.PersonAct.ArgvSHA256 != c.ArgvSHA256 {
 		return nil
 	}
 	a := *l.PersonAct
@@ -404,7 +463,11 @@ func (p *Project) LockPersonAct(l *RunLock, argvSHA string) *PersonAct {
 			return nil
 		}
 		g := loadGrant(filepath.Join(p.consumedDir(), a.Grant))
-		if g == nil || g.ArgvSHA256 != argvSHA || g.Act != a.Act || g.Target != a.Target {
+		if g == nil || g.ArgvSHA256 != c.ArgvSHA256 || g.Act != a.Act || g.Target != a.Target || !g.matches(c) ||
+			!g.ownSession() {
+			return nil
+		}
+		if _, _, ok := p.backing(g, c); !ok {
 			return nil
 		}
 		a.granted = true
@@ -587,10 +650,14 @@ func ByMismatch(by, name string) error {
 // NoGrant is session.person-only for a person act in a person's Claude
 // Code session with no grant: it names the phrase.
 func NoGrant(c PersonCall) error {
+	why := "with no grant from the person's own words"
+	if os.Getenv(EnvClaudeSessionID) == "" {
+		why += " (" + EnvClaudeSessionID + " is not set, so no grant can be matched to this session)"
+	}
 	return &UsageError{Code: CodePersonOnly, Msg: fmt.Sprintf(
-		"`%s` is for a person, and this runs in a model session (CLAUDECODE is set) with no grant from the person's own words — "+
+		"`%s` is for a person, and this runs in a model session (CLAUDECODE is set) %s — "+
 			"the person types **%s** in this Claude Code session and the model runs the command in that turn (`ape hook pre-tool --help`); "+
-			"a `!` line fires no hook and cannot grant it; or the person runs it from a terminal outside Claude Code", c.Line, c.Phrase())}
+			"a `!` line fires no hook and cannot grant it; or the person runs it from a terminal outside Claude Code", c.Line, why, c.Phrase())}
 }
 
 // NoUserName refuses a granted act when git has no user.name to record.

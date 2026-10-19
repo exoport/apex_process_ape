@@ -281,6 +281,38 @@ func TestFrameworkInstallV1_UnattemptedBlockingMigrationCommitsNothing(t *testin
 	require.NoFileExists(t, filepath.Join(root, "lifted"))
 }
 
+// E-R7-1: an apex-v0 → v1 first update in one run. seq-07's check cannot
+// tell on the v0 layout (exit 2, as `ape project operator-interface
+// --check` does there) and answers "not applied" once the lift has run; the
+// update asks it again after the lift, applies both and exits 0. On the
+// old runner the up-front verdict stood and the update exited 1.
+func TestFrameworkInstallV1_V0FirstUpdateRejudgesAfterTheLift(t *testing.T) {
+	fw, root := v0Installed(t)
+	writeTree(t, fw, map[string]string{
+		framework.SubtreeMigrations + "/v1.0.0_seq-07_operator-interface.md": "---\nid: v1.0.0_seq-07\nversion: 1.0.0\n" +
+			"seq: 7\nkind: derivable\nblocking: true\nafter: [v1.0.0_seq-01]\n" +
+			"check: \"test -f lifted || exit 2; test -f oi-done\"\ncommand: \"touch oi-done\"\n---\nbody\n",
+	})
+	v1OnTopOf(t, fw, v1LiftEntry("test -f lifted", "touch lifted"))
+
+	out, err := runFramework(t, "update", fw, root, "--no-fetch", "--version", "v1.0.0")
+	require.NoError(t, err, out)
+	require.FileExists(t, filepath.Join(root, "lifted"))
+	require.FileExists(t, filepath.Join(root, "oi-done"), "seq-07 ran in the same update, after the lift")
+	require.Contains(t, out, "migration v1.0.0_seq-07: judged again (cannot-tell → pending, after v1.0.0_seq-01 applied)")
+	require.Contains(t, out, "asks the check again once an earlier entry in its run applies")
+
+	meta, err := framework.ReadMetadata(root)
+	require.NoError(t, err)
+	ids := make([]string, 0, len(meta.Migrations))
+	for _, m := range meta.Migrations {
+		ids = append(ids, m.ID)
+	}
+	require.Equal(t, []string{"v0.16.0_seq-01", "v1.0.0_seq-01", "v1.0.0_seq-07"}, ids)
+	require.Equal(t, "v1.0.0", meta.Framework.VersionTag)
+	require.Contains(t, gitRun(t, root, "log", "-1", "--format=%s"), "update APEX framework to v1.0.0")
+}
+
 // A v0 release installs exactly as before: config seeded from its template,
 // pipelines, the lock-sidecar ignore line, no hint. A regression guard for
 // the v1 branches, so it passes on the old code by design.

@@ -292,6 +292,11 @@ at most 160 characters, secrets redacted>"); a --by there must be git config use
 (else session.by-mismatch). Without a grant it is refused, session.person-only, naming the
 phrase; pre-tool denies it first, saying why. A ` + "`!`" + ` line fires no hook, so it can never be
 granted. In a session ape launched (APE_SESSION) nothing is recorded or granted.
+A grant counts only in the session it was issued for (its session_id is the command's
+CLAUDE_CODE_SESSION_ID; with none set, nothing is), and only while its prompt record and the
+transcript's message with that promptId still pass the same match (D219). The residual: a
+script the model writes and runs as the same OS user can forge all three; E2 attests the
+person's words, it is not a sandbox, and pre-tool sees direct calls only.
 A long act (approve, --accept-red, --allow-pending-human; D179) that meets a run of the
 same command line on its milestone or change — still running (exit 75: run it again), or
 ended with its result not yet printed — attaches with no grant; another run there is

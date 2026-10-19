@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/exoport/apex_process_ape/internal/apexv1"
 	"github.com/exoport/apex_process_ape/internal/cost"
 	"github.com/exoport/apex_process_ape/internal/repl"
 	"github.com/stretchr/testify/require"
@@ -24,9 +25,15 @@ const baselinePath = "testdata/claude-surface.json"
 // overrides it, e.g. to read a local copy.
 const changelogURL = "https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md"
 
-// watchedEnv are the variables ape SETS on a spawn. One vanishing from the
-// binary means ape's setting silently stopped applying.
-var watchedEnv = []string{repl.EnvClaudeEffortLevel, repl.EnvDisableBGShellReap, repl.EnvForkSubagent, repl.EnvFileReadMaxOutputTokens}
+// watchedEnv are the variables ape relies on: the ones it SETS on a spawn,
+// and CLAUDE_CODE_SESSION_ID, which it READS — a person act consumes a
+// grant only in the session Claude Code names there (E2, D219). One
+// vanishing from the binary means ape's setting silently stopped applying,
+// or that every person act in Claude Code now fails closed.
+var watchedEnv = []string{
+	repl.EnvClaudeEffortLevel, repl.EnvDisableBGShellReap, repl.EnvForkSubagent, repl.EnvFileReadMaxOutputTokens,
+	apexv1.EnvClaudeSessionID,
+}
 
 // TestLive_ClaudeSurface diffs the installed Claude Code's tool list and
 // environment variables against the reviewed baseline, and lists the
@@ -97,8 +104,9 @@ func TestLive_ClaudeSurface(t *testing.T) {
 			gone = append(gone, v)
 		}
 	}
-	require.Empty(t, gone, "Claude Code %s no longer names %v, which ape sets on every spawn: the setting silently "+
-		"stopped applying. Find what replaced it before releasing", installed, gone)
+	require.Empty(t, gone, "Claude Code %s no longer names %v, which ape relies on (it sets them on every spawn, or "+
+		"reads CLAUDE_CODE_SESSION_ID for a person act's grant): the setting silently stopped applying, or every "+
+		"person act in Claude Code fails closed. Find what replaced it before releasing", installed, gone)
 	require.True(t, len(toolsAdded) == 0 && len(toolsRemoved) == 0,
 		"Claude Code %s's tool list moved since the baseline (%s): added %v, removed %v. A removed tool breaks every "+
 			"skill naming it (TaskOutput, 2.1.277). Check the framework's skills, then `make update-claude-surface`",
