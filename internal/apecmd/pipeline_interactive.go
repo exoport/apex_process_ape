@@ -125,6 +125,11 @@ type interactiveCore struct {
 	// step's sub in the same dir isn't re-folded. Set in OnStepStart.
 	stepStartedAt time.Time
 
+	// onTranscript, when set, is told the step's main transcript each time
+	// a hook names a new one: the loop's relay record (OI-11). Set before
+	// the bridge listens, so the field itself is never raced.
+	onTranscript func(path string)
+
 	// contracts is the framework-owned per-skill terminal-contract table
 	// (PLAN-25 Gate C), loaded once per run. nil / empty enrols nothing,
 	// which is the behaviour on any project whose framework predates the
@@ -334,6 +339,7 @@ func (c *interactiveCore) FeedHook(h orchestrator.HookEvent) {
 			// PLAN-19 D1: mirror the active transcript onto the Driver so
 			// WaitStepDone's transcript-growth anchor can stat it.
 			c.driver.SetActiveTranscript(env.TranscriptPath)
+			c.transcriptSeen(env.TranscriptPath)
 		}
 	case ipc.HookSubagentStart, ipc.HookSubagentStop:
 		// Capture the sub-agent's OWN transcript (agent_transcript_path),
@@ -377,7 +383,8 @@ func (c *interactiveCore) FeedHook(h orchestrator.HookEvent) {
 		// didn't carry one — cheap robustness for the scan below.
 		if env := parseHookEnvelope(h.Payload); env.TranscriptPath != "" {
 			c.transcriptMu.Lock()
-			if c.activeTranscript == "" {
+			seeded := c.activeTranscript == ""
+			if seeded {
 				c.activeTranscript = env.TranscriptPath
 				if env.SessionID != "" {
 					c.activeSessionID = env.SessionID
@@ -385,6 +392,9 @@ func (c *interactiveCore) FeedHook(h orchestrator.HookEvent) {
 			}
 			c.transcriptMu.Unlock()
 			c.driver.SetActiveTranscript(env.TranscriptPath)
+			if seeded {
+				c.transcriptSeen(env.TranscriptPath)
+			}
 		}
 	default:
 		// Any other event naming the session's transcript (eval Q23: a
@@ -402,6 +412,7 @@ func (c *interactiveCore) FeedHook(h orchestrator.HookEvent) {
 			c.transcriptMu.Unlock()
 			if seeded {
 				c.driver.SetActiveTranscript(env.TranscriptPath)
+				c.transcriptSeen(env.TranscriptPath)
 			}
 		}
 	}
@@ -744,6 +755,13 @@ func byModelToPipeline(m map[string]cost.Totals, windows map[string]int) map[str
 	return out
 }
 
+// transcriptSeen tells onTranscript of a transcript a hook named.
+func (c *interactiveCore) transcriptSeen(path string) {
+	if c.onTranscript != nil {
+		c.onTranscript(path)
+	}
+}
+
 // WaitStepDone blocks until the bridge fires a Stop hook for the
 // current step, until ctx cancels, or until the idle-timeout window
 // elapses without any hook events. PLAN-6 / Phase E wires this into
@@ -906,6 +924,9 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 	if cfg.usageLimit != nil {
 		go cfg.usageLimit.run(runCtx, core.sessionName, core.driver.LastActivityAt, core.driver.SignalStepFatal)
 	}
+	if cfg.relay != nil {
+		core.onTranscript = cfg.relay.transcript
+	}
 
 	// PLAN-13: optional NATS eventing + transcript upload. Fire-and-forget —
 	// conn is nil when NATS is off or unreachable, and every publish/upload
@@ -959,6 +980,7 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 		// the detached run's handle when it is one (D62).
 		live = registerSession(sessionKindOf(cfg), projectRoot, runIDFromDir(dir), cfg.launch)
 		noteDetachedRun(projectRoot, dir)
+		cfg.relay.start(runIDFromDir(dir))
 		runLogMu.Lock()
 		if rl == nil {
 			if w, openErr := runlog.New(dir, runlog.WithClaudeBin(cfg.claudeBin)); openErr == nil {
@@ -993,6 +1015,8 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 		SessionKind:       sessionKindOf(cfg),
 		Depth:             cfg.launch.depthOrZero(),
 		ParentRun:         cfg.launch.parentRunOrEmpty(),
+		RelayOf:           cfg.relay.relayOfOrEmpty(),
+		Relay:             cfg.relay.count(),
 		OnSessionSpawn:    func(pid int) { live.spawned(pid) },
 		ApeVersion:        Version,
 		ManifestDir:       cfg.manifestDir,

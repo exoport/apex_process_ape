@@ -75,6 +75,11 @@ type RunOptions struct {
 	// recorded in its manifest; 0 and "" record nothing.
 	Depth     int
 	ParentRun string
+	// RelayOf and Relay record a relayed loop session (OI-11): the loop run
+	// it relays and how many relays came before it (1 for the first);
+	// "" and 0 record nothing.
+	RelayOf string
+	Relay   int
 
 	// OnSessionSpawn fires with the pid of each claude the runner spawns,
 	// once it has started. `ape task` records it in the live-session
@@ -411,6 +416,7 @@ func Run(ctx context.Context, spec *Spec, opts RunOptions) error {
 		mw.manifest.ClaudeVersion = claudeVersion(ctx, opts.ClaudeBin)
 		mw.manifest.FileReadMaxOutputTokens = repl.FileReadMaxOutputTokens
 		mw.manifest.Depth, mw.manifest.ParentRun = opts.Depth, opts.ParentRun
+		mw.manifest.RelayOf, mw.manifest.Relay = opts.RelayOf, opts.Relay
 		if ext != nil {
 			enabled := ext.Enabled
 			if enabled == nil {

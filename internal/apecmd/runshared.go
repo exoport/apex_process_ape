@@ -212,7 +212,10 @@ type runConfig struct {
 	budgetWatch *v1BudgetWatch
 	// usageLimit, when set, ends the session when Claude Code draws its
 	// usage-limit line (H20; task_usagelimit.go).
-	usageLimit  *usageLimitWatch
+	usageLimit *usageLimitWatch
+	// relay, when set, keeps the loop session's relay record (OI-11;
+	// v1_relay.go). `ape task` of the loop sets it.
+	relay       *loopRelay
 	prompt      string
 	manifestDir string
 	fromStage   string

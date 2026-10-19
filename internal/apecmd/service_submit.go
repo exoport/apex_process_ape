@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -65,6 +66,11 @@ func serviceGate(kind service.Kind, req service.RunRequest) ([]string, error) {
 		skill = req.Skill
 	}
 	if _, err := apexv1.SessionStart(at, verb, skill, childAllowList(root)); err != nil {
+		return nil, err
+	}
+	// OI-11: the loop's child launch, judged for a relay before the job is
+	// accepted (the job's ape, under the caller's marker, judges it again).
+	if err := relayGate(verb, root, c.RunID, io.Discard); err != nil {
 		return nil, err
 	}
 	// The one child at a time, looked at now so a busy slot is refused

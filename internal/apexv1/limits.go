@@ -23,6 +23,8 @@ import (
 //	  attempts_total: 15       # red verifies per change, re-starts included; default 15
 //	  replans: 3               # re-plans (re-starts with a changed plan) per change; default 3
 //	  consecutive_blocks: 2    # blocked changes in a row per milestone; default 2
+//	  context_relay: 0.6       # relay the loop at its next child launch at this context fill; default 0.6
+//	  relays: 5                # relays per loop run; default 5
 const DefaultAttempts = 5
 
 // The defaults of the limits re-planning cannot reset (H19, D47 Q9).
@@ -57,6 +59,15 @@ type Limits struct {
 	// (milestones.json consecutive_blocks): past it, no change of the
 	// milestone is planned or started and no orchestrator runs it.
 	ConsecutiveBlocks *int `yaml:"consecutive_blocks"`
+
+	// rc.7 (rc7-relay).
+	// ContextRelay is the loop session's context fill (0 < x ≤ 0.95) at
+	// which its next child launch is refused and ape relays the loop to a
+	// fresh session (OI-11, D174, D181; relay.go).
+	ContextRelay *float64 `yaml:"context_relay"`
+	// Relays caps the relays of one loop run: the relay past it stops the
+	// run (limits.relays, a person's).
+	Relays *int `yaml:"relays"`
 }
 
 // UnmarshalYAML validates the block as it parses.
@@ -79,6 +90,12 @@ func (l *Limits) UnmarshalYAML(n *yaml.Node) error {
 	}
 	if p.Replans != nil && *p.Replans < 0 {
 		return fmt.Errorf("limits.replans: %d is not a whole number", *p.Replans)
+	}
+	if p.Relays != nil && *p.Relays < 0 {
+		return fmt.Errorf("limits.relays: %d is not a whole number", *p.Relays)
+	}
+	if v := p.ContextRelay; v != nil && (*v <= 0 || *v > MaxContextRelay) {
+		return fmt.Errorf("limits.context_relay: %g is not a fraction above 0 and at most %g (0.6 is 60%%)", *v, MaxContextRelay)
 	}
 	*l = Limits(p)
 	return nil
@@ -106,6 +123,17 @@ func (l Limits) ReplansCap() int { return intOr(l.Replans, DefaultReplans) }
 func (l Limits) ConsecutiveBlocksCap() int {
 	return intOr(l.ConsecutiveBlocks, DefaultConsecutiveBlocks)
 }
+
+// ContextRelayAt is limits.context_relay, or DefaultContextRelay.
+func (l Limits) ContextRelayAt() float64 {
+	if l.ContextRelay != nil {
+		return *l.ContextRelay
+	}
+	return DefaultContextRelay
+}
+
+// RelaysCap is limits.relays, or DefaultRelays.
+func (l Limits) RelaysCap() int { return intOr(l.Relays, DefaultRelays) }
 
 func intOr(v *int, def int) int {
 	if v != nil {

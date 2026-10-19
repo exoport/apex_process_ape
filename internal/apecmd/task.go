@@ -241,6 +241,25 @@ manifest lists its children and tree_cost_usd when it ends: always, $0 and
 no children included, so an absent tree_cost_usd means not computed (totals
 stay its own). There is no switch to turn the rule off.
 
+The loop relay (OI-11): an APEX v1 loop session's context grows with its
+milestone, so ape relays it. At its next child launch (ape task <skill>,
+ape change review --run, ape change tool, ape change accept --delegate)
+with its context fill at or over _apex/config.yaml
+  limits:
+    context_relay: 0.6   # 0 < x <= 0.95; default 0.6
+    relays: 5            # relays per loop run; default 5
+the launch is refused (exit 2, code session.relay, action stop): the loop
+starts nothing, replies and ends, and this process starts a fresh loop
+session with the same args — its manifest records relay_of (the run it
+relays) and relay (the count), under the same lock; the JSON envelope
+carries relays and relay_of. The fill is the newest turn of the loop
+session's transcript (input + cache read + cache creation tokens) over its
+model's context window; an unknown window is no relay, said once. Past
+limits.relays the launch is refused with limits.relays (exit 1, action
+person) and the run stops, exit 1, termination relays. Both keys are
+guarded (ape project accept-config), like every limit. ape status --json
+shows a live loop's fill and relays (sessions[].relay).
+
 An orchestrator dispatches a skill as
   ape task <skill> --args <id> --detach --output-format json
 which prints {"id", "wait", "log", "stdout"} (four lines without json), then
@@ -250,9 +269,11 @@ result (see ape run wait --help).
 
 Exit codes: 0 success · 1 run failed, idle timeout, the typed line
 never submitted, an APEX v1 milestone budget stopped or refused the
-session, or a v1 limit or ape floor refused it · 2 usage or
+session, or a v1 limit or ape floor refused it, or the loop's relays ran
+out (limits.relays) · 2 usage or
 preflight error, an APEX v0 project (run its pinned v0 ape), or the nesting
-rule refused the session (session.depth, session.not-allowed) · 3 REPL
+rule refused the session (session.depth, session.not-allowed), or the loop
+relay refused a child launch (session.relay) · 3 REPL
 never became ready (last pane on stderr), or a session lock another run
 holds (session.child-running, session.orchestrator-running) · 5 upstream
 API failure · 6 the dispatch violated its declared commit ownership (the run
@@ -569,6 +590,12 @@ type taskEnvelope struct {
 	// not assert", and a field that appears only on failure cannot.
 	CommitContract *commitowners.Result `json:"commit_contract,omitempty"`
 	Error          *string              `json:"error"`
+	// rc.7 (rc7-relay).
+	// Relays / RelayOf: for the loop's run, how many times ape relayed it
+	// to a fresh session (OI-11), and the run the reported session relays.
+	// Absent when it was never relayed.
+	Relays  int    `json:"relays,omitempty"`
+	RelayOf string `json:"relay_of,omitempty"`
 }
 
 // taskExitCode maps a run error onto the PLAN-11 exit-code table.
@@ -616,6 +643,8 @@ type taskRun struct {
 	// HeadBefore is where HEAD pointed before the dispatch — the left
 	// edge of the commit range the assertion judged.
 	HeadBefore string
+	// RunID / RunDir are the dispatch's run ("" when none was made).
+	RunID, RunDir string
 }
 
 // taskPreflightError is a failure found BEFORE any claude process
@@ -676,6 +705,16 @@ func dispatchTaskWith(ctx context.Context, o taskOptions, cfg runConfig) (taskRu
 		}
 		o.launch = l
 	}
+	// OI-11: an APEX v1 loop is relayed to a fresh session when its context
+	// fills (v1_relay.go).
+	if o.skill == apexv1.OrchestratorSkill && runlog.IsV1Project(o.projectRoot) {
+		return dispatchLoop(ctx, o, cfg)
+	}
+	return dispatchTaskOnce(ctx, o, cfg)
+}
+
+// dispatchTaskOnce is one session of dispatchTaskWith, o.launch decided.
+func dispatchTaskOnce(ctx context.Context, o taskOptions, cfg runConfig) (taskRun, error) {
 	cfg.launch = o.launch
 	// A child session dies with the orchestrator run that started it: when
 	// that run's ape process is gone, the session is stopped (a detached
@@ -828,6 +867,8 @@ func dispatchTaskWith(ctx context.Context, o taskOptions, cfg runConfig) (taskRu
 		RunErr:      runErr,
 		ManifestDir: manifestDir,
 		HeadBefore:  headBefore,
+		RunID:       runID,
+		RunDir:      runDir,
 	}, nil
 }
 
@@ -1071,6 +1112,9 @@ func printTaskSummary(env taskEnvelope, runErr error) {
 	}
 	if env.ManifestPath != "" {
 		fmt.Fprintf(os.Stdout, "📊 manifest: %s\n", env.ManifestPath)
+	}
+	if env.Relays > 0 {
+		fmt.Fprintf(os.Stdout, "↻ relayed %d time(s) (limits.context_relay); this session relays run %s\n", env.Relays, env.RelayOf)
 	}
 	if len(env.Commits) > 0 {
 		fmt.Fprintf(os.Stdout, "📌 commits: %d\n", len(env.Commits))

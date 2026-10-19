@@ -229,6 +229,14 @@ func gateSession(verb, skill, projectRoot string) (*sessionLaunch, error) {
 	if err != nil {
 		return nil, err
 	}
+	// OI-11: a child launch is where the loop is relayed, judged once, by
+	// the command the loop ran — a detached run's own ape (its supervisor's
+	// child) was judged when it was started.
+	if at.Orchestrator() && os.Getenv(envDetachedID) == "" {
+		if err := relayGate(verb, projectRoot, at.Run, os.Stderr); err != nil {
+			return nil, err
+		}
+	}
 	l := &sessionLaunch{depth: depth, skill: skill}
 	if depth > 1 {
 		l.parentRun, l.parentPID = at.Run, at.RunnerPID
@@ -268,11 +276,15 @@ func sessionRefusal(err error) error {
 	exit := ExitUsage
 	var ue *apexv1.UsageError
 	var ce *apexv1.ConflictError
+	var fe *apexv1.FailError
 	switch {
 	case errors.As(err, &ue):
 		code, action = ue.Code, ue.Action
 	case errors.As(err, &ce):
 		code, action, exit = ce.Code, ce.Action, exitV1Conflict
+	case errors.As(err, &fe):
+		// limits.relays: the loop's relays are spent (OI-11).
+		code, action, exit = fe.Code, fe.Action, ExitRunFailed
 	default:
 		return usageErr(err)
 	}

@@ -64,6 +64,10 @@ type LiveSession struct {
 	ParentRun string    `json:"parent_run,omitempty"`
 	PID       int       `json:"pid"`
 	StartedAt time.Time `json:"started_at"`
+	// rc.7 (rc7-relay).
+	// Relay is a live loop run's context fill and relays (OI-11), absent on
+	// every other session and on a loop ape has no relay record of.
+	Relay *LoopRelay `json:"relay,omitempty"`
 }
 
 // LiveSessions lists the live model sessions running in the project,
@@ -80,7 +84,11 @@ func (p *Project) LiveSessions() []LiveSession {
 		if depth <= 0 {
 			depth = 1
 		}
-		out = append(out, LiveSession{RunID: r.RunID, Kind: r.Command, Skill: r.Skill, Depth: depth, ParentRun: r.ParentRun, PID: r.PID, StartedAt: r.StartedAt})
+		ls := LiveSession{RunID: r.RunID, Kind: r.Command, Skill: r.Skill, Depth: depth, ParentRun: r.ParentRun, PID: r.PID, StartedAt: r.StartedAt}
+		if r.Skill == OrchestratorSkill && depth == 1 {
+			ls.Relay = p.loopRelay(r.RunID)
+		}
+		out = append(out, ls)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].StartedAt.Before(out[j].StartedAt) })
 	return out

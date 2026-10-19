@@ -192,6 +192,15 @@ type Manifest struct {
 	Depth     int    `yaml:"depth,omitempty"`
 	ParentRun string `yaml:"parent_run,omitempty"`
 
+	// RelayOf is, for a loop session ape relayed (OI-11: its context
+	// reached limits.context_relay), the loop run it relays, and Relay how
+	// many relays the loop run has had with this one (1 for the first). The
+	// relayed runs are one loop run, under one lock: each has its own
+	// manifest, cost and children. Absent on every other run. Additive under
+	// schema_version 2.
+	RelayOf string `yaml:"relay_of,omitempty"`
+	Relay   int    `yaml:"relay,omitempty"`
+
 	// Children are the runs this one started (their manifests' parent_run),
 	// and TreeCostUSD this run's cost plus theirs: written when the run
 	// ends, for an orchestrator, children or not. Totals stay this
@@ -294,6 +303,10 @@ const (
 	// session ended first (D62: a child dies with its parent), and ape
 	// stopped the session.
 	TerminationParentGone = "parent_gone"
+	// TerminationRelays — a loop session's context reached
+	// limits.context_relay again after limits.relays relays (OI-11), and ape
+	// stopped the loop run instead of relaying it once more: a person's.
+	TerminationRelays = "relays"
 )
 
 // TerminationRecord is the durable "why" behind a non-completed run.
