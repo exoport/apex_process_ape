@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/exoport/apex_process_ape/internal/apexv1"
 	"github.com/spf13/cobra"
@@ -12,13 +13,15 @@ import (
 // The hooks `ape project init` registers. Each reads Claude Code's hook
 // payload on stdin and answers on stdout. A hook never fails the session
 // it serves: a payload it cannot read, or a project that is not v1, is an
-// allow with a note on stderr.
+// allow with a note on stderr. pre-commit is git's (Q89): no payload, and
+// its exit code is the verdict.
 
 func newHookCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "hook",
-		Short: "Claude Code hooks for APEX v1 projects (registered by `ape project init`)",
-		Long: `Claude Code hook handlers. Each reads the hook payload (JSON) on stdin.
+		Short: "Claude Code and git hooks for APEX v1 projects (installed by `ape project init`)",
+		Long: `Claude Code hook handlers, and git's pre-commit hook. Each Claude Code hook reads
+the hook payload (JSON) on stdin.
 
   session-start   SessionStart: adds ` + "`ape status --brief`" + ` as context
   stop            Stop and SubagentStop: in a session ape launched, blocks the main
@@ -31,13 +34,18 @@ func newHookCmd() *cobra.Command {
                   delete or push a git tag, push at all, stop processes by name (pkill,
                   killall), or rebase or merge on a change branch
 
-Every hook exits 0; a block or deny is expressed in its JSON output.
+  pre-commit      git's pre-commit hook (installed by ` + "`ape project init`" + ` and the lift):
+                  the commit secret scan on the staged added lines; exit 1 refuses
+                  the commit (commit.secret)
+
+Every Claude Code hook exits 0; a block or deny is expressed in its JSON output.
+pre-commit is git's, not Claude Code's: its exit code is the verdict.
 
 In a session ape task launches in a v1 project, the three hooks also come inline
 in ape's --settings (with --inline), so a hand-edited settings.json cannot drop
 them; the settings.json copy then does nothing, so each event is decided once.`,
 	}
-	cmd.AddCommand(newHookSessionStartCmd(), newHookStopCmd(), newHookPreToolCmd())
+	cmd.AddCommand(newHookSessionStartCmd(), newHookStopCmd(), newHookPreToolCmd(), newHookPreCommitCmd())
 	return cmd
 }
 
@@ -267,5 +275,58 @@ Anything else: no output.`,
 	}
 	cmd.Flags().StringVar(&cwd, "cwd", "", "project directory (default: the payload's cwd)")
 	addInlineFlag(cmd, &inline)
+	return cmd
+}
+
+func newHookPreCommitCmd() *cobra.Command {
+	var cwd string
+	cmd := &cobra.Command{
+		Use:   "pre-commit",
+		Short: "git pre-commit hook: refuse a commit whose staged added lines hold a secret",
+		Long: `git's pre-commit hook (Q89). ` + "`ape project init`" + ` and ` + "`ape project lift`" + ` install it
+as <hooks dir>/pre-commit — the folder ` + "`git rev-parse --git-path hooks`" + ` names: core.hooksPath
+when set, else .git/hooks (a linked worktree's is the main checkout's) — when no
+pre-commit hook is there: a POSIX sh script, marked as ape's by its
+"# ape: pre-commit secret scan" line, that runs ` + "`ape hook pre-commit`" + ` (ape resolved on PATH
+when git runs it; not on PATH, the commit is refused saying so). A hook that is not ape's
+is never touched: ` + "`ape project check`" + ` then lists the notice hooks.pre-commit-absent, naming
+the line to add to it (` + "`ape hook pre-commit || exit 1`" + `), and so does ` + "`ape doctor`" + `. git never
+versions .git/hooks, so a fresh clone has no hook until ` + "`ape project init`" + ` runs again
+(idempotent: it installs only what is missing). A hook in a core.hooksPath folder inside
+the project, not ignored, is committed with the init or lift commit.
+
+The scan is the one every commit ape makes goes through: the added lines of what git is
+about to commit (the index git hands its hooks, so ` + "`git commit -a`" + ` and ` + "`git commit <paths>`" + `
+are scanned as they commit), betterleaks' default rules plus ape's aws-access-key-id,
+the secrets.allow list at the guard's baseline (committed AND accepted), and the same
+commit.secret refusal on stderr: each secret as <file>:<line> rule <id>: <redacted>,
+the placeholder fix first, the allow entry a person may paste. Its files stay staged.
+
+Exit codes: 0 clean (prints nothing), not a v1 project, or APE_SCANNED=1 (set by ape on
+its own commits that run hooks — the archive squash, scanned already; the script checks
+it before starting ape) · 1 a secret (commit.secret), or the scan could not run
+(commit.failed): git commits nothing. ` + "`git commit --no-verify`" + ` skips the hook — a person's
+escape; the archive's scan of the squash stays the backstop.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			dir := cwd
+			if dir == "" {
+				wd, err := os.Getwd()
+				if err != nil {
+					return err
+				}
+				dir = wd
+			}
+			// git may hand its hooks a relative GIT_INDEX_FILE: it is
+			// relative to the hook's directory, and ape runs git elsewhere.
+			if idx := os.Getenv("GIT_INDEX_FILE"); idx != "" && !filepath.IsAbs(idx) {
+				if wd, err := os.Getwd(); err == nil {
+					_ = os.Setenv("GIT_INDEX_FILE", filepath.Join(wd, idx))
+				}
+			}
+			return v1Fail(cmd, &v1Flags{}, apexv1.PreCommitScan(cmd.Context(), dir), nil)
+		},
+	}
+	cmd.Flags().StringVar(&cwd, "cwd", "", "project directory (default: the working directory, where git runs its hooks)")
 	return cmd
 }

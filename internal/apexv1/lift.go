@@ -1056,7 +1056,7 @@ func (lf *lifter) apply() error {
 		return err
 	}
 	lf.res.Init = initRes
-	commit = append(commit, p.initCommitPaths(initRes)...)
+	commit = append(commit, p.initCommitPaths(ctx, initRes)...)
 	if doc, err := readFileString(p.AgentsMD()); err == nil {
 		if out := withCommands(doc, lf.res.Gates); out != doc {
 			if err := liftWrite(p.AgentsMD(), out); err != nil {

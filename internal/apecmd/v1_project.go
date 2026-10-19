@@ -105,8 +105,18 @@ A hook that was altered (another matcher, async, a shorter stop timeout) is repl
 by the one above; running init again changes nothing. ape task passes the same
 hooks inline as well, so its sessions have them even when settings.json does not.
 
-Everything init wrote but hot/.gitignore (and settings.json when it merged hooks) is
-committed as "apex: project init", with the files it amended (CLAUDE.md, AGENTS.md, and the config
+Git's pre-commit hook (Q89): in a git work tree, init installs <hooks dir>/pre-commit
+(` + "`git rev-parse --git-path hooks`" + `: core.hooksPath when set, else .git/hooks) when no
+pre-commit hook is there — a sh script marked "# ape: pre-commit secret scan" that runs
+` + "`ape hook pre-commit`" + `, the commit secret scan, so a session's own git commit and a
+person's are scanned as ape's commits are (see ape hook pre-commit --help). An existing
+hook that is not ape's is kept, never edited: ape project check then lists the notice
+hooks.pre-commit-absent with the line to add. The output's "git hook" line and JSON
+"pre_commit" ({path, status: installed|present|kept, runs_ape}) say which happened. git
+never versions .git/hooks, so a fresh clone has none: run init again, which installs it.
+
+Everything init wrote but hot/.gitignore and a hook under .git/ (and settings.json
+when it merged hooks) is committed as "apex: project init", with the files it amended (CLAUDE.md, AGENTS.md, and the config
 when it was tracked and clean); other files that existed before are not touched and
 not committed. JSON: "amended" lists the files init changed, "amended_uncommitted"
 those it left out of the commit.
@@ -252,6 +262,9 @@ Exit codes: 0 ok · 1 failed (e.g. settings.json is not valid JSON) · 2 usage.`
 				for _, h := range res.HooksAdded {
 					fmt.Fprintln(w, "hook     "+h)
 				}
+				if pc := preCommitLine(res.PreCommit); pc != "" {
+					fmt.Fprintln(w, pc)
+				}
 				fmt.Fprint(w, pluginOut.String())
 				for _, warn := range res.Warnings {
 					fmt.Fprintln(cmd.ErrOrStderr(), "warning: "+warn)
@@ -264,6 +277,23 @@ Exit codes: 0 ok · 1 failed (e.g. settings.json is not valid JSON) · 2 usage.`
 	addV1Flags(cmd, &f)
 	cmd.Flags().BoolVar(&brownfield, "brownfield", false, "record that the project existed before APEX")
 	return cmd
+}
+
+// preCommitLine says what init or the lift did with git's pre-commit hook
+// (Q89); "" outside a git work tree.
+func preCommitLine(h *apexv1.PreCommitHook) string {
+	switch {
+	case h == nil:
+		return ""
+	case h.Status == apexv1.PreCommitInstalled:
+		return "git hook " + h.Path + " (installed: runs `" + apexv1.HookCmdPreCommit + "`, the secret scan)"
+	case h.Status == apexv1.PreCommitPresent:
+		return "git hook " + h.Path + " (ape's, already installed)"
+	case h.RunsApe:
+		return "git hook " + h.Path + " (kept existing: not ape's, and it runs `" + apexv1.HookCmdPreCommit + "`)"
+	}
+	return "git hook " + h.Path + " (kept existing: not ape's, so commits ape does not make are not scanned — add the line `" +
+		apexv1.HookCmdPreCommit + " || exit 1` to it; ape project check lists hooks.pre-commit-absent)"
 }
 
 // initNext is init's next step: with no framework skills installed
@@ -419,6 +449,13 @@ line}; [] when none, beside the findings on a failure too), they never change th
                            approved gate's script is gate drift, so it moves with the
                            milestone's next re-approval (before its approval, when
                            proposed). See ape milestone close --help for the gate folders
+  hooks.pre-commit-absent  git's pre-commit hook (core.hooksPath honoured) does not run
+                           ape's secret scan, so commits ape does not make (a session's
+                           own git commit, a person's) go unscanned until the archive:
+                           absent — a fresh clone; ` + "`ape project init`" + ` installs it —,
+                           another tool's hook — add ` + "`ape hook pre-commit || exit 1`" + ` to
+                           it; ape never edits it —, or not executable. ape doctor reports
+                           it too (hooks.pre-commit). See ape hook pre-commit --help
 
 Exit codes: 0 green · 1 findings (listed on stderr, or under "findings" with --json) · 2 usage.`,
 		Example: "  ape project check\n  ape project check --json",

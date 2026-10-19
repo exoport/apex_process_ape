@@ -217,7 +217,9 @@ func (p *Project) hasCommitHooks(ctx context.Context) bool {
 
 // commitSquash commits the staged squash with msg — with the project's
 // hooks unless skip — and returns git's combined output on failure, which
-// is where a hook says why it refused.
+// is where a hook says why it refused. ScanCommit has scanned it, so ape's
+// pre-commit hook skips it (EnvScanned, Q89); ape's other commits pass
+// --no-verify and run no hook.
 func (p *Project) commitSquash(ctx context.Context, msg string, hooks bool) (string, error) {
 	args := []string{"commit", "-q", "-m", msg}
 	if !hooks {
@@ -225,6 +227,7 @@ func (p *Project) commitSquash(ctx context.Context, msg string, hooks bool) (str
 	}
 	c := exec.CommandContext(ctx, "git", args...)
 	c.Dir = p.Root
+	c.Env = append(os.Environ(), EnvScanned+"=1")
 	out, err := c.CombinedOutput()
 	return string(out), err
 }

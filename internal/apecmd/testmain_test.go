@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/exoport/apex_process_ape/internal/apexv1"
 	"github.com/exoport/apex_process_ape/internal/sessions"
 )
 
@@ -41,6 +42,12 @@ func TestMain(m *testing.M) {
 		}
 		os.Exit(ExitOK)
 	}
+	// Every repository a test runs `ape project init` in has ape's git
+	// pre-commit hook, which runs whatever ape is on PATH: a test's own
+	// git commit skips it, as ape's own commits do (the hook tests unset
+	// it, with this binary on PATH as ape; a copy running as ape keeps
+	// the environment it was given).
+	_ = os.Setenv(apexv1.EnvScanned, "1")
 	code := m.Run()
 	if made != "" {
 		_ = os.RemoveAll(made)

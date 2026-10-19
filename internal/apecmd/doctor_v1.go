@@ -40,11 +40,12 @@ var v0OnlyChecks = map[string]bool{
 // v1OnlyChecks are the APEX v1 project checks; outside a v1 project they
 // do not run. (plugins.project predates the split and keeps its SKIP.)
 var v1OnlyChecks = map[string]bool{
-	"project.check":   true,
-	"hooks.project":   true,
-	"claude.version":  true,
-	"state.gitignore": true,
-	"settings.shared": true,
+	"project.check":    true,
+	"hooks.project":    true,
+	"claude.version":   true,
+	"state.gitignore":  true,
+	"settings.shared":  true,
+	"hooks.pre-commit": true,
 }
 
 func init() {
@@ -55,6 +56,7 @@ func init() {
 		doctorCheck{Name: "claude.version", Run: checkClaudeVersion},
 		doctorCheck{Name: "state.gitignore", Run: checkV1StateGitignore},
 		doctorCheck{Name: "settings.shared", Run: checkV1SettingsShared},
+		doctorCheck{Name: "hooks.pre-commit", Run: checkV1PreCommitHook},
 	)
 }
 
@@ -130,6 +132,25 @@ func checkV1Hooks(_ context.Context, env doctorEnv) CheckResult {
 		Remediation: "`ape project init` merges ape's hooks back (existing keys and hooks are kept); `ape task` sessions get them inline either way.",
 		FixCommand:  "ape project init --cwd " + p.Root,
 	}
+}
+
+// checkV1PreCommitHook reports git's pre-commit hook when it does not run
+// ape's secret scan (Q89, project check's hooks.pre-commit-absent notice):
+// a fresh clone has none, as git never versions .git/hooks.
+func checkV1PreCommitHook(ctx context.Context, env doctorEnv) CheckResult {
+	p, ok := v1ProjectAt(env.ProjectRoot)
+	if !ok {
+		return CheckResult{Status: StatusSkip, Message: msgNotV1Project}
+	}
+	n := p.PreCommitHookNotice(ctx)
+	if n == nil {
+		return CheckResult{Status: StatusOK, Message: "git's pre-commit hook runs `" + apexv1.HookCmdPreCommit + "` (or there is no git work tree)"}
+	}
+	res := CheckResult{Status: StatusWarn, Message: n.Code + ": " + n.Message, Remediation: n.Fix}
+	if strings.Contains(n.Fix, "ape project init") {
+		res.FixCommand = "ape project init --cwd " + p.Root
+	}
+	return res
 }
 
 // checkClaudeVersion reports the installed Claude Code's version. Report
