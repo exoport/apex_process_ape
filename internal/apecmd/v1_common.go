@@ -35,6 +35,9 @@ type v1Flags struct {
 	noDetach bool
 	long     bool
 	ranHere  bool
+	// person is the person act a long verb's call carries out (E2,
+	// D179), nil for none: runLong takes it under the run lock.
+	person *apexv1.PersonCall
 }
 
 func addV1Flags(cmd *cobra.Command, f *v1Flags) {

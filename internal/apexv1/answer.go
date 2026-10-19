@@ -15,7 +15,7 @@ import (
 // it again (`ape change start` takes an answered change as a blocked one).
 // A person's command: refused in a model session.
 func (p *Project) AnswerChange(ctx context.Context, id, text, by string) (*State, error) {
-	if err := requirePerson("ape change answer"); err != nil {
+	if err := requirePerson(ctx, ActAnswer, "ape change answer"); err != nil {
 		return nil, err
 	}
 	text, by = strings.TrimSpace(text), strings.TrimSpace(by)

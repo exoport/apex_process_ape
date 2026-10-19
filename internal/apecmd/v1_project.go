@@ -460,6 +460,11 @@ line}; [] when none, beside the findings on a failure too), they never change th
                            another tool's hook — add ` + "`ape hook pre-commit || exit 1`" + ` to
                            it; ape never edits it —, or not executable. ape doctor reports
                            it too (hooks.pre-commit). See ape hook pre-commit --help
+  hooks.prompt-absent      .claude/settings.json does not register ` + "`ape hook user-prompt`" + ` for
+                           UserPromptSubmit (or it is altered), so the person's prompts are
+                           not recorded and a person act from a Claude Code session is
+                           refused (E2); ` + "`ape project init`" + ` merges it back. ape doctor
+                           reports it too (hooks.prompt). See ape hook pre-tool --help
 
 Exit codes: 0 green · 1 findings (listed on stderr, or under "findings" with --json) · 2 usage.`,
 		Example: "  ape project check\n  ape project check --json",

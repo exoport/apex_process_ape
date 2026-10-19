@@ -13,7 +13,8 @@ import (
 // The hooks `ape project init` registers. Each reads Claude Code's hook
 // payload on stdin and answers on stdout. A hook never fails the session
 // it serves: a payload it cannot read, or a project that is not v1, is an
-// allow with a note on stderr. pre-commit is git's (Q89): no payload, and
+// allow with a note on stderr — but a person act is granted only on a
+// recorded prompt, so a failing hook leaves it refused (E2 fails closed). pre-commit is git's (Q89): no payload, and
 // its exit code is the verdict.
 
 func newHookCmd() *cobra.Command {
@@ -32,7 +33,10 @@ the hook payload (JSON) on stdin.
                   development/specs/**, changes/*/state.json, archive/**, _apex/state/**,
                   an existing development/briefs/** file, and Bash commands that create,
                   delete or push a git tag, push at all, stop processes by name (pkill,
-                  killall), or rebase or merge on a change branch
+                  killall), or rebase or merge on a change branch; grants a person act
+                  on the person's own words (E2), and denies one without them
+  user-prompt     UserPromptSubmit: records the prompt a person typed, which is what
+                  grants a person act (E2); never blocks the prompt
 
   pre-commit      git's pre-commit hook (installed by ` + "`ape project init`" + ` and the lift):
                   the commit secret scan on the staged added lines; exit 1 refuses
@@ -44,11 +48,12 @@ pre-tool exits 2 with the same message, so Claude Code blocks the call: the guar
 fails closed. stop and session-start keep 13, which blocks nothing.
 pre-commit is git's, not Claude Code's: its exit code is the verdict.
 
-In a session ape task launches in a v1 project, the three hooks also come inline
-in ape's --settings (with --inline), so a hand-edited settings.json cannot drop
-them; the settings.json copy then does nothing, so each event is decided once.`,
+In a session ape task launches in a v1 project, session-start, stop and pre-tool also
+come inline in ape's --settings (with --inline), so a hand-edited settings.json cannot
+drop them; the settings.json copy then does nothing, so each event is decided once.
+user-prompt is never inline: in a session ape launched it records nothing.`,
 	}
-	cmd.AddCommand(newHookSessionStartCmd(), newHookStopCmd(), newHookPreToolCmd(), newHookPreCommitCmd())
+	cmd.AddCommand(newHookSessionStartCmd(), newHookStopCmd(), newHookPreToolCmd(), newHookUserPromptCmd(), newHookPreCommitCmd())
 	return cmd
 }
 
@@ -262,6 +267,37 @@ rebase it and re-take the baseline at the base tip). Allowed: rebase/merge --abo
 --quit, git merge-base, merge-file and merge-tree, and rebase or merge on any other
 branch. Parsed like the tag rule, with the same limits.
 
+Bash, too (E2, T6): denies a command that names _apex/state/prompts or
+_apex/state/grants, or runs ` + "`ape hook user-prompt`" + `, ` + "`ape hook pre-tool`" + ` or ` + "`ape __run`" + `:
+they write or act on the records a person act rests on.
+
+Person acts (E2; D178, D179): eight commands are a person's — from a terminal outside
+Claude Code as always, or in the person's own Claude Code session on the person's own
+words. Each line is the command, then what the person types (the phrase grammar):
+` + apexv1.PersonActGrammar() + `
+A Bash command that runs one is allowed only when the prompt that opened this turn — the
+tool call's prompt_id is the prompt's — is recorded by ` + "`ape hook user-prompt`" + `, the
+session's transcript holds the person's user message with that promptId and the same
+words, and the phrase is there: its words in order, the target exact (M2, T3, the change
+id, ADR-0012; case aside), no negation word (not, no, never, don't and every n't, wait,
+hold, stop, cannot, nope) before them in their sentence nor among the three words after the
+target, and the sentence not a question; for an answer, the --text itself after the target.
+"yes", "ok", "do it" and "approve it" grant nothing. Then pre-tool writes a grant,
+_apex/state/grants/<sha256 of the command line>.json, used once, for 120s; a prompt grants
+each act and target once. The command line is normalised — the verb, its arguments and
+every flag set but --cwd, --json, --wait and --no-detach, as --name=value, sorted — and
+must be literal (no $ or backquote anywhere), one person act per command. The command
+consumes the grant and records by: <git config user.name> (prompt <ts>: "<the sentence,
+at most 160 characters, secrets redacted>"); a --by there must be git config user.name
+(else session.by-mismatch). Without a grant it is refused, session.person-only, naming the
+phrase; pre-tool denies it first, saying why. A ` + "`!`" + ` line fires no hook, so it can never be
+granted. In a session ape launched (APE_SESSION) nothing is recorded or granted.
+A long act (approve, --accept-red, --allow-pending-human; D179) that meets a run of the
+same command line on its milestone or change — still running (exit 75: run it again), or
+ended with its result not yet printed — attaches with no grant; another run there is
+run.busy; once its result is printed, the same command is a new act and needs the
+person's words again.
+
 Anything else: no output.
 
 When the project's ape pin cannot run here — it names an ape below the floor (the
@@ -279,12 +315,45 @@ runs this ape regardless.`,
 			if cwd != "" {
 				payload.Cwd = cwd
 			}
-			emitHook(cmd)(apexv1.PreTool(payload).Output())
+			d := apexv1.PreTool(payload)
+			if !d.Deny && payload.ToolName == "Bash" {
+				d = apexv1.PersonActGate(cmd.Context(), payload, personCallsIn(apexv1.BashCommand(payload.ToolInput)))
+			}
+			emitHook(cmd)(d.Output())
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&cwd, "cwd", "", "project directory (default: the payload's cwd)")
 	addInlineFlag(cmd, &inline)
+	return cmd
+}
+
+func newHookUserPromptCmd() *cobra.Command {
+	var cwd string
+	cmd := &cobra.Command{
+		Use:   "user-prompt",
+		Short: "UserPromptSubmit hook: record the prompt a person typed (E2)",
+		Long: `UserPromptSubmit hook (E2, D178). Appends {ts, session_id, transcript_path, prompt,
+prompt_id} — the prompt at most 64 KiB — to _apex/state/prompts/<session_id>.jsonl
+(ignored, never committed): what ` + "`ape hook pre-tool`" + ` grants a person act on (its --help
+has the phrase grammar). Records nothing in a session ape launched (APE_SESSION: ape types
+those prompts itself) or outside a v1 project. Never blocks the prompt: it prints nothing
+and exits 0, an error noted on stderr. ` + "`ape project init`" + ` registers it; missing, ` + "`ape project check`" + `
+lists the notice hooks.prompt-absent and ` + "`ape doctor`" + ` the row hooks.prompt — and a person
+act from a Claude Code session is refused (session.person-only).`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			payload := readHookPayload(cmd)
+			if cwd != "" {
+				payload.Cwd = cwd
+			}
+			if err := apexv1.RecordPrompt(payload); err != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "ape hook user-prompt: %v; not recorded\n", err)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&cwd, "cwd", "", "project directory (default: the payload's cwd)")
 	return cmd
 }
 

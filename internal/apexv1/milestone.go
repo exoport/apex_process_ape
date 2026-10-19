@@ -241,7 +241,7 @@ func (p *Project) NewMilestone(ctx context.Context, title, gate string, budget *
 // approval.
 func (p *Project) ApproveMilestone(ctx context.Context, id, by string, progress io.Writer) (*Milestone, error) {
 	// A model never approves its own milestone (D47 Q6).
-	if err := requirePerson("ape milestone approve"); err != nil {
+	if err := requirePerson(ctx, ActMilestoneApprove, "ape milestone approve"); err != nil {
 		return nil, err
 	}
 	if err := p.recoverArchive(ctx); err != nil {
@@ -533,7 +533,7 @@ type AcceptRed struct {
 // (accepted red by <who> <ts> <sha>)`. A green gate closes it as usual,
 // accepting nothing. A person's flag: refused in a model session.
 func (p *Project) CloseMilestoneAcceptRed(ctx context.Context, id, reason, by string, opt RunOptions) (*GateResult, error) {
-	if err := requirePerson("--accept-red"); err != nil {
+	if err := requirePerson(ctx, ActAcceptRed, "--accept-red"); err != nil {
 		return nil, err
 	}
 	reason, by = strings.TrimSpace(reason), strings.TrimSpace(by)

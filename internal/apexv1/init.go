@@ -19,7 +19,9 @@ const (
 	HookCmdSessionStart = "ape hook session-start"
 	HookCmdStop         = "ape hook stop"
 	HookCmdPreTool      = "ape hook pre-tool"
-	PreToolMatcher      = "Edit|Write|MultiEdit|NotebookEdit|Bash"
+	// HookCmdUserPrompt records the prompts a person types (E2, D178).
+	HookCmdUserPrompt = "ape hook user-prompt"
+	PreToolMatcher    = "Edit|Write|MultiEdit|NotebookEdit|Bash"
 	// StopHookTimeout is the stop hook's timeout in seconds: it re-runs
 	// the change's short command checks, within StopRunBudget (600s), and
 	// never a long one (D58 2.5) — so it is not derived from

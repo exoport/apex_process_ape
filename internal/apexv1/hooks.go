@@ -25,6 +25,10 @@ type HookPayload struct {
 	AgentID        string          `json:"agent_id"`
 	ToolName       string          `json:"tool_name"`
 	ToolInput      json.RawMessage `json:"tool_input"`
+	// Prompt is UserPromptSubmit's text; PromptID names the turn it opens,
+	// on that event and on every PreToolUse of the turn (Q102).
+	Prompt   string `json:"prompt"`
+	PromptID string `json:"prompt_id"`
 	// BackgroundTasks is the work still running when the turn ended, on a
 	// Stop or SubagentStop (D88); nil when the field is absent.
 	BackgroundTasks *[]sessiondriver.BackgroundTask `json:"background_tasks"`
@@ -77,9 +81,10 @@ func (d PreToolDecision) Output() ([]byte, error) {
 }
 
 // PreTool decides whether an edit tool call may touch its target, and
-// whether a Bash call may write a git tag (TagGuard), push (PushGuard,
-// D45), stop processes by name (KillGuard, D46) or rebase or merge on a
-// change branch (RebaseGuard, D40).
+// whether a Bash call may touch the E2 records (RecordGuard, T6), write a
+// git tag (TagGuard), push (PushGuard, D45), stop processes by name
+// (KillGuard, D46) or rebase or merge on a change branch (RebaseGuard,
+// D40). A Bash call's person acts are PersonActGate's, after these.
 func PreTool(payload HookPayload) PreToolDecision {
 	if payload.ToolName == "Bash" {
 		cwd := payload.Cwd
@@ -87,7 +92,7 @@ func PreTool(payload HookPayload) PreToolDecision {
 			cwd, _ = os.Getwd()
 		}
 		command := bashCommand(payload.ToolInput)
-		for _, guard := range []func(command, cwd string) PreToolDecision{TagGuard, PushGuard, KillGuard} {
+		for _, guard := range []func(command, cwd string) PreToolDecision{RecordGuard, TagGuard, PushGuard, KillGuard} {
 			if d := guard(command, cwd); d.Deny {
 				return d
 			}

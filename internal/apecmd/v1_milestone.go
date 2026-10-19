@@ -117,7 +117,8 @@ approved milestone; gate and close refuse a gate that differs from the approved 
 Committed together as "apex: <M> approved".
 
 Before it records anything, approve runs the gate once against the current tree (D70 B),
-synchronously, under timeouts.gate (default 30m), with progress lines on stderr. A new
+under timeouts.gate (default 30m), in a detached run (OI-12; below), with progress lines
+in its log. A new
 gate must run and be red — it is red until the milestone's work is done:
   exit 0                                  refused, milestone.gate-green (action replan):
                                           a green gate proves nothing the milestone adds
@@ -143,10 +144,16 @@ Refused on a change branch (see ` + "`ape milestone --help`" + `).
 
 Only a person approves (D47 Q6): refused in a model session — APE_SESSION or CLAUDECODE
 set, which includes a ` + "`!`" + ` line inside Claude Code — with exit 2, code
-session.person-only. Run it from a plain terminal.
+session.person-only, unless, in the person's own Claude Code session, the person typed
+"approve <M>" in this turn (E2: ` + "`ape hook pre-tool --help`" + `): --by is then optional and must be
+git config user.name (else session.by-mismatch, exit 1), and the record's by is
+"<user.name> (prompt <ts>: \"<the person's words>\")". The run lock records the act
+(person_act): running the same command again while it runs (exit 75), or before its result
+is printed, attaches with no new grant; another run on the milestone is run.busy.
 
 Exit codes: 0 ok · 1 no such milestone, done, malformed (Gate/Goal missing), the gate green
-or broken, or HEAD on a change branch · 2 usage, or a model session.`,
+or broken, HEAD on a change branch, or session.by-mismatch · 2 usage, or a model session
+with no grant.`,
 		Example: "  ape milestone approve M1 --by eval",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -157,17 +164,26 @@ or broken, or HEAD on a change branch · 2 usage, or a model session.`,
 			if err := v1RequireInit(cmd, &f, p); err != nil {
 				return err
 			}
-			m, err := p.ApproveMilestone(cmd.Context(), args[0], by, cmd.ErrOrStderr())
-			if err != nil {
-				return v1Fail(cmd, &f, err, nil)
-			}
-			return v1Emit(cmd.OutOrStdout(), &f, m, func(w io.Writer) {
-				fmt.Fprintf(w, "%s — %s: %s\n", m.ID, m.Title, m.StatusText)
+			// OI-12: the self-check gate can outlive one Bash call, so
+			// approve is a long run (its lock M<n>), and a person act (E2).
+			id := args[0]
+			f.person = personCallOf(cmd, args)
+			return runLong(cmd, &f, p, id, func(ctx context.Context, opt apexv1.RunOptions) renderFn {
+				m, err := p.ApproveMilestone(ctx, id, personBy(ctx, by), opt.Progress)
+				return func(cmd *cobra.Command, f *v1Flags) error {
+					if err != nil {
+						return v1Fail(cmd, f, err, nil)
+					}
+					return v1Emit(cmd.OutOrStdout(), f, m, func(w io.Writer) {
+						fmt.Fprintf(w, "%s — %s: %s\n", m.ID, m.Title, m.StatusText)
+					})
+				}
 			})
 		},
 	}
 	addV1Flags(cmd, &f)
-	cmd.Flags().StringVar(&by, "by", "", "who approves (required)")
+	addV1WaitFlags(cmd, &f)
+	cmd.Flags().StringVar(&by, "by", "", "who approves (required from a terminal; in a Claude Code session, git config user.name)")
 	return cmd
 }
 
@@ -312,8 +328,11 @@ run}, the Status line reads "done (accepted red by <who> <ts> <sha>)", committed
 "apex: <M> done (accepted red)", and ` + "`ape status`" + ` shows it (JSON milestones[].accept_red;
 the brief names the last such milestone). A green gate closes as usual and accepts nothing.
 Only a person passes it: refused in a model session (APE_SESSION or CLAUDECODE set, a ` + "`!`" + `
-line inside Claude Code included) with exit 2, session.person-only. A person tags after
-close.
+line inside Claude Code included) with exit 2, session.person-only — unless, in the person's
+own Claude Code session, the person typed "accept red on <M>" in this turn (E2: ` + "`ape hook pre-tool --help`" + `;
+--by is then git config user.name, recorded with the prompt). Such a close attaches only to
+a run of the same command line: a plain close running on the milestone is run.busy (exit 3),
+never an attach that would drop the flag. A person tags after close.
 
 Exit codes: 0 done · 1 gate red (without --accept-red), changes in flight, not approved,
 no approval record, a changed gate, an archived gate/ in the way, or HEAD on a change
@@ -332,11 +351,12 @@ branch · 2 usage, or --accept-red from a model session.`,
 				return v1Fail(cmd, &f, &apexv1.UsageError{Code: "usage.by", Msg: "--by goes with --accept-red — drop it, or give the reason the red gate is accepted"}, nil)
 			}
 			id, accepting := args[0], cmd.Flags().Changed("accept-red")
+			f.person = personCallOf(cmd, args)
 			return runLong(cmd, &f, p, id, func(ctx context.Context, opt apexv1.RunOptions) renderFn {
 				var g *apexv1.GateResult
 				var err error
 				if accepting {
-					g, err = p.CloseMilestoneAcceptRed(ctx, id, acceptRed, by, opt)
+					g, err = p.CloseMilestoneAcceptRed(ctx, id, acceptRed, personBy(ctx, by), opt)
 				} else {
 					g, err = p.CloseMilestone(ctx, id, opt)
 				}
@@ -458,11 +478,17 @@ Accept records it as it is ("apex: ADR-NNNN accepted (recorded)"), unless its te
 since that commit (decision.accepted-edited: restore it first). The lift migration's
 records (by "lift") count as records.
 
+Only a person accepts (OI-4): refused in a model session (APE_SESSION or CLAUDECODE set,
+a ` + "`!`" + ` line inside Claude Code included) with exit 2, session.person-only — unless, in the
+person's own Claude Code session, the person typed "accept <ADR-NNNN>" in that turn (E2:
+` + "`ape hook pre-tool --help`" + `; --by is then git config user.name, recorded with the prompt;
+another --by is session.by-mismatch, exit 1).
+
 A person's acceptance is recorded on the base branch (D11, D38): refused on a change's
 branch, change/<id> (code branch.change-branch; ` + "`git switch <base>`" + ` first).
 
-Exit codes: 0 accepted · 1 no such ADR, not proposed, malformed, or HEAD on a change
-branch · 2 usage.`,
+Exit codes: 0 accepted · 1 no such ADR, not proposed, malformed, HEAD on a change
+branch, or session.by-mismatch · 2 usage, or a model session with no grant.`,
 		Example: "  ape decision accept ADR-0003 --by diego",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -473,7 +499,10 @@ branch · 2 usage.`,
 			if err := v1RequireInit(cmd, &f, p); err != nil {
 				return err
 			}
-			res, err := p.AcceptDecision(cmd.Context(), args[0], by)
+			if err := v1PersonAct(cmd, p, personCallOf(cmd, args)); err != nil {
+				return v1Fail(cmd, &f, err, nil)
+			}
+			res, err := p.AcceptDecision(cmd.Context(), args[0], personBy(cmd.Context(), by))
 			if err != nil {
 				return v1Fail(cmd, &f, err, nil)
 			}

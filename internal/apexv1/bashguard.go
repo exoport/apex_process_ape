@@ -3,6 +3,7 @@ package apexv1
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -100,4 +101,48 @@ func KillGuard(command, cwd string) PreToolDecision {
 		return PreToolDecision{}
 	}
 	return PreToolDecision{Deny: true, Reason: strings.Replace(killGuardReason, "%s", what, 1) + inlineOverrideNote(command)}
+}
+
+// The E2 records guard (T6): the person's prompts and pre-tool's grants
+// are what a person act rests on, so a model never writes them. Denied: a
+// Bash command naming _apex/state/prompts or _apex/state/grants (an edit
+// tool there is denied with the rest of _apex/state/), and one running the
+// plumbing that writes them or acts on them — `ape hook user-prompt`
+// (Claude Code runs it on the person's prompt), `ape hook pre-tool` (it
+// runs before every tool call) and `ape __run` (a long run's worker, which
+// ape starts). A same-UID program that writes them without naming them is
+// the documented residual.
+
+var recordPathRe = regexp.MustCompile(`(?:^|[^A-Za-z0-9_])state/+(?:\./+)*(prompts|grants)(?:$|[^A-Za-z0-9_-])`)
+
+const recordGuardReason = "%s: the person's recorded prompts and pre-tool's grants are what a person act rests on (E2), " +
+	"so only Claude Code's hooks and ape write them, and only ape and Claude Code run its hook and worker plumbing — " +
+	"to have a person act done, ask the person to type its phrase (`ape hook pre-tool --help`)"
+
+// RecordGuard decides a Bash command; Deny is set for one that names the
+// E2 records or runs their plumbing.
+func RecordGuard(command, cwd string) PreToolDecision {
+	if m := recordPathRe.FindStringSubmatch(command); m != nil {
+		return PreToolDecision{Deny: true, Reason: strings.Replace(recordGuardReason, "%s", "the command names _apex/state/"+m[1], 1)}
+	}
+	if !strings.Contains(command, "ape") {
+		return PreToolDecision{}
+	}
+	what := scanCmds(command, cwd, 0, func(words []string, _ string) string {
+		if base := filepath.Base(words[0]); base != "ape" && base != "ape.exe" {
+			return ""
+		}
+		args := words[1:]
+		switch {
+		case len(args) >= 1 && args[0] == "__run":
+			return "`ape __run` is a long run's worker"
+		case len(args) >= 2 && args[0] == "hook" && (args[1] == "user-prompt" || args[1] == "pre-tool"):
+			return "`ape hook " + args[1] + "` is Claude Code's hook"
+		}
+		return ""
+	})
+	if what == "" {
+		return PreToolDecision{}
+	}
+	return PreToolDecision{Deny: true, Reason: strings.Replace(recordGuardReason, "%s", what, 1)}
 }

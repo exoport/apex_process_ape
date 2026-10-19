@@ -46,6 +46,7 @@ var v1OnlyChecks = map[string]bool{
 	"state.gitignore":  true,
 	"settings.shared":  true,
 	"hooks.pre-commit": true,
+	"hooks.prompt":     true,
 }
 
 func init() {
@@ -57,6 +58,7 @@ func init() {
 		doctorCheck{Name: "state.gitignore", Run: checkV1StateGitignore},
 		doctorCheck{Name: "settings.shared", Run: checkV1SettingsShared},
 		doctorCheck{Name: "hooks.pre-commit", Run: checkV1PreCommitHook},
+		doctorCheck{Name: "hooks.prompt", Run: checkV1PromptHook},
 	)
 }
 
@@ -124,7 +126,7 @@ func checkV1Hooks(_ context.Context, env doctorEnv) CheckResult {
 	}
 	fs := p.CheckHooks()
 	if len(fs) == 0 {
-		return CheckResult{Status: StatusOK, Message: fmt.Sprintf("ape's %d hooks registered in .claude/settings.json", len(apexv1.APEHooks()))}
+		return CheckResult{Status: StatusOK, Message: fmt.Sprintf("ape's %d hooks registered in .claude/settings.json", apexv1.RequiredHookCount())}
 	}
 	return CheckResult{
 		Status:      StatusFail,
@@ -151,6 +153,29 @@ func checkV1PreCommitHook(ctx context.Context, env doctorEnv) CheckResult {
 		res.FixCommand = "ape project init --cwd " + p.Root
 	}
 	return res
+}
+
+// checkV1PromptHook reports the UserPromptSubmit hook missing from, or
+// altered in, .claude/settings.json (E2, T10; project check's notice
+// hooks.prompt-absent): without it no prompt is recorded, so a person act
+// from a Claude Code session is refused — safe, and a person's terminal
+// still works, hence a WARN.
+func checkV1PromptHook(_ context.Context, env doctorEnv) CheckResult {
+	p, ok := v1ProjectAt(env.ProjectRoot)
+	if !ok {
+		return CheckResult{Status: StatusSkip, Message: msgNotV1Project}
+	}
+	why := p.PromptHookProblem()
+	if why == "" {
+		return CheckResult{Status: StatusOK, Message: "`" + apexv1.HookCmdUserPrompt + "` records the person's prompts (UserPromptSubmit): person acts can be granted in Claude Code (E2)"}
+	}
+	return CheckResult{
+		Status:  StatusWarn,
+		Message: why + ": a person act from a Claude Code session is refused (no prompt is recorded to grant it)",
+		Remediation: "`ape project init` merges ape's hooks back (existing keys and hooks are kept); " +
+			"meanwhile a person runs person acts from a terminal outside Claude Code.",
+		FixCommand: "ape project init --cwd " + p.Root,
+	}
 }
 
 // checkClaudeVersion reports the installed Claude Code's version. Report

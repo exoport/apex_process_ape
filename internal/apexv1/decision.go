@@ -187,6 +187,10 @@ func (p *Project) NewDecision(ctx context.Context, slug, title, supersedes strin
 // body it was accepted with; from then on `ape project check` refuses an
 // edit to it (supersede it instead).
 func (p *Project) AcceptDecision(ctx context.Context, id, by string) (*DecisionResult, error) {
+	// A person's acceptance (OI-4): a model never accepts its own decision.
+	if err := requirePerson(ctx, ActDecisionAccept, "ape decision accept"); err != nil {
+		return nil, err
+	}
 	if err := p.recoverArchive(ctx); err != nil {
 		return nil, err
 	}

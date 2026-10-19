@@ -454,6 +454,9 @@ func (lx *shellLexer) redirect() {
 	skip(func(r rune) bool { return !strings.ContainsRune(" \t\n;&|()", r) })
 }
 
+// BashCommand reads a Bash tool call's command.
+func BashCommand(input json.RawMessage) string { return bashCommand(input) }
+
 // bashCommand reads a Bash tool call's command.
 func bashCommand(input json.RawMessage) string {
 	var in struct {
@@ -461,4 +464,17 @@ func bashCommand(input json.RawMessage) string {
 	}
 	_ = json.Unmarshal(input, &in)
 	return in.Command
+}
+
+// ApeCommands are the words after `ape` of every ape invocation in a
+// command line, parsed as the guards parse it (person acts, E2).
+func ApeCommands(command string) [][]string {
+	var out [][]string
+	scanCmds(command, "", 0, func(words []string, _ string) string {
+		if base := filepath.Base(words[0]); base == "ape" || base == "ape.exe" {
+			out = append(out, words[1:])
+		}
+		return ""
+	})
+	return out
 }

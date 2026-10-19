@@ -335,7 +335,9 @@ in place of an approved milestone (else exit 1, change.not-approved).
   - re-approving the same plan is a no-op (exit 0, JSON "already": true, nothing written)
   - only a person approves (D47 Q6): refused in a model session — APE_SESSION or
     CLAUDECODE set, a `+"`!`"+` line inside Claude Code included — with exit 2, code
-    session.person-only; run it from a plain terminal
+    session.person-only; run it from a plain terminal, or, in the person's own Claude
+    Code session, the person types "approve <fix-id>" in that turn (E2: `+"`ape hook pre-tool --help`"+`;
+    --by is then git config user.name, recorded with the prompt)
 
 Fixes form a queue: planned and approved between runs (or `+"`ape run stop`"+`, plan, approve,
 restart), never overlapping a run (D45). An approved fix runs ahead of milestone work, at
@@ -349,7 +351,10 @@ checked out in another worktree · 2 usage (no --by), or a model session.`,
 		"  ape change approve fix-login-redirect --by diego",
 		&f,
 		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
-			res, err := p.ApproveFix(cmd.Context(), id, by)
+			if err := v1PersonAct(cmd, p, personCallOf(cmd, cmd.Flags().Args())); err != nil {
+				return v1Fail(cmd, &f, err, nil)
+			}
+			res, err := p.ApproveFix(cmd.Context(), id, personBy(cmd.Context(), by))
 			if err != nil {
 				return v1Fail(cmd, &f, err, nil)
 			}
@@ -880,6 +885,13 @@ second argument (T<n>) or --task.
 
 Accepting a task again replaces its earlier acceptance.
 
+A person's acceptance (--by) is a person's act (OI-4): refused in a model session
+(APE_SESSION or CLAUDECODE set, a `+"`!`"+` line inside Claude Code included) with exit 2,
+session.person-only — unless, in the person's own Claude Code session, the person typed
+"accept <T> of <id>" in that turn (E2: `+"`ape hook pre-tool --help`"+`): --by is then optional
+and must be git config user.name (else session.by-mismatch, exit 1), recorded with the
+prompt. --delegate and --verdict are not person acts.
+
 --delegate: autonomous acceptance (D75, D76). Off by default (D78: project init writes no
 human_review block; without one, delegate.off, action person). Only when
 _apex/config.yaml delegates it:
@@ -1017,6 +1029,10 @@ outside its session) · 75 --delegate: still running, call again.`,
 			case verdict != "":
 				return recordDelegateVerdict(cmd, &f, p, id, task, verdict, reason, evidence, defects)
 			}
+			if err := v1PersonAct(cmd, p, personCallOf(cmd, cmd.Flags().Args())); err != nil {
+				return v1Fail(cmd, &f, err, nil)
+			}
+			by = personBy(cmd.Context(), by)
 			st, err := p.Accept(cmd.Context(), id, task, by, evidence...)
 			if err != nil {
 				return v1Fail(cmd, &f, err, nil)
@@ -1095,14 +1111,19 @@ re-plan is recorded as a re-start). The answer also restarts the counts limits.r
 limits.attempts_total judge (`+"`ape change verify --help`"+`).
 
 Only a person answers (D47 Q6): refused in a model session — APE_SESSION or CLAUDECODE set,
-a `+"`!`"+` line inside Claude Code included — with exit 2, session.person-only.
+a `+"`!`"+` line inside Claude Code included — with exit 2, session.person-only — unless, in
+the person's own Claude Code session, the person typed "answer <id>: <the --text>" in that
+turn (E2: `+"`ape hook pre-tool --help`"+`; --by is then git config user.name, recorded with the prompt).
 
 Exit codes: 0 answered · 1 not blocked, no such change, or the branch is checked out in
 another worktree · 2 usage (no --text or --by), or a model session.`,
 		`  ape change answer add-tenant-delete --text "soft delete; keep rows 30 days" --by diego`,
 		&f,
 		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
-			st, err := p.AnswerChange(cmd.Context(), id, text, by)
+			if err := v1PersonAct(cmd, p, personCallOf(cmd, cmd.Flags().Args())); err != nil {
+				return v1Fail(cmd, &f, err, nil)
+			}
+			st, err := p.AnswerChange(cmd.Context(), id, text, personBy(cmd.Context(), by))
 			if err != nil {
 				return v1Fail(cmd, &f, err, nil)
 			}
@@ -1215,7 +1236,10 @@ func newChangeArchiveCmd() *cobra.Command {
      caps.over-ceiling (caps: holding a value above its ceiling); human-
      review tasks must be accepted, unless --allow-pending-human (recorded) — a person's
      flag only (D45): refused in a model session (APE_SESSION or CLAUDECODE set) with exit
-     2, session.person-only; the orchestrator leaves such a change reviewed and moves on.
+     2, session.person-only — unless, in the person's own Claude Code session, the person
+     typed "allow pending human on <id>" in that turn (E2: `+"`ape hook pre-tool --help`"+`; recorded
+     as allow_pending_human_by, and a plain archive running on the change is run.busy); the
+     orchestrator leaves such a change reviewed and moves on.
      An archived change's unaccepted tasks stay in `+"`ape status`"+` and stay acceptable
      (`+"`ape change accept --help`"+`)
   2. runs with HEAD on change/<id>, or on another non-change branch (it switches to
@@ -1285,6 +1309,7 @@ rebase conflicts or the delta no longer applies.`,
 		"  ape change archive add-tenant-delete",
 		&f,
 		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
+			f.person = personCallOf(cmd, cmd.Flags().Args())
 			return runLong(cmd, &f, p, id, func(ctx context.Context, opt apexv1.RunOptions) renderFn {
 				res, err := p.Archive(ctx, id, allowPending, opt)
 				return func(cmd *cobra.Command, f *v1Flags) error { return renderArchive(cmd, f, id, res, err) }

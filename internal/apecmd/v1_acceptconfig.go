@@ -41,14 +41,17 @@ A person who made the change, or approves it, accepts it: this command commits a
 and every guarded change before it is clean. A later change is judged again. A git revert of the change also clears it.
 
 Only a person accepts (D47 Q6): refused in a model session — APE_SESSION or CLAUDECODE set,
-which includes a ` + "`!`" + ` line inside Claude Code — with exit 2, code session.person-only.
+which includes a ` + "`!`" + ` line inside Claude Code — with exit 2, code session.person-only,
+unless, in the person's own Claude Code session, the person typed "accept the config" in
+this turn (E2: ` + "`ape hook pre-tool --help`" + `; --by is then git config user.name, recorded with
+the prompt; another --by is session.by-mismatch, exit 1).
 Refused on a change branch, and with staged changes in the index.
 
 Exit codes: 0 accepted (prints the commit) · 1 HEAD on a change branch, staged changes, or
 git failed · 2 usage, or a model session.`,
 		Example: "  ape project accept-config --by diego",
 		Args:    cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			p, err := v1Project(&f)
 			if err != nil {
 				return err
@@ -56,7 +59,10 @@ git failed · 2 usage, or a model session.`,
 			if err := v1RequireInit(cmd, &f, p); err != nil {
 				return err
 			}
-			sha, err := p.AcceptConfig(cmd.Context(), by)
+			if err := v1PersonAct(cmd, p, personCallOf(cmd, args)); err != nil {
+				return v1Fail(cmd, &f, err, nil)
+			}
+			sha, err := p.AcceptConfig(cmd.Context(), personBy(cmd.Context(), by))
 			if err != nil {
 				return v1Fail(cmd, &f, err, nil)
 			}
