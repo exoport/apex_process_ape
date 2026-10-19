@@ -474,19 +474,7 @@ and unrelated work-in-progress elsewhere does not block anything.`,
 			if err != nil {
 				return handleUpdateError(err)
 			}
-			warnOperatingRulesSkew(res.Summary)
-			if err := printFrameworkUpdate(
-				&frameworkUpdateOutput{Metadata: res.Metadata, Summary: res.Summary}, format,
-			); err != nil {
-				return err
-			}
-			if err := migrateAndCommitUpdate(cmd, projectRoot, prior, res, untracked, noMigrate, !rf.noCommit); err != nil {
-				return err
-			}
-			if repair {
-				return runFrameworkRepair(cmd, projectRoot)
-			}
-			return nil
+			return finishFrameworkUpdate(cmd, format, projectRoot, prior, res, untracked, noMigrate, !rf.noCommit, repair)
 		},
 	}
 	cmd.Flags().BoolVar(&noFetch, "no-fetch", false, "Skip fetching the framework and governance repos; use the releases they already hold")
@@ -507,6 +495,26 @@ and unrelated work-in-progress elsewhere does not block anything.`,
 	return cmd
 }
 
+// finishFrameworkUpdate is `update` after framework.Update installed: the
+// report, the migrations and the commit, then --repair.
+func finishFrameworkUpdate(cmd *cobra.Command, format output.Format, projectRoot string, prior *framework.Metadata,
+	res *framework.UpdateResult, untracked map[string]bool, noMigrate, commit, repair bool,
+) error {
+	warnOperatingRulesSkew(res.Summary)
+	if err := printFrameworkUpdate(
+		&frameworkUpdateOutput{Metadata: res.Metadata, Summary: res.Summary}, format,
+	); err != nil {
+		return err
+	}
+	if err := migrateAndCommitUpdate(cmd, projectRoot, prior, res, untracked, noMigrate, commit); err != nil {
+		return err
+	}
+	if repair {
+		return runFrameworkRepair(cmd, projectRoot)
+	}
+	return nil
+}
+
 // migrateAndCommitUpdate is the half of `update` after the install: the
 // project-data and upgrade migrations (unless --no-migrate), then the one
 // commit recording the install and the migrations it ran. A blocking
@@ -520,15 +528,8 @@ func migrateAndCommitUpdate(cmd *cobra.Command, projectRoot string, prior *frame
 		fmt.Fprintln(cmd.OutOrStdout(),
 			"migration: skipped (--no-migrate) — `ape doctor` will report it as pending")
 	} else {
-		if err := runProjectMigrations(cmd.Context(), cmd.OutOrStdout(), projectRoot); err != nil {
-			return err
-		}
-		start, _ := gitOut(cmd.Context(), projectRoot, "rev-parse", "-q", "--verify", "HEAD")
 		var err error
-		if applied, err = runUpgradeMigrationsApplied(cmd.Context(), cmd.OutOrStdout(), projectRoot); err != nil {
-			if be, ok := errors.AsType[*blockingMigrationError](err); ok {
-				return refuseBlockedUpdate(cmd, projectRoot, untracked, res.Summary.AboardCreated, strings.TrimSpace(start), be, commit)
-			}
+		if applied, err = runUpdateMigrations(cmd, projectRoot, res, untracked, commit); err != nil {
 			return err
 		}
 	}
@@ -550,6 +551,24 @@ func migrateAndCommitUpdate(cmd *cobra.Command, projectRoot string, prior *frame
 	}
 	return commitInstall(cmd.Context(), cmd.OutOrStdout(), projectRoot, untracked,
 		updateSubject(prior, &meta, applied), meta, applied, generatorTrailer)
+}
+
+// runUpdateMigrations runs an update's project-data and upgrade migrations
+// and returns the upgrade ids applied; a blocking one left unapplied ends
+// the update through refuseBlockedUpdate.
+func runUpdateMigrations(cmd *cobra.Command, projectRoot string, res *framework.UpdateResult, untracked map[string]bool, commit bool) ([]string, error) {
+	if err := runProjectMigrations(cmd.Context(), cmd.OutOrStdout(), projectRoot); err != nil {
+		return nil, err
+	}
+	start, _ := gitOut(cmd.Context(), projectRoot, "rev-parse", "-q", "--verify", "HEAD")
+	applied, err := runUpgradeMigrationsApplied(cmd.Context(), cmd.OutOrStdout(), projectRoot)
+	if err != nil {
+		if be, ok := errors.AsType[*blockingMigrationError](err); ok {
+			return nil, refuseBlockedUpdate(cmd, projectRoot, untracked, res.Summary.AboardCreated, strings.TrimSpace(start), be, commit)
+		}
+		return nil, err
+	}
+	return applied, nil
 }
 
 // refuseBlockedUpdate ends an update whose blocking migration failed or was

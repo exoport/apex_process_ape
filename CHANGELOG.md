@@ -114,6 +114,29 @@ and E-R6b-2's refusal text (D161), and the v1 framework install order (D162, D16
 - **`ape framework setup`, then `ape project init`.** init's `next:` (JSON
   `next`) names `ape framework setup` while no `.claude/skills/apex-*` exists;
   the tutorial installs the framework first.
+- **`ape framework setup|update` install an APEX v1 release** (D162-1): a
+  release is `.claude/skills/` plus `_apex/ape-commands.yaml` (or, for v0,
+  `_apex/pipelines/`); v1 is a manifest whose `min_ape_version` is 1.0.0 or
+  later. Before, every v1 release was refused (exit 3): the trial installed
+  payloads by copying them.
+- **A v1 release seeds no config** (D162-2): `ape project init` writes
+  `_apex/config.yaml`; `--project-name`/`--extensions` are not needed, and are
+  reported as ignored when given.
+- **A v1 install removes `_apex/migrations/v0.*`** in its commit, and the
+  runner, `--plan` and doctor never plan an entry below 1.0.0 (D162-3). The
+  ledger keeps its history.
+- **An update whose blocking migration is not applied commits nothing**
+  (D162-4): a `blocking: true` derivable entry (the lift) that failed, was not
+  attempted, cannot run, or whose check cannot run makes `update` exit 1,
+  naming each entry with its reason; the tree is put back (the install's files
+  reverted, files it added removed). A migration's own commit (the lift's)
+  stays. A migration command's stderr is now shown.
+- **No v0 noise for a v1 release** (D162-7): no operating-rules,
+  commit-owners, output-styles or legacy-xhigh notices, no lock-file ignore
+  line. `Generator:` names the command that ran (`ape framework setup` or
+  `ape framework update`), for every release.
+- **setup of a v1 release ends with `next: ape project init`** when the
+  project has no v1 layout (JSON `next`).
 - **A framework install commit is not "outside the change flow"** (D162-6):
   a `Framework-Version:` commit touching only what an install writes
   (`.claude/`, `.aboard/`, `.gitignore`, `CLAUDE.md`, `AGENTS.md`). The trailer

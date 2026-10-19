@@ -177,11 +177,12 @@ func v0Installed(t *testing.T) (fw, root string) {
 	return fw, root
 }
 
-// v1OnTopOf turns the fake v0 framework repo into a v1 release at tag: the
+// v1OnTopOf turns the fake v0 framework repo into a v1 release, v1.0.0: the
 // manifest and a lift entry added, the v0 pipelines kept so the old ape's
 // layout check passes and only the migration behaviour is under test.
-func v1OnTopOf(t *testing.T, fw, tag, liftEntry string) {
+func v1OnTopOf(t *testing.T, fw, liftEntry string) {
 	t.Helper()
+	const tag = "v1.0.0"
 	writeTree(t, fw, map[string]string{
 		framework.SubtreeApeCommands:                           v1ReleaseManifest,
 		framework.SubtreeSkills + "/apex-foo/SKILL.md":         "# apex-foo v1\n",
@@ -195,7 +196,7 @@ func v1OnTopOf(t *testing.T, fw, tag, liftEntry string) {
 // one (the pending v0.24.0 included), and the ledger keeps its v0 history.
 func TestFrameworkInstallV1_UpdateFromV0DropsV0Migrations(t *testing.T) {
 	fw, root := v0Installed(t)
-	v1OnTopOf(t, fw, "v1.0.0", v1LiftEntry("test -f lifted", "touch lifted"))
+	v1OnTopOf(t, fw, v1LiftEntry("test -f lifted", "touch lifted"))
 
 	out, err := runFramework(t, "update", fw, root, "--no-fetch", "--version", "v1.0.0")
 	require.NoError(t, err, out)
@@ -210,7 +211,7 @@ func TestFrameworkInstallV1_UpdateFromV0DropsV0Migrations(t *testing.T) {
 
 	meta, err := framework.ReadMetadata(root)
 	require.NoError(t, err)
-	var ids []string
+	ids := make([]string, 0, len(meta.Migrations))
 	for _, m := range meta.Migrations {
 		ids = append(ids, m.ID)
 	}
@@ -221,7 +222,7 @@ func TestFrameworkInstallV1_UpdateFromV0DropsV0Migrations(t *testing.T) {
 // even the installed ones the update is about to remove.
 func TestFrameworkInstallV1_PlanListsNoV0Entry(t *testing.T) {
 	fw, root := v0Installed(t)
-	v1OnTopOf(t, fw, "v1.0.0", v1LiftEntry("test -f lifted", "touch lifted"))
+	v1OnTopOf(t, fw, v1LiftEntry("test -f lifted", "touch lifted"))
 	r, cwd := fw, root
 	cmd := newFrameworkUpdateCmd(&r, &cwd)
 	cmd.SetArgs([]string{"--plan", "--no-fetch", "--no-check", "--version", "v1.0.0"})
@@ -239,7 +240,7 @@ func TestFrameworkInstallV1_PlanListsNoV0Entry(t *testing.T) {
 // from the release again.
 func TestFrameworkInstallV1_FailedBlockingMigrationCommitsNothing(t *testing.T) {
 	fw, root := v0Installed(t)
-	v1OnTopOf(t, fw, "v1.0.0", v1LiftEntry("exit 1", "echo lift refused >&2; exit 3"))
+	v1OnTopOf(t, fw, v1LiftEntry("exit 1", "echo lift refused >&2; exit 3"))
 	head := gitRun(t, root, "rev-parse", "HEAD")
 	skill, err := os.ReadFile(filepath.Join(root, framework.ProjectSkillsDir, "apex-foo", "SKILL.md"))
 	require.NoError(t, err)
@@ -269,7 +270,7 @@ func TestFrameworkInstallV1_UnattemptedBlockingMigrationCommitsNothing(t *testin
 		framework.SubtreeMigrations + "/v1.0.0_seq-00_first.md": "---\nid: v1.0.0_seq-00\nversion: 1.0.0\nseq: 0\n" +
 			"kind: derivable\nblocking: false\ncheck: \"exit 1\"\ncommand: \"exit 4\"\n---\nbody\n",
 	})
-	v1OnTopOf(t, fw, "v1.0.0", v1LiftEntry("test -f lifted", "touch lifted"))
+	v1OnTopOf(t, fw, v1LiftEntry("test -f lifted", "touch lifted"))
 	head := gitRun(t, root, "rev-parse", "HEAD")
 
 	out, err := runFramework(t, "update", fw, root, "--no-fetch", "--version", "v1.0.0")

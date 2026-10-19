@@ -2979,9 +2979,11 @@ ape framework
 
 Manage the apex_process_framework assets installed at the project root.
 
-  ape framework setup      One-time install: skills + pipelines + bootstrap
-                           _apex/config.yaml. Refuses if already installed
-                           (pass --force to re-bootstrap).
+  ape framework setup      One-time install: skills (+ pipelines and a
+                           bootstrapped _apex/config.yaml for APEX v0; an
+                           APEX v1 project runs 'ape project init' next).
+                           Refuses if already installed (pass --force to
+                           re-bootstrap).
   ape framework update     Install the framework's newest release (or
                            --version) and commit it. Refuses if not yet
                            set up (run setup first).
@@ -3025,20 +3027,41 @@ framework's newest release tag (--version picks one; --from-worktree
 installs the repo's working tree instead):
 
   - .claude/skills/apex-*  copied from <repo>/.claude/skills
-  - _apex/pipelines/*.yaml copied from <repo>/_apex/pipelines
-  - _apex/config.yaml      seeded (interactive prompt by default;
-                           supply --project-name and --extensions to
-                           skip the TUI; --no-bootstrap to skip seeding
+  - _apex/pipelines/*.yaml copied from <repo>/_apex/pipelines, when the
+                           release ships any (APEX v0)
+  - _apex/config.yaml      seeded, APEX v0 only (interactive prompt by
+                           default; supply --project-name and --extensions
+                           to skip the TUI; --no-bootstrap to skip seeding
                            entirely)
   - _apex/framework.yaml   metadata recording what was installed.
 
+A release is a tag whose tree holds .claude/skills/ and
+_apex/ape-commands.yaml at its root (an APEX v0 release may hold
+_apex/pipelines/ instead of the manifest). It is APEX v1 when that
+manifest's min_ape_version is 1.0.0 or later. An APEX v1 release:
+  - seeds no _apex/config.yaml: 'ape project init' writes it, so neither
+    --project-name nor --extensions is needed, headless or not (passed,
+    they are ignored, and setup says so)
+  - removes the project's APEX v0 migration entries (_apex/migrations/v0.*)
+    in the install commit; the ledger in _apex/framework.yaml keeps them
+  - skips v0's surfaces: the operating-rules, commit-owners, output-styles
+    and effort-table notices, and the sprint-status.yaml.lock .gitignore
+    line. .aboard/ is still created
+  - ends with 'next: ape project init' when the project has no v1 layout
+    yet (and the JSON carries "next"). Either order works; setup first
+    keeps the install commit before the project's v1 epoch.
+
 The install is committed as 'chore(framework): install APEX framework
-vX.Y.Z' with Framework-Version / Framework-Commit / Generator trailers.
---no-commit leaves it in the working tree instead.
+vX.Y.Z' with Framework-Version / Framework-Commit trailers and
+'Generator: ape framework setup'. --no-commit leaves it in the working
+tree instead.
 
 Refuses to run when:
   - _apex/framework.yaml already exists (pass --force to re-bootstrap;
     this resets project_name and extensions)
+  - the release is not a release layout: no .claude/skills/, or neither
+    _apex/ape-commands.yaml nor _apex/pipelines/ (exit 3; the message
+    names what is missing)
   - committing, and the project is not a git repo, is on a detached HEAD,
     or has modified or staged tracked files (exit 4)
   - this ape is older than the release's min_ape_version (exit 11; on a
@@ -3052,10 +3075,10 @@ Refuses to run when:
     release, or diverged from it, is left where it is and reported. ape's
     own clones under the user cache are always overwritten
 
-Headless contexts: when stdout is not a TTY (or --output-format is not
-human) and the project lacks _apex/config.yaml, you must supply
---project-name and --extensions, OR pass --no-bootstrap. Otherwise
-'setup' refuses to seed silently.
+Headless contexts (APEX v0 releases): when stdout is not a TTY (or
+--output-format is not human) and the project lacks _apex/config.yaml,
+you must supply --project-name and --extensions, OR pass --no-bootstrap.
+Otherwise 'setup' refuses to seed silently (exit 5).
 
 For subsequent refreshes against a framework version bump, use
 'ape framework update'.
@@ -3130,9 +3153,18 @@ Install the framework's newest release tag (or the one --version names;
 --from-worktree installs the repo's working tree instead) into <project>:
 
   - .claude/skills/apex-*  re-copied from <repo>/.claude/skills
-  - _apex/pipelines/*.yaml re-copied from <repo>/_apex/pipelines
+  - _apex/pipelines/*.yaml re-copied from <repo>/_apex/pipelines, when the
+                           release ships any (APEX v0)
   - _apex/framework.yaml   metadata refreshed (preserves project_name +
                            extensions recorded by 'ape framework setup')
+
+A release holds .claude/skills/ and _apex/ape-commands.yaml at its root
+(an APEX v0 release may hold _apex/pipelines/ instead of the manifest);
+see 'ape framework setup --help' for what makes it APEX v1. Installing an
+APEX v1 release removes the project's APEX v0 migration entries
+(_apex/migrations/v0.*) in the update commit, and the runner never plans
+or runs an entry below 1.0.0, whatever the ledger says; the ledger keeps
+its history. v0's notices and its .gitignore lock line are skipped.
 
 Then any pending PROJECT-DATA migration (PLAN-25 D10), and then the
 framework's own per-version UPGRADE list from _apex/migrations/*.md.
@@ -3154,7 +3186,19 @@ entry unapplied-and-unverifiable, which is reported and blocks nothing.
 The install and the migrations it ran are committed together as
 'chore(framework): update APEX framework to vX.Y.Z', with Framework-Version,
 Framework-Commit, Framework-Migrations and Generator trailers; an update
-that changed nothing commits nothing. When this ape is older than the
+that changed nothing commits nothing. A migration that commits on its own
+(the v1.0.0 lift) lands its commit first.
+
+A 'blocking: true' derivable migration — the lift, above all — is one the
+install is not valid without. When one fails or is not attempted (an
+earlier entry failed, its check could not run, it cannot be run), the
+update exits 1, names it and why, and commits nothing: the install is
+reverted and the tree is as the update found it, so a re-run starts from
+the release again. Its own error is printed where it ran. A commit that
+migration (or an earlier one) made itself stays. With --no-commit the
+result is left in the working tree instead. Any other failed migration
+is reported, the ledger keeps what succeeded, and the update still
+commits the install. When this ape is older than the
 release's min_ape_version, a terminal is offered an ape update first (bingo
 when the project pins ape, else 'ape update'), committed as
 'chore(ape): update ape to vA.B.C' when bingo changed, and the command
@@ -3209,8 +3253,9 @@ Refuses to run when:
     release, or diverged from it, is left where it is and reported. ape's
     own clones under the user cache are always overwritten
 
-Exit codes: 2 usage; 3 the framework source (no release, missing tag,
-build layout); 4 the project tree; 7 not installed; 11 ape below
+Exit codes: 1 a blocking migration was not applied (nothing committed);
+2 usage; 3 the framework source (no release, missing tag, not a release
+layout); 4 the project tree; 7 not installed; 11 ape below
 min_ape_version; 12 a commit failed (the changes are left staged).
 
 A migration is skipped (never forced) when ITS OWN paths have uncommitted

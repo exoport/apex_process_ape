@@ -447,8 +447,9 @@ func joinAll(findings []string) string {
 // is kept so its finding is still reported.
 func TestDropBelow_KeepsOnlyTheFloorAndAbove(t *testing.T) {
 	in := []Entry{{ID: "a", Version: "0.24.0"}, {ID: "b", Version: "v1.0.0"}, {ID: "c", Version: "1.2.0"}, {ID: "d", Version: "soon"}}
-	var ids []string
-	for _, e := range DropBelow(in, "1.0.0") {
+	kept := DropBelow(in, "1.0.0")
+	ids := make([]string, 0, len(kept))
+	for _, e := range kept {
 		ids = append(ids, e.ID)
 	}
 	require.Equal(t, []string{"b", "c", "d"}, ids)
