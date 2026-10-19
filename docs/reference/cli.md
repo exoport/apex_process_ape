@@ -2117,7 +2117,17 @@ change does not MODIFY or REMOVE (regression), plus the scenarios of its own ADD
 MODIFIED blocks — of the capabilities the change touches (frontmatter touches:), plus any
 other scenario whose check command is identical to a task's (H10). The rest of the spec
 is the milestone gate's to run (`ape milestone gate` runs all of it). human-review checks
-are not run. A command shared by several checks runs once. Each check runs under
+are not run. A command shared by several checks runs once. A check, regression or gate
+command that is one ( … ) block of several lines, each a simple command, runs as its lines
+joined by && — each line's exit counts, as under set -e (a line that is itself a ;, & or
+|| list goes in { …; }) — and its log opens with "split into N commands". A line's
+constructs count as simple when they open and close on that line (for … done, while …
+done, if … fi, case … esac, { … }, [[ … ]], (( … ))). A block with a line that changes the
+shell's state (cd, export, set, NAME=value, … — inside a same-line loop too; a ( … )
+subshell's own cd is fine), continues (a trailing \), opens a construct it closes on
+another line, defines a function, starts a here-doc, or is already joined (&&, ||, ; at
+its end) runs as written, its log saying which line. JSON cmd stays the command as
+configured. Each check runs under
 _apex/config.yaml timeouts.check (default idle 15m, max 2h), the regression command under
 timeouts.regression (idle 30m, max 2h): a command that makes no progress — no output, no
 CPU time used by its process group — for idle, or still runs at max, is killed with its
@@ -4040,7 +4050,8 @@ Fifteen blocks of _apex/config.yaml can loosen what ape enforces, and are guarde
   marketplaces, plugins, tools   what runs inside a session (hooks, MCP, skills)
   human_review  who accepts a human-review task in a person's place (D75; docs: D152)
   release       how apex-release proposes the next version, and what it brings up to date (D120)
-  secrets       the fingerprints the commit secret scan lets through (D155; commit.secret)
+  secrets       the fingerprints the commit secret scan lets through (D155; commit.secret):
+                an entry counts only once a person accepts it (R23)
 The guard compares whole blocks, either way: raising a cap or a timeout loosens as surely
 as lowering one. Since the project's v1 epoch (the newest "apex: project init" or "apex:
 lift" commit; a block committed before it, or in it, is the baseline), a commit that
@@ -4107,8 +4118,10 @@ command any session may run (not person-only).
 (archive.legacy-layout, naming them) when some is — the migration's check: 0 applied,
 1 not applied.
 
-JSON: {"moved": [{"id", "from", "to"}], "rewritten": [<state.json>], "commit"}; under
---check, "moved" lists what would move.
+JSON: {"moved": [{"id", "from", "to"}], "rewritten": [<state.json>], "commit"}; "moved"
+is always there, [] when nothing moved. Under --check it lists what is left to move, at
+the top level beside the failure's ok/exit/diagnostics when some is (exit 1), and is []
+when nothing is (exit 0).
 
 Exit codes: 0 moved, or nothing to move (--check: nothing left) · 1 refused, or (--check)
 some left · 3 a folder's new place exists.
@@ -4328,6 +4341,10 @@ Create the APEX v1 skeleton where it is absent. Nothing that exists is overwritt
 project-context line added to an AGENTS.md that lacks it, and the models: defaults
 appended to an _apex/config.yaml that has no models: block).
 
+A new project installs the framework's skills first, then runs init: `ape framework setup`,
+then `ape project init` (each names the other in its next:, D162). init's next: asks
+for setup while no .claude/skills/apex-* exists; JSON "next" carries the same line.
+
   _apex/config.yaml                  project_name, development_folder, and the models:
                                      defaults (D65, D93) — apex-apply, apex-orchestrator
                                      and apex-release {model: sonnet, effort: high};
@@ -4511,7 +4528,10 @@ where, what M1 delivers) is apex-plan's, from the disposition file this writes.
 
 Before: a person tags the commit to lift and pushes the tag. The tag is the archive of
 everything the lift deletes; v0 files stay readable as `git show apex-v0-final:<path>`.
+The lift checks the tag on the current branch's upstream, so the branch needs one
+(D162-5): `git push -u origin <branch>` once, if `git rev-parse @{u}` fails.
 
+  git push -u origin "$(git branch --show-current)"   # only when the branch has no upstream
   git tag -a apex-v0-final -m "APEX v0 final" && git push origin apex-v0-final
   ape project lift --dry-run        # the whole plan, nothing written
   ape project lift
@@ -4612,9 +4632,12 @@ The commit:
                  read-only review, then the person, who deletes it. Then "Code and
                  tests that read deleted v0 state": every kept code, test, script,
                  Makefile or CI file (not docs, not evidence) that names a path the
-                 lift deletes outside its comments — by its path (./ and ../ too), a
-                 path under a deleted folder, or the base name of a deleted file when
-                 it has an extension and no other file has it — one line per file with
+                 lift deletes outside its comments (SQL's -- and /* */ too) — by its
+                 path (./ and ../ too), a path under a deleted folder at a segment
+                 boundary, or the base name of a deleted file when it has an extension
+                 and no other file has it and its line reads it (cat, test -f, an
+                 open/read/glob/Join call, a quoted path; not an echo, a printf or a
+                 test's or logger's message) — one line per file with
                  what it reads (--json and the report: v0_state_readers, {file,
                  reads}); re-point each to v1 state or retire it. Then, as summaries:
                  other code and CI that still names removed paths (in a comment, or a
@@ -4659,7 +4682,11 @@ regression_new_failures) · red-after-lift (green at the tag: the LIFT broke it 
 in a commit, or reset to the tag and lift with --exclude) · cannot-run (exit 126/127, or
 an output saying a command was not found — "command not found", "No such file or
 directory" — with make's "Error 127", and no failing test named: a tool it runs is
-missing here, which is not a red; read the same at both points) · red-no-baseline. Red at both, the
+missing here, which is not a red; read the same at both points) · red-no-baseline. A run
+that exits 0 but whose output names failing tests (as below) is red for the verdict, by
+those names, and its note says "exit 0, but the output names N failing tests": green at
+the tag, it is red-after-lift with the names in regression_new_failures (a ( … ) block
+without set -e passes on its last line's exit alone). Red at both, the
 failing tests are compared by name where the output names them (go test "--- FAIL:",
 gotestsum "=== FAIL: <pkg> <test>" and "✖ <pkg>", pytest "FAILED", cargo "... FAILED",
 jest "✕", flutter and dart test "<name> [E]", the counters before the name dropped);

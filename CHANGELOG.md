@@ -5,7 +5,8 @@
 On top of rc.5 and the candidates below: research's rc.5 lift findings R16–R22, the v0
 state readers (D141), the docs delegate by default (D152), and gates, archive layout,
 hot/ and the secret scan (D155), the changelog in the docs delegate's scope (D158), and no
-wall-clock kill of a run that shows progress (D159).
+wall-clock kill of a run that shows progress (D159), research's rc.6 lift findings R23–R28
+and E-R6b-2's refusal text (D161), and the v1 framework install order (D162, D163).
 
 ### `ape project lift`
 
@@ -63,6 +64,62 @@ wall-clock kill of a run that shows progress (D159).
   `betterleaks:allow` markers and `.betterleaksignore` are not honoured; bingo
   `.sum` files are skipped. A session's own commits are scanned when the
   archive squashes them. The binary grows by about 8 MB.
+
+### The secret scan, the guard and the refusal (D161: R23, R28, E-R6b-2; class B/C)
+
+- **`secrets.allow` counts from the guard's baseline** (R23): the newest `apex:
+  config accepted` since the v1 epoch, else the epoch. A session can no longer
+  commit its own allow entry and then the secret: a committed, unaccepted entry
+  lets nothing through, and the refusal says "its allow entry is committed but
+  not accepted". The baseline decides both ways (an unaccepted removal waits
+  for acceptance too). Before a v1 epoch the scanned commit's config is read.
+- **A refusal undoes ape's own record edit** (R28): `next add`, accepts,
+  answers, decisions, milestone records, gate results, `state.json`, `change
+  new`. A file that was clean is restored (a created one removed); one that was
+  not keeps its tree and gets its index back, with the command that clears it.
+  Commits carrying a model's or a person's work (change notes, catch-up, the
+  milestone close, the archive squash, the lift) are never undone; the refusal
+  prints the `git restore --staged` command.
+- **The refusal names the placeholder fix first** (E-R6b-2): "replace each with
+  a placeholder (`<token>`, `$TOKEN`) — an example in docs never needs a real
+  value — or move a real secret to hot/"; the allow entry comes second.
+- **The refusal no longer echoes the secret through the commit subject.** `next
+  add`'s subject (the text cut at 60 characters) could show a token whole, or
+  all but one character; any secret or secret prefix in it is now redacted.
+
+### Lift and checks (D161: R24–R27; class B/C)
+
+- **Exit 0 with failing tests named is red in the lift's verdict** (R24a): a
+  regression run whose output names failing tests counts red by those names —
+  `red-after-lift` with `regression_new_failures` when the tag was green; the
+  note says "exit 0, but the output names N failing tests".
+- **A multi-line `( … )` block runs as its lines joined by `&&`** (R24b), for
+  every check, regression and gate: each line's exit counts, as under `set -e`.
+  Only when every line is a complete command (a construct that opens and
+  closes on its line counts) and none changes shell state; otherwise it runs as
+  written, and the log says why. The recorded `cmd` is the configured string;
+  the log says "split into N commands". A project whose block passed only on
+  its last line's exit now goes red (cortex: its `go test` line).
+- **D141 readers** (R25): SQL `--` and `/* */` are comments, and a deleted
+  file's base name counts only where the line reads a file (not in `echo`,
+  `printf` or a test/log message). Path-prefix matches are unchanged.
+- **A removed folder matches only at a path-segment boundary** (R26), in
+  `references_to_removed_paths` and in the comment editor.
+- **`ape project archive-layout --json` always carries `moved`** (R27): `[]`
+  when nothing is left; under `--check` the folders left to move, at the top
+  level beside the diagnostics.
+
+### Installing a v1 framework (D162, D163; class C)
+
+- **`ape framework setup`, then `ape project init`.** init's `next:` (JSON
+  `next`) names `ape framework setup` while no `.claude/skills/apex-*` exists;
+  the tutorial installs the framework first.
+- **A framework install commit is not "outside the change flow"** (D162-6):
+  a `Framework-Version:` commit touching only what an install writes
+  (`.claude/`, `.aboard/`, `.gitignore`, `CLAUDE.md`, `AGENTS.md`). The trailer
+  on a commit that also touches code exempts nothing.
+- **The lift help says the branch needs an upstream** (D162-5): the lift
+  checks the `apex-v0-final` tag there.
 
 ### A working run is never killed for time (D159; class B/C)
 
