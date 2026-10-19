@@ -6,7 +6,7 @@ On top of rc.5 and the candidates below: research's rc.5 lift findings R16–R22
 state readers (D141), the docs delegate by default (D152), and gates, archive layout,
 hot/ and the secret scan (D155), the changelog in the docs delegate's scope (D158), and no
 wall-clock kill of a run that shows progress (D159), research's rc.6 lift findings R23–R28
-and E-R6b-2's refusal text (D161), and the v1 framework install order (D162, D163).
+and E-R6b-2's refusal text (D161), the v1 framework install order (D162, D163), and research's rc.6c lift probes R29–R31 (D166).
 
 ### `ape project lift`
 
@@ -108,6 +108,21 @@ and E-R6b-2's refusal text (D161), and the v1 framework install order (D162, D16
 - **`ape project archive-layout --json` always carries `moved`** (R27): `[]`
   when nothing is left; under `--check` the folders left to move, at the top
   level beside the diagnostics.
+
+### The lift's regression and readers, again (D166: R29–R31; class C)
+
+- **The lift names a red run's failing tests whatever its exit code** (R29):
+  `regression_new_failures` holds the names the after-lift output gives, minus
+  those that failed at the tag, also for a non-zero exit (cortex's 7 tests were
+  only in the log).
+- **The lift runs a `( … )` block's lines each on its own** (R30), in its two
+  comparison runs only: one `regression_commands` entry per line, each past a
+  red one, so a red `go test` no longer hides the builds after it. Verify,
+  gates and checks keep the `&&` join.
+- **A whole removed path in a message is no v0 state reader** (R31): R25's
+  echo/printf/test-or-log-message rule also covers full paths, a message
+  carried onto the next line included. A read on the line (`cat`, `open`,
+  `os.ReadFile`, `os.listdir`, a redirection, …) still counts.
 
 ### Installing a v1 framework (D162, D163; class C)
 

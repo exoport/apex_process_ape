@@ -4680,9 +4680,13 @@ The commit:
                  lift deletes outside its comments (SQL's -- and /* */ too) — by its
                  path (./ and ../ too), a path under a deleted folder at a segment
                  boundary, or the base name of a deleted file when it has an extension
-                 and no other file has it and its line reads it (cat, test -f, an
-                 open/read/glob/Join call, a quoted path; not an echo, a printf or a
-                 test's or logger's message) — one line per file with
+                 and no other file has it and its line reads it (cat, test -f, a
+                 redirection, an open/read/glob/Join call, a quoted path). Neither
+                 counts in an echo's or a printf's words or a test's or logger's
+                 message (t.Errorf, fmt.Errorf, log.*, console.*, print(, a testify
+                 message), a message string a call opens on one line and carries on
+                 the next included, unless a reading call or command on its line
+                 takes it — one line per file with
                  what it reads (--json and the report: v0_state_readers, {file,
                  reads}); re-point each to v1 state or retire it. Then, as summaries:
                  other code and CI that still names removed paths (in a comment, or a
@@ -4731,7 +4735,9 @@ missing here, which is not a red; read the same at both points) · red-no-baseli
 that exits 0 but whose output names failing tests (as below) is red for the verdict, by
 those names, and its note says "exit 0, but the output names N failing tests": green at
 the tag, it is red-after-lift with the names in regression_new_failures (a ( … ) block
-without set -e passes on its last line's exit alone). Red at both, the
+without set -e passes on its last line's exit alone). A run red at the lift commit and
+green at the tag lists the failing tests its output names in regression_new_failures
+whatever its exit code (less any the tag's run named), at most 50. Red at both, the
 failing tests are compared by name where the output names them (go test "--- FAIL:",
 gotestsum "=== FAIL: <pkg> <test>" and "✖ <pkg>", pytest "FAILED", cargo "... FAILED",
 jest "✕", flutter and dart test "<name> [E]", the counters before the name dropped);
@@ -4745,7 +4751,13 @@ each command is judged on its own, regression_verdict and the regression_* field
 the worst one's, and --json lists every command in regression_commands (cmd, verdict,
 note, new_failures, regression, regression_at_tag; logs regression-<n>.log and
 regression-<n>-at-tag.log). From a command that changes the shell's state (cd, export,
-source, NAME=value, …) on, the chain stays one command. The exit code stays 0: the
+source, NAME=value, …) on, the chain stays one command. A ( … ) block of several lines
+that splits (each line a simple command, as a change's verify splits it) is, for these
+two runs, one command per line in that chain, not its lines joined by &&: each line runs
+past a red one and is judged on its own in regression_commands, and its log opens with
+"split into N commands: the lift runs each line of the ( … ) block on its own"; a block
+that does not split (a line that changes the shell's state, a construct left open) stays
+one command, run as written. The exit code stays 0: the
 commit stands either way, and the verdict is in --json and the output.
 
 --from-update is how the framework's v1.0.0 migration entry runs it inside
