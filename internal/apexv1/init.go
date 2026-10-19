@@ -364,9 +364,19 @@ func initSkeleton(ctx context.Context, root string, brownfield bool) (*InitResul
 	if err := dir(p.StateDir(), false); err != nil {
 		return nil, nil, err
 	}
+	// Next lives in next.md, the roadmap pointing at it (D217): both are
+	// laid down with a new roadmap. An existing roadmap is the project's,
+	// Next and all, until `ape next move` (seq-09) moves it, so no next.md
+	// is put beside it — the writers would split its items across two
+	// files.
+	if !fileExists(p.RoadmapMD()) {
+		if err := write(p.NextMD(), nextMDSkeleton); err != nil {
+			return nil, nil, err
+		}
+	}
 	steps := []struct{ path, content string }{
 		{p.ProjectMD(), fmt.Sprintf(projectSkeleton, name)},
-		{p.RoadmapMD(), "# Roadmap\n"},
+		{p.RoadmapMD(), "# Roadmap\n\n" + NextPointer + "\n"},
 		{p.AgentsMD(), agentsSkeleton(p.DevRel)},
 		{p.ClaudeMD(), "@AGENTS.md\n"},
 		// A whitelist: whatever ape adds to _apex/state/ later is ignored

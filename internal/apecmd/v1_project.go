@@ -90,7 +90,12 @@ for setup while no .claude/skills/apex-* exists; JSON "next" carries the same li
                                      gets it appended, and nothing else
   development/project.md             vision, users, scope, out of scope, constraints (skeleton);
                                      optional: stack or tools (either name, D118), notes
-  development/roadmap.md             "# Roadmap"
+  development/roadmap.md             "# Roadmap", then the line pointing at Next:
+                                     "Next — not milestones: [next.md](next.md)" (D217)
+  development/next.md                Next (D217): "# Next" and a line saying these are
+                                     findings to triage, not milestones — written only
+                                     with a new roadmap; an existing roadmap keeps its
+                                     Next until ape next move moves it
   development/specs/                 empty: no backfill — a spec is born from its first change
   development/changes/               the changes in flight
   development/archive/               archived and abandoned changes
@@ -404,8 +409,10 @@ func newProjectCheckCmd() *cobra.Command {
                            agents.no-project-context: ` + "`ape project init`" + ` adds the line);
                            CLAUDE.md (if any) has the line @AGENTS.md
   development/roadmap.md   # Roadmap, ≥ 1 "## M<n> — <title>" with Status (ape-written),
-                           Gate, Goal; Budget a number when present; a "## Next"
-                           section holds findings (` + "`ape next add`" + `), not a milestone. Its Delivery: line
+                           Gate, Goal; Budget a number when present; the line
+                           "Next — not milestones: [next.md](next.md)" points at Next
+                           (D217); a "## Next" section that still holds findings is
+                           not a milestone (notice roadmap.next-inline). Its Delivery: line
                            links the current brief, e.g.
                            ` + "`Delivery: Phase 1 — \"…\" ([brief](briefs/2026-10-16-<slug>.md))`" + `;
                            a Markdown link or a bare briefs/….md path, relative to
@@ -415,6 +422,10 @@ func newProjectCheckCmd() *cobra.Command {
                            milestone has ape's approval record (milestone.status-
                            unrecorded; a done one, ape's close) and its gate as approved
                            (milestone.gate-changed): a person approves it again
+  development/next.md      optional (D217); only its items are checked: a leading date
+                           is a real YYYY-MM-DD with text after it, a "(from <id>)"
+                           names a change id (next.bad-item); an undated item, as
+                           apex-plan wrote them, is accepted
   development/briefs/      YYYY-MM-DD-<slug>.md with a real date (brief.bad-name);
                            committed with the plan (brief.uncommitted); never changed
                            from the text of the commit that added it, in the working
@@ -549,6 +560,10 @@ line}; [] when none, beside the findings on a failure too), they never change th
   decision.standard-differs
                            ADR-0001 is the project's own decision, not the standard:
                            ape never replaces it; a person decides
+  roadmap.next-inline      the roadmap still holds Next — a "## Next" section, or items
+                           under apex-plan's "Next — not milestones:" label — while it
+                           lives in development/next.md (D217): ` + "`ape next move`" + ` moves
+                           it (the framework's migration v1.0.0_seq-09 runs it)
 
 Exit codes: 0 green · 1 findings (listed on stderr, or under "findings" with --json) · 2 usage.`,
 		Example: "  ape project check\n  ape project check --json",
@@ -950,10 +965,12 @@ func newStatusCmd() *cobra.Command {
   - next: what the way of working says comes next, derived from the state alone; JSON
     "next_why" beside it (and "Why next:" in the long output, not --brief) is its reason,
     one line (Q100) — next stays one string
-  - the roadmap's Next (JSON "roadmap_next": ["2026-10-16 <text> (from <id>)", …], []
-    when none; a count line in the human output): the findings noticed out of scope that
-    apex-plan triages, as the base branch's roadmap.md holds them (` + "`ape next add`" + ` writes
-    there from any branch). Not the same field as "next", the step above
+  - Next (JSON "roadmap_next": ["2026-10-16 <text> (from <id>)", …], [] when none; a
+    count line in the human output): the findings noticed out of scope that apex-plan
+    triages, as the base branch holds them (` + "`ape next add`" + ` writes there from any
+    branch) — development/next.md's items, then any the roadmap still holds (a project
+    not yet moved by ` + "`ape next move`" + `, D217), each once. Not the same field as
+    "next", the step above
   - JSON "docs": {changelog, user_docs} from _apex/config.yaml docs: ({} when unset), for
     the skills that keep a changelog and user docs current
   - JSON "config": {commit_types, release_scheme, release_docs, commit_subject} — the
@@ -1082,7 +1099,7 @@ func statusLong(r *apexv1.StatusReport) string {
 			n, r.OutsideFlow[0].SHA, r.OutsideFlow[0].Subject)
 	}
 	if n := len(r.RoadmapNext); n > 0 {
-		fmt.Fprintf(&b, "\nNext (roadmap): %d finding(s) to triage at the next delivery (ape status --json: roadmap_next)\n", n)
+		fmt.Fprintf(&b, "\nNext: %d finding(s) to triage at the next delivery (next.md; ape status --json: roadmap_next)\n", n)
 	}
 	if u := r.BaseUpstream; u != nil && u.Behind == 0 {
 		// Behind is in the brief already.

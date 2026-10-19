@@ -326,7 +326,7 @@ func roadmapNextCard(r *apexv1.StatusReport) map[string]any {
 		}
 		body = []any{
 			map[string]any{"type": "list", "items": items},
-			caption("Findings noticed out of scope, for apex-plan to triage at the next delivery."),
+			caption("Findings noticed out of scope, for apex-plan to triage at the next delivery (next.md)."),
 		}
 	}
 	return card(fmt.Sprintf("Next — %d", len(r.RoadmapNext)), "", body)

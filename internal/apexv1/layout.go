@@ -216,6 +216,13 @@ func (p *Project) RoadmapMD() string {
 	return filepath.Join(p.Dev(), "roadmap.md")
 }
 
+// NextMD is development/next.md (D217): the findings noticed out of
+// scope, for apex-plan to triage; the roadmap keeps one line pointing
+// at it.
+func (p *Project) NextMD() string {
+	return filepath.Join(p.Dev(), "next.md")
+}
+
 func (p *Project) SpecsDir() string {
 	return filepath.Join(p.Dev(), "specs")
 }

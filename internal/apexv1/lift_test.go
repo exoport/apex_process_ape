@@ -465,10 +465,16 @@ func main() { fmt.Println(greet("ADR-0004")) }
 		read(t, p, "CLAUDE.md"))
 
 	// The v1 skeleton.
-	for _, f := range []string{"development/project.md", "development/roadmap.md", "_apex/state/.gitignore", ".claude/settings.json"} {
+	for _, f := range []string{"development/project.md", "development/roadmap.md", "development/next.md", "_apex/state/.gitignore", ".claude/settings.json"} {
 		require.FileExists(t, filepath.Join(root, f))
 	}
 	require.True(t, p.IsV1())
+	// D217: the lift writes the new layout directly — Next in next.md,
+	// committed, the roadmap pointing at it — so seq-09 has nothing to do.
+	require.Contains(t, read(t, p, "development/roadmap.md"), NextPointer)
+	require.Contains(t, run(t, root, "show", "--name-only", "--format=", "HEAD"), "development/next.md")
+	_, err = p.NextMoveCheck()
+	require.NoError(t, err)
 
 	// The disposition file.
 	disp := read(t, p, "development/lift-disposition.md")
