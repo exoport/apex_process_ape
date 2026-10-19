@@ -219,6 +219,10 @@ the project (H27):
                       when absent — a fresh clone; ape project init installs
                       it —, another tool's hook without the line, or not
                       executable
+    hooks.prompt      the UserPromptSubmit hook ape hook user-prompt missing
+                      from or altered in .claude/settings.json (project
+                      check's notice hooks.prompt-absent): WARN — without it a
+                      person act from a Claude Code session is refused (E2)
   None of v0's rows run there: --strict is green on a healthy v1 project.
 
   Anywhere else: the rows below, v0's included, plus apex.v0, which WARNs
