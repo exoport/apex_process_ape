@@ -17,7 +17,8 @@ import (
 )
 
 // One run per scope (D58 2.1). A long command — `change start|verify|
-// archive` (scope: the change id) or `milestone gate|close` (scope: M<n>)
+// archive` (scope: the change id) or `milestone gate|close|approve`
+// (scope: M<n>)
 // — holds _apex/state/runs/<scope>.json while it runs: {id, pid, pgid,
 // verb, scope, sha, started, log}, created atomically (a link, which
 // fails when the file exists, of a fully written temp file — O_EXCL
@@ -44,6 +45,9 @@ type RunLock struct {
 	SHA     string `json:"sha"`
 	Started string `json:"started"`
 	Log     string `json:"log"`
+	// PersonAct is the person act the run carries out (D179, OI-12):
+	// what a re-run attaches by, and what its worker acts on.
+	PersonAct *PersonAct `json:"person_act,omitempty"`
 }
 
 // Alive reports whether the lock's process still runs.
@@ -230,6 +234,9 @@ type RunResult struct {
 	Human    RunOutput `json:"human"`
 	JSON     RunOutput `json:"json"`
 	Reported bool      `json:"reported"`
+	// PersonAct is the run's lock's: an unprinted result is handed to a
+	// person act's call only when it is that act (D179).
+	PersonAct *PersonAct `json:"person_act,omitempty"`
 }
 
 // SaveRunResult writes a run's result.

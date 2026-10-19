@@ -24,7 +24,19 @@ func APEHooks() []HookSpec {
 		{"Stop", "", HookCmdStop, StopHookTimeout},
 		{"SubagentStop", "", HookCmdStop, StopHookTimeout},
 		{"PreToolUse", PreToolMatcher, HookCmdPreTool, 0},
+		promptHook,
 	}
+}
+
+// promptHook records the person's prompts (E2, D178): never inline — in a
+// session ape launches it records nothing (T7) — and, missing, a notice
+// (hooks.prompt-absent), not a finding: without it a person act from
+// Claude Code is refused, as before, and nothing else changes.
+var promptHook = HookSpec{"UserPromptSubmit", "", HookCmdUserPrompt, 0}
+
+// requiredHooks are the hooks a missing or altered one of is a finding.
+func requiredHooks() []HookSpec {
+	return slices.DeleteFunc(APEHooks(), func(h HookSpec) bool { return h == promptHook })
 }
 
 // Inline hooks (backlog 31).
@@ -52,7 +64,7 @@ const (
 
 // InlineHooks are APEHooks as `ape task` injects them.
 func InlineHooks() []HookSpec {
-	out := APEHooks()
+	out := requiredHooks()
 	for i := range out {
 		out[i].Command += " " + InlineHookFlag
 	}
@@ -229,7 +241,7 @@ func (p *Project) CheckHooks() []Finding {
 	}
 	hooks, _ := root["hooks"].(map[string]any)
 	var out []Finding
-	for _, w := range APEHooks() {
+	for _, w := range requiredHooks() {
 		groups, _ := hooks[w.Event].([]any)
 		found := findHook(groups, w.Command)
 		if len(found) == 0 {
@@ -242,4 +254,38 @@ func (p *Project) CheckHooks() []Finding {
 		out = append(out, Finding{File: file, Message: fmt.Sprintf("hook %#q for %s is altered (%s) — run `ape project init` to restore it", w.Command, w.Event, alteration(w, found[0]))})
 	}
 	return out
+}
+
+// RequiredHookCount is how many hooks CheckHooks requires.
+func RequiredHookCount() int { return len(requiredHooks()) }
+
+// PromptHookProblem says why the UserPromptSubmit hook does not record
+// the person's prompts — missing or altered in .claude/settings.json —
+// or "" when it does (T10).
+func (p *Project) PromptHookProblem() string {
+	root, err := readSettings(p.SettingsJSON())
+	if err != nil {
+		return ".claude/settings.json is unreadable, so no prompt is recorded"
+	}
+	hooks, _ := root["hooks"].(map[string]any)
+	groups, _ := hooks[promptHook.Event].([]any)
+	found := findHook(groups, promptHook.Command)
+	if len(found) == 0 {
+		return fmt.Sprintf("hook %#q is not registered for %s", promptHook.Command, promptHook.Event)
+	}
+	if slices.ContainsFunc(found, func(e hookEntry) bool { return alteration(promptHook, e) == "" }) {
+		return ""
+	}
+	return fmt.Sprintf("hook %#q for %s is altered (%s)", promptHook.Command, promptHook.Event, alteration(promptHook, found[0]))
+}
+
+// promptHookNotices is the hooks.prompt-absent notice, or none.
+func (p *Project) promptHookNotices() []Diagnostic {
+	why := p.PromptHookProblem()
+	if why == "" {
+		return nil
+	}
+	return []Diagnostic{notice(Diagnostic{Code: CodeHooksPromptAbsent, File: ".claude/settings.json", Message: why +
+		": the person's prompts are not recorded, so a person act (approve, answer, accept …) from a Claude Code session is refused (E2) — " +
+		"`ape project init` merges the hook back"})}
 }

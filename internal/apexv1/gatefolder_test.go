@@ -177,8 +177,11 @@ Goal: Five.
 	p := fixture(t, files)
 	recordApprovals(t, p)
 	commitAll(t, p, "approvals")
-	// With ape's pre-commit hook in place, the gate notices are all (Q89).
+	// With ape's pre-commit hook and its prompt hook in place, the gate
+	// notices are all (Q89, E2).
 	_, err := p.installPreCommitHook(ctx())
+	require.NoError(t, err)
+	_, err = MergeHooks(p.SettingsJSON())
 	require.NoError(t, err)
 
 	ns := p.Notices()

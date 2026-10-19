@@ -737,6 +737,10 @@ func (p *Project) saveAndCommitSubject(ctx context.Context, id string, st *State
 // Q18, acceptOnBase); an archived change, in its archived state.json on
 // the base branch, wherever HEAD is (acceptArchived).
 func (p *Project) Accept(ctx context.Context, id, task, by string, evidence ...string) (*State, error) {
+	// A person's acceptance (OI-4): a model never accepts its own work.
+	if err := requirePerson(ctx, ActAcceptTask, "ape change accept --by"); err != nil {
+		return nil, err
+	}
 	return p.accept(ctx, id, acceptance{task: task, by: by, items: evidence})
 }
 

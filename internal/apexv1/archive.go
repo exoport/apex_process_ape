@@ -199,7 +199,7 @@ type ArchiveResult struct {
 func (p *Project) Archive(ctx context.Context, id string, allowPendingHuman bool, opt RunOptions) (*ArchiveResult, error) {
 	// Archiving past a person's review is a person's call (D45).
 	if allowPendingHuman {
-		if err := requirePerson("--allow-pending-human"); err != nil {
+		if err := requirePerson(ctx, ActAllowPendingHuman, "--allow-pending-human"); err != nil {
 			return nil, err
 		}
 	}
@@ -470,6 +470,9 @@ func (p *Project) writeArchive(ctx context.Context, id string, st *State, update
 	st.TipRef = archiveRef(id)
 	if len(pending) > 0 {
 		st.AllowPendingHuman = true
+		if a := PersonActFrom(ctx); a != nil && a.Act == ActAllowPendingHuman {
+			st.AllowPendingHumanBy = a.By
+		}
 	}
 	if err := SaveState(filepath.Join(dest, "state.json"), st); err != nil {
 		return err

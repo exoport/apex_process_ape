@@ -65,6 +65,7 @@ func TestCheckHooks_MissingAlteredAndRestored(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []string{
 		"SessionStart: ape hook session-start", "Stop: ape hook stop (restored)", "PreToolUse: ape hook pre-tool (restored)",
+		"UserPromptSubmit: ape hook user-prompt",
 	}, added)
 	require.Empty(t, p.CheckHooks())
 	data, err := os.ReadFile(p.SettingsJSON())

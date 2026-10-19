@@ -145,7 +145,7 @@ func (p *Project) configBlocksAt(ctx context.Context, rev, rel string) map[strin
 // the guarded changes before it are no longer config.changed. A person's
 // act (D47 Q6), on a clean index, never on a change branch.
 func (p *Project) AcceptConfig(ctx context.Context, by string) (string, error) {
-	if err := requirePerson("ape project accept-config"); err != nil {
+	if err := requirePerson(ctx, ActAcceptConfig, "ape project accept-config"); err != nil {
 		return "", err
 	}
 	by = strings.TrimSpace(by)

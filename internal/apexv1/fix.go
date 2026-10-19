@@ -54,7 +54,7 @@ type ApproveResult struct {
 // since its approval is approved again (recorded anew).
 func (p *Project) ApproveFix(ctx context.Context, id, by string) (*ApproveResult, error) {
 	// A model never approves its own fix (D47 Q6).
-	if err := requirePerson("ape change approve"); err != nil {
+	if err := requirePerson(ctx, ActFixApprove, "ape change approve"); err != nil {
 		return nil, err
 	}
 	if err := p.recoverArchive(ctx); err != nil {

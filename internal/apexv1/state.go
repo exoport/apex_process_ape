@@ -229,6 +229,9 @@ type State struct {
 	BlockedReason     *string             `json:"blocked_reason"`
 	ReviewVoided      []ReviewVoid        `json:"review_voided,omitempty"`
 	AllowPendingHuman bool                `json:"allow_pending_human,omitempty"`
+	// AllowPendingHumanBy is who archived it so (E2: a person's act in a
+	// Claude Code session records its by and prompt).
+	AllowPendingHumanBy string `json:"allow_pending_human_by,omitempty"`
 	// Answer is a person's answer to what blocked the change (H9).
 	Answer          *Answer `json:"answer,omitempty"`
 	AbandonedReason string  `json:"abandoned_reason,omitempty"`

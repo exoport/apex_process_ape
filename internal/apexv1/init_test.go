@@ -25,7 +25,7 @@ func TestInit_Greenfield(t *testing.T) {
 	} {
 		require.Contains(t, res.Created, want)
 	}
-	require.Len(t, res.HooksAdded, 4)
+	require.Len(t, res.HooksAdded, 5) // UserPromptSubmit too (E2)
 	p, err := Open(root)
 	require.NoError(t, err)
 	require.Equal(t, "apex: project init", subjects(t, p)[0])
@@ -195,6 +195,7 @@ func TestMergeHooks(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []string{
 		"SessionStart: ape hook session-start", "Stop: ape hook stop", "SubagentStop: ape hook stop", "PreToolUse: ape hook pre-tool",
+		"UserPromptSubmit: ape hook user-prompt",
 	}, added)
 	var s struct {
 		Hooks map[string][]struct {
@@ -213,7 +214,7 @@ func TestMergeHooks(t *testing.T) {
 	require.Equal(t, StopHookTimeout, s.Hooks["Stop"][0].Hooks[0].Timeout)
 	require.Equal(t, StopHookTimeout, s.Hooks["SubagentStop"][0].Hooks[0].Timeout)
 	require.Equal(t, "command", s.Hooks["SessionStart"][0].Hooks[0].Type)
-	require.Len(t, s.Hooks, 4, "nothing else")
+	require.Len(t, s.Hooks, 5, "nothing else")
 
 	added, err = MergeHooks(path)
 	require.NoError(t, err)
