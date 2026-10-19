@@ -46,7 +46,7 @@ Subcommands:
 - `log` — Publish a structured log record over NATS
 - `metrics` — Scan and publish this session's usage metrics over NATS
 - `milestone` — Add, approve, gate and close roadmap milestones
-- `next` — Record a finding for later under the roadmap's Next
+- `next` — Record a finding for later in development/next.md (Next)
 - `plugins` — Install the plugins _apex/config.yaml lists, and report what they and the tools slot bring
 - `project` — Create and check an APEX v1 project layout
 - `prompt` — Drive an unattended Claude session from a prompt or a handoff file
@@ -3647,6 +3647,11 @@ at most 160 characters, secrets redacted>"); a --by there must be git config use
 (else session.by-mismatch). Without a grant it is refused, session.person-only, naming the
 phrase; pre-tool denies it first, saying why. A `!` line fires no hook, so it can never be
 granted. In a session ape launched (APE_SESSION) nothing is recorded or granted.
+A grant counts only in the session it was issued for (its session_id is the command's
+CLAUDE_CODE_SESSION_ID; with none set, nothing is), and only while its prompt record and the
+transcript's message with that promptId still pass the same match (D219). The residual: a
+script the model writes and runs as the same OS user can forge all three; E2 attests the
+person's words, it is not a sandbox, and pre-tool sees direct calls only.
 A long act (approve, --accept-red, --allow-pending-human; D179) that meets a run of the
 same command line on its milestone or change — still running (exit 75: run it again), or
 ended with its result not yet printed — attaches with no grant; another run there is
@@ -4223,42 +4228,62 @@ Flags:
 
 ## ape next
 
-Record a finding for later under the roadmap's Next
+Record a finding for later in development/next.md (Next)
 
 ```
 ape next
 ```
 
-The roadmap's Next holds what was noticed but is out of scope now (H26): one dated line
-per finding, which apex-plan triages at the next delivery — a milestone, kept, or deleted
-with the reason in its commit. A "## Next" section of roadmap.md is not a milestone.
+Next holds what was noticed but is out of scope now (H26): one dated line per
+finding, which apex-plan triages at the next delivery — a milestone, kept, or deleted
+with the reason in its commit. Next is not a milestone.
+
+Since D217 it lives in development/next.md; the roadmap keeps one line in its
+place, "Next — not milestones: [next.md](next.md)". A project made before keeps
+Next in development/roadmap.md (a "## Next" section, or items under apex-plan's
+"Next — not milestones:" label) until `ape next move` moves it (the framework's
+migration v1.0.0_seq-09).
 
 Subcommands:
 
-- `add` — Append a dated finding under the roadmap's Next, on the base branch
+- `add` — Append a dated finding to Next (development/next.md), on the base branch
+- `move` — Move the roadmap's Next into development/next.md (the framework's seq-09 runs it)
 
 ## ape next add
 
-Append a dated finding under the roadmap's Next, on the base branch
+Append a dated finding to Next (development/next.md), on the base branch
 
 ```
 ape next add "<text>" [--from <change-id>] [flags]
 ```
 
-Append one line to development/roadmap.md's Next:
+Append one line to Next:
 
   - YYYY-MM-DD <text> (from <change-id>)
 
-(without "(from …)" when --from is not given) at the end of its "## Next" section; else
-under apex-plan's "Next — not milestones:" label above the first milestone, after its list;
-else in a new "## Next" section at the end of the file. Committed alone on the base branch
-as "apex: next — <text>": from the base branch itself, or from a change's branch,
-change/<id>, without a checkout — the change's branch and working tree do not move, and a
-base branch moved only by such a record does not make the change catch up. Refused when
-the base branch is checked out in another worktree (git.base-checked-out).
+(without "(from …)" when --from is not given) at the end of development/next.md (D217).
+next.md is used when it exists, or when the roadmap holds no Next block: a project with
+neither gets next.md from its skeleton (a "# Next" title and a line saying these are
+findings to triage, not milestones) and the roadmap the line pointing at it,
+"Next — not milestones: [next.md](next.md)", above its first milestone. A project not yet
+moved — its roadmap holds Next and there is no next.md — keeps getting the line in the
+roadmap, so its items are never split across two files (D217 Q125): at the end of its
+"## Next" section; else under apex-plan's "Next — not milestones:" label above the first
+milestone, after its list. `ape next move` moves them (see its --help).
+
+Committed alone on the base branch as "apex: next — <text>": from the base branch
+itself, or from a change's branch, change/<id>, without a checkout — the change's branch
+and working tree do not move, and a base branch moved only by such a record does not
+make the change catch up. Refused when the base branch is checked out in another
+worktree (git.base-checked-out).
 
 For models and people alike: apex-apply and apex-change record what they notice outside
 the change's scope here instead of building it (--from <id>, the change that noticed it).
+The archive carries a review's "Noticed, out of scope" items the same way.
+
+JSON: {"line", "path" (the file the line went to: development/next.md, or the roadmap
+of a project not yet moved), "pointer" (the roadmap, when it was given the pointer
+line), "branch", "commit"}.
 
 Exit codes: 0 recorded · 1 no roadmap.md, or the base branch is checked out elsewhere ·
 2 usage (empty or multi-line text, --from not a change id).
@@ -4276,6 +4301,69 @@ Flags:
 | ---- | ---- | ------- | ----------- |
 | `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
 | `--from` | string | `—` | the change that found it |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+
+## ape next move
+
+Move the roadmap's Next into development/next.md (the framework's seq-09 runs it)
+
+```
+ape next move [--check] [flags]
+```
+
+Move Next out of development/roadmap.md into development/next.md (D217), in one commit,
+"apex: Next moved to development/next.md (seq-09)". The framework's migration
+v1.0.0_seq-09 runs it (command: ape next move; check: ape next move --check); ape
+project init and the lift lay the new layout down directly.
+
+  - the items of the roadmap's "## Next" sections and those under apex-plan's
+    "Next — not milestones:" label above the first milestone are appended to next.md
+    byte for byte (list line and continuation lines), in order — a section's other
+    lines (prose, sub-headings, code) with them — and each item once: one next.md
+    holds already, or the block held earlier, is left out (JSON "duplicates")
+  - next.md is created from its skeleton when absent: a "# Next" title and one line
+    saying these are findings to triage, not milestones
+  - the label and its list are replaced, in place, by the line
+    "Next — not milestones: [next.md](next.md)"; each "## Next" section is removed, and
+    with no label to replace the line goes above the first milestone. A roadmap that
+    has the line keeps it, and gets no second one. Nothing else of the roadmap changes
+
+Idempotent: once the roadmap holds no Next block and has the line, and next.md exists,
+it writes nothing (JSON "pending": false). A project with both — a roadmap block and
+next.md — is merged. `ape project check` lists the notice roadmap.next-inline
+while the roadmap holds Next; `ape next add` and the archive keep adding to the
+roadmap's block until then, when there is no next.md.
+
+Refused on a change branch (branch.change-branch), outside a git repository
+(git.not-a-repo), and while roadmap.md or next.md has uncommitted changes (tree.dirty):
+nothing is written. A command any session may run (not person-only): it moves the
+project's own lines and decides nothing.
+
+--check writes nothing: exit 0 when Next is in next.md already, 1 (next.move-pending,
+action apply, naming what is left) when a move is due — the migration's check: 0
+applied, 1 not applied.
+
+JSON: {"moved": [the items, as ape status lists them], "duplicates": […], "path"
+(next.md), "roadmap", "created", "pointer_added", "pending", "commit"}. Under --check it
+says what is due, under "result" beside the failure's ok/exit/diagnostics (exit 1).
+
+Exit codes: 0 moved, or nothing due (--check: nothing due) · 1 refused, no roadmap.md,
+or (--check) a move due.
+
+Examples:
+
+```
+  ape next move --check
+  ape next move
+  ape next move --json
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--check` | bool | `false` | write nothing: exit 0 when Next is in next.md already, 1 when a move is due |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
 | `--json` | bool | `false` | machine output (JSON on stdout) |
 
 ## ape plugins
@@ -4565,8 +4653,10 @@ Validate the whole project and list every failure, not just the first.
                            agents.no-project-context: `ape project init` adds the line);
                            CLAUDE.md (if any) has the line @AGENTS.md
   development/roadmap.md   # Roadmap, ≥ 1 "## M<n> — <title>" with Status (ape-written),
-                           Gate, Goal; Budget a number when present; a "## Next"
-                           section holds findings (`ape next add`), not a milestone. Its Delivery: line
+                           Gate, Goal; Budget a number when present; the line
+                           "Next — not milestones: [next.md](next.md)" points at Next
+                           (D217); a "## Next" section that still holds findings is
+                           not a milestone (notice roadmap.next-inline). Its Delivery: line
                            links the current brief, e.g.
                            `Delivery: Phase 1 — "…" ([brief](briefs/2026-10-16-<slug>.md))`;
                            a Markdown link or a bare briefs/….md path, relative to
@@ -4576,6 +4666,10 @@ Validate the whole project and list every failure, not just the first.
                            milestone has ape's approval record (milestone.status-
                            unrecorded; a done one, ape's close) and its gate as approved
                            (milestone.gate-changed): a person approves it again
+  development/next.md      optional (D217); only its items are checked: a leading date
+                           is a real YYYY-MM-DD with text after it, a "(from <id>)"
+                           names a change id (next.bad-item); an undated item, as
+                           apex-plan wrote them, is accepted
   development/briefs/      YYYY-MM-DD-<slug>.md with a real date (brief.bad-name);
                            committed with the plan (brief.uncommitted); never changed
                            from the text of the commit that added it, in the working
@@ -4710,6 +4804,10 @@ line}; [] when none, beside the findings on a failure too), they never change th
   decision.standard-differs
                            ADR-0001 is the project's own decision, not the standard:
                            ape never replaces it; a person decides
+  roadmap.next-inline      the roadmap still holds Next — a "## Next" section, or items
+                           under apex-plan's "Next — not milestones:" label — while it
+                           lives in development/next.md (D217): `ape next move` moves
+                           it (the framework's migration v1.0.0_seq-09 runs it)
 
 Exit codes: 0 green · 1 findings (listed on stderr, or under "findings" with --json) · 2 usage.
 
@@ -4831,7 +4929,12 @@ for setup while no .claude/skills/apex-* exists; JSON "next" carries the same li
                                      gets it appended, and nothing else
   development/project.md             vision, users, scope, out of scope, constraints (skeleton);
                                      optional: stack or tools (either name, D118), notes
-  development/roadmap.md             "# Roadmap"
+  development/roadmap.md             "# Roadmap", then the line pointing at Next:
+                                     "Next — not milestones: [next.md](next.md)" (D217)
+  development/next.md                Next (D217): "# Next" and a line saying these are
+                                     findings to triage, not milestones — written only
+                                     with a new roadmap; an existing roadmap keeps its
+                                     Next until ape next move moves it
   development/specs/                 empty: no backfill — a spec is born from its first change
   development/changes/               the changes in flight
   development/archive/               archived and abandoned changes
@@ -6920,10 +7023,12 @@ Show where the project stands, from the records ape keeps:
   - next: what the way of working says comes next, derived from the state alone; JSON
     "next_why" beside it (and "Why next:" in the long output, not --brief) is its reason,
     one line (Q100) — next stays one string
-  - the roadmap's Next (JSON "roadmap_next": ["2026-10-16 <text> (from <id>)", …], []
-    when none; a count line in the human output): the findings noticed out of scope that
-    apex-plan triages, as the base branch's roadmap.md holds them (`ape next add` writes
-    there from any branch). Not the same field as "next", the step above
+  - Next (JSON "roadmap_next": ["2026-10-16 <text> (from <id>)", …], [] when none; a
+    count line in the human output): the findings noticed out of scope that apex-plan
+    triages, as the base branch holds them (`ape next add` writes there from any
+    branch) — development/next.md's items, then any the roadmap still holds (a project
+    not yet moved by `ape next move`, D217), each once. Not the same field as
+    "next", the step above
   - JSON "docs": {changelog, user_docs} from _apex/config.yaml docs: ({} when unset), for
     the skills that keep a changelog and user docs current
   - JSON "config": {commit_types, release_scheme, release_docs, commit_subject} — the

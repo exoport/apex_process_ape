@@ -7,7 +7,8 @@ and `/apex-orchestrator` is the operator's own Claude Code session — with pers
 attested by the person's own words (E2, D179, OI-12), the loop's context relay (D174,
 D181), the delegate's return of a change (D188), semantic archive subjects by default
 (D193, D194), and research's rc.6e lift probes R32–R34 (D180, D184); rc.7b adds the `.claude/` git split
-(D203) and the standard ADR-0001 (D205, D206, D210).
+(D203), the standard ADR-0001 (D205, D206, D210), Next in `development/next.md` (D217) and
+eval's E-R7-1 and E2 residual (D219).
 
 ### The loop is `apex-loop` (Q95–Q97)
 
@@ -105,6 +106,30 @@ D181), the delegate's return of a change (D188), semantic archive subjects by de
 - **No bare "v0"/"v1" in what ape writes into a project:** commit messages (`apex: lift from
   apex-v0 <ver>`), the lift's disposition and report, ADR gap texts, the pre-commit hook script
   and the pin note say `apex-v0` / `apex-v1`. JSON keys, codes and tags are unchanged.
+
+### rc.7b: Next moves to `development/next.md` (D217, D218; Q124–Q128)
+
+- **Next is its own file:** `development/next.md` holds the same dated items; the roadmap keeps
+  one pointer line, `Next — not milestones: [next.md](next.md)`, and only milestones. init and
+  the lift write both. `ape status` (`roadmap_next`) reads `next.md`, then any roadmap block.
+- **`ape next add` and the archive's Noticed** write `next.md`, or a not-yet-moved roadmap's
+  block, so items are never split.
+- **`ape next move [--check]`** (the framework's seq-09) moves a roadmap's Next block into
+  `next.md` byte for byte in one `apex:` commit; `--check` exits 1 with `next.move-pending`.
+  `project check`: the notice `roadmap.next-inline` while the roadmap still holds Next, and
+  `next.bad-item` for a malformed `next.md` item.
+
+### rc.7b: eval's E-R7-1 and the E2 residual (D219)
+
+- **An apex-v0 → apex-v1 `ape framework update` succeeds in one run:** once an entry has
+  applied, each remaining derivable migration is judged again right before it would run (seq-07
+  was judged on the apex-v0 layout, could not tell, and blocked the update).
+- **A person act's grant counts only in its own session and while its prompt still backs it:**
+  the grant's `session_id` must equal the caller's `CLAUDE_CODE_SESSION_ID` (absent: refused),
+  and the recorded prompt and its transcript message must pass the phrase check again. A script
+  the model writes and runs as the same OS user can still forge all three: E2 attests the
+  person's words; it is not a sandbox. `make check-claude-surface` now watches
+  `CLAUDE_CODE_SESSION_ID`.
 
 ### `ape project lift` and the pin (R32–R34)
 
