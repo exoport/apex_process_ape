@@ -38,9 +38,9 @@ func TestCommitSubject_CLI(t *testing.T) {
 	require.NoError(t, err)
 	var st struct {
 		Next    string `json:"next"`
-		NextWhy string `json:"next_why"`
+		NextWhy string `json:"next_why"` //nolint:tagliatelle // the v1 --json payloads are snake_case by contract
 		Config  struct {
-			CommitSubject string `json:"commit_subject"`
+			CommitSubject string `json:"commit_subject"` //nolint:tagliatelle // the v1 --json payloads are snake_case by contract
 		} `json:"config"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(stdout), &st), stdout)

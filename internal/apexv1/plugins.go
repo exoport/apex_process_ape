@@ -635,9 +635,9 @@ func (p *Project) CheckPlugins(ctx context.Context, cli PluginCLI) []Finding {
 				cur, ok := have[n]
 				switch {
 				case !ok:
-					out = append(out, Finding{File: ".claude/settings.json", Message: "plugins: " + sec.key + "." + n + " is missing — run `ape project init` (or `ape doctor --fix`) to write it"})
+					out = append(out, Finding{File: settingsJSONRel, Message: "plugins: " + sec.key + "." + n + " is missing — run `ape project init` (or `ape doctor --fix`) to write it"})
 				case !jsonEqual(cur, sec.want[n]):
-					out = append(out, Finding{File: ".claude/settings.json", Message: "plugins: " + sec.key + "." + n + " differs from _apex/config.yaml — run `ape project init` (or `ape doctor --fix`) to rewrite it"})
+					out = append(out, Finding{File: settingsJSONRel, Message: "plugins: " + sec.key + "." + n + " differs from _apex/config.yaml — run `ape project init` (or `ape doctor --fix`) to rewrite it"})
 				}
 			}
 		}

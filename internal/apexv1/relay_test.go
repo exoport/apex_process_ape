@@ -104,7 +104,7 @@ func TestRelayRecord(t *testing.T) {
 	require.NoFileExists(t, RelayRecordPath(root, "r1"))
 }
 
-func relayTranscript(t *testing.T, model string, tokens string) string {
+func relayTranscript(t *testing.T, model, tokens string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "loop.jsonl")
 	require.NoError(t, os.WriteFile(path, []byte(`{"type":"assistant","message":{"model":"`+model+

@@ -2,7 +2,6 @@ package apexv1
 
 import (
 	"encoding/json"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -63,5 +62,5 @@ func TestStatus_NextWhyInJSON(t *testing.T) {
 	require.NoError(t, json.Unmarshal(data, &out))
 	require.IsType(t, "", out["next"])
 	require.Equal(t, r.NextWhy, out["next_why"])
-	require.True(t, strings.Contains(string(data), `"next_why":`))
+	require.Contains(t, string(data), `"next_why":`)
 }

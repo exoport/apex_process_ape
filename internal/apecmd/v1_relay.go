@@ -41,7 +41,7 @@ import (
 func relayGate(verb, projectRoot, run string, warn io.Writer) error {
 	rec, err := apexv1.ReadRelayRecord(projectRoot, run)
 	if err != nil || rec == nil || rec.Transcript == "" || childSlotBusy(projectRoot, run) {
-		return nil
+		return nil //nolint:nilerr // an unreadable relay record is no relay: a child launch is never refused on it
 	}
 	use, ok := apexv1.TranscriptContext(rec.Transcript)
 	if !ok {
@@ -68,12 +68,12 @@ func relayGate(verb, projectRoot, run string, warn io.Writer) error {
 		Threshold: cfg.Limits.ContextRelayAt(), Exhausted: exhausted,
 	}
 	if apexv1.WriteRelayRecord(projectRoot, rec) != nil {
-		return nil
+		return nil //nolint:nilerr // a refusal the record cannot carry is not made (see above)
 	}
 	return refusal
 }
 
-// childSlotBusy reports whether the loop run run has a live child holding
+// childSlotBusy reports whether run, a loop run, has a live child holding
 // its one child slot (another holder than this process).
 func childSlotBusy(projectRoot, run string) bool {
 	cur, err := readSessionLock(filepath.Join(runlog.SessionLocksRoot(projectRoot), "child-"+safeLockName(run)+".json"))
@@ -172,7 +172,7 @@ func dispatchLoop(ctx context.Context, o taskOptions, cfg runConfig) (taskRun, e
 			fmt.Fprintf(os.Stderr, "⚠ relay: ape knows no context window for %s, so run %s's context fill was unknown and it was not relayed\n", rec.ContextUnknown, run.RunID)
 		}
 		if run.RunErr != nil || rec == nil || rec.Requested == nil || run.RunID == "" {
-			return run, nil
+			return run, nil //nolint:nilerr // run.RunErr is the run's own outcome, carried in run; no relay follows it
 		}
 		req := rec.Requested
 		if req.Exhausted {

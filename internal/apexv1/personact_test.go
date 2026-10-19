@@ -116,11 +116,13 @@ func e2Turn(t *testing.T, p *Project, session, promptID, prompt, command string)
 		SessionID: session, TranscriptPath: transcript, Cwd: p.Root, HookEventName: "UserPromptSubmit",
 		Prompt: prompt, PromptID: promptID,
 	}))
-	return bashPayload(p, session, promptID, transcript, command)
+	return bashPayload(t, p, session, promptID, transcript, command)
 }
 
-func bashPayload(p *Project, session, promptID, transcript, command string) HookPayload {
-	in, _ := json.Marshal(map[string]string{"command": command, "description": "run it"})
+func bashPayload(t *testing.T, p *Project, session, promptID, transcript, command string) HookPayload {
+	t.Helper()
+	in, err := json.Marshal(map[string]string{"command": command, "description": "run it"})
+	require.NoError(t, err)
 	return HookPayload{
 		SessionID: session, TranscriptPath: transcript, Cwd: p.Root, HookEventName: "PreToolUse",
 		ToolName: "Bash", ToolInput: in, PromptID: promptID,
@@ -195,7 +197,7 @@ func TestE2_T1_NoPromptNoGrant(t *testing.T) {
 	asClaudeCode(t)
 	c := approveCall("M1")
 	transcript := filepath.Join(t.TempDir(), "s1.jsonl")
-	d := PersonActGate(ctx(), bashPayload(p, "s1", "p1", transcript, c.Line), []PersonCall{c})
+	d := PersonActGate(ctx(), bashPayload(t, p, "s1", "p1", transcript, c.Line), []PersonCall{c})
 	require.True(t, d.Deny)
 	require.Contains(t, d.Reason, "no prompt of this turn is recorded")
 	require.Contains(t, d.Reason, "A `!` line fires no hook")
@@ -227,12 +229,12 @@ func TestE2_T2_InjectionIsNoPrompt(t *testing.T) {
 	// A prompt record without the transcript's user message (forged, T6).
 	transcript := filepath.Join(t.TempDir(), "s2.jsonl")
 	require.NoError(t, RecordPrompt(HookPayload{SessionID: "s2", TranscriptPath: transcript, Cwd: p.Root, Prompt: "approve M1", PromptID: "q1"}))
-	d := PersonActGate(ctx(), bashPayload(p, "s2", "q1", transcript, c.Line), []PersonCall{c})
+	d := PersonActGate(ctx(), bashPayload(t, p, "s2", "q1", transcript, c.Line), []PersonCall{c})
 	require.True(t, d.Deny)
 	require.Contains(t, d.Reason, "transcript does not show")
 	// A meta message holding the words is not the person's either.
 	appendTranscript(t, transcript, map[string]any{"type": "user", "isMeta": true, "promptId": "q1", "message": map[string]any{"role": "user", "content": "approve M1"}})
-	require.True(t, PersonActGate(ctx(), bashPayload(p, "s2", "q1", transcript, c.Line), []PersonCall{c}).Deny)
+	require.True(t, PersonActGate(ctx(), bashPayload(t, p, "s2", "q1", transcript, c.Line), []PersonCall{c}).Deny)
 }
 
 // T3: a grant is turn-bound (a later turn's prompt_id finds the later
@@ -291,13 +293,15 @@ func TestE2_T6_RecordsAreProtected(t *testing.T) {
 		d := RecordGuard(cmd, p.Root)
 		require.True(t, d.Deny, cmd)
 		require.Contains(t, d.Reason, "what a person act rests on", cmd)
-		in, _ := json.Marshal(map[string]string{"command": cmd})
+		in, err := json.Marshal(map[string]string{"command": cmd})
+		require.NoError(t, err)
 		require.True(t, PreTool(HookPayload{ToolName: "Bash", ToolInput: in, Cwd: p.Root}).Deny, cmd)
 	}
 	for _, cmd := range []string{"ape status --json", "ls _apex/state/runs/prompts", "ape hook pre-commit", "grep grants notes.md"} {
 		require.False(t, RecordGuard(cmd, p.Root).Deny, cmd)
 	}
-	in, _ := json.Marshal(map[string]string{"file_path": filepath.Join(p.Root, "_apex/state/grants/x.json")})
+	in, err := json.Marshal(map[string]string{"file_path": filepath.Join(p.Root, "_apex", "state", "grants", "x.json")})
+	require.NoError(t, err)
 	require.True(t, PreTool(HookPayload{ToolName: "Write", ToolInput: in, Cwd: p.Root}).Deny)
 }
 
@@ -372,8 +376,9 @@ func TestE2_T10_PromptHookNotice(t *testing.T) {
 	require.Contains(t, p.PromptHookProblem(), "altered (async")
 	require.NoError(t, os.Remove(p.SettingsJSON()))
 	require.Contains(t, p.PromptHookProblem(), "is not registered for UserPromptSubmit")
-	var codes []string
-	for _, n := range p.Notices() {
+	notices := p.Notices()
+	codes := make([]string, 0, len(notices))
+	for _, n := range notices {
 		codes = append(codes, n.Code)
 	}
 	require.Contains(t, codes, CodeHooksPromptAbsent)
@@ -388,7 +393,7 @@ func TestE2_T11_OtherSession(t *testing.T) {
 	asClaudeCode(t)
 	c := approveCall("M1")
 	a := e2Turn(t, p, "sA", "p1", "approve M1", c.Line)
-	b := bashPayload(p, "sB", "p1", a.TranscriptPath, c.Line)
+	b := bashPayload(t, p, "sB", "p1", a.TranscriptPath, c.Line)
 	require.True(t, PersonActGate(ctx(), b, []PersonCall{c}).Deny)
 }
 
@@ -416,7 +421,9 @@ func TestE2_T13_AttachVerdict(t *testing.T) {
 	d := PersonActGate(ctx(), payload, []PersonCall{red})
 	require.True(t, d.Deny)
 	require.Contains(t, d.Reason, "a run without this person act")
-	require.Contains(t, RunBusyPersonAct(lock, red).(*ConflictError).Code, CodeRunBusy)
+	var ce *ConflictError
+	require.ErrorAs(t, RunBusyPersonAct(lock, red), &ce)
+	require.Contains(t, ce.Code, CodeRunBusy)
 
 	// An ended run whose result is unprinted: attach; printed: a new act.
 	p.ReleaseRunLock(lock)
@@ -482,7 +489,7 @@ func TestE2_T8_T12_T14_Residuals(t *testing.T) {
 	// recorded it (an old pinned ape ran the hook, or none did).
 	transcript := filepath.Join(t.TempDir(), "s1.jsonl")
 	appendTranscript(t, transcript, map[string]any{"type": "user", "promptId": "p1", "message": map[string]any{"role": "user", "content": "approve M1"}})
-	d := PersonActGate(ctx(), bashPayload(p, "s1", "p1", transcript, c.Line), []PersonCall{c})
+	d := PersonActGate(ctx(), bashPayload(t, p, "s1", "p1", transcript, c.Line), []PersonCall{c})
 	require.True(t, d.Deny)
 	require.Nil(t, p.ConsumeGrant(c))
 }

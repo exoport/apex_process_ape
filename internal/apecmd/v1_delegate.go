@@ -157,7 +157,7 @@ func runDelegateSession(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, id, t
 			why += " (no verdict; " + sessionEnded(res.TaskExit) + "; log " + res.Log + ")"
 		}
 		return v1Fail(cmd, f, &apexv1.FailError{Code: "delegate.fail", Msg: "the delegate failed " + task + " of " + id + ": " + why + delegateToPerson(outcome) +
-			" — the task still awaits a person (`ape change accept " + id + " --task " + task + " --by <who>`)" + delegateFixOption(outcome, id)}, res)
+			" — the task still awaits a person (`ape change accept " + id + " --task " + task + " --by <who>`)" + delegateFixOption(outcome)}, res)
 	}
 	return v1Emit(cmd.OutOrStdout(), f, res, func(w io.Writer) {
 		fmt.Fprintf(w, "change %s: %s accepted by %s (run %s): %s\n", id, task, outcome.Accepted.By, outcome.Accepted.Run, outcome.Reason)
@@ -189,7 +189,7 @@ func delegateToPerson(o *apexv1.DelegateOutcome) string {
 
 // delegateFixOption is the person's option for an archived change's
 // fail: a fix change (D188 Q107).
-func delegateFixOption(o *apexv1.DelegateOutcome, id string) string {
+func delegateFixOption(o *apexv1.DelegateOutcome) string {
 	if o.ToPerson != apexv1.ToPersonArchived {
 		return ""
 	}

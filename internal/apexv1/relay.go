@@ -94,8 +94,6 @@ func TranscriptContext(path string) (use ContextUse, ok bool) {
 // process running the loop when the run starts and when its session's
 // transcript is known, read and amended by the child launches it makes,
 // removed when the run ends.
-//
-//nolint:tagliatelle // snake_case, like every other file ape writes for tools to read
 type RelayRecord struct {
 	Run string `json:"run"`
 	// RelayOf is the loop run this one relays (its manifest's relay_of),
@@ -112,8 +110,6 @@ type RelayRecord struct {
 }
 
 // RelayRequest is the refusal a child launch recorded.
-//
-//nolint:tagliatelle // snake_case, like every other file ape writes for tools to read
 type RelayRequest struct {
 	At        time.Time `json:"at"`
 	Verb      string    `json:"verb"`
@@ -139,11 +135,11 @@ func RelayRecordPath(root, run string) string {
 // (not a relayable loop run, or one already ended).
 func ReadRelayRecord(root, run string) (*RelayRecord, error) {
 	if run == "" {
-		return nil, nil
+		return nil, nil //nolint:nilnil // no loop run: no record, the documented nil
 	}
 	data, err := os.ReadFile(RelayRecordPath(root, run))
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
+		return nil, nil //nolint:nilnil // no record on disk: the documented nil
 	}
 	if err != nil {
 		return nil, err
@@ -182,7 +178,11 @@ func safeRunName(run string) string {
 
 // Percent is a fill as a whole percentage, rounded down: 0.599 is 59 %, so a
 // message never shows a fill under its threshold as equal to it.
-func Percent(f float64) int { return int(math.Floor(f*100 + 1e-9)) }
+func Percent(f float64) int { return int(math.Floor(f*100 + percentEpsilon)) }
+
+// percentEpsilon keeps a float product that lands a hair under a whole
+// percentage (0.29*100 is 28.999…) from rounding down past it.
+const percentEpsilon = 1e-9
 
 // RelayCheck is the relay's verdict on a child launch (verb, e.g. "ape
 // task") of a loop session whose context is use, in a loop run that has
@@ -220,8 +220,6 @@ func RelaysExhausted(req *RelayRequest, relays, capRelays int) error {
 
 // LoopRelay is a live loop run's context and relays, for `ape status`
 // (LiveSession.Relay).
-//
-//nolint:tagliatelle // ape's snake_case --json contract
 type LoopRelay struct {
 	ContextTokens int `json:"context_tokens"`
 	// ContextWindow is 0 and ContextFill null when the window is unknown

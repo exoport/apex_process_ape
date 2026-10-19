@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -175,8 +176,6 @@ func ArgvSHA256(argv []string) string {
 
 // PersonAct is a person act a command carries out, as a run lock and its
 // result record it (person_act): who, and the prompt that granted it.
-//
-//nolint:tagliatelle // the v1 records are snake_case by contract
 type PersonAct struct {
 	Act        string `json:"act"`
 	Target     string `json:"target"`
@@ -217,7 +216,7 @@ func PersonActFrom(ctx context.Context) *PersonAct {
 // PersonBy is the by a granted act records (D178 Q-OI-2): the person's
 // git user.name and the prompt that asked for it.
 func PersonBy(name, promptTS, quote string) string {
-	return fmt.Sprintf(`%s (prompt %s: "%s")`, name, promptTS, quote)
+	return name + " (prompt " + promptTS + `: "` + quote + `")`
 }
 
 // GitUserName is `git config user.name` in the project, "" when unset.
@@ -235,8 +234,6 @@ func (p *Project) PromptsDir() string { return filepath.Join(p.StateDir(), "prom
 func (p *Project) GrantsDir() string { return filepath.Join(p.StateDir(), "grants") }
 
 // PromptRecord is one line of _apex/state/prompts/<session>.jsonl.
-//
-//nolint:tagliatelle // the v1 records are snake_case by contract
 type PromptRecord struct {
 	TS             string `json:"ts"`
 	SessionID      string `json:"session_id"`
@@ -316,8 +313,6 @@ func (p *Project) promptRecord(sessionID, promptID string) *PromptRecord {
 }
 
 // grant is _apex/state/grants/<argv sha256>.json.
-//
-//nolint:tagliatelle // the v1 records are snake_case by contract
 type grant struct {
 	SessionID  string `json:"session_id"`
 	PromptID   string `json:"prompt_id"`
@@ -455,7 +450,7 @@ func PersonActGate(ctx context.Context, payload HookPayload, calls []PersonCall)
 		return PreToolDecision{}
 	}
 	if len(calls) > 1 {
-		return PreToolDecision{Deny: true, Reason: "this command runs " + fmt.Sprint(len(calls)) +
+		return PreToolDecision{Deny: true, Reason: "this command runs " + strconv.Itoa(len(calls)) +
 			" person acts — run each person act as a command of its own, each on the person's own words (E2)"}
 	}
 	c := calls[0]
@@ -514,8 +509,8 @@ func RunBusyPersonAct(l *RunLock, c PersonCall) error {
 		what = "a run without this person act"
 	}
 	return &ConflictError{Code: CodeRunBusy, Action: ActionRetry, Msg: fmt.Sprintf(
-		"%s: `ape %s %s` is running on it since %s (pid %d, log %s), %s — wait for it to end (`ape %s %s` attaches to it), then run `%s`: a new run, which needs the person's own words again",
-		l.Scope, l.Verb, l.Scope, l.Started, l.PID, l.Log, what, l.Verb, l.Scope, c.Line)}
+		"%s: `ape %s %s` is running on it since %s (pid %d, log %s), %s — wait for it to end (`ape %s %s` attaches to it), then run %s: a new run, which needs the person's own words again",
+		l.Scope, l.Verb, l.Scope, l.Started, l.PID, l.Log, what, l.Verb, l.Scope, "`"+c.Line+"`")}
 }
 
 // grantVerdict grants c when the prompt that opened this turn asks for it

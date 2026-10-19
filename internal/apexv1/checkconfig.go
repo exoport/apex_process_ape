@@ -487,7 +487,7 @@ func (p *Project) modelsFindings() []Finding {
 	if yaml.Unmarshal(data, &doc) != nil {
 		return nil
 	}
-	models := topLevelValue(&doc, "models")
+	models := topLevelModels(&doc)
 	if models == nil || models.Kind != yaml.MappingNode {
 		return nil
 	}

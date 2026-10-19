@@ -56,7 +56,7 @@ func inGitRepo(ctx context.Context, dir string) bool {
 // the project, so only `ape task` sessions, which get them inline, would
 // run them. A tracked settings.json is shared whatever the rules say.
 func (p *Project) settingsIgnoredFindings(ctx context.Context) []Finding {
-	const file = ".claude/settings.json"
+	const file = settingsJSONRel
 	rel := p.Rel(p.SettingsJSON())
 	if !inGitRepo(ctx, p.Root) || len(gitIgnored(ctx, p.Root, false, rel)) == 0 {
 		return nil

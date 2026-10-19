@@ -243,12 +243,13 @@ func modelDefaultSkills() []string {
 	if err := yaml.Unmarshal([]byte(modelDefaultsYAML), &doc); err != nil {
 		panic("modelDefaultsYAML: " + err.Error())
 	}
-	return mappingKeys(topLevelValue(&doc, "models"))
+	return mappingKeys(topLevelModels(&doc))
 }
 
-// topLevelValue is the value of key in a YAML document's top-level
-// mapping; nil when the document is empty, not a mapping, or lacks key.
-func topLevelValue(doc *yaml.Node, key string) *yaml.Node {
+// topLevelModels is the value of models: in a YAML document's top-level
+// mapping; nil when the document is empty, not a mapping, or lacks it.
+func topLevelModels(doc *yaml.Node) *yaml.Node {
+	const key = "models"
 	if doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
 		return nil
 	}
@@ -439,7 +440,7 @@ func (p *Project) amendConfigModels(ctx context.Context, res *InitResult) error 
 	if err := yaml.Unmarshal(data, &doc); err != nil {
 		return err
 	}
-	if models := topLevelValue(&doc, "models"); models != nil {
+	if models := topLevelModels(&doc); models != nil {
 		have := map[string]bool{}
 		for _, k := range mappingKeys(models) {
 			have[k] = true

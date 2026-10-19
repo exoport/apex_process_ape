@@ -37,6 +37,9 @@ const (
 	LiftReport    = "lift-disposition.json"
 	frameworkYAML = "_apex/framework.yaml"
 	configYAML    = "_apex/config.yaml"
+	// settingsJSONRel is the project's Claude Code settings file, as a
+	// finding names it.
+	settingsJSONRel = ".claude/settings.json"
 	// v0SHALen is how much of the commit a v0 version was read from the
 	// report names.
 	v0SHALen = 12

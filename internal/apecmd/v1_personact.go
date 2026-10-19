@@ -157,7 +157,7 @@ func takePersonAct(ctx context.Context, p *apexv1.Project, c apexv1.PersonCall) 
 		return &apexv1.PersonAct{Act: c.Act, Target: c.Target, ArgvSHA256: c.ArgvSHA256, By: c.By}, nil
 	case "CLAUDECODE":
 	default:
-		return nil, nil
+		return nil, nil //nolint:nilnil // under APE_SESSION: no act, the body refuses (T7)
 	}
 	// No grant first; then a --by that is not user.name, checked before
 	// the grant is spent.

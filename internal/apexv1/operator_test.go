@@ -215,7 +215,7 @@ func TestWithOperatorLine(t *testing.T) {
 }
 
 func noticeCodesOf(ds []Diagnostic) []string {
-	var out []string
+	out := make([]string, 0, len(ds))
 	for _, d := range ds {
 		out = append(out, d.Code)
 	}

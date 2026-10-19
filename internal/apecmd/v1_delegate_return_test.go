@@ -42,6 +42,6 @@ func TestDelegateToPerson(t *testing.T) {
 		}
 		require.Contains(t, got, c.want)
 	}
-	require.Contains(t, delegateFixOption(&apexv1.DelegateOutcome{ToPerson: apexv1.ToPersonArchived}, "add-wave"), "fix change")
-	require.Empty(t, delegateFixOption(&apexv1.DelegateOutcome{ToPerson: apexv1.ToPersonSecondFail}, "add-wave"))
+	require.Contains(t, delegateFixOption(&apexv1.DelegateOutcome{ToPerson: apexv1.ToPersonArchived}), "fix change")
+	require.Empty(t, delegateFixOption(&apexv1.DelegateOutcome{ToPerson: apexv1.ToPersonSecondFail}))
 }

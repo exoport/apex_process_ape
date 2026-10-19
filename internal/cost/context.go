@@ -19,7 +19,7 @@ type contextLine struct {
 		Usage struct {
 			UsageBlock
 
-			CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+			CacheCreationInputTokens int `json:"cache_creation_input_tokens"` //nolint:tagliatelle // Claude Code's transcript field names, not ours
 		} `json:"usage"`
 	} `json:"message"`
 }

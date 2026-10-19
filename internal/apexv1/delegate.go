@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
@@ -991,9 +992,7 @@ func (p *Project) settleDelegateFail(ctx context.Context, run *DelegateRun, v *D
 	next := *st
 	next.Status, next.Review = StatusInProgress, nil
 	next.DelegateReturns = make(map[string][]DelegateReturn, len(st.DelegateReturns)+1)
-	for task, rs := range st.DelegateReturns {
-		next.DelegateReturns[task] = rs
-	}
+	maps.Copy(next.DelegateReturns, st.DelegateReturns)
 	next.DelegateReturns[run.Task] = append(slices.Clone(st.DelegateReturns[run.Task]), ret)
 	if err := p.saveChangeState(ctx, ci, &next, "apex: "+run.Change+" returned by delegate"); err != nil {
 		return err

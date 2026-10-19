@@ -493,7 +493,7 @@ func (lf *lifter) ignoredWrites() *FailError {
 		return nil
 	}
 	fix := "un-ignore them"
-	if slices.Contains(ignored, ".claude/settings.json") {
+	if slices.Contains(ignored, settingsJSONRel) {
 		fix = "un-ignore them — for .claude/, `.claude/*` and `!.claude/settings.json` in .gitignore, which also shares the v1 hooks with every checkout"
 	}
 	return &FailError{Code: CodeClaudeIgnored, Msg: "git ignores what the lift commits: " + strings.Join(ignored, ", ") +

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -147,7 +148,7 @@ func findOperatorRow(data []byte) (operatorRow, error) {
 	if err := yaml.Unmarshal(data, &doc); err != nil {
 		return operatorRow{}, err
 	}
-	models := topLevelValue(&doc, "models")
+	models := topLevelModels(&doc)
 	if models == nil || models.Kind != yaml.MappingNode {
 		return operatorRow{}, nil
 	}
@@ -180,36 +181,52 @@ func moveOperatorRow(data []byte) ([]byte, error) {
 		return nil, errors.New("models.apex-orchestrator is not where the parser put it")
 	}
 	if row.loop {
-		if row.flow {
-			return nil, errors.New("models: is a flow mapping ({…}), so its apex-orchestrator entry is not removed by line")
-		}
-		indent := row.key.Column - 1
-		end := n + 1
-		for end < len(lines) {
-			l := strings.TrimRight(lines[end], "\r\n")
-			if strings.TrimSpace(l) == "" || len(l)-len(strings.TrimLeft(l, " \t")) <= indent {
-				break
-			}
-			end++
-		}
-		lines = append(lines[:n], lines[end:]...)
+		lines, err = removeOperatorRow(lines, n, row)
 	} else {
-		col := row.key.Column - 1
-		l := lines[n]
-		name := OperatorSkill
-		if col < len(l) && (l[col] == '"' || l[col] == '\'') {
-			col++
-		}
-		if col > len(l) || !strings.HasPrefix(l[col:], name) {
-			return nil, errors.New("models.apex-orchestrator's key is not where the parser put it")
-		}
-		lines[n] = l[:col] + OrchestratorSkill + l[col+len(name):]
+		lines, err = renameOperatorKey(lines, n, row)
+	}
+	if err != nil {
+		return nil, err
 	}
 	out := []byte(strings.Join(lines, ""))
 	if err := checkOperatorMove(data, out, row.loop); err != nil {
 		return nil, err
 	}
 	return out, nil
+}
+
+// removeOperatorRow removes the row at line n (models.apex-loop exists
+// and wins): the key's line and every more-indented line under it.
+func removeOperatorRow(lines []string, n int, row operatorRow) ([]string, error) {
+	if row.flow {
+		return nil, errors.New("models: is a flow mapping ({…}), so its apex-orchestrator entry is not removed by line")
+	}
+	indent := row.key.Column - 1
+	end := n + 1
+	for end < len(lines) {
+		l := strings.TrimRight(lines[end], "\r\n")
+		if strings.TrimSpace(l) == "" || len(l)-len(strings.TrimLeft(l, " \t")) <= indent {
+			break
+		}
+		end++
+	}
+	return append(lines[:n], lines[end:]...), nil
+}
+
+// renameOperatorKey renames the key at line n to apex-loop, every other
+// byte of the line kept.
+func renameOperatorKey(lines []string, n int, row operatorRow) ([]string, error) {
+	col := row.key.Column - 1
+	l := lines[n]
+	name := OperatorSkill
+	if col < len(l) && (l[col] == '"' || l[col] == '\'') {
+		col++
+	}
+	if col > len(l) || !strings.HasPrefix(l[col:], name) {
+		return nil, errors.New("models.apex-orchestrator's key is not where the parser put it")
+	}
+	lines[n] = l[:col] + OrchestratorSkill + l[col+len(name):]
+	return lines, nil
 }
 
 // checkOperatorMove parses before and after: after's models has no
@@ -228,9 +245,7 @@ func checkOperatorMove(before, after []byte, removed bool) error {
 		return errors.New("models: did not read as a mapping")
 	}
 	want := map[string]any{}
-	for k, v := range bm {
-		want[k] = v
-	}
+	maps.Copy(want, bm)
 	if !removed {
 		want[OrchestratorSkill] = bm[OperatorSkill]
 	}

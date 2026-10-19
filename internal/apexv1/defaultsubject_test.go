@@ -1,7 +1,6 @@
 package apexv1
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -112,5 +111,5 @@ func TestNewChange_Type(t *testing.T) {
 	res, err = q.NewChangeOfType(ctx(), "add-hug", "M1", "edit", []string{"greeting"}, nil)
 	require.NoError(t, err)
 	require.Equal(t, "edit", res.Type)
-	require.True(t, strings.Contains(read(t, q, "development/changes/add-hug/change.md"), "\ntype: edit\n"))
+	require.Contains(t, read(t, q, "development/changes/add-hug/change.md"), "\ntype: edit\n")
 }

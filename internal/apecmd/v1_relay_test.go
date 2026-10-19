@@ -29,8 +29,8 @@ func loopTranscript(t *testing.T, model string, tokens int) string {
 }
 
 // inRelayedLoop makes this process a child launch from the loop run
-// orch-run, whose relay record names a transcript at tokens of model, with
-// relays relays so far.
+// orch-run, whose relay record names a transcript at tokens of model, and
+// which has relayed relays times so far.
 func inRelayedLoop(t *testing.T, root, model string, tokens, relays int) {
 	t.Helper()
 	outsideEverySession(t)

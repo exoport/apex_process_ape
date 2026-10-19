@@ -211,7 +211,7 @@ func TestE2_EveryPersonActNeedsAGrant(t *testing.T) {
 	stdout, _, err := v1Exec(t, newChangeCmd, "accept", "add-wave", "T1", "--verdict", "pass", "--reason", "ok", "--json", "--cwd", root)
 	require.NotEqual(t, ExitOK, exitCodeOf(t, err))
 	require.NotContains(t, stdout, "session.person-only")
-	require.Equal(t, "", strings.TrimSpace(v1Git(t, root, "status", "--porcelain")), "nothing was written")
+	require.Empty(t, strings.TrimSpace(v1Git(t, root, "status", "--porcelain")), "nothing was written")
 }
 
 // Q-OI-2: a --by in a model session must be git config user.name.

@@ -231,7 +231,7 @@ func removeHookEntries(groups []any, found []hookEntry) []any {
 // .claude/settings.json (backlog 31). `ape task` injects them anyway; this
 // is for every other session in the project — a person's, or a pipeline's.
 func (p *Project) CheckHooks() []Finding {
-	const file = ".claude/settings.json"
+	const file = settingsJSONRel
 	root, err := readSettings(p.SettingsJSON())
 	if err != nil {
 		if _, ok := errors.AsType[*FailError](err); ok {
@@ -285,7 +285,7 @@ func (p *Project) promptHookNotices() []Diagnostic {
 	if why == "" {
 		return nil
 	}
-	return []Diagnostic{notice(Diagnostic{Code: CodeHooksPromptAbsent, File: ".claude/settings.json", Message: why +
+	return []Diagnostic{notice(Diagnostic{Code: CodeHooksPromptAbsent, File: settingsJSONRel, Message: why +
 		": the person's prompts are not recorded, so a person act (approve, answer, accept …) from a Claude Code session is refused (E2) — " +
 		"`ape project init` merges the hook back"})}
 }
