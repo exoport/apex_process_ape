@@ -190,5 +190,7 @@ func notice(d Diagnostic) Diagnostic {
 func (p *Project) Notices() []Diagnostic {
 	out := append(append(append(p.gateNotices(), p.preCommitNotices(context.Background())...), p.promptHookNotices()...), p.operatorRowNotices()...)
 	// rc.7b (rc7b-adr).
-	return append(out, p.standardADRNotices()...)
+	out = append(out, p.standardADRNotices()...)
+	// rc.7b (rc7b-next).
+	return append(out, p.nextInlineNotices()...)
 }

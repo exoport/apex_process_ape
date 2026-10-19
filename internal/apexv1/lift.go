@@ -504,7 +504,7 @@ func (lf *lifter) preflight() []*FailError {
 // creates count.
 func (lf *lifter) ignoredWrites() *FailError {
 	p := &Project{Root: lf.root, DevRel: lf.devRel}
-	files := []string{p.SettingsJSON(), p.ProjectMD(), p.RoadmapMD(), p.AgentsMD(), p.ClaudeMD(), p.StateGitignore(), p.decisionsJSON()}
+	files := []string{p.SettingsJSON(), p.ProjectMD(), p.RoadmapMD(), p.NextMD(), p.AgentsMD(), p.ClaudeMD(), p.StateGitignore(), p.decisionsJSON()}
 	dirs := []string{p.SpecsDir(), p.ChangesDir(), p.ArchiveDir(), p.DecisionsDir(), p.BriefsDir()}
 	paths := make([]string, 0, len(files)+len(dirs)+len(lf.writes)+1)
 	for _, f := range files {

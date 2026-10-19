@@ -224,6 +224,8 @@ var findingRules = []findingRule{
 	rule("", `^task \S+'s check .* is not exactly human-review`, CodeMalformedHumanReview),
 	// rc.6 (rc6-e).
 	rule("", `^hot/ is not ignored by git`, CodeHotNotIgnored),
+	// rc.7b (rc7b-next).
+	rule("", `^next item .* is malformed: `, "next.bad-item"),
 }
 
 // UnclassifiedFinding is the code of a finding no rule matches — a

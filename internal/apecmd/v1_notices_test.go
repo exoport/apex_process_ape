@@ -26,7 +26,7 @@ func TestProjectCheck_Notices(t *testing.T) {
 	stdout, stderr, err := v1Exec(t, newProjectCmd, "check", "--cwd", root)
 	require.NoError(t, err, "a notice is not a finding")
 	require.Equal(t, "project check: green\n", stdout)
-	require.Contains(t, stderr, "notice: development/roadmap.md:3: M1 gate runs scripts outside development/gates/: gate.sh — "+
+	require.Contains(t, stderr, "notice: development/roadmap.md:5: M1 gate runs scripts outside development/gates/: gate.sh — "+
 		"move them into development/gates/M1-<slug>/ with the milestone's next re-approval")
 
 	stdout, _, err = v1Exec(t, newProjectCmd, "check", "--json", "--cwd", root)

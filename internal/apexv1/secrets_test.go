@@ -238,9 +238,10 @@ func TestCommitRecord_PersonsStagedFileIsNotScanned(t *testing.T) {
 	require.Equal(t, "A  mine.env", run(t, p.Root, "status", "--porcelain", "--", "mine.env"))
 }
 
-// R28: a refused `ape next add` undoes ape's own edit to the roadmap — the
-// tree exactly as before, the refusal says so — and the next harmless
-// `next add` commits (it was refused too while the edit stayed staged).
+// R28: a refused `ape next add` undoes ape's own edits — next.md it
+// created and the pointer it gave the roadmap (D217) — the tree exactly as
+// before, the refusal says so — and the next harmless `next add` commits
+// (it was refused too while the edit stayed staged).
 func TestAddNext_RefusedEditIsUndone(t *testing.T) {
 	p := fixture(t, baseFiles())
 	write(t, p, "notes.txt", "a person's own work\n")
@@ -249,12 +250,13 @@ func TestAddNext_RefusedEditIsUndone(t *testing.T) {
 
 	_, err := p.AddNext(ctx(), "rotate GITHUB_TOKEN="+fakeToken, "")
 	fe := secretFail(t, err)
-	require.Contains(t, fe.Msg, "ape's edit to development/roadmap.md was undone; nothing was committed")
+	require.Contains(t, fe.Msg, "ape's edit to development/next.md, development/roadmap.md was undone; nothing was committed")
 	require.Contains(t, fe.Msg, "nothing was committed: apex: next — rotate GITHUB_TOKEN=ghp_... adds a secret")
 	require.NotContains(t, fe.Msg, fakeToken[:12], "the subject, which holds the text, is redacted too")
 	require.Equal(t, before, run(t, p.Root, "status", "--porcelain"))
 	require.Equal(t, head, HeadSHA(ctx(), p.Root))
-	require.NotContains(t, read(t, p, "development/roadmap.md"), fakeToken)
+	require.NoFileExists(t, filepath.Join(p.Root, "development", "next.md"))
+	require.Equal(t, roadmapApproved, read(t, p, "development/roadmap.md"))
 
 	res, err := p.AddNext(ctx(), "rotate the GitHub token", "")
 	require.NoError(t, err)
@@ -271,12 +273,14 @@ func TestRedactSubject(t *testing.T) {
 	require.Equal(t, "apex: next — gh", redactSubject("apex: next — gh", f), "a start shorter than 8 is not a secret's")
 }
 
-// R28: a roadmap that held a person's uncommitted edits keeps its working
+// R28: a roadmap (or next.md) that held a person's uncommitted edits keeps its working
 // tree (ape's line in it, beside theirs); only ape's staging is taken
 // back, the person's staged hunk kept, and the refusal names the command
 // that clears the rest.
 func TestAddNext_RefusedEditOnADirtyFileOnlyUnstages(t *testing.T) {
-	p := fixture(t, baseFiles())
+	files := baseFiles()
+	files["development/roadmap.md"] = roadmapApproved + "\n## Next\n- 2026-10-01 a\n"
+	p := fixture(t, files) // not yet moved: next add writes the roadmap's block
 	rm := "development/roadmap.md"
 	write(t, p, rm, read(t, p, rm)+"\nstaged by a person\n")
 	run(t, p.Root, "add", "--", rm)

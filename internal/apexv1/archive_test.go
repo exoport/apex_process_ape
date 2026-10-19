@@ -482,13 +482,34 @@ func TestArchive_NoticedGoesToNext(t *testing.T) {
 
 	res, err := p.Archive(ctx(), "add-wave", true, RunOptions{})
 	require.NoError(t, err)
-	roadmap := read(t, p, "development/roadmap.md")
-	require.Contains(t, roadmap, "- 2026-10-15 greet.sh ignores LANG (from add-wave)")
-	require.NotContains(t, roadmap, "not carried")
-	require.NotContains(t, roadmap, "- 2026-10-15 none")
+	next := read(t, p, "development/next.md")
+	require.Contains(t, next, "- 2026-10-15 greet.sh ignores LANG (from add-wave)")
+	require.NotContains(t, next, "not carried")
+	require.NotContains(t, next, "- 2026-10-15 none")
+	require.Contains(t, read(t, p, "development/roadmap.md"), NextPointer, "next.md created with the roadmap's pointer (D217)")
 	files := run(t, p.Root, "show", "--name-only", "--format=", res.Commit)
-	require.Contains(t, files, "development/roadmap.md", "Next is written in the squash")
-	require.Empty(t, p.Check(), "the roadmap with Next still passes the project check")
+	require.Contains(t, files, "development/next.md", "Next is written in the squash")
+	require.Contains(t, files, "development/roadmap.md")
+	require.Empty(t, p.Check(), "the roadmap with its pointer and next.md pass the project check")
+}
+
+// D217 Q125: a project not yet moved gets the noticed items in its
+// roadmap's Next block, and no next.md.
+func TestArchive_NoticedGoesToTheRoadmapBeforeTheMove(t *testing.T) {
+	p := verifiedWave(t)
+	now = func() time.Time { return time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC) }
+	t.Cleanup(func() { now = time.Now })
+	run(t, p.Root, "switch", "-q", "main")
+	write(t, p, "development/roadmap.md", read(t, p, "development/roadmap.md")+"\n## Next\n- older\n")
+	commitAll(t, p, "docs: Next")
+	run(t, p.Root, "switch", "-q", "change/add-wave")
+	write(t, p, "development/changes/add-wave/review.md", "fine\n\n## Noticed, out of scope\n\n- greet.sh ignores LANG\n")
+	_, err := p.Review(ctx(), "add-wave", "pass", "development/changes/add-wave/review.md")
+	require.NoError(t, err)
+	_, err = p.Archive(ctx(), "add-wave", true, RunOptions{})
+	require.NoError(t, err)
+	require.True(t, strings.HasSuffix(read(t, p, "development/roadmap.md"), "## Next\n- older\n- 2026-10-15 greet.sh ignores LANG (from add-wave)\n"))
+	require.NoFileExists(t, filepath.Join(p.Root, "development", "next.md"))
 }
 
 func TestNoticedItems(t *testing.T) {

@@ -37,12 +37,20 @@ func TestInit_Greenfield(t *testing.T) {
 		"D82: the project-context line, plain text, right under the title; A13: then the operator's line")
 	_, err = p.OperatorInterfaceCheck()
 	require.NoError(t, err, "a project rc.7 init made leaves seq-07 nothing to do")
+	// D217: Next in next.md, the roadmap pointing at it — seq-09 has
+	// nothing to do.
+	require.Contains(t, res.Created, "development/next.md")
+	require.Equal(t, nextMDSkeleton, read(t, p, "development/next.md"))
+	require.Equal(t, "# Roadmap\n\n"+NextPointer+"\n", read(t, p, "development/roadmap.md"))
+	_, err = p.NextMoveCheck()
+	require.NoError(t, err, "a project rc.7b init made leaves seq-09 nothing to do")
 	require.FileExists(t, filepath.Join(root, filepath.FromSlash("development/specs/.gitkeep")))
 	// Backlog 26: a whitelist, so anything ape adds there later is ignored
 	// by default; init commits it, and project.json stays local.
 	require.Equal(t, "*\n!.gitignore\n!milestones.json\n!decisions.json\n", read(t, p, "_apex/state/.gitignore"))
 	committed := run(t, root, "show", "--name-only", "--format=", "HEAD")
 	require.Contains(t, committed, "_apex/state/.gitignore")
+	require.Contains(t, strings.Split(committed, "\n"), "development/next.md")
 	require.NotContains(t, committed, "project.json")
 	// D203: the root .gitignore, created with the .claude/ shape, committed.
 	require.Equal(t, shapeBlock, read(t, p, ".gitignore"))
@@ -77,6 +85,22 @@ func TestInit_Greenfield(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, res.Created)
 	require.Empty(t, res.HooksAdded)
+}
+
+// D217: init lays next.md down only with a new roadmap: an existing one
+// keeps its Next (and the writers keep using it) until `ape next move`.
+func TestInit_ExistingRoadmapGetsNoNextMD(t *testing.T) {
+	needSh(t)
+	root := t.TempDir()
+	gitEnv(t)
+	run(t, root, "init", "-q")
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "development"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "development", "roadmap.md"), []byte("# Roadmap\n\n## Next\n- a\n"), 0o644))
+	res, err := Init(ctx(), root, true)
+	require.NoError(t, err)
+	require.Contains(t, res.Kept, "development/roadmap.md")
+	require.NotContains(t, res.Created, "development/next.md")
+	require.NoFileExists(t, filepath.Join(root, "development", "next.md"))
 }
 
 func TestInit_BrownfieldKeepsWhatExists(t *testing.T) {

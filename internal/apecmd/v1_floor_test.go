@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/exoport/apex_process_ape/internal/apexv1"
@@ -150,5 +151,56 @@ func TestNextAddCLI(t *testing.T) {
 	require.Equal(t, ExitUsage, exitCodeOf(t, err))
 	require.Equal(t, "apex: next — the CSV export ignores --tz", v1Git(t, root, "log", "-1", "--format=%s"))
 	_, _, err = v1Exec(t, newProjectCmd, "check", "--cwd", root)
-	require.NoError(t, err, "## Next keeps the roadmap valid")
+	require.NoError(t, err, "next.md and the roadmap's pointer line keep the project valid")
+	require.Contains(t, nextRead(t, root, "development/next.md"), "- "+apexv1.Today()+" the CSV export ignores --tz (from add-wave)\n")
+}
+
+// D217 Q126: ape next move from the command line — the framework's
+// v1.0.0_seq-09: --check exits 1 (next.move-pending, action apply) while
+// the roadmap holds Next, the move is one commit, then --check exits 0
+// and a second move writes nothing.
+func TestNextMoveCLI(t *testing.T) {
+	root := v1Repo(t)
+	rm := filepath.Join(root, "development", "roadmap.md")
+	doc := nextRead(t, root, "development/roadmap.md")
+	require.NoError(t, os.Remove(filepath.Join(root, "development", "next.md")))
+	require.NoError(t, os.WriteFile(rm, []byte(strings.Replace(doc, apexv1.NextPointer, "## Next\n- 2026-10-01 a (from add-x)\n", 1)), 0o644))
+	v1Git(t, root, "commit", "-qam", "a project made before D217")
+	_, stderr, err := v1Exec(t, newProjectCmd, "check", "--cwd", root)
+	require.NoError(t, err, "the notice never fails the check")
+	require.Contains(t, stderr, "notice: development/roadmap.md:3: the roadmap still holds Next (1 item(s))")
+
+	stdout, _, err := v1Exec(t, newNextCmd, "move", "--check", "--json", "--cwd", root)
+	require.Equal(t, ExitRunFailed, exitCodeOf(t, err))
+	var pending struct {
+		Diagnostics []apexv1.Diagnostic   `json:"diagnostics"`
+		Result      apexv1.NextMoveResult `json:"result"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &pending), stdout)
+	require.Equal(t, "next.move-pending", pending.Diagnostics[0].Code)
+	require.Equal(t, apexv1.ActionApply, pending.Diagnostics[0].Action)
+	require.Equal(t, []string{"2026-10-01 a (from add-x)"}, pending.Result.Moved)
+
+	stdout, _, err = v1Exec(t, newNextCmd, "move", "--cwd", root)
+	require.NoError(t, err)
+	require.Contains(t, stdout, "1 item(s) moved from development/roadmap.md to development/next.md\n")
+	require.Equal(t, "apex: Next moved to development/next.md (seq-09)", v1Git(t, root, "log", "-1", "--format=%s"))
+	require.Contains(t, nextRead(t, root, "development/roadmap.md"), apexv1.NextPointer)
+	require.NotContains(t, nextRead(t, root, "development/roadmap.md"), "## Next")
+
+	stdout, _, err = v1Exec(t, newNextCmd, "move", "--check", "--cwd", root)
+	require.NoError(t, err)
+	require.Equal(t, "Next is in development/next.md already; nothing due\n", stdout)
+	stdout, _, err = v1Exec(t, newNextCmd, "move", "--json", "--cwd", root)
+	require.NoError(t, err)
+	require.Contains(t, stdout, `"pending": false`)
+	require.Equal(t, "apex: Next moved to development/next.md (seq-09)", v1Git(t, root, "log", "-1", "--format=%s"))
+}
+
+// nextRead is a project file's content.
+func nextRead(t *testing.T, root, rel string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
+	require.NoError(t, err)
+	return string(data)
 }

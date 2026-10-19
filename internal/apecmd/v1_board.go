@@ -25,7 +25,9 @@ var boardRefreshVerbs = map[string]bool{
 	"project init": true, "project lift": true, "project accept-config": true,
 	"milestone new": true, "milestone approve": true, "milestone gate": true, "milestone close": true,
 	"decision new": true, "decision accept": true,
-	"next add":   true,
+	"next add": true,
+	// rc.7b (rc7b-next): the move can drop a duplicate Next item.
+	"next move":  true,
 	"change new": true, "change approve": true, "change start": true, "change verify": true,
 	"change review": true, "change accept": true, "change block": true, "change answer": true,
 	"change archive": true, "change abandon": true, "change tool": true,

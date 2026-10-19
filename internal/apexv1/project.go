@@ -196,6 +196,11 @@ func (p *Project) Check() []Finding {
 		add(ValidateRoadmap(p.Rel(p.RoadmapMD()), doc)...)
 		add(p.milestoneRecordFindings()...)
 	}
+	// next.md is optional (a project made before D217 has none): only its
+	// items' shape is checked.
+	if doc, err := readFileString(p.NextMD()); err == nil {
+		add(ValidateNextMD(p.Rel(p.NextMD()), doc)...)
+	}
 	add(p.briefFindings(context.Background())...)
 
 	for _, capName := range p.Capabilities() {

@@ -253,13 +253,13 @@ func (p *Project) commitDetached(ctx context.Context, branch, tip string, files 
 
 // recordsOnlyMoved reports a base branch that moved from base to tip only
 // by ape's own base-branch records — milestones.json, decisions.json, the
-// roadmap, an archived change's folder, a change's accepted.json — which
-// the change's branch has not touched since base: a block counted, a `ape
-// next add`, an archived change's acceptance, a reviewed change's
-// acceptance from the base (D52 Q18), a gate result. Such a move changes no code, so it
-// does not make a change catch up (rebase, re-baseline, re-verify); the
-// squash at archive takes the records along. Any other file, or one the
-// branch touched too, is a move.
+// roadmap, next.md (D217), an archived change's folder, a change's
+// accepted.json — which the change's branch has not touched since base: a
+// block counted, a `ape next add`, an archived change's acceptance, a
+// reviewed change's acceptance from the base (D52 Q18), a gate result.
+// Such a move changes no code, so it does not make a change catch up
+// (rebase, re-baseline, re-verify); the squash at archive takes the
+// records along. Any other file, or one the branch touched too, is a move.
 func (p *Project) recordsOnlyMoved(ctx context.Context, base, tip string) bool {
 	if base == "" {
 		return false
@@ -289,7 +289,7 @@ func (p *Project) recordsOnlyMoved(ctx context.Context, base, tip string) bool {
 	for _, f := range onBranch {
 		touched[f] = true
 	}
-	records := map[string]bool{p.Rel(p.MilestonesJSON()): true, p.Rel(p.decisionsJSON()): true, p.Rel(p.RoadmapMD()): true}
+	records := map[string]bool{p.Rel(p.MilestonesJSON()): true, p.Rel(p.decisionsJSON()): true, p.Rel(p.RoadmapMD()): true, p.Rel(p.NextMD()): true}
 	archive := p.Rel(p.ArchiveDir()) + "/"
 	for _, f := range onBase {
 		if touched[f] || !records[f] && !strings.HasPrefix(f, archive) && !p.isAcceptedRecord(f) {
