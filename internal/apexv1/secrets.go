@@ -494,8 +494,8 @@ func redactSubject(subject string, found []secretFinding) string {
 	for _, s := range found {
 		subject = strings.ReplaceAll(subject, s.value, s.Redacted)
 		for k := len(s.value) - 1; k >= minEchoed; k-- {
-			if strings.HasSuffix(strings.TrimSuffix(subject, "…"), s.value[:k]) {
-				subject = strings.TrimSuffix(strings.TrimSuffix(subject, "…"), s.value[:k]) + s.Redacted
+			if before, ok := strings.CutSuffix(strings.TrimSuffix(subject, "…"), s.value[:k]); ok {
+				subject = before + s.Redacted
 				break
 			}
 		}

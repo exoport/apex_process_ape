@@ -224,8 +224,12 @@ func readsByName(code string, tok pathTok) bool {
 // root a script joins it to, and so is a ) or a quote before its /
 // ($(ROOT)/development/…, root + "/development/…"): dropped.
 func pathTokens(code string) []string {
-	var out []string
-	for _, t := range pathTokenSpans(code) {
+	spans := pathTokenSpans(code)
+	if len(spans) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(spans))
+	for _, t := range spans {
 		out = append(out, t.s)
 	}
 	return out

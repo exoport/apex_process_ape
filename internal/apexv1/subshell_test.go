@@ -112,7 +112,7 @@ func TestSplitSubshell_LiftedBlockSplits(t *testing.T) {
 	// The same shape with stand-ins: go test fails, go build after it
 	// passes, so only the split sees the red.
 	dir := t.TempDir()
-	stand := "( true\ntrue\nfor f in a b; do echo $f; done\nfalse\ntrue\n)"
+	stand := "( true\n:\nfor f in a b; do echo $f; done\nfalse\ntrue\n)"
 	r := RunCheck(ctx(), dir, stand, filepath.Join(dir, "r.log"), 0)
 	require.Equal(t, 1, r.Exit, "the failing line counts")
 	require.Equal(t, []string{"a", "b"}, r.Tail, "the lines after the red one did not run")
@@ -143,7 +143,7 @@ func TestRunCheck_SubshellBlockSplit(t *testing.T) {
 	require.Equal(t, "make && for f in a b; do echo $f; done && go test", joinLines([]string{"make", "for f in a b; do echo $f; done", "go test"}), "a ; inside a construct is not the line's")
 
 	// The last line red: red either way.
-	require.Equal(t, 1, RunCheck(ctx(), dir, "( true\ntrue\nfalse\n)", "", 0).Exit)
+	require.Equal(t, 1, RunCheck(ctx(), dir, "( true\n:\nfalse\n)", "", 0).Exit)
 	require.Equal(t, 0, RunCheck(ctx(), dir, "( true\n# fine\ntrue\n)", "", 0).Exit)
 
 	// A block that does not split runs as written: a cd holds for the

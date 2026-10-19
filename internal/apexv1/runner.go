@@ -60,6 +60,26 @@ func RunCheck(ctx context.Context, dir, cmd, logPath string, timeout time.Durati
 	return runCheck(ctx, dir, cmd, logPath, Timeouts{}.Limits(KindTask, timeout), nil)
 }
 
+// openCheckLog creates a check's log at logPath, nil when there is none or
+// it cannot be created. The split note (R24b) opens the log only: the
+// output's hash and tail are the command's own.
+func openCheckLog(logPath, note string) *os.File {
+	if logPath == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+		return nil
+	}
+	f, err := os.Create(logPath)
+	if err != nil {
+		return nil
+	}
+	if note != "" {
+		_, _ = f.WriteString(note + "\n")
+	}
+	return f
+}
+
 // runCheck is RunCheck under lim that also judges a zero exit against the
 // vacuous phrases (H11): an output vacuousPhrase finds one in records
 // ExitVacuous.
@@ -103,19 +123,9 @@ func runCheck(ctx context.Context, dir, cmd, logPath string, lim TierTimeout, va
 	var lastOut atomic.Int64
 	lastOut.Store(time.Now().UnixNano())
 	sinks := []io.Writer{&capped{w: &buf, max: outputKeep}, hash, progressWriter{&lastOut}}
-	var logFile *os.File
-	if logPath != "" {
-		if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err == nil {
-			if f, err := os.Create(logPath); err == nil {
-				logFile = f
-				sinks = append(sinks, f)
-				// The split note opens the log only: the output's hash
-				// and tail are the command's own.
-				if note != "" {
-					_, _ = io.WriteString(f, note+"\n")
-				}
-			}
-		}
+	logFile := openCheckLog(logPath, note)
+	if logFile != nil {
+		sinks = append(sinks, logFile)
 	}
 	w := &lockedWriter{w: io.MultiWriter(sinks...)}
 	c.Stdout = w

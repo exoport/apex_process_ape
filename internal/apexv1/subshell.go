@@ -78,7 +78,7 @@ func simpleLine(l string) (code, why string) {
 	toks, heredoc, balanced := shellTokens(t)
 	switch {
 	case !balanced:
-		return "", "has unbalanced quotes or parentheses"
+		return "", whyUnbalanced
 	case heredoc:
 		return "", "opens a construct (a here-doc <<)"
 	}
@@ -87,6 +87,10 @@ func simpleLine(l string) (code, why string) {
 	}
 	return t, ""
 }
+
+// whyUnbalanced is the reason a line with unbalanced quotes or
+// parentheses is no simple command.
+const whyUnbalanced = "has unbalanced quotes or parentheses"
 
 // shellTok is one token of a line: an operator (; ;; & && || | |& ( )) or
 // a word, quotes, $( ), ${ }, `…` and (( )) inside it.
@@ -97,6 +101,8 @@ type shellTok struct {
 // shellTokens splits one line into operators and words, and reports a
 // here-doc (<<, not the here-string <<<) and whether its quotes and
 // parentheses balance. A # that starts a token ends the line.
+//
+//nolint:gocyclo // a hand-written lexer: one case per token class
 func shellTokens(t string) (toks []shellTok, heredoc, balanced bool) {
 	for i := 0; i < len(t); {
 		c := t[i]
@@ -123,7 +129,7 @@ func shellTokens(t string) (toks []shellTok, heredoc, balanced bool) {
 		start := i
 		for i < len(t) {
 			c := t[i]
-			if c == ' ' || c == '\t' || shellOp(t[i:]) != "" && !(c == '&' && i > start && (t[i-1] == '>' || t[i-1] == '<')) {
+			if c == ' ' || c == '\t' || shellOp(t[i:]) != "" && (c != '&' || i <= start || t[i-1] != '>' && t[i-1] != '<') {
 				break
 			}
 			switch {
@@ -204,23 +210,24 @@ func closeQuote(t string, i int) int {
 func closeParens(t string, i int) int {
 	depth := 0
 	for j := i; j < len(t); j++ {
-		switch c := t[j]; {
-		case c == '\\':
+		switch t[j] {
+		case '\\':
 			j++
-		case c == '\'':
+		case '\'':
 			k := strings.IndexByte(t[j+1:], '\'')
 			if k < 0 {
 				return -1
 			}
 			j += k + 1
-		case c == '"' || c == '`':
+		case '"', '`':
 			if j = closeQuote(t, j); j < 0 {
 				return -1
 			}
-		case c == '(':
+		case '(':
 			depth++
-		case c == ')':
-			if depth--; depth == 0 {
+		case ')':
+			depth--
+			if depth == 0 {
 				return j
 			}
 		}
@@ -250,6 +257,8 @@ type shellFrame struct {
 // not end joined to the next. It returns why the line is no simple
 // command, or "", and whether the line is a list at its top level (a ;, &
 // or || outside any construct).
+//
+//nolint:gocyclo // one pass over a line's tokens: one case per construct keyword, each a few lines
 func lineConstructs(toks []shellTok) (why string, list bool) {
 	var stack []shellFrame
 	top := func() *shellFrame {
@@ -297,11 +306,11 @@ func lineConstructs(toks []shellTok) (why string, list bool) {
 				case i > 0 && toks[i-1].word != "" && i+1 < len(toks) && toks[i+1].op == ")":
 					return "opens a construct (a function definition)", false
 				default:
-					return "has unbalanced quotes or parentheses", false
+					return whyUnbalanced, false
 				}
 			case ")":
 				if f.closer != ")" {
-					return "has unbalanced quotes or parentheses", false
+					return whyUnbalanced, false
 				}
 				stack, cmdPos = stack[:len(stack)-1], false
 				continue
