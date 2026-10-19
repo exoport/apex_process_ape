@@ -16,10 +16,11 @@ func newNextCmd() *cobra.Command {
 finding, which apex-plan triages at the next delivery — a milestone, kept, or deleted
 with the reason in its commit. Next is not a milestone.
 
-Since D217 it lives in development/next.md; the roadmap keeps one line in its place,
-"` + apexv1.NextPointer + `". A project made before keeps Next in development/roadmap.md
-(a "## Next" section, or items under apex-plan's "Next — not milestones:" label) until
-` + "`ape next move`" + ` moves it (the framework's migration v1.0.0_seq-09).`,
+Since D217 it lives in development/next.md; the roadmap keeps one line in its
+place, "` + apexv1.NextPointer + `". A project made before keeps
+Next in development/roadmap.md (a "## Next" section, or items under apex-plan's
+"Next — not milestones:" label) until ` + "`ape next move`" + ` moves it (the framework's
+migration v1.0.0_seq-09).`,
 	}
 	cmd.AddCommand(newNextAddCmd(), newNextMoveCmd())
 	return cmd
