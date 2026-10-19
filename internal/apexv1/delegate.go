@@ -369,12 +369,14 @@ func (p *Project) prepareDocsDelegate(ctx context.Context, cfg Config, id, task 
 	if tg == nil || tg.doc == nil || !tg.doc.Meta.Docs {
 		return nil, delegateOff(id, task, hr)
 	}
+	// The guard first (Q90): a model's own unaccepted docs: person is
+	// delegate.unaccepted-config, as the help says, not delegate.off.
+	if err := p.refuseUnacceptedConfig(ctx, "human_review", "release", "docs"); err != nil {
+		return nil, err
+	}
 	if !hr.DocsDefault() {
 		return nil, &FailError{Code: "delegate.off", Msg: "the docs delegate is off: _apex/config.yaml sets human_review.docs: person, so only a person accepts " + task +
 			" of the docs change " + id + " — a person runs `ape change accept " + id + " --task " + task + " --by <who>`"}
-	}
-	if err := p.refuseUnacceptedConfig(ctx, "human_review", "release", "docs"); err != nil {
-		return nil, err
 	}
 	if terr != nil {
 		return nil, terr

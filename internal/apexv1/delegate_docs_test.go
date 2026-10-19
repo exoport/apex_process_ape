@@ -284,6 +284,29 @@ func TestDocsDelegate_ConfigGuard(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// Q90 (eval Q21): the guard runs before the docs: person check, so a
+// model's own unaccepted human_review: {docs: person} — committed, or an
+// uncommitted edit — is delegate.unaccepted-config, as the help says, not
+// delegate.off; once a person accepts it, it is delegate.off.
+func TestDocsDelegate_UnacceptedDocsPersonIsUnacceptedConfig(t *testing.T) {
+	p := docsWave(t, "", true, nil)
+	write(t, p, "_apex/config.yaml", "human_review: {docs: person}\n")
+	_, err := p.PrepareDelegate(ctx(), "docs-wave", "T2")
+	require.Contains(t, requireFail(t, err, "delegate.unaccepted-config").Msg, "human_review block differs from the one committed at HEAD")
+
+	run(t, p.Root, "switch", "-q", "main")
+	commitAll(t, p, "chore: the docs are a person's")
+	_, err = p.PrepareDelegate(ctx(), "docs-wave", "T2")
+	fe := requireFail(t, err, "delegate.unaccepted-config")
+	require.Contains(t, fe.Msg, "human_review block was changed by a commit no person accepted")
+	require.Equal(t, ActionPerson, ActionFor(fe.Code))
+
+	_, err = p.AcceptConfig(ctx(), "ann")
+	require.NoError(t, err)
+	_, err = p.PrepareDelegate(ctx(), "docs-wave", "T2")
+	require.Contains(t, requireFail(t, err, "delegate.off").Msg, "human_review.docs: person")
+}
+
 // change check reads docs: as a YAML boolean only (D152): any other value
 // is a change.frontmatter finding, and docs: is no unknown key.
 func TestCheckChange_DocsKey(t *testing.T) {
