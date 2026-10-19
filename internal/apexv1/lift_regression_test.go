@@ -93,6 +93,39 @@ func TestJudgeLiftRegression_RedAtTagComparesFailures(t *testing.T) {
 	require.Empty(t, fresh)
 }
 
+// R24: for the lift's verdict a run that exits 0 but names failing tests
+// is red, by those names, at either point.
+func TestJudgeLiftRegression_ExitZeroNamingFailures(t *testing.T) {
+	r := func(sha string) *CheckResult { return &CheckResult{Exit: 0, Log: sha + ".log", OutputSHA256: sha} }
+	failing := "--- FAIL: TestA (0.00s)\n--- FAIL: TestB (0.01s)\nok  \tgithub.com/x/y\t0.1s\n"
+	v, note, fresh := judgeLiftRegression(r("t"), r("a"), "ok  \tgithub.com/x/y\t0.1s\n", failing)
+	require.Equal(t, LiftRegressionRedAfterLift, v)
+	require.Equal(t, []string{"TestA", "TestB"}, fresh)
+	require.Contains(t, note, "red at the lift commit (exit 0, but the output names 2 failing tests: TestA, TestB), green at apex-v0-final")
+
+	v, note, fresh = judgeLiftRegression(r("t"), r("a"), failing, failing)
+	require.Equal(t, LiftRegressionRedAtTag, v, "the same names at both points: red at both")
+	require.Empty(t, fresh)
+	require.Contains(t, note, "red at the lift commit (exit 0, but the output names 2 failing tests) and at apex-v0-final (exit 0, but the output names 2 failing tests), failing as it did there")
+
+	v, note, fresh = judgeLiftRegression(r("t"), r("a"), "--- FAIL: TestA (0.00s)\n", failing)
+	require.Equal(t, LiftRegressionRedAtTagNewFailures, v)
+	require.Equal(t, []string{"TestB"}, fresh)
+	require.Contains(t, note, "(exit 0, but the output names 1 failing test)")
+
+	v, note, _ = judgeLiftRegression(r("t"), &CheckResult{Exit: 1, Log: "a.log"}, failing, "--- FAIL: TestA (0.00s)\n--- FAIL: TestB (0.01s)\n")
+	require.Equal(t, LiftRegressionRedAtTag, v, "exit 0 naming them at the tag, exit 1 naming them after: red at both")
+	require.Contains(t, note, "red at the lift commit (exit 1) and at apex-v0-final (exit 0, but the output names 2 failing tests)")
+
+	v, note, _ = judgeLiftRegression(r("t"), r("a"), failing, "ok\n")
+	require.Equal(t, LiftRegressionGreen, v)
+	require.Contains(t, note, "red at apex-v0-final, exit 0, but the output names 2 failing tests")
+
+	v, note, _ = judgeLiftRegression(nil, r("a"), "", failing)
+	require.Equal(t, LiftRegressionNoBaseline, v)
+	require.Contains(t, note, "red at the lift commit (exit 0, but the output names 2 failing tests), with no run")
+}
+
 func liftWithGates(t *testing.T, gates string) string {
 	t.Helper()
 	return liftWithGatesAt(t, liftFixture(t, false), gates)
@@ -217,6 +250,24 @@ func TestLift_RegressionAtTheTag(t *testing.T) {
 		require.Equal(t, 2, res.Regression.Exit)
 		require.Equal(t, LiftRegressionCannotRun, res.RegressionVerdict)
 		require.Contains(t, res.RegressionNote, "command was not found and make reported Error 127")
+	})
+	t.Run("exit 0 with failing tests named", func(t *testing.T) {
+		// R24, cortex: the ( … ) block's go test failed tests the lift
+		// broke, the block exited 0 on its last line, and the lift said
+		// green.
+		root := liftFixture(t, false)
+		script := "#!/bin/sh\ntest -f development/team-memory.md || { echo '--- FAIL: TestPinAgreement_LiveTree (0.00s)'; echo 'FAIL\tgithub.com/x/pinlint\t0.1s'; }\n" +
+			"echo 'ok  \tgithub.com/x/other\t0.2s'\nexit 0\n"
+		require.NoError(t, os.WriteFile(filepath.Join(root, "gotest.sh"), []byte(script), 0o755))
+		run(t, root, "add", "gotest.sh")
+		root = liftWithGatesAt(t, root, "sh ./gotest.sh")
+		res, err := Lift(ctx(), root, LiftOptions{})
+		require.NoError(t, err)
+		require.Equal(t, 0, res.RegressionAtTag.Exit)
+		require.Equal(t, 0, res.Regression.Exit, "the exit is recorded as it was")
+		require.Equal(t, LiftRegressionRedAfterLift, res.RegressionVerdict)
+		require.Equal(t, []string{"TestPinAgreement_LiveTree", "github.com/x/pinlint"}, res.RegressionNewFailures)
+		require.Contains(t, res.RegressionNote, "LIFT FAILURE: red at the lift commit (exit 0, but the output names 2 failing tests: TestPinAgreement_LiveTree, github.com/x/pinlint), green at apex-v0-final")
 	})
 	t.Run("not run", func(t *testing.T) {
 		root := liftWithGates(t, "test -f nowhere.txt")

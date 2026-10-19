@@ -1318,54 +1318,99 @@ func (lf *lifter) movePin() bool {
 
 // judgeLiftRegression compares the regression command at the lift commit
 // (after) with its run at the tag (before, nil when it did not run);
-// beforeOut and afterOut are their outputs, read when a run is red.
+// beforeOut and afterOut are their outputs. A run that exits 0 but whose
+// output names failing tests is red here, by those names (R24).
 func judgeLiftRegression(before, after *CheckResult, beforeOut, afterOut string) (verdict, note string, fresh []string) {
+	afterNamed, beforeNamed := failingDespiteZero(after, afterOut), failingDespiteZero(before, beforeOut)
+	beforeRed := before != nil && (before.Exit != 0 || len(beforeNamed) > 0)
 	tag := "not run"
 	if before != nil {
-		tag = fmt.Sprintf("exit %d", before.Exit)
+		tag = liftExit(before, beforeNamed)
 	}
+	exit := liftExit(after, afterNamed)
 	afterCannot, why := liftCannotRun(after, afterOut)
 	beforeCannot, _ := liftCannotRun(before, beforeOut)
 	switch {
-	case after.Exit == 0:
-		if before != nil && before.Exit != 0 {
+	case after.Exit == 0 && len(afterNamed) == 0:
+		if beforeRed {
 			return LiftRegressionGreen, fmt.Sprintf("green at the lift commit (red at %s, %s: check that run's log for a flaky test)", LiftTag, tag), nil
 		}
 		return LiftRegressionGreen, "green at the lift commit, as at " + LiftTag, nil
-	case afterCannot && (before == nil || before.Exit != 0):
+	case afterCannot && (before == nil || beforeRed):
 		return LiftRegressionCannotRun, fmt.Sprintf("cannot run here (exit %d at the lift commit%s, %s at %s): a command it runs is missing or not executable on this machine — not a red; run it where its tools are, or set `regression:` to what can run; output in %s", after.Exit, why, tag, LiftTag, after.Log), nil
 	case before == nil:
-		return LiftRegressionNoBaseline, fmt.Sprintf("red at the lift commit (exit %d), with no run at %s to compare: output in %s", after.Exit, LiftTag, after.Log), nil
+		return LiftRegressionNoBaseline, fmt.Sprintf("red at the lift commit (%s), with no run at %s to compare: output in %s", exit, LiftTag, after.Log), nil
 	case beforeCannot:
-		return LiftRegressionNoBaseline, fmt.Sprintf("red at the lift commit (exit %d); at %s it could not run (%s), so nothing says whose red it is: output in %s", after.Exit, LiftTag, tag, after.Log), nil
-	case before.Exit != 0:
-		return judgeRedAtTag(before, after, tag, beforeOut, afterOut)
+		return LiftRegressionNoBaseline, fmt.Sprintf("red at the lift commit (%s); at %s it could not run (%s), so nothing says whose red it is: output in %s", exit, LiftTag, tag, after.Log), nil
+	case beforeRed:
+		return judgeRedAtTag(before, after, tag, exit, beforeOut, afterOut)
+	case len(afterNamed) > 0:
+		shown := afterNamed[:min(len(afterNamed), liftNewFailuresShown)]
+		return LiftRegressionRedAfterLift, fmt.Sprintf("LIFT FAILURE: red at the lift commit (%s: %s), green at %s — the lift broke them (an edited file a test or CI pins, a removed path code still reads); output in %s. Fix them in a commit of their own, or `git reset --hard %s` and lift again with --exclude", exit, failureList(afterNamed), LiftTag, after.Log, LiftTag), shown
 	default:
-		return LiftRegressionRedAfterLift, fmt.Sprintf("LIFT FAILURE: red at the lift commit (exit %d), green at %s — the lift broke it (an edited file a test or CI pins, a removed path code still reads); output in %s. Fix it in a commit of its own, or `git reset --hard %s` and lift again with --exclude", after.Exit, LiftTag, after.Log, LiftTag), nil
+		return LiftRegressionRedAfterLift, fmt.Sprintf("LIFT FAILURE: red at the lift commit (%s), green at %s — the lift broke it (an edited file a test or CI pins, a removed path code still reads); output in %s. Fix it in a commit of its own, or `git reset --hard %s` and lift again with --exclude", exit, LiftTag, after.Log, LiftTag), nil
 	}
+}
+
+// R24: cortex's regression block exited 0 with seven lift-caused tests
+// failing in its output — only its last line's exit counted — and the
+// lift called it green, "as at apex-v0-final". For the lift's verdict a
+// run that exits 0 but names failing tests is red, by those names. A
+// change's verify, a gate and a check keep the exit code (their ( … )
+// blocks split instead, R24b): output that only quotes a FAIL line would
+// fool a general rule.
+
+// failingDespiteZero are the failing tests a run that exited 0 names in
+// out; nil for a run that did not exit 0, or names none.
+func failingDespiteZero(r *CheckResult, out string) []string {
+	if r == nil || r.Exit != 0 {
+		return nil
+	}
+	return failingTests(out)
+}
+
+// liftExit is a comparison run's exit for a note: "exit N", or, for a run
+// that exited 0 naming failing tests, that it did, so nobody reads the 0
+// as green.
+func liftExit(r *CheckResult, named []string) string {
+	switch n := len(named); {
+	case r.Exit != 0 || n == 0:
+		return fmt.Sprintf("exit %d", r.Exit)
+	case n == 1:
+		return "exit 0, but the output names 1 failing test"
+	default:
+		return fmt.Sprintf("exit 0, but the output names %d failing tests", n)
+	}
+}
+
+// failureList is the first five of names for a note, the count saying
+// the rest are in regression_new_failures.
+func failureList(names []string) string {
+	shown := names[:min(len(names), liftNewFailuresShown)]
+	list := strings.Join(shown[:min(len(shown), 5)], ", ")
+	if len(names) > 5 {
+		list += fmt.Sprintf(", … (%d in all, in regression_new_failures)", len(names))
+	}
+	return list
 }
 
 // judgeRedAtTag judges a run red at the tag and at the lift commit (R4):
 // by the failing test names when the run after the lift reports them,
 // else by the outputs' hashes, tool-install lines and durations left out
 // (R13). Only the same failures (or fewer), or the same output, are
-// called pre-existing.
-func judgeRedAtTag(before, after *CheckResult, tag, beforeOut, afterOut string) (verdict, note string, fresh []string) {
+// called pre-existing. tag and exit say each run's exit.
+func judgeRedAtTag(before, after *CheckResult, tag, exit, beforeOut, afterOut string) (verdict, note string, fresh []string) {
 	newNames, named := newFailures(beforeOut, afterOut)
 	switch {
 	case len(newNames) > 0:
 		shown := newNames[:min(len(newNames), liftNewFailuresShown)]
-		list := strings.Join(shown[:min(len(shown), 5)], ", ")
-		if len(newNames) > 5 {
-			list += fmt.Sprintf(", … (%d in all, in regression_new_failures)", len(newNames))
-		}
-		return LiftRegressionRedAtTagNewFailures, fmt.Sprintf("LIFT FAILURE: red at the lift commit (exit %d) and at %s (%s), but %d failing test(s) the run at %s did not have: %s — the lift broke them (code reading a removed path, an edited file a test pins). Fix them in a commit of their own; the rest are pre-existing. Output in %s and %s",
-			after.Exit, LiftTag, tag, len(newNames), LiftTag, list, after.Log, before.Log), shown
+		return LiftRegressionRedAtTagNewFailures, fmt.Sprintf("LIFT FAILURE: red at the lift commit (%s) and at %s (%s), but %d failing test(s) the run at %s did not have: %s — the lift broke them (code reading a removed path, an edited file a test pins). Fix them in a commit of their own; the rest are pre-existing. Output in %s and %s",
+			exit, LiftTag, tag, len(newNames), LiftTag, failureList(newNames), after.Log, before.Log), shown
 	case named || before.OutputSHA256 == after.OutputSHA256 ||
 		(beforeOut+afterOut != "" && liftComparisonHash(beforeOut) == liftComparisonHash(afterOut)):
-		return LiftRegressionRedAtTag, fmt.Sprintf("red at the lift commit (exit %d) and at %s (%s), failing as it did there: a pre-existing failure for apex-plan to roadmap, not a lift failure; output in %s and %s", after.Exit, LiftTag, tag, after.Log, before.Log), nil
+		return LiftRegressionRedAtTag, fmt.Sprintf("red at the lift commit (%s) and at %s (%s), failing as it did there: a pre-existing failure for apex-plan to roadmap, not a lift failure; output in %s and %s", exit, LiftTag, tag, after.Log, before.Log), nil
 	default:
-		return LiftRegressionRedAtTag, fmt.Sprintf("red at the tag; the output changed after the lift (exit %d at the lift commit, %s at %s), and no failing test names could be read to compare, so nothing says the red is only the tag's: diff %s with %s before calling it the tag's", after.Exit, tag, LiftTag, after.Log, before.Log), nil
+		return LiftRegressionRedAtTag, fmt.Sprintf("red at the tag; the output changed after the lift (%s at the lift commit, %s at %s), and no failing test names could be read to compare, so nothing says the red is only the tag's: diff %s with %s before calling it the tag's", exit, tag, LiftTag, after.Log, before.Log), nil
 	}
 }
 
