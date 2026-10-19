@@ -39,6 +39,9 @@ the hook payload (JSON) on stdin.
                   the commit (commit.secret)
 
 Every Claude Code hook exits 0; a block or deny is expressed in its JSON output.
+When the project's ape pin cannot run (.bingo/ape.mod; exit 13 for other verbs),
+pre-tool exits 2 with the same message, so Claude Code blocks the call: the guard
+fails closed. stop and session-start keep 13, which blocks nothing.
 pre-commit is git's, not Claude Code's: its exit code is the verdict.
 
 In a session ape task launches in a v1 project, the three hooks also come inline
@@ -259,7 +262,14 @@ rebase it and re-take the baseline at the base tip). Allowed: rebase/merge --abo
 --quit, git merge-base, merge-file and merge-tree, and rebase or merge on any other
 branch. Parsed like the tag rule, with the same limits.
 
-Anything else: no output.`,
+Anything else: no output.
+
+When the project's ape pin cannot run here — it names an ape below the floor (the
+installed framework's min_ape_version, or 1.0.0 in a v1 project without
+_apex/ape-commands.yaml) or one that is not installed — this hook exits 2 with the
+pin's message, which Claude Code reads as a deny: the guard fails closed rather than
+letting every tool call through. APE_TOOLCHAIN=local in the session's environment
+runs this ape regardless.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			payload := readHookPayload(cmd)

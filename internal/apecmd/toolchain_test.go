@@ -2,6 +2,7 @@ package apecmd
 
 import (
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -31,7 +32,7 @@ func pinInput(cwd, running, verb string) pinCheckInput {
 		cwd: cwd, running: running, self: "/path/to/ape-running", verb: verb,
 		env:       func(string) string { return "" },
 		locate:    func(v string) (string, bool) { return "/gobin/ape-" + v, true },
-		floorFrom: func(string) (string, error) { return "", errors.New("no floor") },
+		floorFrom: func(string) (pinFloor, error) { return pinFloor{}, errors.New("no floor") },
 	}
 }
 
@@ -77,9 +78,9 @@ func TestDecidePin(t *testing.T) {
 	t.Run("pin below the framework floor: refuse with the move-forward command", func(t *testing.T) {
 		root, sub := pinProject(t, "v0.0.66")
 		in := pinInput(sub, "0.7.0", "ape story list")
-		in.floorFrom = func(r string) (string, error) {
+		in.floorFrom = func(r string) (pinFloor, error) {
 			require.Equal(t, root, r)
-			return "0.7.0", nil
+			return pinFloor{"0.7.0", "the installed framework's min_ape_version 0.7.0"}, nil
 		}
 		d := decidePin(in)
 		require.ErrorContains(t, d.refuse, "pins ape v0.0.66")
@@ -90,7 +91,7 @@ func TestDecidePin(t *testing.T) {
 		for _, verb := range []string{"ape framework update", "ape doctor", "ape version", "ape"} {
 			_, sub := pinProject(t, "v0.0.66")
 			in := pinInput(sub, "0.8.5", verb)
-			in.floorFrom = func(string) (string, error) { return "0.7.0", nil }
+			in.floorFrom = func(string) (pinFloor, error) { return pinFloor{"0.7.0", "min_ape_version 0.7.0"}, nil }
 			d := decidePin(in)
 			require.True(t, d.run, verb)
 			require.NoError(t, d.refuse, verb)
@@ -224,4 +225,101 @@ func TestDecidePin_ProjectLiftIsExempt(t *testing.T) {
 	require.True(t, d.run, "not installed: still runs here")
 	require.NoError(t, d.refuse)
 	require.Equal(t, "/gobin/ape-v0.9.0", decidePin(pinInput(sub, "1.0.0-rc.3", "ape project check")).exec, "other v1 verbs still honour the pin")
+}
+
+// R33, from tenax on rc.6e: a lifted project has no _apex/ape-commands.yaml
+// until the payload lands, so its old pin had no floor to fall below and a
+// bare ape ran the pinned v0 ape — every commit refused with `unknown
+// command "hook"`. A v1 layout is floor 1.0.0 then; the manifest, when
+// there, still decides.
+func TestInstalledFloor_V1Layout(t *testing.T) {
+	root := t.TempDir()
+	_, err := installedFloor(root)
+	require.Error(t, err, "no manifest, no v1 layout: no floor")
+
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "_apex", "state"), 0o755))
+	f, err := installedFloor(root)
+	require.NoError(t, err)
+	require.Equal(t, "1.0.0", f.version)
+	require.Contains(t, f.by, "the least an APEX v1 project")
+
+	md := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(md, "development"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(md, "development", "project.md"), []byte("# p\n"), 0o644))
+	f, err = installedFloor(md)
+	require.NoError(t, err)
+	require.Equal(t, "1.0.0", f.version, "development/project.md is a v1 layout too")
+
+	require.NoError(t, os.WriteFile(filepath.Join(root, "_apex", "ape-commands.yaml"), []byte("min_ape_version: 1.0.0-rc.3\n"), 0o644))
+	f, err = installedFloor(root)
+	require.NoError(t, err)
+	require.Equal(t, "1.0.0-rc.3", f.version, "the manifest wins")
+	require.Contains(t, f.by, "the installed framework's min_ape_version 1.0.0-rc.3")
+}
+
+// R33: under a v0 pin, a lifted project's bare ape refuses with exit 13's
+// clear message rather than swapping to the v0 ape (which the fake locate
+// would hand over here).
+func TestDecidePin_V1LayoutImpliesFloor(t *testing.T) {
+	root, sub := pinProject(t, "v0.9.0")
+	in := pinInput(sub, "1.0.0-rc.7", "ape hook pre-commit")
+	in.floorFrom = installedFloor
+	require.Equal(t, "/gobin/ape-v0.9.0", decidePin(in).exec, "not v1 yet: the pin is honoured")
+
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "_apex", "state"), 0o755))
+	d := decidePin(in)
+	require.Empty(t, d.exec)
+	require.ErrorContains(t, d.refuse, "this project pins ape v0.9.0 (.bingo/ape.mod), below 1.0.0, the least an APEX v1 project")
+	require.ErrorContains(t, d.refuse, "bingo get -l "+apeModulePath+"@v1.0.0")
+	require.ErrorContains(t, d.refuse, envToolchain+"=local")
+
+	_, sub = pinProject(t, "v1.0.0-rc.6")
+	in = pinInput(sub, "1.0.0-rc.7", "ape hook pre-commit")
+	in.floorFrom = installedFloor
+	require.NoError(t, os.MkdirAll(filepath.Join(filepath.Dir(filepath.Dir(sub)), "_apex", "state"), 0o755))
+	require.Equal(t, "/gobin/ape-v1.0.0-rc.6", decidePin(in).exec, "an rc of 1.0.0 meets the floor")
+}
+
+// R33: a pin refusal of `ape hook pre-tool` exits 2, which Claude Code
+// reads as a block — 13 let every tool call through. stop and
+// session-start keep 13 (no block, no stop loop); git refuses a commit on
+// any non-zero exit. No real pinned binary is looked at: GOBIN, GOPATH and
+// the home directory are empty scratch dirs and go is off PATH.
+func TestHonourApePin_PreToolFailsClosed(t *testing.T) {
+	t.Setenv(envToolchain, "")
+	t.Setenv(envPinned, "")
+	t.Setenv("GOBIN", t.TempDir())
+	t.Setenv("GOPATH", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", t.TempDir()) // os.UserHomeDir on Windows
+	t.Setenv("PATH", t.TempDir())
+	cases := []struct {
+		args []string
+		code int
+	}{
+		{[]string{"hook", "pre-tool", "--inline"}, ExitUsage},
+		{[]string{"hook", "stop"}, exitCodeApePinUnusable},
+		{[]string{"hook", "session-start"}, exitCodeApePinUnusable},
+		{[]string{"hook", "pre-commit"}, exitCodeApePinUnusable},
+		{[]string{"project", "check"}, exitCodeApePinUnusable},
+	}
+	t.Run("v1 layout under a v0 pin", func(t *testing.T) {
+		root, _ := pinProject(t, "v0.9.0")
+		require.NoError(t, os.MkdirAll(filepath.Join(root, "_apex", "state"), 0o755))
+		t.Chdir(root)
+		for _, c := range cases {
+			err := honourApePin(newRootCmd(), c.args, io.Discard)
+			require.Equal(t, c.code, exitCodeOf(t, err), c.args)
+			require.ErrorContains(t, err, "pins ape v0.9.0 (.bingo/ape.mod), below 1.0.0", c.args)
+		}
+	})
+	t.Run("pin not installed", func(t *testing.T) {
+		root, _ := pinProject(t, "v0.9.0")
+		t.Chdir(root)
+		for _, c := range cases {
+			err := honourApePin(newRootCmd(), c.args, io.Discard)
+			require.Equal(t, c.code, exitCodeOf(t, err), c.args)
+			require.ErrorContains(t, err, "ape-v0.9.0 is not installed", c.args)
+		}
+	})
 }

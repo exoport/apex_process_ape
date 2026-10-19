@@ -140,6 +140,7 @@ func TestLift_MovesThePin(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, res.Ape.PinMoved)
 		require.Contains(t, res.Ape.PinNote, "could not move the pin (no such version): after the lift, run bingo get x@v1.0.0")
+		require.Contains(t, res.Ape.PinNote, "so "+LiftPinLocal, "R33: commits and Claude sessions need it too")
 		require.NotContains(t, run(t, root, "show", "--name-status", "--format=", "HEAD"), ".bingo")
 		require.Empty(t, run(t, root, "status", "--porcelain"), ".bingo/ is back to the tag's")
 	})

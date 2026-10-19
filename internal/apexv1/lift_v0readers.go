@@ -190,7 +190,7 @@ func (lf *lifter) readsDeleted(rel, tok string, byBase map[string]string) (strin
 var (
 	// nameUseRe is a call or command that reads, lists or joins a path.
 	nameUseRe = regexp.MustCompile(`(?i)\b\w*(?:open|read|load|glob|join|stat|exists?|isfile|path|dir|walk)\w*\s*\(` +
-		`|(?:^|[\s;|&(` + "`" + `])(?:cat|find|ls|source|head|tail|grep|sed|awk|yq|jq|cp|mv|diff|wc|tee)\s` +
+		`|(?:^|[\s;|&(` + "`" + `])(?:cat|find|ls|source|head|tail|grep|sed|awk|yq|jq|cp|mv|diff|wc|tee|git\s+(?:log|show|diff|ls-files|ls-tree|grep|blame|rev-list))\s` +
 		`|\btest\s+-[a-z]\s|\[\[?\s+-[a-z]\s|\$\((?:wildcard|shell|file)\b|^\s*-?include\s`)
 	// nameMsgRe is a command or call whose argument is a message: echo,
 	// printf, a test's or a logger's message, an error's text.
@@ -225,9 +225,22 @@ var (
 // string is the path (no whitespace in it), is joined to a root, or is
 // itself a command that reads it (sh -c "cat development/…"). An
 // unquoted path is unchanged.
+//
+// From tenax on rc.6e (the R32 residual, D180): a string is not the path
+// where only a sentence's end follows the path in it — a sentence split
+// across +-joined strings ends in "development/deferred/).", which has no
+// whitespace and reads nothing. Anything else after it keeps it the path:
+// a field ("…/sprint-status.yaml:updated_at", which tenax's timestamp
+// check reads), a placeholder ("…/%s.md", f"…/{id}.md") or a glob. Such a
+// string reads only where a reading call or command decides.
+//
+// R34, the same run: a path in a shell command substitution inside a
+// double-quoted string — x="$(git log "$t"..HEAD -- development/…/)" — is
+// unquoted there, so a sentence's rule does not take it.
 func readsAt(code string, tok pathTok, byName bool, frames []callFrame) bool {
 	lineStart := strings.LastIndexByte(code[:tok.at], '\n') + 1
-	if lit, prose := literalAt(code, lineStart, tok); prose && !tok.joined {
+	lit, prose, notPath := literalAt(code, lineStart, tok)
+	if prose && !tok.joined {
 		use := lastUseInString(lit)
 		if redirectRe.MatchString(lit) {
 			use = len(lit)
@@ -265,7 +278,7 @@ func readsAt(code string, tok pathTok, byName bool, frames []callFrame) bool {
 			return false
 		}
 	}
-	return pathShaped || !byName
+	return pathShaped || !byName && !notPath
 }
 
 // lastMatch is where re's last match in s starts, -1 when none.
@@ -292,20 +305,39 @@ func lastUseInString(lit string) int {
 }
 
 // literalAt is the quoted string on its line that tok sits in (R32): lit
-// its text from the opening quote up to tok, and prose when the whole
-// string holds whitespace — a sentence, not a path. Line by line, as the
-// rest of the class: a string opened on an earlier line is not one here
-// (callFrames decides that case), and one left open runs to the line's
-// end. A \ escapes the next byte except in a ` string.
-func literalAt(code string, lineStart int, tok pathTok) (lit string, prose bool) {
+// its text from the opening quote up to tok, prose when the whole string
+// holds whitespace — a sentence, not a path — and notPath when it holds
+// none and what follows tok in it, past an optional /, is a sentence's
+// end (sentenceEndRe). Line by line, as the rest of the class: a string
+// opened on an earlier line is not one here (callFrames decides that
+// case), and one left open runs to the line's end. A \ escapes the next
+// byte except in a ` string; a $( in a " string opens a command
+// substitution, unquoted up to its ) (R34).
+func literalAt(code string, lineStart int, tok pathTok) (lit string, prose, notPath bool) {
 	var q byte
 	open := -1
+	type subst struct{ open, depth int }
+	var substs []subst // the $( open in " strings, innermost last
 	for i := lineStart; i < tok.at; i++ {
 		switch c := code[i]; {
 		case q == 0:
-			if c == '"' || c == '\'' || c == '`' {
+			switch {
+			case c == '"' || c == '\'' || c == '`':
 				q, open = c, i+1
+			case len(substs) > 0 && c == '(':
+				substs[len(substs)-1].depth++
+			case len(substs) > 0 && c == ')':
+				if s := &substs[len(substs)-1]; s.depth > 0 {
+					s.depth--
+				} else {
+					q, open = '"', s.open
+					substs = substs[:len(substs)-1]
+				}
 			}
+		case q == '"' && c == '$' && i+1 < len(code) && code[i+1] == '(':
+			substs = append(substs, subst{open: open})
+			q = 0
+			i++
 		case c == '\\' && q != '`':
 			i++
 		case c == q:
@@ -313,7 +345,7 @@ func literalAt(code string, lineStart int, tok pathTok) (lit string, prose bool)
 		}
 	}
 	if q == 0 {
-		return "", false
+		return "", false, false
 	}
 	end := tok.end
 	for end < len(code) && code[end] != '\n' && code[end] != q {
@@ -323,8 +355,13 @@ func literalAt(code string, lineStart int, tok pathTok) (lit string, prose bool)
 		end++
 	}
 	end = min(end, len(code))
-	return code[open:tok.at], strings.ContainsAny(code[open:end], " \t")
+	prose = strings.ContainsAny(code[open:end], " \t")
+	rest := strings.TrimPrefix(code[min(tok.end, end):end], "/")
+	return code[open:tok.at], prose, !prose && sentenceEndRe.MatchString(rest)
 }
+
+// sentenceEndRe is a sentence's closing punctuation, and nothing else.
+var sentenceEndRe = regexp.MustCompile(`^[)\].,;:!?]+$`)
 
 // The kinds of a callFrame.
 const (

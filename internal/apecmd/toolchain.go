@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/exoport/apex_process_ape/internal/apexv1"
 	"github.com/exoport/apex_process_ape/internal/framework"
 	"github.com/spf13/cobra"
 	"golang.org/x/mod/modfile"
@@ -138,7 +139,14 @@ type pinCheckInput struct {
 	help      bool   // -h/--help was asked for
 	updateApe bool   // `framework update --update-ape`
 	locate    func(version string) (string, bool)
-	floorFrom func(root string) (string, error)
+	floorFrom func(root string) (pinFloor, error)
+}
+
+// pinFloor is the least ape a project's pin may name, and what sets it,
+// worded for the refusal.
+type pinFloor struct {
+	version string
+	by      string
 }
 
 // recoveryVerbs still run when the pin cannot: they are how a project
@@ -155,6 +163,12 @@ var recoveryVerbs = map[string]bool{
 
 // verbFrameworkUpdate is the command path of `ape framework update`.
 const verbFrameworkUpdate = "ape framework update"
+
+// verbHookPreTool is the command path of `ape hook pre-tool`: a pin that
+// refuses it exits 2, so the guard fails closed. stop and session-start
+// keep 13, which Claude Code does not read as a block — a refused stop
+// hook that blocked would loop.
+const verbHookPreTool = "ape hook pre-tool"
 
 // verbProjectLift is the command path of `ape project lift`. It is exempt
 // from the pin (L1): it runs on a v0 project, whose pin names a v0 ape
@@ -181,9 +195,9 @@ func decidePin(in pinCheckInput) pinDecision {
 	// A pin below the installed framework's floor would run a binary the
 	// framework's skills cannot use. Honouring it is not an option.
 	if floor, ferr := in.floorFrom(pin.root); ferr == nil &&
-		framework.CompareApeVersion(pin.version, floor) == framework.ApeVersionBelow {
-		return in.cannot(fmt.Errorf("this project pins ape %s (.bingo/ape.mod), below the installed framework's "+
-			"min_ape_version %s", pin.version, floor), "move the pin forward: "+remedy("v"+trimV(floor)))
+		framework.CompareApeVersion(pin.version, floor.version) == framework.ApeVersionBelow {
+		return in.cannot(fmt.Errorf("this project pins ape %s (.bingo/ape.mod), below %s", pin.version, floor.by),
+			"move the pin forward: "+remedy("v"+trimV(floor.version)))
 	}
 
 	// `ape update` acts on the binary that runs it. Handing it to a pin
@@ -278,12 +292,36 @@ func firstFile(dirs []string, name string) (string, bool) {
 	return "", false
 }
 
-func installedFloor(root string) (string, error) {
+// v1LayoutApeFloor is the least ape an APEX v1 project runs on.
+const v1LayoutApeFloor = "1.0.0"
+
+// installedFloor is the installed framework's min_ape_version
+// (_apex/ape-commands.yaml), else, in an APEX v1 project, 1.0.0 (R33): a
+// lifted project has no ape-commands.yaml until the payload lands, and
+// its v0 pin then ran a v0 ape — every commit refused with `unknown
+// command "hook"`, and the pre-tool guard off — instead of refusing.
+func installedFloor(root string) (pinFloor, error) {
 	m, err := framework.LoadApeCommands(root)
-	if err != nil || m == nil {
-		return "", errors.New("no floor")
+	switch {
+	case err != nil:
+		return pinFloor{}, errors.New("no floor")
+	case m != nil:
+		return pinFloor{version: m.MinApeVersion, by: "the installed framework's min_ape_version " + m.MinApeVersion}, nil
+	case isV1Layout(root):
+		return pinFloor{version: v1LayoutApeFloor, by: v1LayoutApeFloor + ", the least an APEX v1 project (_apex/state/ or " +
+			apexv1.DefaultDevFolder + "/project.md) runs on"}, nil
 	}
-	return m.MinApeVersion, nil
+	return pinFloor{}, errors.New("no floor")
+}
+
+// isV1Layout is apexv1's v1 detection at root; a config it cannot read
+// leaves the default development folder.
+func isV1Layout(root string) bool {
+	p, err := apexv1.Open(root)
+	if err != nil {
+		p = &apexv1.Project{Root: root, DevRel: apexv1.DefaultDevFolder}
+	}
+	return p.IsV1()
 }
 
 // honourApePin runs the check for this process: nil to carry on here, or
@@ -318,6 +356,10 @@ func honourApePin(root *cobra.Command, args []string, stderr io.Writer) error {
 		floorFrom: installedFloor,
 	})
 	switch {
+	case d.refuse != nil && verb == verbHookPreTool:
+		// Claude Code reads only exit 2 from a PreToolUse hook as a
+		// block: 13 would let every tool call through (R33).
+		return usageErrExit(ExitUsage, d.refuse)
 	case d.refuse != nil:
 		return usageErrExit(exitCodeApePinUnusable, d.refuse)
 	case d.exec != "":
