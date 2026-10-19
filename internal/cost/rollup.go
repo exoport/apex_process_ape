@@ -42,6 +42,22 @@ type Bucket struct {
 	PerModel map[string]Totals `json:"per_model,omitempty"`
 }
 
+// Merge is b and o as one bucket: their totals, runs and per-model
+// totals summed (a run id in both keeps o's row). Neither is changed.
+func (b Bucket) Merge(o Bucket) Bucket {
+	out := Bucket{Totals: sumTotals(b.Totals, o.Totals)}
+	for _, src := range []map[string]Totals{b.Runs, o.Runs} {
+		for id, t := range src {
+			if out.Runs == nil {
+				out.Runs = map[string]Totals{}
+			}
+			out.Runs[id] = t
+		}
+	}
+	out.PerModel = sumPerModel(sumPerModel(nil, b.PerModel), o.PerModel)
+	return out
+}
+
 // RollupPath returns <project>/_output/ape/cost-rollup.json.
 func RollupPath(projectRoot string) string {
 	return runlog.CostRollupPath(projectRoot)

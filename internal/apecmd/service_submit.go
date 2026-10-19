@@ -57,8 +57,8 @@ func serviceGate(kind service.Kind, req service.RunRequest) ([]string, error) {
 	at := apexv1.SessionAt{Depth: 1, Run: c.RunID, Kind: "task", Skill: runningTaskSkill(root, c.RunID)}
 	if !at.Orchestrator() {
 		return nil, &apexv1.UsageError{Code: apexv1.CodeSessionDepth, Action: apexv1.ActionStop, Msg: fmt.Sprintf(
-			"%s refused: the caller runs inside an ape session (depth 1, run %s) that is not a running apex-orchestrator run in %s,"+
-				" and only an orchestrator starts model sessions from inside ape — run it from a terminal, or let the orchestrator start it", verb, c.RunID, root)}
+			"%s refused: the caller runs inside an ape session (depth 1, run %s) that is not a running apex-loop run in %s,"+
+				" and only a loop run starts model sessions from inside ape — run it from a terminal, or let the loop start it", verb, c.RunID, root)}
 	}
 	skill := ""
 	if kind == service.KindTask {
@@ -109,9 +109,9 @@ computed as ` + "`ape task`" + ` computes its own nesting depth — the session 
 widen it by scrubbing its environment. Any caller in the given body is
 replaced. The daemon refuses a request without a stamp, and one from depth
 2, with session.depth (action stop). From depth 1 it accepts only an
-apex-orchestrator run's job, a task of a skill on that project's allow-list,
+apex-loop run's job, a task of a skill on that project's allow-list,
 one child at a time (session.not-allowed, session.child-running), and runs
-it as that orchestrator's child (depth 2, parent_run, listed in its
+it as that loop run's child (depth 2, parent_run, listed in its
 children, stopped with it). From depth 0 it runs the job as before.
 
 The stamp is the client's word: a raw NATS publish can claim depth 0. The
@@ -121,13 +121,18 @@ The subject is ape.svc.<name>.<slug>.<kind>.run, the slug derived from the
 daemon's primary project: --service-root, by default the request's
 project_root.
 
+A task of apex-orchestrator is refused before anything is sent (exit 2,
+skill.renamed, action stop): since rc.7 it is the operator's interface, opened
+with /apex-orchestrator in a person's own Claude Code session, and the
+unattended runner is apex-loop (see ape task --help).
+
 Exit codes: 0 accepted (the reply on stdout) · 1 no daemon answered, or NATS
-failed · 2 usage, a malformed request, or a refusal (session.depth,
+failed · 2 usage, a malformed request, or a refusal (skill.renamed, session.depth,
 session.not-allowed, VALIDATION, PROJECT_NOT_ALLOWED) · 3 busy
 (session.child-running, session.orchestrator-running, BUSY_EXCLUSIVE,
 BUSY_KEY): retry later. A refusal prints the daemon's message with its code.`,
 		Example: `  ape service submit task '{"skill":"apex-plan","args":"M2"}'
-  ape service submit task '{"project_root":"/abs/repo","skill":"apex-orchestrator","args":"M1"}' --name ci`,
+  ape service submit task '{"project_root":"/abs/repo","skill":"apex-loop","args":"M1"}' --name ci`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			kind := service.Kind(args[0])
@@ -149,6 +154,12 @@ BUSY_KEY): retry later. A refusal prints the daemon's message with its code.`,
 			}
 			if abs, err := filepath.Abs(rr.ProjectRoot); err == nil {
 				rr.ProjectRoot = abs
+			}
+			// Q95: the operator's apex-orchestrator is never a job's task.
+			if kind == service.KindTask {
+				if err := refuseRenamed("ape service submit task", rr.Skill, rr.Args, rr.ProjectRoot); err != nil {
+					return sessionRefusal(err)
+				}
 			}
 			rr.V = service.WireVersion
 			rr.Caller = callerStamp(rr.ProjectRoot)

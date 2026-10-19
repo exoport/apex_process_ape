@@ -68,10 +68,10 @@ of the session it runs in (see ape service submit --help). The daemon
 refuses a request without one (wire v2; a pre-rc.4 client's request is
 refused, never run) and one from depth 2 with session.depth (action stop),
 spawning nothing; a script job is refused from depth 1 too. From depth 1
-only an apex-orchestrator run's job runs — its run must be a running
-apex-orchestrator manifest in the job's project_root — and only a task of a
+only an apex-loop run's job runs — its run must be a running
+apex-loop manifest in the job's project_root — and only a task of a
 skill on its allow-list, one child at a time (session.not-allowed,
-session.child-running): the job's ape task runs under the orchestrator's
+session.child-running): the job's ape task runs under the loop's
 session marker, as its child (depth 2, parent_run, in its children, stopped
 when it ends). A depth-0 job runs as before. A refusal is a micro error whose
 code is the nesting code, its body {v, code, action, message}; job.status

@@ -40,7 +40,9 @@ and ape script sessions that run through them — with its run id, the skill
 ape typed, its depth and parent run (the nesting rule, D62), the ape
 process running it (PID) and the claude it spawned (claude_pid in JSON).
 ape reads those rows to tell which session a command runs under, so a
-pruned row only ever belongs to a process that is gone. Rows an older ape
+pruned row only ever belongs to a process that is gone. Rows show the skill
+as recorded: a loop run an ape before rc.7 started reads apex-orchestrator,
+and counts as apex-loop's for the nesting rule (its lock and children, Q95). Rows an older ape
 wrote for ` + "`ape pipeline`" + `'s web mode, retired with APEX v0, carry a port and URL.
 
   ape sessions               Show one row per live session.

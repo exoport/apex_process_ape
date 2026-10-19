@@ -39,7 +39,7 @@ then ` + "`ape project init`" + ` (each names the other in its next:, D162). ini
 for setup while no .claude/skills/apex-* exists; JSON "next" carries the same line.
 
   _apex/config.yaml                  project_name, development_folder, and the models:
-                                     defaults (D65, D93) — apex-apply, apex-orchestrator
+                                     defaults (D65, D93) — apex-apply, apex-loop
                                      and apex-release {model: sonnet, effort: high};
                                      apex-review, apex-plan, apex-change and apex-accept
                                      {model: opus, effort: medium}. An existing config
@@ -664,8 +664,8 @@ func newStatusCmd() *cobra.Command {
     changes[].lane "fix"; else "milestone"). Approved fixes (changes[].approved: {by, at,
     plan_digest}) are listed before milestone changes — started ones first, then by
     approval time — and JSON "fixes" holds the ids of those not blocked, in the order they
-    run: the first runs ahead of milestone work, at the orchestrator's next change boundary
-    (never in parallel), or alone with ` + "`ape task apex-orchestrator --args <id>`" + `, and next
+    run: the first runs ahead of milestone work, at the loop's next change boundary
+    (never in parallel), or alone with ` + "`ape task apex-loop --args <id>`" + `, and next
     points at it. A fix awaiting approval is listed last, with the command a person runs
     (` + "`ape change approve <id> --by <who>`" + `). A fix's runs (` + "`ape task <skill> --args <fix-id>`" + `)
     count toward no milestone's spend
@@ -685,7 +685,7 @@ func newStatusCmd() *cobra.Command {
     {by, at, text}, kept once it is started again); next has it re-planned and started
   - human review (H4, D47): every change lists awaiting_human (always present in JSON, []
     when none): its human-review tasks no person has accepted, once only the person is
-    left — the change is reviewed, or archived. The orchestrator skips such a change. A
+    left — the change is reviewed, or archived. The loop skips such a change. A
     reviewed change awaiting a person is not archived next — next names the accept a
     person runs. Archived changes
     with unaccepted human-review tasks (archived past them by a person) are listed after
@@ -745,11 +745,11 @@ func newStatusCmd() *cobra.Command {
   - the latest ape task run (JSON "latest_run": {skill, run_id, status, stopped,
     resets, resets_at, message, depth, parent_run}): how it ended, e.g. "stopped:
     usage-limit, resets 2026-10-16T23:00:00+02:00" when a claude.ai usage limit
-    stopped it (see ape task --help, exit 14); a session an orchestrator started
+    stopped it (see ape task --help, exit 14); a session a loop run started
     names that run ("started by <run>"; depth 2, parent_run)
   - JSON "sessions": the model sessions ape launched that run in this project now
     ([{run_id, kind, skill, depth, parent_run, pid, started_at}], [] when none): an
-    apex-orchestrator run at depth 1 and its one child at depth 2 (D62)
+    apex-loop run at depth 1 and its one child at depth 2 (D62)
 
 --brief renders at most 25 lines (what the SessionStart hook injects).
 

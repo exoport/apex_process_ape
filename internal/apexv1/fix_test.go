@@ -157,7 +157,7 @@ func TestStatus_FixesFirst(t *testing.T) {
 	require.Equal(t, LaneMilestone, r.Changes[2].Lane)
 	require.Nil(t, r.Changes[3].Approved)
 	require.Contains(t, r.Next, "fix fix-zed (approved by ann, draft) runs ahead of milestone work")
-	require.Contains(t, r.Next, "`ape task apex-orchestrator --args fix-zed`")
+	require.Contains(t, r.Next, "`ape task apex-loop --args fix-zed`")
 	brief := r.Brief()
 	require.Contains(t, brief, "fix (approved by ann)")
 	require.Contains(t, brief, "fix — awaiting approval: `ape change approve fix-alpha --by <who>`")

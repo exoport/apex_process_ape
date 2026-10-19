@@ -82,7 +82,7 @@ const (
 type CodeDoc struct {
 	Code string `json:"code"`
 	Exit int    `json:"exit"`
-	// Action is what the orchestrator does next (D47), so it branches on
+	// Action is what the loop does next (D47), so it branches on
 	// one field instead of carrying code tables: one of Actions.
 	Action  string `json:"action"`
 	Meaning string `json:"meaning"`
@@ -92,7 +92,7 @@ type CodeDoc struct {
 // apply: hand the change to apex-apply (code work, or re-start); review:
 // run the review again; replan: apex-change re-plans the change (or plans
 // the fix a red gate needs); stop: the run stops (a bug, the environment,
-// or nothing to do); person: a person must act — the orchestrator lists it
+// or nothing to do); person: a person must act — the loop lists it
 // and moves on to other work, or stops when there is none.
 const (
 	ActionRetry  = "retry"
@@ -148,15 +148,15 @@ var DiagnosticCodes = []CodeDoc{
 	{"delegate.not-in-session", 2, "stop", "accept --verdict outside the delegate session ape started for that change and task (APE_DELEGATE=<id>/<T> and its run): only the delegate records a verdict"},
 	{"usage.delegate", 2, "stop", "accept: --delegate, --verdict and --by are three different acts; one at a time (--reason only with --verdict)"},
 	{"project.not-initialized", 2, "person", "no development folder: run `ape project init`"},
-	{CodeSessionDepth, 2, "stop", "ape task, prompt, chat or change review --run from a model session that may not start one (D62): depth 1 that is not ape's own apex-orchestrator run, or depth 2 (a session an orchestrator started); depth comes from what ape recorded at launch (APE_DEPTH and the process ancestry), never from the model — the session finishes its own work; a person or the orchestrator starts the next session. ape script refuses at any depth >= 1"},
-	{CodeSessionNotAllowed, 2, "stop", "an apex-orchestrator run starting a session that is not `ape task <skill>` / `ape change review --run` for a skill on its allow-list (the core skills apex-plan, apex-change, apex-apply, apex-review, apex-release, plus tools: skills) (D62)"},
+	{CodeSessionDepth, 2, "stop", "ape task, prompt, chat or change review --run from a model session that may not start one (D62): depth 1 that is not ape's own apex-loop run, or depth 2 (a session a loop run started); depth comes from what ape recorded at launch (APE_DEPTH and the process ancestry), never from the model — the session finishes its own work; a person or the loop starts the next session. ape script refuses at any depth >= 1"},
+	{CodeSessionNotAllowed, 2, "stop", "an apex-loop run starting a session that is not `ape task <skill>` / `ape change review --run` for a skill on its allow-list (the core skills apex-plan, apex-change, apex-apply, apex-review, apex-release, plus tools: skills) (D62)"},
 	{"session.person-only", 2, "person", "a person-only flag or command from a model session (APE_SESSION or CLAUDECODE set): --allow-pending-human, --accept-red (D45), ape milestone approve, ape change approve, ape change answer (D47 Q6) — a person runs it from a terminal outside Claude Code (a `!` line inside Claude Code is a model session)"},
 	{"usage.lift-exclude", 2, "stop", "lift: an --exclude glob does not compile"},
 	{"usage.unclassified", 2, "stop", "a usage error without a code (a bug: report it)"},
 
 	// failures (exit 1)
 	{"accept.not-human-review", 1, "stop", "accept: the task has a command check; verify runs it"},
-	{"archive.pending-human", 1, "person", "archive: human-review tasks are not accepted; the orchestrator leaves the change reviewed and moves on (D45) — a person accepts them, or archives past them with --allow-pending-human (a person only)"},
+	{"archive.pending-human", 1, "person", "archive: human-review tasks are not accepted; the loop leaves the change reviewed and moves on (D45) — a person accepts them, or archives past them with --allow-pending-human (a person only)"},
 	{"branch.change-branch", 1, "stop", "change new, milestone new/approve/gate/close, decision accept: HEAD is on a change branch; their records belong on the base branch (git switch <base>)"},
 	{"branch.detached", 1, "stop", "start: HEAD is detached; a change branch is created from a branch, recorded as its base"},
 	{"change.no-branch", 1, "person", "archive: the change has no change/<id> branch with a recorded base_branch (started before D38)"},
@@ -207,7 +207,7 @@ var DiagnosticCodes = []CodeDoc{
 	{CodeLiftWriteFailed, 1, "stop", "lift: removing the v0 families or writing a file failed mid-lift; git reset --hard restores the tree"},
 	{CodeGitStatusFailed, 1, "stop", "git status could not be read"},
 	{"ape.below-floor", 1, "person", "ape task: the installed framework's _apex/ape-commands.yaml declares a min_ape_version above this ape (H1); no session starts — a person updates ape (the message carries the command)"},
-	{CodeBlocksExceeded, 1, "stop", "the milestone's changes blocked in a row reached limits.consecutive_blocks (default 2): change new and change start of its changes and ape task apex-orchestrator for it refuse, and ape status --json reports it under milestone.diagnostics; the run stops — a person deals with the blocked changes and re-approves the milestone (ape milestone approve), which resets the count (H19, D49)"},
+	{CodeBlocksExceeded, 1, "stop", "the milestone's changes blocked in a row reached limits.consecutive_blocks (default 2): change new and change start of its changes and ape task apex-loop for it refuse, and ape status --json reports it under milestone.diagnostics; the run stops — a person deals with the blocked changes and re-approves the milestone (ape milestone approve), which resets the count (H19, D49)"},
 	{"milestone.budget-exceeded", 1, "person", "ape task: the current milestone's spend is at its enforced budget (limits.budget: enforce); no session starts"},
 	{"milestone.changes-in-flight", 1, "apply", "close: changes of the milestone are in-progress, verified or reviewed; the action is person instead when one of them has a non-empty awaiting_human (reviewed, human-review tasks not accepted: D49)"},
 	{CodeStatusUnrecorded, 1, "person", "a milestone's Status says approved (or done) and ape holds no record of it in milestones.json — approved by hand, or before ape recorded approvals (H2); change start, gate and close refuse it: a person runs `ape milestone approve <M> --by <who>` (a done one: restore its Status line)"},
@@ -246,15 +246,15 @@ var DiagnosticCodes = []CodeDoc{
 	{"error.unclassified", 1, "stop", "a failure without a code (a bug: report it)"},
 
 	// conflicts (exit 3)
-	{CodeConflicted, 3, "apply", "start, verify, archive: the base branch moved and change/<id> does not rebase onto it (D40, H8); ape aborted the rebase, kept the old tip under refs/apex/pre-rebase/<id>/<n>, recreated change/<id> at the base tip and cherry-picked the branch's net diff --no-commit: conflict markers and unmerged paths are in the tree, HEAD on the branch, the change in-progress (verify stale, review to run again); apex-apply resolves and commits — when it cannot, it blocks the change and the orchestrator re-plans (D43)"},
+	{CodeConflicted, 3, "apply", "start, verify, archive: the base branch moved and change/<id> does not rebase onto it (D40, H8); ape aborted the rebase, kept the old tip under refs/apex/pre-rebase/<id>/<n>, recreated change/<id> at the base tip and cherry-picked the branch's net diff --no-commit: conflict markers and unmerged paths are in the tree, HEAD on the branch, the change in-progress (verify stale, review to run again); apex-apply resolves and commits — when it cannot, it blocks the change and the loop re-plans (D43)"},
 	{"archive.base-changed", 3, "replan", "a requirement this change modifies or removes changed in the spec since start (another branch); nothing written"},
 	{CodeDeltaConflict, 3, "replan", "the delta no longer applies to the current specs; nothing written"},
 	{CodeFolderExists, 3, "stop", "the archive folder already exists; nothing written"},
 	{CodeGateGreen, 1, "replan", "milestone approve (and a re-approval): the gate, run once against the current tree (D70 B), exits 0 — a gate must be red until the milestone's work is done; apex-plan re-plans the gate"},
 	{CodeGateBroken, 1, "replan", "milestone approve (and a re-approval): the gate cannot run (D70 B) — a script it names is missing or fails `bash -n`, it exits 126 or 127, a requires: entry is missing, or it times out (timeouts.gate); apex-plan re-plans the gate"},
 	{"change.requirement-conflict", 3, "replan", "another active change claims the same requirement"},
-	{CodeChildRunning, 3, "retry", "ape task / change review --run from an apex-orchestrator run that already has a child session running (D62: one at a time) — wait for it (`ape run wait <id> --wait 9m`), then start the next"},
-	{CodeOrchestratorRunning, 3, "retry", "ape task apex-orchestrator in a project that already has a live apex-orchestrator run (D62: one per project) — wait for it to end, or stop it, then start again"},
+	{CodeChildRunning, 3, "retry", "ape task / change review --run from an apex-loop run that already has a child session running (D62: one at a time) — wait for it (`ape run wait <id> --wait 9m`), then start the next"},
+	{CodeOrchestratorRunning, 3, "retry", "ape task apex-loop in a project that already has a live loop run — apex-loop, or apex-orchestrator as an ape before rc.7 recorded it (D62: one per project) — wait for it to end, or stop it, then start again"},
 	{CodeRunBusy, 3, "retry", "start, verify, archive, gate, close (and review --run's re-verify): another of these verbs is running on the same change or milestone (its run lock, _apex/state/runs/<id|M>.json); the message names it and since when — wait for it (running that command attaches), then run this one again (D58 2.1)"},
 	{"conflict.unclassified", 3, "stop", "a conflict without a code (a bug: report it)"},
 
@@ -378,5 +378,7 @@ var DiagnosticCodes = []CodeDoc{
 	{CodeCommitSecret, 1, "person", "a commit ape was about to make adds a secret (D155) — or, through `ape hook pre-commit`, a git commit made in the project (Q89; the commit's files stay staged): betterleaks' default rules (plus ape's aws-access-key-id, a lone AWS key id, Q88) found one in the lines it adds — exactly what that commit records, so a person's unrelated staged file, a deleted line and unchanged context are not scanned — and nothing was committed; each is named `<file>:<line> rule <id>: <redacted>`; replace it with a placeholder (`<token>`, `$TOKEN`: an example in docs never needs a real value) or move a real secret to hot/ (git-ignored) and read it from there, or, if it is not a secret, a person adds the printed {fingerprint, reason} entry to _apex/config.yaml secrets.allow (guarded: it counts only once committed and accepted with `ape project accept-config`, R23); inline betterleaks:allow markers and .betterleaksignore are not honoured; a refused record ape wrote itself in that command is undone (R28), any other staged path is named with the `git restore --staged` that unstages it"},
 	// rc.6e (rc6e-sec).
 	{CodeHooksPreCommitAbsent, 0, "person", "a notice, never a finding (project check's notices; the exit is unchanged; ape doctor reports it too): git's pre-commit hook (`git rev-parse --git-path hooks/pre-commit`: core.hooksPath when set) does not run ape's secret scan (Q89), so a commit ape does not make — a session's own git commit, a person's — is not scanned until the archive's squash: it is absent (git never versions .git/hooks, so a fresh clone has none: `ape project init` installs ape's), another tool's hook (ape never edits it: add the line `ape hook pre-commit || exit 1` to it), or not executable (chmod +x)"},
+	// rc.7 (rc7-rename).
+	{CodeSkillRenamed, 2, "stop", "ape task apex-orchestrator — and the same skill through ape service submit task or an ape script's RunTask — is refused before anything is read or spawned (Q95, D171): since rc.7 apex-orchestrator is the operator's interface, a skill a person opens in their own Claude Code session with /apex-orchestrator, and the unattended runner of one approved milestone or fix is apex-loop; the message names both: `ape task apex-loop --args <M>` (the run's own --args) and /apex-orchestrator. A loop run an older ape recorded as apex-orchestrator still counts as the loop's"},
 	{UnclassifiedFinding, 1, "stop", "a finding no rule classifies (a bug: report it)"},
 }

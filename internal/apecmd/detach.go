@@ -334,7 +334,7 @@ ended, and exit with the run's own exit code.
 --wait (or its older name --timeout) bounds the wait. When it expires with
 the run still going, the command exits 75 and the run is untouched: wait
 again. That is how a caller under a tool time limit waits for a run longer
-than the limit — each wait stays inside it. An orchestrator dispatches a
+than the limit — each wait stays inside it. A loop run dispatches a
 skill as ` + "`ape task <skill> --args <id> --detach`" + ` and then
 ` + "`ape run wait <id> --wait 9m`" + ` until it stops exiting 75 (D61).
 
@@ -350,8 +350,8 @@ stderr (its "log"), so a --output-format json envelope reads clean.
 --json prints one object instead of the lines: id, state (running, ended or
 lost), exit_code (null until it ends), log, stdout, run_id and run_dir (the
 run's own record, once it has one), depth and parent_run (the nesting rule:
-2 and the orchestrator's run for a session an orchestrator started),
-stop_reason ("parent_gone" when ape stopped it because that orchestrator
+2 and the loop's run for a session a loop run started),
+stop_reason ("parent_gone" when ape stopped it because that loop run
 ended), and result: the session's last assistant message, read from its
 transcript, at most 2048 bytes (result_truncated: true when cut). result is
 absent when there is no transcript to read. The exit codes are the same.`,
@@ -792,7 +792,7 @@ func markParentGone(path, parentRun string, parentPID int) {
 			m.Status = pipeline.StatusCancelled
 		}
 		m.Termination = &pipeline.TerminationRecord{Kind: pipeline.TerminationParentGone, Message: fmt.Sprintf(
-			"the orchestrator run %s that started this session ended (its ape process, pid %d, is gone), and ape stopped the session", parentRun, parentPID)}
+			"the loop run %s that started this session ended (its ape process, pid %d, is gone), and ape stopped the session", parentRun, parentPID)}
 	})
 }
 

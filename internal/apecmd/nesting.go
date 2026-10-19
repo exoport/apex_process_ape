@@ -220,6 +220,9 @@ func (l *sessionLaunch) release() {
 // start a session running skill ("" for a prompt or chat) in projectRoot.
 // The error is an apexv1.UsageError (session.depth, session.not-allowed).
 func gateSession(verb, skill, projectRoot string) (*sessionLaunch, error) {
+	if err := refuseRenamed(verb, skill, "", projectRoot); err != nil {
+		return nil, err
+	}
 	at := currentSession(projectRoot)
 	var allow []string
 	if at.Orchestrator() {
@@ -234,6 +237,19 @@ func gateSession(verb, skill, projectRoot string) (*sessionLaunch, error) {
 		l.parentRun, l.parentPID = at.Run, at.RunnerPID
 	}
 	return l, nil
+}
+
+// refuseRenamed is apexv1.RenamedSkill for a session of skill about to
+// start in projectRoot (Q95): every launcher of a skill — ape task, ape
+// script's RunTask, ape service submit task — calls it, with the session's
+// args when it has them, and gateSession does again for any that did not.
+// A v0 project is left to its own refusal (V0ProjectMsg): there
+// apex-orchestrator still names v0's persona.
+func refuseRenamed(verb, skill, args, projectRoot string) error {
+	if skill != apexv1.OperatorSkill || apexv1.IsV0Project(apexv1.FindRoot(projectRoot)) {
+		return nil
+	}
+	return apexv1.RenamedSkill(verb, skill, args)
 }
 
 // childAllowList is the orchestrator's allow-list for projectRoot (the core

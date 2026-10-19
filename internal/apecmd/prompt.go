@@ -14,6 +14,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/exoport/apex_process_ape/internal/apexv1"
 	"github.com/exoport/apex_process_ape/internal/bridge/orchestrator"
 	"github.com/exoport/apex_process_ape/internal/cost"
 	"github.com/exoport/apex_process_ape/internal/effort"
@@ -157,7 +158,10 @@ _apex/config.yaml). It makes no commits of its own.
 A prompt session is a model session under the nesting rule (D62; see ape
 task --help): it starts only outside every ape session (depth 0), and is
 refused inside one (exit 2, session.depth — or session.not-allowed from an
-apex-orchestrator run, which starts only allow-listed skills with ape task).
+apex-loop run, which starts only allow-listed skills with ape task).
+--agent apex-loop is refused (it runs as ape task apex-loop), and so is
+--agent apex-orchestrator (the operator's interface opens with
+/apex-orchestrator in a person's own Claude Code session).
 
 Exit codes: 0 session completed (Stop hook) · 1 idle-timeout, session
 failed, or the typed line never submitted · 2 usage or preflight error (no _apex/config.yaml, unresolved
@@ -746,17 +750,22 @@ func printPromptSummary(res promptResult, tele *sessiondriver.Telemetry, runDir,
 	}
 }
 
-// orchestratorAgent is apex-orchestrator, which runs as `ape task
-// apex-orchestrator` (D61, D62) — ape's own record of the skill it typed is
-// what lets it start child sessions — or as /apex-orchestrator in a plain
-// Claude Code session; never as an `ape prompt` agent, whose session the
-// nesting rule does not know as an orchestrator.
-const orchestratorAgent = "apex-orchestrator"
+// orchestratorAgent is apex-loop, which runs as `ape task apex-loop` (D61,
+// D62) — ape's own record of the skill it typed is what lets it start child
+// sessions — or as /apex-loop in a plain Claude Code session; never as an
+// `ape prompt` agent, whose session the nesting rule does not know as the
+// loop's.
+const orchestratorAgent = apexv1.OrchestratorSkill
 
-// refuseOrchestrator is the preflight check for orchestratorAgent.
+// refuseOrchestrator is the preflight check for orchestratorAgent, and for
+// the operator's apex-orchestrator (Q95), which opens only in a person's
+// own Claude Code session.
 func refuseOrchestrator(agent string) error {
-	if agent == orchestratorAgent {
+	switch agent {
+	case orchestratorAgent:
 		return errors.New(orchestratorRefusal)
+	case apexv1.OperatorSkill:
+		return errors.New(operatorRefusal)
 	}
 	return nil
 }
@@ -800,6 +809,12 @@ func promptEffortPlan(o promptOptions) (effort.Plan, error) {
 	return effort.Decide(o.effort, source, table, o.model), nil
 }
 
-const orchestratorRefusal = "ape prompt --agent apex-orchestrator is refused: the orchestrator starts ape sessions, " +
-	"and only an `ape task apex-orchestrator` run may (D62). Run `ape task apex-orchestrator --args <M> --detach`, " +
-	"or start `claude` from a plain shell and run `/apex-orchestrator <request>` there"
+const orchestratorRefusal = "ape prompt --agent apex-loop is refused: the loop starts ape sessions, " +
+	"and only an `ape task apex-loop` run may (D62). Run `ape task apex-loop --args <M> --detach`, " +
+	"or start `claude` from a plain shell and run `/apex-loop <M>` there"
+
+// operatorRefusal refuses the operator's apex-orchestrator as an ape prompt
+// agent (Q95): an ape session is not the person's own.
+const operatorRefusal = "ape prompt --agent apex-orchestrator is refused: since rc.7 apex-orchestrator is the operator's interface, " +
+	"which opens in your own Claude Code session, never in a session ape launches. Run `claude` in the project and type `/apex-orchestrator`; " +
+	"the unattended runner is `ape task apex-loop --args <M> --detach`"

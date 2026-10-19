@@ -252,8 +252,8 @@ type StatusReport struct {
 	Archived   int              `json:"archived"`
 	// Fixes are the approved fixes not archived nor blocked, in the order
 	// they run (D40): started ones first, then by approval time. The first
-	// runs ahead of milestone work, at the orchestrator's next change
-	// boundary — or alone, `ape task apex-orchestrator --args <id>`.
+	// runs ahead of milestone work, at the loop's next change boundary —
+	// or alone, `ape task apex-loop --args <id>`.
 	Fixes []string `json:"fixes"`
 	// PreExistingRed is what was red at a change's baseline that is not
 	// the change's own: the planner's to roadmap (backlog 37).
@@ -287,8 +287,8 @@ type StatusReport struct {
 	// stop carries its reset. Absent before the first run.
 	LatestRun *LatestRun `json:"latest_run,omitempty"`
 	// Sessions are the model sessions ape launched that run in the project
-	// now, with their depth and parent run (D62): an apex-orchestrator run
-	// at depth 1 and its one child at depth 2. Always present ([] when none).
+	// now, with their depth and parent run (D62): an apex-loop run at
+	// depth 1 and its one child at depth 2. Always present ([] when none).
 	Sessions []LiveSession `json:"sessions"`
 	// Config holds the effective values skills read from ape rather than
 	// restate (D120, Q55): the defaults filled in.
@@ -673,8 +673,8 @@ func fixNext(c *ChangeStatus, branch string) string {
 	if c.Branch != "" && branch != c.Branch {
 		what += ", on " + c.Branch
 	}
-	return what + ") runs ahead of milestone work: the orchestrator takes it at its next change boundary; " +
-		"with no milestone run active, `ape task apex-orchestrator --args " + c.ID + "` runs it alone"
+	return what + ") runs ahead of milestone work: the loop takes it at its next change boundary; " +
+		"with no milestone run active, `ape task " + OrchestratorSkill + " --args " + c.ID + "` runs it alone"
 }
 
 // briefReasonMax caps a blocked reason in the brief, so a long question

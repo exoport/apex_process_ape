@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/exoport/apex_process_ape/internal/apexv1"
 	"github.com/exoport/apex_process_ape/internal/pipeline"
 	"github.com/exoport/apex_process_ape/internal/runlog"
 	"github.com/stretchr/testify/require"
@@ -202,4 +203,4 @@ func TestRecordLineage_TreeCostZeroIsPresent(t *testing.T) {
 }
 
 // OrchestratorSkillForTest keeps the test readable.
-const OrchestratorSkillForTest = "apex-orchestrator"
+const OrchestratorSkillForTest = apexv1.OrchestratorSkill

@@ -95,9 +95,9 @@ and unsafe while keeping the apescript orchestration surface fully
 available. See docs/reference/apescript.md for the per-group rules.
 
 A script is a conductor (D62): it runs at depth 0, from a terminal, and the
-sessions it starts are depth 1 — an apex-orchestrator among them holds the
-project's one orchestrator lock. It refuses inside any ape session (exit 2,
-code session.depth), the orchestrator's included, because a script starts
+sessions it starts are depth 1 — an apex-loop among them holds the
+project's one loop lock. It refuses inside any ape session (exit 2,
+code session.depth), the loop's included, because a script starts
 model sessions.
 
 Exit codes: 0 success · 1 the script returned an error, panicked, or a

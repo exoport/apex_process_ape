@@ -130,9 +130,9 @@ skill (.claude/skills/<skill>/SKILL.md) or user skill ($CLAUDE_CONFIG_DIR, else
 ~/.claude, /skills/<skill>/SKILL.md; a user skill wins over a project one). Each must
 be installed (tools.not-installed) and slash-invocable — not user-invocable: false
 (tools.not-invocable) — because ape task types it as a slash command; a malformed
-block is tools.invalid. The orchestrator may start these skills as children, beside
+block is tools.invalid. The loop may start these skills as children, beside
 apex-plan, apex-change, apex-apply, apex-review, apex-release and apex-accept (D62,
-D76); apex-handoff and apex-orchestrator never.
+D76); apex-handoff, apex-loop and the operator's apex-orchestrator never.
 
 ape project check reports the same findings (exit 1).`,
 	}
