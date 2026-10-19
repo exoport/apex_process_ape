@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -32,6 +33,10 @@ func newProjectInitCmd() *cobra.Command {
 (the exceptions: the @AGENTS.md line appended to a CLAUDE.md that lacks it, the
 project-context line added to an AGENTS.md that lacks it, and the models: defaults
 appended to an _apex/config.yaml that has no models: block).
+
+A new project installs the framework's skills first, then runs init: ` + "`ape framework setup`" + `,
+then ` + "`ape project init`" + ` (each names the other in its next:, D162). init's next: asks
+for setup while no .claude/skills/apex-* exists; JSON "next" carries the same line.
 
   _apex/config.yaml                  project_name, development_folder, and the models:
                                      defaults (D65, D93) — apex-apply, apex-orchestrator
@@ -216,12 +221,16 @@ Exit codes: 0 ok · 1 failed (e.g. settings.json is not valid JSON) · 2 usage.`
 			if err != nil {
 				return v1Fail(cmd, &f, err, nil)
 			}
+			next := initNext(res.Root)
 			out := struct {
 				*apexv1.InitResult
 				Plugins *apexv1.PluginSync `json:"plugins,omitempty"`
 				// Scope is what v1.0 supports (D45).
 				Scope string `json:"scope"`
-			}{res, plugins, apexv1.Scope}
+				// Next is the step after init: the framework's skills first
+				// when they are absent (D162).
+				Next string `json:"next"`
+			}{res, plugins, apexv1.Scope, next}
 			return v1Emit(cmd.OutOrStdout(), &f, out, func(w io.Writer) {
 				for _, c := range res.Created {
 					fmt.Fprintln(w, "created  "+c)
@@ -248,13 +257,24 @@ Exit codes: 0 ok · 1 failed (e.g. settings.json is not valid JSON) · 2 usage.`
 					fmt.Fprintln(cmd.ErrOrStderr(), "warning: "+warn)
 				}
 				fmt.Fprintln(w, "scope: "+apexv1.Scope)
-				fmt.Fprintln(w, "next: write development/project.md, AGENTS.md and the roadmap (apex-plan), then `ape project check`")
+				fmt.Fprintln(w, "next: "+next)
 			})
 		},
 	}
 	addV1Flags(cmd, &f)
 	cmd.Flags().BoolVar(&brownfield, "brownfield", false, "record that the project existed before APEX")
 	return cmd
+}
+
+// initNext is init's next step: with no framework skills installed
+// (.claude/skills/apex-*), `ape framework setup` first (D162: setup, then
+// init; each names the other).
+func initNext(root string) string {
+	const after = "write development/project.md, AGENTS.md and the roadmap (apex-plan), then `ape project check`"
+	if m, _ := filepath.Glob(filepath.Join(root, ".claude", "skills", "apex-*")); len(m) == 0 {
+		return "install the framework's skills with `ape framework setup`, then " + after
+	}
+	return after
 }
 
 // initAmendNote says what init changed in an existing file.

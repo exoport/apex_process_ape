@@ -26,7 +26,10 @@ where, what M1 delivers) is apex-plan's, from the disposition file this writes.
 
 Before: a person tags the commit to lift and pushes the tag. The tag is the archive of
 everything the lift deletes; v0 files stay readable as ` + "`git show apex-v0-final:<path>`" + `.
+The lift checks the tag on the current branch's upstream, so the branch needs one
+(D162-5): ` + "`git push -u origin <branch>`" + ` once, if ` + "`git rev-parse @{u}`" + ` fails.
 
+  git push -u origin "$(git branch --show-current)"   # only when the branch has no upstream
   git tag -a apex-v0-final -m "APEX v0 final" && git push origin apex-v0-final
   ape project lift --dry-run        # the whole plan, nothing written
   ape project lift

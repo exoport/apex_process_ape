@@ -6,11 +6,11 @@ Good ape tutorials hold the reader's hand from "I haven't used ape before" to "I
 
 ## Available tutorials
 
-- [Your first APEX v1 project](first-v1-project.md) — doctor → `project init` → project.md → a milestone a person approves → a green `project check` and `doctor --strict`
+- [Your first APEX v1 project](first-v1-project.md) — doctor → `framework setup` → `project init` → project.md → a milestone a person approves → a green `project check` and `doctor --strict`
 
 ## Planned tutorials
 
-- **Lift a v0 project.** `ape framework update` to v1 on an APEX v0 project, which runs `ape project lift`. End state: the v1 layout in one commit, with the disposition list a person reviews.
+- **Lift a v0 project.** `ape framework update` to v1 on an APEX v0 project, which runs `ape project lift` (the branch needs an upstream, and the `apex-v0-final` tag pushed to it). End state: the v1 layout in one commit, with the disposition list a person reviews.
 
 ## Writing a tutorial
 

@@ -75,3 +75,29 @@ func TestStatus_OutsideFlowReleaseCommit(t *testing.T) {
 	commitAll(t, p, "docs: changelog by hand")
 	require.Equal(t, []string{"docs: changelog by hand", "release: v0.1.1"}, outsideSubjects(p.Status()))
 }
+
+// D162-6: ape framework setup|update's install commit (trailer
+// `Framework-Version:`) touching only what an install writes is not outside
+// the flow; the trailer on a commit that also touches code exempts nothing,
+// and an install-shaped commit without the trailer is listed.
+func TestStatus_OutsideFlowFrameworkInstall(t *testing.T) {
+	p := reviewedWave(t)
+	run(t, p.Root, "switch", "-q", "main")
+	run(t, p.Root, "commit", "-q", "--allow-empty", "-m", "apex: project init")
+
+	write(t, p, ".claude/skills/apex-plan/SKILL.md", "# plan\n")
+	write(t, p, ".gitignore", "*.log\n")
+	write(t, p, "CLAUDE.md", "@AGENTS.md\n")
+	write(t, p, "_apex/framework.yaml", "version: v1.0.0-rc.6\n")
+	run(t, p.Root, "add", "-A")
+	run(t, p.Root, "commit", "-q", "-m", "chore(framework): install APEX framework v1.0.0-rc.6\n\nFramework-Version: v1.0.0-rc.6\nGenerator: ape framework setup")
+	require.Empty(t, p.Status().OutsideFlow, "the install commit touches only framework files")
+
+	write(t, p, ".claude/skills/apex-plan/SKILL.md", "# plan 2\n")
+	write(t, p, "greet.sh", "#!/bin/sh\necho Hey\n")
+	run(t, p.Root, "add", "-A")
+	run(t, p.Root, "commit", "-q", "-m", "chore(framework): update APEX framework to v1.0.0-rc.7\n\nFramework-Version: v1.0.0-rc.7")
+	write(t, p, ".claude/skills/apex-plan/SKILL.md", "# plan 3\n")
+	commitAll(t, p, "chore: skills by hand")
+	require.Equal(t, []string{"chore: skills by hand", "chore(framework): update APEX framework to v1.0.0-rc.7"}, outsideSubjects(p.Status()))
+}
