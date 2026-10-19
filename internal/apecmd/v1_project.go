@@ -129,9 +129,30 @@ hooks.pre-commit-absent with the line to add. The output's "git hook" line and J
 "pre_commit" ({path, status: installed|present|kept, runs_ape}) say which happened. git
 never versions .git/hooks, so a fresh clone has none: run init again, which installs it.
 
+What .claude/ commits (D203): .claude/settings.json (ape's hooks) and .claude/skills/
+(the framework's skills) are the team's and tracked; the rest of .claude/
+(settings.local.json, your own agents) and CLAUDE.local.md are personal. init puts that
+shape in the root .gitignore (created when absent):
+  # APEX (ape): .claude/settings.json and .claude/skills/ are the team's; …
+  .claude/*
+  !.claude/settings.json
+  !.claude/skills/
+  CLAUDE.local.md
+With no .claude rule the block is appended (only its missing lines when part of it is
+there); an ignore of the whole folder (.claude, .claude/, /.claude, /.claude/, .claude/**,
+/.claude/**) is rewritten in place to it, since git never reads a negation under an
+ignored folder; your own .claude/<x> lines and every other line are kept as they are.
+Idempotent. The output's ".gitignore:" line and JSON "gitignore" ({action:
+added|rewritten|already, created, uncommitted, revealed}) say which; "revealed" lists
+the files under .claude/ it un-ignored that init does not commit (a skill of your own:
+commit it or ignore it by name). A settings.json it un-ignored is committed with the
+hooks. An ignore elsewhere (a nested .gitignore, .git/info/exclude, core.excludesFile)
+is not rewritten: ape project check reports it (settings.ignored).
+
 Everything init wrote but hot/.gitignore and a hook under .git/ (and settings.json
 when it merged hooks) is committed as "apex: project init", with the files it amended (CLAUDE.md, AGENTS.md, and the config
-when it was tracked and clean); other files that existed before are not touched and
+when it was tracked and clean) and the .gitignore when it was absent or tracked and
+clean; other files that existed before are not touched and
 not committed. JSON: "amended" lists the files init changed, "amended_uncommitted"
 those it left out of the commit.
 
@@ -279,6 +300,9 @@ Exit codes: 0 ok · 1 failed (e.g. settings.json is not valid JSON) · 2 usage.`
 				}
 				for _, h := range res.HooksAdded {
 					fmt.Fprintln(w, "hook     "+h)
+				}
+				for _, l := range apexv1.ClaudeIgnoreLines(res.GitIgnore) {
+					fmt.Fprintln(w, l)
 				}
 				if pc := preCommitLine(res.PreCommit); pc != "" {
 					fmt.Fprintln(w, pc)
@@ -434,6 +458,12 @@ func newProjectCheckCmd() *cobra.Command {
                            and shared through git: settings.ignored when git ignores it
                            (and does not track it), since its hooks then reach no other
                            checkout — only ` + "`ape task`" + ` sessions get them inline
+  .claude/skills/          shared through git too (D203): settings.ignored when git
+                           ignores a skill folder there (asked of one no release ships),
+                           since the framework's skills then reach no other checkout.
+                           ` + "`ape project init`" + ` puts the .claude/ shape in the root
+                           .gitignore (see its --help); an ignore elsewhere is removed
+                           by hand
   provenance               since the v1 epoch (the newest "apex: project init" or "apex: lift"
                            commit; nothing before it is judged), one git log walk: a commit
                            touching development/specs/** must be an archive squash — a
@@ -668,7 +698,7 @@ opens in their own Claude Code session by typing /apex-orchestrator — and the 
 runner of one approved milestone or fix is apex-loop. This brings a project that ape
 project init or the lift made before rc.7 there; the framework's migration
 v1.0.0_seq-07 runs it (command: ape project operator-interface; check: ape project
-operator-interface --check). A project init or the lift made with rc.7 has nothing to do.
+operator-interface --check). A project init or the lift made with rc.7b has nothing to do.
 
 One commit, "apex: operator interface (seq-07)", of what is left of:
   models     _apex/config.yaml's models.apex-orchestrator row renamed to apex-loop, its
@@ -685,6 +715,11 @@ One commit, "apex: operator interface (seq-07)", of what is left of:
                Talk to APEX: type ` + "`/apex-orchestrator`" + ` in Claude Code.
              after the project-context line (else after its first # heading, else at
              the top), when no line outside code names /apex-orchestrator (A11)
+  .gitignore the .claude/ shape (D203, Q114): .claude/*, !.claude/settings.json,
+             !.claude/skills/ and CLAUDE.local.md, as ape project init writes it — appended
+             (the file created when absent), or a whole-folder .claude ignore rewritten in
+             place; every other line kept. Files under .claude/ it un-ignores that are not
+             settings.json are listed ("revealed"), not committed
 Idempotent: with nothing left it writes nothing and says "nothing to do" (exit 0).
 
 How ape knows seq-07 ran: from the config, not a marker (a fresh clone would lose one). A
@@ -694,8 +729,9 @@ check lists the notice models.operator-row. Beside an apex-loop row it is a left
 the notice says to drop it, and apex-loop's row is the one read.
 
 Refused on a change branch (branch.change-branch), outside a git repository
-(git.not-a-repo), and while _apex/config.yaml, .claude/settings.json or AGENTS.md has
-uncommitted changes (tree.dirty): nothing is written. A command any session may run (not
+(git.not-a-repo), and while _apex/config.yaml, .claude/settings.json or AGENTS.md (or
+the .gitignore, when it has the shape to take) has uncommitted changes or is untracked
+(tree.dirty): nothing is written. A command any session may run (not
 person-only).
 
 --check writes nothing: exit 0 when nothing is left, 1
@@ -703,8 +739,9 @@ person-only).
 is — the migration's check: 0 applied, 1 not applied.
 
 JSON: {"models": "moved"|"removed" (absent when there is no old row), "hooks": [<Event>:
-<command>, …], "agents_line": true|false, "commit"}; "hooks" is always there, [] when
-none. Under --check they say what is left, at the top level beside the failure's
+<command>, …], "agents_line": true|false, "gitignore": "added"|"rewritten" (absent when
+the shape is there), "revealed": [files it un-ignored, not committed], "commit"}; "hooks"
+is always there, [] when none. Under --check they say what is left, at the top level beside the failure's
 ok/exit/diagnostics when something is (exit 1).
 
 Exit codes: 0 applied, or nothing to do (--check: nothing left) · 1 refused, or (--check)
@@ -725,6 +762,9 @@ something left.`,
 					left := map[string]any{"hooks": res.Hooks, "agents_line": res.AgentsLine}
 					if res.Models != "" {
 						left["models"] = res.Models
+					}
+					if res.GitIgnore != "" {
+						left["gitignore"] = res.GitIgnore
 					}
 					return v1FailWith(cmd, &f, err, nil, left)
 				}
@@ -752,6 +792,9 @@ something left.`,
 				}
 				if res.AgentsLine {
 					fmt.Fprintf(w, "AGENTS.md: added %q\n", apexv1.OperatorLine)
+				}
+				for _, l := range apexv1.ClaudeIgnoreLines(&apexv1.ClaudeIgnoreResult{Action: res.GitIgnore, Revealed: res.Revealed}) {
+					fmt.Fprintln(w, l)
 				}
 				fmt.Fprintf(w, "commit %.7s %s\n", res.Commit, apexv1.OperatorInterfaceSubject)
 			})

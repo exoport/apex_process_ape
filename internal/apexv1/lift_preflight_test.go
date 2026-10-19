@@ -48,25 +48,27 @@ func TestLift_DryRunReportsEveryPreflightProblem(t *testing.T) {
 
 // L2, from mdpdf and pdfa: .claude/ was git-ignored, with the v0 skills
 // on disk untracked. The dry run passed; the real lift failed at `git
-// add` on .claude/settings.json and left the tree half-staged. Now the dry
-// run says so, the real run refuses before writing, and once
-// settings.json is un-ignored the lift removes the manifest's untracked
-// v0 skills too.
+// add` on .claude/settings.json and left the tree half-staged; since L2
+// it refused instead, and pdfa un-ignored settings.json and skills/ by
+// hand. Now (D203) the lift rewrites the whole-folder ignore to the
+// .claude/ shape in its own commit: the dry run plans it and writes
+// nothing, the real lift commits settings.json, removes the manifest's
+// untracked v0 skills, and lists the person's own skills it un-ignored.
 func TestLift_IgnoredClaudeFolder(t *testing.T) {
 	root := liftFixture(t, false)
 	run(t, root, "rm", "-r", "-q", "--cached", ".claude")
-	require.NoError(t, os.WriteFile(filepath.Join(root, ".gitignore"), []byte(".claude/\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(root, ".gitignore"), []byte("bin/\n.claude/\n*.log\n"), 0o644))
 	run(t, root, "add", ".gitignore")
 	run(t, root, "commit", "-q", "-m", "ignore .claude")
 	run(t, root, "tag", "-a", LiftTag, "-m", "final")
 	run(t, root, "push", "-q", "origin", LiftTag)
-	head := run(t, root, "rev-parse", "HEAD")
 
 	res, err := Lift(ctx(), root, LiftOptions{DryRun: true})
 	require.NoError(t, err)
-	require.Equal(t, []string{CodeClaudeIgnored}, preflightCodes(res))
-	require.Contains(t, res.Preflight[0].Message, ".claude/settings.json")
-	require.Contains(t, res.Preflight[0].Message, "!.claude/settings.json")
+	require.Empty(t, res.Preflight, "judged against the rules as the lift's rewrite leaves them")
+	require.Equal(t, ClaudeIgnoreRewritten, res.GitIgnore.Action)
+	require.Contains(t, res.CommitMessage, "- rewrites the whole-folder .claude ignore to the .claude/ shape in .gitignore")
+	require.Equal(t, "bin/\n.claude/\n*.log\n", read(t, &Project{Root: root}, ".gitignore"), "a dry run writes nothing")
 	var untracked []string
 	for _, d := range res.Deleted {
 		if d.Untracked {
@@ -75,25 +77,94 @@ func TestLift_IgnoredClaudeFolder(t *testing.T) {
 	}
 	require.Equal(t, []string{".claude/skills/apex-dev-story", ".claude/skills/apex-orchestrator"}, untracked, "the manifest's, not apex-unlisted or my-own")
 
-	_, err = Lift(ctx(), root, LiftOptions{NoVerifyRun: true})
-	require.Equal(t, CodeClaudeIgnored, liftCode(err))
-	require.Equal(t, head, run(t, root, "rev-parse", "HEAD"))
-	require.Empty(t, run(t, root, "status", "--porcelain"), "refused before anything was written")
-
-	// The fix the message names, committed and re-tagged.
-	require.NoError(t, os.WriteFile(filepath.Join(root, ".gitignore"), []byte(".claude/*\n!.claude/settings.json\n"), 0o644))
-	run(t, root, "add", ".gitignore")
-	run(t, root, "commit", "-q", "-m", "share settings.json")
-	run(t, root, "tag", "-f", "-a", LiftTag, "-m", "final")
-	run(t, root, "push", "-q", "-f", "origin", LiftTag)
 	res, err = Lift(ctx(), root, LiftOptions{NoVerifyRun: true})
 	require.NoError(t, err)
 	require.Empty(t, res.Preflight)
-	require.Contains(t, run(t, root, "show", "--name-status", "--format=", "HEAD"), "A\t.claude/settings.json")
+	require.Equal(t, "bin/\n"+claudeIgnoreMarker+"\n.claude/*\n!.claude/settings.json\n!.claude/skills/\nCLAUDE.local.md\n*.log\n",
+		read(t, &Project{Root: root}, ".gitignore"), "rewritten in place, every other line kept")
+	shown := run(t, root, "show", "--name-status", "--format=", "HEAD")
+	require.Contains(t, shown, "A\t.claude/settings.json")
+	require.Contains(t, shown, "M\t.gitignore", "the rewrite rides in the lift commit")
 	require.NoDirExists(t, filepath.Join(root, ".claude", "skills", "apex-dev-story"))
 	require.NoDirExists(t, filepath.Join(root, ".claude", "skills", "apex-orchestrator"))
 	require.DirExists(t, filepath.Join(root, ".claude", "skills", "my-own"), "not the manifest's: kept")
-	require.Empty(t, run(t, root, "status", "--porcelain"))
+	require.Equal(t, ClaudeIgnoreRewritten, res.GitIgnore.Action)
+	require.Equal(t, []string{".claude/skills/apex-unlisted/", ".claude/skills/my-own/"}, res.GitIgnore.Revealed,
+		"un-ignored, not the lift's to commit: listed")
+	require.Equal(t, "?? .claude/skills/apex-unlisted/SKILL.md\n?? .claude/skills/my-own/SKILL.md", run(t, root, "status", "--porcelain", "-uall"))
+}
+
+// What `lift.claude-ignored` still refuses (D203): an ignore ape does not
+// rewrite — core.excludesFile ignoring .claude/ (settings.json with it), a
+// nested .gitignore ignoring skills/ — named with its rule.
+func TestLift_IgnoredOutsideRootGitignore(t *testing.T) {
+	for _, tc := range []struct{ name, want, rule string }{
+		{"core.excludesFile", ".claude/settings.json (", ":1: .claude/"},
+		{"nested .gitignore", ".claude/skills/ (the framework's skills) (.claude/.gitignore:1: skills/)", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := liftFixture(t, false)
+			rule := ""
+			if tc.rule != "" {
+				excludes := filepath.Join(t.TempDir(), "global-ignore")
+				require.NoError(t, os.WriteFile(excludes, []byte(".claude/\n"), 0o644))
+				run(t, root, "config", "core.excludesFile", excludes)
+				rule = excludes + tc.rule
+			} else {
+				require.NoError(t, os.WriteFile(filepath.Join(root, ".claude", ".gitignore"), []byte("skills/\n"), 0o644))
+				run(t, root, "add", "-f", ".claude/.gitignore")
+				run(t, root, "commit", "-q", "-m", "ignore skills")
+			}
+			run(t, root, "tag", "-a", LiftTag, "-m", "final")
+			run(t, root, "push", "-q", "origin", LiftTag)
+			head := run(t, root, "rev-parse", "HEAD")
+			res, err := Lift(ctx(), root, LiftOptions{DryRun: true})
+			require.NoError(t, err)
+			require.Equal(t, []string{CodeClaudeIgnored}, preflightCodes(res))
+			require.Contains(t, res.Preflight[0].Message, tc.want)
+			require.Contains(t, res.Preflight[0].Message, rule, "names the rule")
+			_, err = Lift(ctx(), root, LiftOptions{NoVerifyRun: true})
+			require.Equal(t, CodeClaudeIgnored, liftCode(err))
+			require.Equal(t, head, run(t, root, "rev-parse", "HEAD"))
+			require.Empty(t, run(t, root, "status", "--porcelain"), "refused before anything was written")
+		})
+	}
+}
+
+// Inside `ape framework update` (Q113), the update puts the .claude/
+// shape in .gitignore before the v1.0.0 lift runs: the .gitignore, the
+// install's skills and a settings.json the shape un-ignored are all
+// uncommitted when the lift starts. The lift takes settings.json (with the
+// v1 hooks) and leaves the .gitignore and the skills to the update's
+// commit.
+func TestLift_FromUpdateAfterTheShape(t *testing.T) {
+	root := liftFixture(t, false)
+	run(t, root, "rm", "-r", "-q", "--cached", ".claude")
+	require.NoError(t, os.WriteFile(filepath.Join(root, ".gitignore"), []byte(".claude/\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(root, ".claude", "settings.json"), []byte("{\"model\": \"opus\"}\n"), 0o644))
+	run(t, root, "add", ".gitignore")
+	run(t, root, "commit", "-q", "-m", "ignore .claude")
+	run(t, root, "tag", "-a", LiftTag, "-m", "final")
+	run(t, root, "push", "-q", "origin", LiftTag)
+	// The update: the shape, then the v1 install, which wipes every
+	// apex-* skill and copies its own.
+	gi, err := EnsureClaudeIgnoreShape(ctx(), root)
+	require.NoError(t, err)
+	require.Equal(t, ClaudeIgnoreRewritten, gi.Action)
+	for _, s := range []string{"apex-dev-story", "apex-orchestrator", "apex-unlisted"} {
+		require.NoError(t, os.RemoveAll(filepath.Join(root, ".claude", "skills", s)))
+	}
+	require.NoError(t, os.MkdirAll(filepath.Join(root, ".claude", "skills", "apex-new"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, ".claude", "skills", "apex-new", "SKILL.md"), []byte("# v1\n"), 0o644))
+
+	res, err := Lift(ctx(), root, LiftOptions{NoVerifyRun: true, FromUpdate: true})
+	require.NoError(t, err)
+	require.Equal(t, ClaudeIgnoreAlready, res.GitIgnore.Action)
+	shown := strings.Split(run(t, root, "show", "--name-status", "--format=", "HEAD"), "\n")
+	require.Contains(t, shown, "A\t.claude/settings.json")
+	require.NotContains(t, shown, "M\t.gitignore", "the update's commit carries it")
+	require.Contains(t, read(t, &Project{Root: root}, ".claude/settings.json"), `"model": "opus"`, "the person's settings kept, hooks merged")
+	require.Equal(t, "M .gitignore\n?? .claude/skills/apex-new/SKILL.md\n?? .claude/skills/my-own/SKILL.md", run(t, root, "status", "--porcelain", "-uall"))
 }
 
 // L1: the lift commit moves the project's ape pin to the running version

@@ -44,6 +44,11 @@ func TestInit_Greenfield(t *testing.T) {
 	committed := run(t, root, "show", "--name-only", "--format=", "HEAD")
 	require.Contains(t, committed, "_apex/state/.gitignore")
 	require.NotContains(t, committed, "project.json")
+	// D203: the root .gitignore, created with the .claude/ shape, committed.
+	require.Equal(t, shapeBlock, read(t, p, ".gitignore"))
+	require.Equal(t, ClaudeIgnoreAdded, res.GitIgnore.Action)
+	require.True(t, res.GitIgnore.Created)
+	require.Contains(t, strings.Split(committed, "\n"), ".gitignore")
 	require.NoDirExists(t, filepath.Join(root, "development", ".apex"), "the old state folder is not made")
 	cfg, err := LoadConfig(root)
 	require.NoError(t, err)

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/exoport/apex_process_ape/internal/runlog"
@@ -54,6 +55,11 @@ type InitResult struct {
 	// without an entry for a skill init has a default for, or a config
 	// the defaults could not be appended to (D86).
 	Warnings []string `json:"warnings,omitempty"`
+	// GitIgnore is what init did to the root .gitignore's .claude/ rules
+	// (D203): the shape added, a whole-folder ignore rewritten, or already
+	// there. Committed with the skeleton unless the .gitignore was
+	// untracked or had uncommitted changes.
+	GitIgnore *ClaudeIgnoreResult `json:"gitignore,omitempty"`
 }
 
 // hasAgentsImport reports whether a CLAUDE.md imports the map.
@@ -368,6 +374,9 @@ func initSkeleton(ctx context.Context, root string, brownfield bool) (*InitResul
 			return nil, nil, err
 		}
 	}
+	if err := p.initClaudeIgnore(ctx, res); err != nil {
+		return nil, nil, err
+	}
 	// A CLAUDE.md that existed without the import gets the one line it
 	// needs, and nothing else (item 15, OpenSpec Q8): the project's own
 	// instructions stay as they are.
@@ -405,6 +414,24 @@ func initSkeleton(ctx context.Context, root string, brownfield bool) (*InitResul
 		return nil, nil, err
 	}
 	return res, p, nil
+}
+
+// initClaudeIgnore puts the .claude/ shape in the root .gitignore (D203):
+// .claude/settings.json and .claude/skills/ shared, the rest personal. It
+// joins init's commit when the file was absent, or tracked and clean
+// before (as amendConfigModels decides for the config); a settings.json it
+// un-ignored is committed with ape's hooks, the other files it un-ignored
+// are listed, not committed.
+func (p *Project) initClaudeIgnore(ctx context.Context, res *InitResult) error {
+	commit := !fileExists(filepath.Join(p.Root, ".gitignore")) || p.trackedClean(ctx, ".gitignore")
+	gi, err := EnsureClaudeIgnoreShape(ctx, p.Root)
+	if err != nil {
+		return err
+	}
+	gi.Uncommitted = gi.Changed() && !commit
+	gi.SetRevealed(func(rel string) bool { return rel == settingsJSONRel })
+	res.GitIgnore = gi
+	return nil
 }
 
 // initHooks merges ape's hooks into .claude/settings.json and installs
@@ -521,7 +548,11 @@ func (p *Project) initCommitPaths(ctx context.Context, res *InitResult) []string
 	if fileExists(p.StateGitignore()) {
 		paths = append(paths, p.Rel(p.StateGitignore()))
 	}
-	if len(res.HooksAdded) > 0 {
+	if gi := res.GitIgnore; gi.Changed() && !gi.Uncommitted {
+		paths = append(paths, ".gitignore")
+	}
+	// A settings.json the .claude/ shape un-ignored is the team's (D203).
+	if len(res.HooksAdded) > 0 || (res.GitIgnore != nil && slices.Contains(res.GitIgnore.RevealedFiles, settingsJSONRel)) {
 		paths = append(paths, p.Rel(p.SettingsJSON()))
 	}
 	// A pre-commit hook init installed in a hooks folder the project

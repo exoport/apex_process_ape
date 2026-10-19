@@ -49,9 +49,13 @@ v0.15.0–v0.31.x and a resolvable _apex/config.yaml (lift.unsupported-layout); 
 tree (lift.dirty); apex-v0-final exists (lift.no-tag), is HEAD (lift.tag-not-head),
 and is on the current branch's upstream remote at the same commit, checked with
 git ls-remote — the one network call (lift.tag-not-pushed; lift.remote-unreachable);
-and git ignores nothing the lift commits (lift.claude-ignored) — above all
-.claude/settings.json, where the v1 hooks go: un-ignore it with .claude/* and
-!.claude/settings.json, commit, and re-tag. --dry-run lists every problem, not the first.
+and git ignores nothing the v1 project commits (lift.claude-ignored) — above all
+.claude/settings.json, where the v1 hooks go, and .claude/skills/, where the framework's
+skills go — judged with the root .gitignore as the lift's commit leaves it (the .claude/
+shape below, so a whole-folder .claude ignore there is no refusal); what is refused is an
+ignore ape does not rewrite (a nested .gitignore, .git/info/exclude, core.excludesFile, a
+later line of the root .gitignore), named with its rule: remove it, commit, and re-tag.
+--dry-run lists every problem, not the first, and writes nothing.
 
 The commit:
   deletes        the v0 families, at the paths _apex/config.yaml's folder variables
@@ -130,6 +134,14 @@ The commit:
                  the secret scan, when the repository has none (an existing one is
                  kept; the output's "git hook" line says which; see ape hook
                  pre-commit --help)
+  shapes         the root .gitignore's .claude/ rules (D203), as ape project init does:
+                 .claude/*, !.claude/settings.json, !.claude/skills/, CLAUDE.local.md —
+                 a whole-folder .claude ignore (pdfa's .claude/) rewritten in place, else
+                 the block appended; every other line kept. settings.json and skills/ are
+                 the team's, the rest of .claude/ personal. The output's ".gitignore:" line
+                 and JSON "gitignore" ({action: added|rewritten|already, revealed}) say
+                 which; "revealed" lists the files under .claude/ it un-ignored and did not
+                 commit (a skill of your own: commit it or ignore it by name)
   writes         development/lift-disposition.md (16 KB, unless its candidates need
                  more): the binding-rule candidates (CLAUDE.md list items,
                  project-context "don't miss" items, team-memory gotcha titles), EVERY
@@ -223,7 +235,9 @@ commit stands either way, and the verdict is in --json and the output.
 --from-update is how the framework's v1.0.0 migration entry runs it inside
 ` + "`ape framework update`" + `: uncommitted changes under .claude/skills/, _apex/ (not
 config.yaml or state/), .aboard/ and .gitignore are the install's, left out of the lift
-commit for the update's own; skills the v1 install placed are never deleted.
+commit for the update's own; skills the v1 install placed are never deleted. An untracked
+.claude/settings.json (the update's .claude/ shape un-ignored it) is no refusal: the lift
+merges the v1 hooks into it and commits it.
 
 Exit codes: 0 lifted (or planned) · 1 refused or failed (code in --json) · 2 usage.`,
 		Example: "  ape project lift --dry-run\n  ape project lift --json\n  ape project lift --exclude 'schema/core/**' --exclude deploy/init/00-bootstrap.sh",
@@ -377,6 +391,7 @@ func printLift(w io.Writer, r *apexv1.LiftResult) {
 		fmt.Fprintln(w, "gates     no ## Code Validation found: no commands, no regression")
 	}
 	fmt.Fprintf(w, "rules     %d binding-rule candidate(s) in %s\n", len(r.Candidates), r.Disposition)
+	printLiftGitIgnore(w, r)
 	fmt.Fprintf(w, "report    %s: every list whole, ignored by git (the disposition file summarises them)\n", r.Report)
 	if r.DryRun {
 		fmt.Fprintln(w, "commit message:")
@@ -408,6 +423,29 @@ func printLift(w io.Writer, r *apexv1.LiftResult) {
 		fmt.Fprintf(w, "  %d [%s] %s at %s, %s at the lift commit — %s\n", i+1, c.Verdict, at, apexv1.LiftTag, after, c.Cmd)
 	}
 	fmt.Fprintf(w, "next: apex-plan with %s (the judged v1.0.0 migration entry), then a fresh read-only review of it, then yours\n", r.Disposition)
+}
+
+// printLiftGitIgnore says what the lift does to the root .gitignore's
+// .claude/ rules (D203): a dry run what its commit will do.
+func printLiftGitIgnore(w io.Writer, r *apexv1.LiftResult) {
+	gi := r.GitIgnore
+	if gi == nil {
+		return
+	}
+	if !r.DryRun {
+		for _, l := range apexv1.ClaudeIgnoreLines(gi) {
+			fmt.Fprintln(w, l)
+		}
+		return
+	}
+	switch gi.Action {
+	case apexv1.ClaudeIgnoreAlready:
+		fmt.Fprintln(w, ".gitignore: the .claude/ shape is already in place")
+	case apexv1.ClaudeIgnoreRewritten:
+		fmt.Fprintln(w, ".gitignore: the lift commit rewrites the whole-folder .claude ignore in place to the .claude/ shape (.claude/* !.claude/settings.json !.claude/skills/ CLAUDE.local.md)")
+	default:
+		fmt.Fprintln(w, ".gitignore: the lift commit adds the .claude/ shape (.claude/* !.claude/settings.json !.claude/skills/ CLAUDE.local.md)")
+	}
 }
 
 // printLiftPreCommit says what the lift's skeleton did with git's

@@ -270,6 +270,14 @@ type OperatorInterfaceResult struct {
 	Hooks []string `json:"hooks"`
 	// AgentsLine: AGENTS.md gains (or lacks) OperatorLine.
 	AgentsLine bool `json:"agents_line"`
+	// GitIgnore is what happens to the root .gitignore's .claude/ rules
+	// (D203, Q114): "added" (the shape's lines appended, the file created
+	// when absent) or "rewritten" (a whole-folder .claude ignore replaced
+	// in place); "" when the shape is there.
+	GitIgnore string `json:"gitignore,omitempty"`
+	// Revealed are files under .claude/ the rewrite un-ignored that the
+	// commit does not carry (a folder per skill).
+	Revealed []string `json:"revealed,omitempty"`
 	// Commit is the one commit, OperatorInterfaceSubject; "" when nothing
 	// was left to do.
 	Commit string `json:"commit,omitempty"`
@@ -277,7 +285,7 @@ type OperatorInterfaceResult struct {
 
 // Pending reports whether the result has anything to do.
 func (r *OperatorInterfaceResult) Pending() bool {
-	return r.Models != "" || len(r.Hooks) > 0 || r.AgentsLine
+	return r.Models != "" || len(r.Hooks) > 0 || r.AgentsLine || r.GitIgnore != ""
 }
 
 // operatorInterfacePlan is what seq-07 would do, writing nothing.
@@ -302,6 +310,9 @@ func (p *Project) operatorInterfacePlan() (*OperatorInterfaceResult, error) {
 	}
 	doc, err := readFileString(p.AgentsMD())
 	res.AgentsLine = err == nil && !hasOperatorLine(doc)
+	if res.GitIgnore, err = ClaudeIgnorePending(p.Root); err != nil {
+		return res, err
+	}
 	return res, nil
 }
 
@@ -327,6 +338,12 @@ func (p *Project) OperatorInterfaceCheck() (*OperatorInterfaceResult, error) {
 	if res.AgentsLine {
 		left = append(left, "AGENTS.md lacks the line \""+OperatorLine+"\"")
 	}
+	switch res.GitIgnore {
+	case ClaudeIgnoreAdded:
+		left = append(left, ".gitignore lacks the .claude/ shape (.claude/*, !.claude/settings.json, !.claude/skills/, CLAUDE.local.md)")
+	case ClaudeIgnoreRewritten:
+		left = append(left, ".gitignore ignores the whole .claude folder, to rewrite to the .claude/ shape (.claude/*, !.claude/settings.json, !.claude/skills/)")
+	}
 	return res, &FailError{Code: CodeOperatorInterfacePending, Msg: "the operator interface (seq-07) is not applied: " + strings.Join(left, "; ") +
 		" — `ape project operator-interface` applies it in one commit"}
 }
@@ -335,7 +352,8 @@ func (p *Project) OperatorInterfaceCheck() (*OperatorInterfaceResult, error) {
 // framework's v1.0.0_seq-07): models.apex-orchestrator moved to
 // models.apex-loop byte for byte (or removed when apex-loop's row exists),
 // ape's hooks merged into .claude/settings.json with init's merge, and
-// AGENTS.md's OperatorLine added when absent — in ONE commit,
+// AGENTS.md's OperatorLine added when absent, and the .claude/ shape put in
+// the root .gitignore (D203, Q114) — in ONE commit,
 // OperatorInterfaceSubject. Idempotent: with nothing left it writes
 // nothing. Refused outside a git repository, on a change branch, and while
 // the files it edits have uncommitted changes (nothing written).
@@ -354,6 +372,9 @@ func (p *Project) OperatorInterface(ctx context.Context) (*OperatorInterfaceResu
 		return res, err
 	}
 	paths := []string{p.Rel(ConfigPath(p.Root)), p.Rel(p.SettingsJSON()), p.Rel(p.AgentsMD())}
+	if res.GitIgnore != "" {
+		paths = append(paths, ".gitignore")
+	}
 	if dirty, err := gitRaw(ctx, p.Root, append([]string{"status", "--porcelain=v1", "--untracked-files=normal", "--"}, paths...)...); err != nil {
 		return res, &FailError{Code: CodeGitStatusFailed, Msg: "cannot read git status: " + err.Error()}
 	} else if strings.TrimSpace(dirty) != "" {
@@ -390,6 +411,16 @@ func (p *Project) OperatorInterface(ctx context.Context) (*OperatorInterfaceResu
 				return res, undo(err.Error())
 			}
 		}
+	}
+	if res.GitIgnore != "" {
+		// D203 (Q114): before the hooks, so a settings.json it un-ignores
+		// is committed with them.
+		gi, err := EnsureClaudeIgnoreShape(ctx, p.Root)
+		if err != nil {
+			return res, undo(err.Error())
+		}
+		gi.SetRevealed(func(rel string) bool { return rel == settingsJSONRel })
+		res.Revealed = gi.Revealed
 	}
 	added, err := MergeHooks(p.SettingsJSON())
 	if err != nil {
