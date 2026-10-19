@@ -17,7 +17,7 @@ finding, which apex-plan triages at the next delivery — a milestone, kept, or 
 with the reason in its commit. Next is not a milestone.
 
 Since D217 it lives in development/next.md; the roadmap keeps one line in its
-place, "` + apexv1.NextPointer + `". A project made before keeps
+place, ` + "`" + apexv1.NextPointer + "`" + `. A project made before keeps
 Next in development/roadmap.md (a "## Next" section, or items under apex-plan's
 "Next — not milestones:" label) until ` + "`ape next move`" + ` moves it (the framework's
 migration v1.0.0_seq-09).`,
@@ -40,7 +40,7 @@ func newNextAddCmd() *cobra.Command {
 next.md is used when it exists, or when the roadmap holds no Next block: a project with
 neither gets next.md from its skeleton (a "# Next" title and a line saying these are
 findings to triage, not milestones) and the roadmap the line pointing at it,
-"` + apexv1.NextPointer + `", above its first milestone. A project not yet
+` + "`" + apexv1.NextPointer + "`" + `, above its first milestone. A project not yet
 moved — its roadmap holds Next and there is no next.md — keeps getting the line in the
 roadmap, so its items are never split across two files (D217 Q125): at the end of its
 "## Next" section; else under apex-plan's "Next — not milestones:" label above the first
@@ -114,7 +114,7 @@ project init and the lift lay the new layout down directly.
   - next.md is created from its skeleton when absent: a "# Next" title and one line
     saying these are findings to triage, not milestones
   - the label and its list are replaced, in place, by the line
-    "` + apexv1.NextPointer + `"; each "## Next" section is removed, and
+    ` + "`" + apexv1.NextPointer + "`" + `; each "## Next" section is removed, and
     with no label to replace the line goes above the first milestone. A roadmap that
     has the line keeps it, and gets no second one. Nothing else of the roadmap changes
 

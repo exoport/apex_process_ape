@@ -4239,7 +4239,7 @@ finding, which apex-plan triages at the next delivery — a milestone, kept, or 
 with the reason in its commit. Next is not a milestone.
 
 Since D217 it lives in development/next.md; the roadmap keeps one line in its
-place, "Next — not milestones: [next.md](next.md)". A project made before keeps
+place, `Next — not milestones: [next.md](next.md)`. A project made before keeps
 Next in development/roadmap.md (a "## Next" section, or items under apex-plan's
 "Next — not milestones:" label) until `ape next move` moves it (the framework's
 migration v1.0.0_seq-09).
@@ -4265,7 +4265,7 @@ Append one line to Next:
 next.md is used when it exists, or when the roadmap holds no Next block: a project with
 neither gets next.md from its skeleton (a "# Next" title and a line saying these are
 findings to triage, not milestones) and the roadmap the line pointing at it,
-"Next — not milestones: [next.md](next.md)", above its first milestone. A project not yet
+`Next — not milestones: [next.md](next.md)`, above its first milestone. A project not yet
 moved — its roadmap holds Next and there is no next.md — keeps getting the line in the
 roadmap, so its items are never split across two files (D217 Q125): at the end of its
 "## Next" section; else under apex-plan's "Next — not milestones:" label above the first
@@ -4324,7 +4324,7 @@ project init and the lift lay the new layout down directly.
   - next.md is created from its skeleton when absent: a "# Next" title and one line
     saying these are findings to triage, not milestones
   - the label and its list are replaced, in place, by the line
-    "Next — not milestones: [next.md](next.md)"; each "## Next" section is removed, and
+    `Next — not milestones: [next.md](next.md)`; each "## Next" section is removed, and
     with no label to replace the line goes above the first milestone. A roadmap that
     has the line keeps it, and gets no second one. Nothing else of the roadmap changes
 
@@ -4654,7 +4654,7 @@ Validate the whole project and list every failure, not just the first.
                            CLAUDE.md (if any) has the line @AGENTS.md
   development/roadmap.md   # Roadmap, ≥ 1 "## M<n> — <title>" with Status (ape-written),
                            Gate, Goal; Budget a number when present; the line
-                           "Next — not milestones: [next.md](next.md)" points at Next
+                           `Next — not milestones: [next.md](next.md)` points at Next
                            (D217); a "## Next" section that still holds findings is
                            not a milestone (notice roadmap.next-inline). Its Delivery: line
                            links the current brief, e.g.
@@ -4930,7 +4930,7 @@ for setup while no .claude/skills/apex-* exists; JSON "next" carries the same li
   development/project.md             vision, users, scope, out of scope, constraints (skeleton);
                                      optional: stack or tools (either name, D118), notes
   development/roadmap.md             "# Roadmap", then the line pointing at Next:
-                                     "Next — not milestones: [next.md](next.md)" (D217)
+                                     `Next — not milestones: [next.md](next.md)` (D217)
   development/next.md                Next (D217): "# Next" and a line saying these are
                                      findings to triage, not milestones — written only
                                      with a new roadmap; an existing roadmap keeps its

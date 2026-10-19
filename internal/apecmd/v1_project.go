@@ -91,7 +91,7 @@ for setup while no .claude/skills/apex-* exists; JSON "next" carries the same li
   development/project.md             vision, users, scope, out of scope, constraints (skeleton);
                                      optional: stack or tools (either name, D118), notes
   development/roadmap.md             "# Roadmap", then the line pointing at Next:
-                                     "Next — not milestones: [next.md](next.md)" (D217)
+                                     ` + "`Next — not milestones: [next.md](next.md)`" + ` (D217)
   development/next.md                Next (D217): "# Next" and a line saying these are
                                      findings to triage, not milestones — written only
                                      with a new roadmap; an existing roadmap keeps its
@@ -410,7 +410,7 @@ func newProjectCheckCmd() *cobra.Command {
                            CLAUDE.md (if any) has the line @AGENTS.md
   development/roadmap.md   # Roadmap, ≥ 1 "## M<n> — <title>" with Status (ape-written),
                            Gate, Goal; Budget a number when present; the line
-                           "Next — not milestones: [next.md](next.md)" points at Next
+                           ` + "`Next — not milestones: [next.md](next.md)`" + ` points at Next
                            (D217); a "## Next" section that still holds findings is
                            not a milestone (notice roadmap.next-inline). Its Delivery: line
                            links the current brief, e.g.
