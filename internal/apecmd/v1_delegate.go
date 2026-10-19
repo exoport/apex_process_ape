@@ -165,22 +165,23 @@ func runDelegateSession(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, id, t
 }
 
 // delegateToPerson says why a delegate's fail stays a person's rather
-// than going back to the change (D188).
+// than going back to the change (D188): a clause of delegate.fail's
+// message, before its fix.
 func delegateToPerson(o *apexv1.DelegateOutcome) string {
 	switch o.ToPerson {
 	case apexv1.ToPersonSecondFail:
 		last := o.Returns[len(o.Returns)-1]
-		return " — its second fail: the delegate returned it to the change once already (run " + last.Run + ": " + last.Reason + ")"
+		return "; its second fail: the delegate returned it to the change once already (run " + last.Run + ": " + last.Reason + ")"
 	case apexv1.ToPersonArchived:
-		return " — the change is archived, so ape cannot return it to the change"
+		return "; the change is archived, so ape cannot return it to the change"
 	case apexv1.ToPersonNotReviewed:
-		return " — the change is no longer reviewed, so ape does not return it"
+		return "; the change is no longer reviewed, so ape does not return it"
 	case apexv1.ToPersonNoDefect:
 		if len(o.DefectsOutside) > 0 {
-			return " — its --defect paths are not in the change's own diff (" + strings.Join(o.DefectsOutside, ", ") + "), so it does not go back to the change"
+			return "; its --defect paths are not in the change's own diff (" + strings.Join(o.DefectsOutside, ", ") + "), so it does not go back to the change"
 		}
 		if o.Reason != apexv1.NoVerdictReason && len(o.Background) == 0 {
-			return " — it names no defect in the change's own diff (--defect), so it does not go back to the change"
+			return "; it names no defect in the change's own diff (--defect), so it does not go back to the change"
 		}
 	}
 	return ""
