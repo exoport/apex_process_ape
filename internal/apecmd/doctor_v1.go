@@ -215,7 +215,8 @@ func checkV1StateGitignore(ctx context.Context, env doctorEnv) CheckResult {
 	}
 }
 
-// checkV1SettingsShared reports a .claude/settings.json git ignores (H25d).
+// checkV1SettingsShared reports a .claude/settings.json git ignores (H25d),
+// or a .claude/skills/ (D203).
 func checkV1SettingsShared(ctx context.Context, env doctorEnv) CheckResult {
 	p, ok := v1ProjectAt(env.ProjectRoot)
 	if !ok {
@@ -225,7 +226,7 @@ func checkV1SettingsShared(ctx context.Context, env doctorEnv) CheckResult {
 		what, fix, _ := strings.Cut(msg, " — ")
 		return CheckResult{Status: StatusFail, Message: what, Remediation: fix}
 	}
-	return CheckResult{Status: StatusOK, Message: ".claude/settings.json is shared through git (not ignored)"}
+	return CheckResult{Status: StatusOK, Message: ".claude/settings.json and .claude/skills/ are shared through git (not ignored)"}
 }
 
 // joinFindings renders up to n findings on one line, then a count of the rest.

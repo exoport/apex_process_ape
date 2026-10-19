@@ -153,11 +153,15 @@ type LiftResult struct {
 	Disposition    string          `json:"disposition"`
 	// Report is the disposition's full lists, as JSON (L11): written to
 	// ape's ignored state folder after the commit, never committed (R3).
-	Report        string       `json:"report"`
-	Init          *InitResult  `json:"init,omitempty"`
-	CommitMessage string       `json:"commit_message"`
-	Commit        string       `json:"commit,omitempty"`
-	Regression    *CheckResult `json:"regression,omitempty"`
+	Report string      `json:"report"`
+	Init   *InitResult `json:"init,omitempty"`
+	// GitIgnore is what the lift does (a dry run: would do) to the root
+	// .gitignore's .claude/ rules (D203), in its commit: added, rewritten
+	// or already; revealed lists what it un-ignored and did not commit.
+	GitIgnore     *ClaudeIgnoreResult `json:"gitignore,omitempty"`
+	CommitMessage string              `json:"commit_message"`
+	Commit        string              `json:"commit,omitempty"`
+	Regression    *CheckResult        `json:"regression,omitempty"`
 	// RegressionAtTag is the same command run at the tag, before anything
 	// is written: the baseline that tells a pre-existing red from one the
 	// lift caused (L4).
@@ -381,7 +385,14 @@ func installTerritory(rel string) bool {
 // call: git ls-remote against the current branch's upstream remote.
 func (lf *lifter) preflight() []*FailError {
 	var out []*FailError
-	status, err := gitRaw(lf.ctx, lf.root, "status", "--porcelain=v1", "--untracked-files=normal")
+	// Inside an update, file by file: a .claude/ git tracks nothing in
+	// (ignored until the update's .claude/ shape) would show as one folder,
+	// the install's skills and a settings.json in one line.
+	untrackedFiles := "--untracked-files=normal"
+	if lf.opt.FromUpdate {
+		untrackedFiles = "--untracked-files=all"
+	}
+	status, err := gitRaw(lf.ctx, lf.root, "status", "--porcelain=v1", untrackedFiles)
 	if err != nil {
 		return []*FailError{{Code: CodeGitStatusFailed, Msg: "git status: " + err.Error() + " — fix the repository, then lift"}}
 	}
@@ -397,6 +408,12 @@ func (lf *lifter) preflight() []*FailError {
 		p = strings.Trim(p, "\"")
 		if lf.opt.FromUpdate && installTerritory(p) {
 			lf.dirty[strings.TrimSuffix(p, "/")] = true
+			continue
+		}
+		// The update's .claude/ shape (D203, Q113) un-ignored a
+		// settings.json git never tracked: the lift merges the v1 hooks
+		// into it and commits it, as init does.
+		if lf.opt.FromUpdate && p == settingsJSONRel && strings.HasPrefix(line, "??") {
 			continue
 		}
 		dirty = append(dirty, p)
@@ -470,14 +487,20 @@ func (lf *lifter) preflight() []*FailError {
 // ignoredWrites is the pre-flight check a real lift used to fail on after
 // a passing dry run (L2, mdpdf and pdfa): a path the lift commits that git
 // ignores. `git add` refuses it, and the lift stopped half-staged. Above
-// all .claude/settings.json, where the v1 hooks go: an ignored .claude/
-// would also keep them from every other checkout. Tracked paths are never
-// ignored, so only the ones the lift creates count.
+// all .claude/settings.json, where the v1 hooks go, and .claude/skills/,
+// where the framework's skills go (D203): an ignored .claude/ would also
+// keep them from every other checkout. The lift puts the .claude/ shape in
+// the root .gitignore in its commit (D203), so the paths are judged
+// against the rules as that leaves them, without writing anything: what
+// is still refused is an ignore ape does not rewrite (a nested .gitignore,
+// .git/info/exclude, core.excludesFile, a later line of the root
+// .gitignore). Tracked paths are never ignored, so only the ones the lift
+// creates count.
 func (lf *lifter) ignoredWrites() *FailError {
 	p := &Project{Root: lf.root, DevRel: lf.devRel}
 	files := []string{p.SettingsJSON(), p.ProjectMD(), p.RoadmapMD(), p.AgentsMD(), p.ClaudeMD(), p.StateGitignore(), p.decisionsJSON()}
 	dirs := []string{p.SpecsDir(), p.ChangesDir(), p.ArchiveDir(), p.DecisionsDir(), p.BriefsDir()}
-	paths := make([]string, 0, len(files)+len(dirs)+len(lf.writes))
+	paths := make([]string, 0, len(files)+len(dirs)+len(lf.writes)+1)
 	for _, f := range files {
 		paths = append(paths, p.Rel(f))
 	}
@@ -487,17 +510,38 @@ func (lf *lifter) ignoredWrites() *FailError {
 	for rel := range lf.writes {
 		paths = append(paths, rel)
 	}
+	paths = append(paths, claudeSkillsProbe)
 	sort.Strings(paths)
-	ignored := gitIgnored(lf.ctx, lf.root, false, uniqueStrings(paths)...)
-	if len(ignored) == 0 {
+	paths = uniqueStrings(paths)
+	shaped, action, err := claudeIgnorePlan(lf.root)
+	if err != nil {
+		return &FailError{Code: CodeClaudeIgnored, Msg: "cannot read the root .gitignore: " + err.Error() + " — fix it, then lift"}
+	}
+	lf.res.GitIgnore = &ClaudeIgnoreResult{Action: action}
+	rules, err := gitIgnoredAs(lf.ctx, lf.root, shaped, paths...)
+	if err != nil {
+		rules = map[string]string{}
+		for _, f := range gitIgnored(lf.ctx, lf.root, false, paths...) {
+			rules[f] = "the current rules"
+		}
+	}
+	if len(rules) == 0 {
 		return nil
 	}
-	fix := "un-ignore them"
-	if slices.Contains(ignored, settingsJSONRel) {
-		fix = "un-ignore them — for .claude/, `.claude/*` and `!.claude/settings.json` in .gitignore, which also shares the v1 hooks with every checkout"
+	var ignored []string
+	for _, f := range paths {
+		if rule, ok := rules[f]; ok {
+			if f == claudeSkillsProbe {
+				f = ".claude/skills/ (the framework's skills)"
+			}
+			ignored = append(ignored, f+" ("+rule+")")
+		}
 	}
-	return &FailError{Code: CodeClaudeIgnored, Msg: "git ignores what the lift commits: " + strings.Join(ignored, ", ") +
-		", so `git add` would refuse it mid-lift — " + fix + "; commit that, move " + LiftTag + " to it and push the tag, then lift"}
+	return &FailError{Code: CodeClaudeIgnored, Msg: "git ignores what the v1 project commits, even with the root .gitignore in ape's .claude/ shape (" +
+		strings.Join([]string{claudeIgnoreChildren, claudeIgnoreSettings, claudeIgnoreSkills}, " ") + "): " + strings.Join(ignored, ", ") +
+		", so `git add` would refuse it mid-lift — the lift rewrites only a whole-folder .claude ignore in the root .gitignore; remove the rule named " +
+		"(a nested .gitignore, .git/info/exclude, core.excludesFile, or a later line of the root .gitignore), commit that, move " + LiftTag +
+		" to it and push the tag, then lift"}
 }
 
 // excluded reports a path --exclude names.
@@ -1065,6 +1109,14 @@ func (lf *lifter) apply() error {
 		return err
 	}
 	lf.res.Init = initRes
+	if gi := initRes.GitIgnore; gi != nil {
+		// What the lift removes after its commit (the manifest's untracked
+		// v0 skills) is not left visible.
+		gi.SetRevealed(func(rel string) bool {
+			return rel == settingsJSONRel || slices.ContainsFunc(lf.untracked, func(u string) bool { return strings.HasPrefix(rel, u+"/") })
+		})
+		lf.res.GitIgnore = gi
+	}
 	commit = append(commit, p.initCommitPaths(ctx, initRes)...)
 	if doc, err := readFileString(p.AgentsMD()); err == nil {
 		// A13: the lifted project's AGENTS.md names the operator's
@@ -1538,6 +1590,14 @@ func (lf *lifter) commitMessage() string {
 		fmt.Fprintf(&b, "- carries %d gate command(s) from %s into AGENTS.md and regression:\n", len(r.Gates.Commands), r.Gates.Source)
 	}
 	b.WriteString("- lays down the v1 skeleton (ape project init --brownfield)\n")
+	if _, action, err := claudeIgnorePlan(lf.root); err == nil && action != ClaudeIgnoreAlready && !lf.dirtyAt(".gitignore") {
+		verb := "adds"
+		if action == ClaudeIgnoreRewritten {
+			verb = "rewrites the whole-folder .claude ignore to"
+		}
+		fmt.Fprintf(&b, "- %s the .claude/ shape in .gitignore (%s): settings.json and skills/ shared, the rest of .claude/ personal\n", verb,
+			strings.Join([]string{claudeIgnoreChildren, claudeIgnoreSettings, claudeIgnoreSkills, claudeIgnoreLocalMD}, " "))
+	}
 	fmt.Fprintf(&b, "- writes %s for apex-plan and the person (its full lists in %s, not committed)\n", r.Disposition, r.Report)
 	if len(r.ADRs) > 0 {
 		b.WriteString("\nADRs, old -> new:\n")

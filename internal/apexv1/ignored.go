@@ -14,9 +14,14 @@ import (
 // project works in another checkout (H25d, H27).
 
 func init() {
-	findingRules = append(findingRules, rule("", `^\.claude/settings\.json is ignored by git`, "settings.ignored"))
+	findingRules = append(findingRules,
+		rule("", `^\.claude/settings\.json is ignored by git`, "settings.ignored"),
+		// rc.7b (D203): the framework's skills too.
+		rule("", `^\.claude/skills/ is ignored by git`, "settings.ignored"),
+	)
 	DiagnosticCodes = append(DiagnosticCodes,
-		CodeDoc{"settings.ignored", 1, ActionPerson, ".claude/settings.json is ignored by git: ape's hooks there reach no other checkout (only ape task sessions get them inline); un-ignore it and commit it"},
+		CodeDoc{"settings.ignored", 1, ActionPerson, ".claude/settings.json or .claude/skills/ is ignored by git: ape's hooks, or the framework's skills, reach no other checkout (only ape task sessions get the hooks inline); " +
+			"ape project init puts the .claude/ shape in the root .gitignore (.claude/*, !.claude/settings.json, !.claude/skills/), an ignore elsewhere is removed by hand; then commit them"},
 	)
 }
 
@@ -54,15 +59,26 @@ func inGitRepo(ctx context.Context, dir string) bool {
 // settingsIgnoredFindings reports a .claude/settings.json git ignores
 // (H25d): the hooks ape merged there would not reach another checkout of
 // the project, so only `ape task` sessions, which get them inline, would
-// run them. A tracked settings.json is shared whatever the rules say.
+// run them. A tracked settings.json is shared whatever the rules say. And
+// (D203) an ignored .claude/skills/, asked of a skill folder no release
+// ships: the framework's skills, new ones included, would not either.
 func (p *Project) settingsIgnoredFindings(ctx context.Context) []Finding {
-	const file = settingsJSONRel
-	rel := p.Rel(p.SettingsJSON())
-	if !inGitRepo(ctx, p.Root) || len(gitIgnored(ctx, p.Root, false, rel)) == 0 {
+	if !inGitRepo(ctx, p.Root) {
 		return nil
 	}
-	return []Finding{{File: file, Message: ".claude/settings.json is ignored by git, so ape's hooks there reach no other checkout " +
-		"(only `ape task` sessions get them inline) — un-ignore it (e.g. `!.claude/settings.json` in .gitignore) and commit it"}}
+	const fix = " — `ape project init` puts the .claude/ shape in the root .gitignore (.claude/*, !.claude/settings.json, !.claude/skills/); " +
+		"an ignore it does not rewrite (a nested .gitignore, .git/info/exclude, core.excludesFile; `git check-ignore -v <path>` names it) is removed by hand; then commit it"
+	ignored := gitIgnored(ctx, p.Root, false, p.Rel(p.SettingsJSON()), claudeSkillsProbe)
+	var out []Finding
+	if slices.Contains(ignored, p.Rel(p.SettingsJSON())) {
+		out = append(out, Finding{File: settingsJSONRel, Message: ".claude/settings.json is ignored by git, so ape's hooks there reach no other checkout " +
+			"(only `ape task` sessions get them inline)" + fix})
+	}
+	if slices.Contains(ignored, claudeSkillsProbe) {
+		out = append(out, Finding{File: ".claude/skills/", Message: ".claude/skills/ is ignored by git, so the framework's skills ape framework setup|update install there " +
+			"reach no other checkout" + fix})
+	}
+	return out
 }
 
 // SettingsIgnored is settingsIgnoredFindings' message, "" when git shares

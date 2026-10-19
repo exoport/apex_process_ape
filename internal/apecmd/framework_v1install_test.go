@@ -301,3 +301,50 @@ func TestFrameworkInstallV1_V0ReleaseInstallsAsBefore(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(ignore), framework.GitignoreLockPattern)
 }
+
+// D203, Q113: with .claude/ ignored, an APEX v1 install committed none of
+// the skills it installed. setup and update put the .claude/ shape in the
+// root .gitignore in their commit, so the skills are committed with it; a
+// file of the person's the rewrite un-ignored is left out (and listed).
+// setup runs before init (D162), and init then finds the shape in place.
+func TestFrameworkInstallV1_IgnoredClaudeCommitsSkills(t *testing.T) {
+	t.Run("setup before init", func(t *testing.T) {
+		v1Env(t)
+		fw := v1FrameworkRepo(t, "v1.0.0-rc.9", v1LiftEntry("exit 0", "true"))
+		root := emptyGitProject(t)
+		writeTree(t, root, map[string]string{
+			".gitignore": ".claude/\n", ".claude/skills/mine/SKILL.md": "# mine\n", ".claude/settings.local.json": "{}\n",
+		})
+		gitRun(t, root, "add", ".gitignore")
+		gitRun(t, root, "commit", "-q", "-m", "ignore .claude")
+
+		out, err := runFramework(t, "setup", fw, root, "--version", "v1.0.0-rc.9", "--no-fetch")
+		require.NoError(t, err, out)
+		tracked := gitRun(t, root, "ls-files", ".claude", ".gitignore")
+		require.Equal(t, ".claude/skills/apex-change/SKILL.md\n.claude/skills/apex-plan/SKILL.md\n.gitignore", tracked,
+			"the install's skills and the shape are committed; the person's skill and settings.local.json are not")
+		require.Contains(t, gitRun(t, root, "show", "--format=", "HEAD", "--", ".gitignore"), "+!.claude/skills/")
+		require.Equal(t, "?? .claude/skills/mine/SKILL.md", gitRun(t, root, "status", "--porcelain", "-uall"))
+
+		_, stderr, err := v1Exec(t, newProjectCmd, "init", "--cwd", root)
+		require.NoError(t, err, stderr)
+		require.Contains(t, gitRun(t, root, "ls-files", ".claude"), ".claude/settings.json")
+		require.Equal(t, "?? .claude/skills/mine/SKILL.md", gitRun(t, root, "status", "--porcelain", "-uall"))
+	})
+	t.Run("update", func(t *testing.T) {
+		fw, root := v0Installed(t)
+		gitRun(t, root, "rm", "-r", "-q", "--cached", ".claude")
+		ignore, err := os.ReadFile(filepath.Join(root, ".gitignore"))
+		require.NoError(t, err)
+		writeTree(t, root, map[string]string{".gitignore": string(ignore) + ".claude\n"})
+		gitRun(t, root, "add", ".gitignore")
+		gitRun(t, root, "commit", "-q", "-m", "ignore .claude")
+		v1OnTopOf(t, fw, v1LiftEntry("test -f lifted", "touch lifted"))
+
+		out, err := runFramework(t, "update", fw, root, "--no-fetch", "--version", "v1.0.0")
+		require.NoError(t, err, out)
+		require.Contains(t, gitRun(t, root, "ls-files", ".claude/skills"), ".claude/skills/apex-foo/SKILL.md")
+		require.Contains(t, gitRun(t, root, "show", "--format=", "HEAD", "--", ".gitignore"), "+!.claude/skills/")
+		require.Equal(t, "?? notes.txt", gitRun(t, root, "status", "--porcelain"))
+	})
+}

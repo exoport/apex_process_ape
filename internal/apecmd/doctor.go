@@ -211,9 +211,10 @@ the project (H27):
     state.gitignore   _apex/state/'s whitelist: milestones.json and
                       decisions.json tracked, ape's run records, logs,
                       hook verdicts and counters ignored and untracked
-    settings.shared   .claude/settings.json not ignored by git: an ignored
-                      one shares ape's hooks with no other checkout (only
-                      ape task sessions get them inline)
+    settings.shared   .claude/settings.json and .claude/skills/ not ignored
+                      by git: an ignored one shares ape's hooks, or the
+                      framework's skills, with no other checkout (only
+                      ape task sessions get the hooks inline)
     hooks.pre-commit  git's pre-commit hook does not run ape's secret scan
                       (project check's notice hooks.pre-commit-absent): WARN
                       when absent — a fresh clone; ape project init installs

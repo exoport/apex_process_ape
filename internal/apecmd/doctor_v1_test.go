@@ -109,7 +109,7 @@ func TestDoctor_V1RowsReportBreakage(t *testing.T) {
 	r = status("settings.shared")
 	require.Equal(t, StatusWarn, r.Status)
 	require.Contains(t, r.Message, "is ignored by git")
-	require.Contains(t, r.Remediation, "un-ignore")
+	require.Contains(t, r.Remediation, "`ape project init` puts the .claude/ shape in the root .gitignore")
 }
 
 // Outside a v1 project the v1 rows do not run; a v0 project gets its v0
@@ -152,13 +152,14 @@ func TestProjectCheck_SettingsIgnored(t *testing.T) {
 		Diagnostics []apexv1.Diagnostic `json:"diagnostics"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(stdout), &out), stdout)
-	var codes []string
+	var codes, files []string
 	for _, d := range out.Diagnostics {
 		codes = append(codes, d.Code)
 		if d.Code == "settings.ignored" {
 			require.Equal(t, apexv1.ActionPerson, d.Action)
-			require.Equal(t, ".claude/settings.json", d.File)
+			files = append(files, d.File)
 		}
 	}
 	require.Contains(t, codes, "settings.ignored")
+	require.Equal(t, []string{".claude/settings.json", ".claude/skills/"}, files, "D203: the framework's skills too")
 }

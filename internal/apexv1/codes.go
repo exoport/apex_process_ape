@@ -203,7 +203,7 @@ var DiagnosticCodes = []CodeDoc{
 	{"lift.tag-not-head", 1, "person", "lift: apex-v0-final does not point at HEAD"},
 	{CodeTagNotPushed, 1, "person", "lift: the current branch has no upstream remote, or apex-v0-final is not on it, or points elsewhere there (git ls-remote)"},
 	{"lift.remote-unreachable", 1, "retry", "lift: git ls-remote against the upstream remote failed (network, credentials)"},
-	{CodeClaudeIgnored, 1, "person", "lift: git ignores a path the lift commits — .claude/settings.json (the v1 hooks) as a rule, under an ignored .claude/ — so git add would refuse it mid-lift; a person un-ignores it (.claude/* and !.claude/settings.json), commits, moves apex-v0-final to that commit and pushes it"},
+	{CodeClaudeIgnored, 1, "person", "lift: git ignores a path the v1 project commits — .claude/settings.json (the v1 hooks), .claude/skills/ (the framework's skills) or the skeleton — even with the root .gitignore in ape's .claude/ shape, which the lift writes itself (a whole-folder .claude ignore there is rewritten, D203): the rule is one ape does not rewrite (a nested .gitignore, .git/info/exclude, core.excludesFile, a later line of the root .gitignore), named in the message; a person removes it, commits, moves apex-v0-final to that commit and pushes it"},
 	{CodeLiftWriteFailed, 1, "stop", "lift: removing the v0 families or writing a file failed mid-lift; git reset --hard restores the tree"},
 	{CodeGitStatusFailed, 1, "stop", "git status could not be read"},
 	{"ape.below-floor", 1, "person", "ape task: the installed framework's _apex/ape-commands.yaml declares a min_ape_version above this ape (H1); no session starts — a person updates ape (the message carries the command)"},
