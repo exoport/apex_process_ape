@@ -36,6 +36,10 @@ type InitResult struct {
 	HooksAdded []string `json:"hooks_added"`
 	Brownfield bool     `json:"brownfield"`
 	Commit     string   `json:"commit,omitempty"`
+	// PreCommit is what init did with git's pre-commit hook (Q89):
+	// installed, present, or kept (another tool's); absent outside a git
+	// work tree.
+	PreCommit *PreCommitHook `json:"pre_commit,omitempty"`
 	// Amended lists existing files init changed: a CLAUDE.md missing the
 	// @AGENTS.md import, an AGENTS.md missing the project-context line
 	// (D82), and an _apex/config.yaml without models: (D86).
@@ -270,7 +274,7 @@ func Init(ctx context.Context, root string, brownfield bool) (*InitResult, error
 	if err != nil {
 		return res, err
 	}
-	if paths := p.initCommitPaths(res); len(paths) > 0 {
+	if paths := p.initCommitPaths(ctx, res); len(paths) > 0 {
 		sha, err := p.commitRecord(ctx, "apex: project init", "", paths...)
 		if err != nil {
 			return res, commitFailed(err, "skeleton written but its commit failed: "+err.Error())
@@ -390,12 +394,23 @@ func initSkeleton(ctx context.Context, root string, brownfield bool) (*InitResul
 	} else {
 		res.Kept = append(res.Kept, p.Rel(p.ProjectJSON()))
 	}
-	added, err := MergeHooks(p.SettingsJSON())
-	if err != nil {
+	if err := p.initHooks(ctx, res); err != nil {
 		return nil, nil, err
 	}
-	res.HooksAdded = added
 	return res, p, nil
+}
+
+// initHooks merges ape's hooks into .claude/settings.json and installs
+// git's pre-commit hook, ape's secret scan (Q89), when absent — so
+// re-running init on a fresh clone installs it.
+func (p *Project) initHooks(ctx context.Context, res *InitResult) error {
+	added, err := MergeHooks(p.SettingsJSON())
+	if err != nil {
+		return err
+	}
+	res.HooksAdded = added
+	res.PreCommit, err = p.installPreCommitHook(ctx)
+	return err
 }
 
 // amendConfigModels appends modelDefaultsYAML to an existing
@@ -483,7 +498,7 @@ func (p *Project) trackedClean(ctx context.Context, rel string) bool {
 // whitelist), so it is not staged, nor is hot/.gitignore (its own `*`
 // ignores it: staging it by name would fail); the whitelist always is, in
 // case another ape command wrote it before init ran.
-func (p *Project) initCommitPaths(res *InitResult) []string {
+func (p *Project) initCommitPaths(ctx context.Context, res *InitResult) []string {
 	skip := map[string]bool{p.Rel(p.ProjectJSON()): true, p.Rel(p.HotGitignorePath()): true}
 	for _, u := range res.AmendedUncommitted {
 		skip[u] = true
@@ -499,6 +514,11 @@ func (p *Project) initCommitPaths(res *InitResult) []string {
 	}
 	if len(res.HooksAdded) > 0 {
 		paths = append(paths, p.Rel(p.SettingsJSON()))
+	}
+	// A pre-commit hook init installed in a hooks folder the project
+	// versions (core.hooksPath inside it, not ignored); never .git/hooks.
+	if rel := p.preCommitCommitPath(ctx, res.PreCommit); rel != "" {
+		paths = append(paths, rel)
 	}
 	return paths
 }

@@ -34,13 +34,14 @@ var boardRefreshVerbs = map[string]bool{
 // boardSkipVerbs are the v1 leaves that do not refresh: they write nothing
 // status reports (check, diff, codes, status itself — `status --board`
 // refreshes on request), or they run inside a model session's every turn
-// (the hooks), where the latency is paid on every tool call or stop.
+// (the hooks), where the latency is paid on every tool call or stop — or,
+// git's pre-commit hook, on every commit.
 // The plugins verbs change installs and settings, which status does not
 // report.
 var boardSkipVerbs = map[string]bool{
 	"project check": true, "project codes": true, "status": true,
 	"change check": true, "change diff": true,
-	"hook session-start": true, "hook stop": true, "hook pre-tool": true,
+	"hook session-start": true, "hook stop": true, "hook pre-tool": true, "hook pre-commit": true,
 	"plugins sync": true, "plugins status": true,
 	// The archive layout move changes where archived changes live, not
 	// what status counts or lists.

@@ -71,6 +71,13 @@ const (
 	CodeCommitSecret = "commit.secret"
 )
 
+// rc.6e (rc6e-sec).
+const (
+	// CodeHooksPreCommitAbsent: project check's notice (Q89) when git's
+	// pre-commit hook does not run ape's secret scan (precommit.go).
+	CodeHooksPreCommitAbsent = "hooks.pre-commit-absent"
+)
+
 // CodeDoc documents one diagnostic code.
 type CodeDoc struct {
 	Code string `json:"code"`
@@ -368,6 +375,8 @@ var DiagnosticCodes = []CodeDoc{
 	// rc.6 (rc6-f).
 	{"archive.legacy-layout", 1, "person", "`ape project archive-layout --check`: archived changes are left in the older layout development/archive/<date>-<id>/ (named; D155) — `ape project archive-layout` moves them into development/archive/changes/ (the framework's v1.0.0_seq-06 runs it); every command reads both layouts meanwhile"},
 	// rc.6 (rc6-g).
-	{CodeCommitSecret, 1, "person", "a commit ape was about to make adds a secret (D155): the betterleaks default rules found one in the lines it adds — exactly what that commit records, so a person's unrelated staged file, a deleted line and unchanged context are not scanned — and nothing was committed; each is named `<file>:<line> rule <id>: <redacted>`; replace it with a placeholder (`<token>`, `$TOKEN`: an example in docs never needs a real value) or move a real secret to hot/ (git-ignored) and read it from there, or, if it is not a secret, a person adds the printed {fingerprint, reason} entry to _apex/config.yaml secrets.allow (guarded: it counts only once committed and accepted with `ape project accept-config`, R23); inline betterleaks:allow markers and .betterleaksignore are not honoured; a refused record ape wrote itself in that command is undone (R28), any other staged path is named with the `git restore --staged` that unstages it"},
+	{CodeCommitSecret, 1, "person", "a commit ape was about to make adds a secret (D155) — or, through `ape hook pre-commit`, a git commit made in the project (Q89; the commit's files stay staged): betterleaks' default rules (plus ape's aws-access-key-id, a lone AWS key id, Q88) found one in the lines it adds — exactly what that commit records, so a person's unrelated staged file, a deleted line and unchanged context are not scanned — and nothing was committed; each is named `<file>:<line> rule <id>: <redacted>`; replace it with a placeholder (`<token>`, `$TOKEN`: an example in docs never needs a real value) or move a real secret to hot/ (git-ignored) and read it from there, or, if it is not a secret, a person adds the printed {fingerprint, reason} entry to _apex/config.yaml secrets.allow (guarded: it counts only once committed and accepted with `ape project accept-config`, R23); inline betterleaks:allow markers and .betterleaksignore are not honoured; a refused record ape wrote itself in that command is undone (R28), any other staged path is named with the `git restore --staged` that unstages it"},
+	// rc.6e (rc6e-sec).
+	{CodeHooksPreCommitAbsent, 0, "person", "a notice, never a finding (project check's notices; the exit is unchanged; ape doctor reports it too): git's pre-commit hook (`git rev-parse --git-path hooks/pre-commit`: core.hooksPath when set) does not run ape's secret scan (Q89), so a commit ape does not make — a session's own git commit, a person's — is not scanned until the archive's squash: it is absent (git never versions .git/hooks, so a fresh clone has none: `ape project init` installs ape's), another tool's hook (ape never edits it: add the line `ape hook pre-commit || exit 1` to it), or not executable (chmod +x)"},
 	{UnclassifiedFinding, 1, "stop", "a finding no rule classifies (a bug: report it)"},
 }

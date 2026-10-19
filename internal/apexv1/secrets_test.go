@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/betterleaks/betterleaks/v2/config"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 )
@@ -560,4 +561,66 @@ func TestLift_RefusesASecretItAdds(t *testing.T) {
 	require.Contains(t, fe.Msg, "the lift commit adds a secret")
 	require.Contains(t, fe.Msg, "`git reset --hard` restores the tree, then lift again")
 	require.Equal(t, tagSHA, run(t, root, "rev-parse", "HEAD"), "nothing was committed")
+}
+
+// Q88 (rc.6e): an AWS access key id is refused on its own (ape's
+// aws-access-key-id: betterleaks' aws-access-token needs the secret key
+// beside it), as an assignment too; one ending EXAMPLE or of low entropy
+// is not a secret. Beside its secret key it is reported once, by
+// aws-access-token. Each id is assembled here, so no scanner flags this
+// file.
+func TestScanCommit_AWSAccessKeyID(t *testing.T) {
+	id := "AKIA" + "MRLV32HHEU7JCMSQ"
+	secret := "q8Vx2LmN4pR6tZ0bC3dF5gH7jK9wS1yU" + "aE2iO4uT"
+	for _, c := range []struct {
+		name, line string
+		rules      []string
+	}{
+		{"a lone id", "key " + id, []string{awsAccessKeyIDRuleID}},
+		{"an assignment", "aws_access_key_id = " + id, []string{awsAccessKeyIDRuleID}},
+		{"an id ending EXAMPLE", "aws_access_key_id = " + "AKIA" + "IOSFODNN7EXAMPLE", nil},
+		{"a low-entropy id", "aws_access_key_id = " + "AKIA" + "AAAAAAAAAAAAAAAA", nil},
+		{"an id beside its secret key", "aws_access_key_id = " + id + "\naws_secret_access_key = " + secret, []string{"aws-access-token"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			root := secretRepo(t, map[string]string{"creds.ini": "[default]\n"})
+			writeAt(t, root, "creds.ini", "[default]\n"+c.line+"\n")
+			run(t, root, "add", "-A")
+			err := ScanCommit(ctx(), root, "apex: x", "creds.ini")
+			if c.rules == nil {
+				require.NoError(t, err)
+				return
+			}
+			fe := secretFail(t, err)
+			var rules []string
+			for _, f := range fe.Findings {
+				rules = append(rules, strings.TrimSuffix(strings.Fields(f.Message)[1], ":"))
+				require.Equal(t, 2, f.Line)
+			}
+			require.Equal(t, c.rules, rules, fe.Msg)
+			require.NotContains(t, fe.Msg, id, "redacted")
+		})
+	}
+}
+
+// Q88: aws-access-key-id is betterleaks' aws-access-token minus its
+// required component, appended to the parsed defaults; the fallback
+// values (a betterleaks without that rule) are the ones it ships.
+func TestSecretRules_AWSAccessKeyIDFromTheDefaults(t *testing.T) {
+	cfg, err := secretRules()
+	require.NoError(t, err)
+	base, ok := cfg.Rule("aws-access-token")
+	require.True(t, ok)
+	require.NotEmpty(t, base.Components, "betterleaks' rule still needs the secret key: when it stops, drop ape's")
+	r, ok := cfg.Rule(awsAccessKeyIDRuleID)
+	require.True(t, ok)
+	require.Equal(t, base.Regex, r.Regex)
+	require.Equal(t, base.Keywords, r.Keywords)
+	require.Equal(t, base.FilterExpr, r.FilterExpr)
+	require.Empty(t, r.Components)
+	require.Empty(t, r.ValidateExpr, "no provider expression")
+	require.Less(t, r.Specificity, base.Specificity)
+	fallback := awsAccessKeyIDRule(&config.Config{})
+	require.Equal(t, []string{base.Regex, base.FilterExpr}, []string{fallback.Regex, fallback.FilterExpr})
+	require.Equal(t, base.Keywords, fallback.Keywords)
 }

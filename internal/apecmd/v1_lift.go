@@ -122,7 +122,10 @@ The commit:
   lays down      the v1 skeleton, as ` + "`ape project init --brownfield`" + ` (CLAUDE.md keeps its
                  content, loses the v0 apex:managed block and gains @AGENTS.md),
                  hot/.gitignore (` + "`*`" + `, when hot/ has none) included: it ignores
-                 itself, so it is not in the lift commit
+                 itself, so it is not in the lift commit; and git's pre-commit hook,
+                 the secret scan, when the repository has none (an existing one is
+                 kept; the output's "git hook" line says which; see ape hook
+                 pre-commit --help)
   writes         development/lift-disposition.md (16 KB, unless its candidates need
                  more): the binding-rule candidates (CLAUDE.md list items,
                  project-context "don't miss" items, team-memory gotcha titles), EVERY
@@ -380,6 +383,7 @@ func printLift(w io.Writer, r *apexv1.LiftResult) {
 		return
 	}
 	fmt.Fprintf(w, "commit    %s  %s\n", r.Commit, strings.SplitN(r.CommitMessage, "\n", 2)[0])
+	printLiftPreCommit(w, r)
 	if t := r.RegressionAtTag; t != nil {
 		fmt.Fprintf(w, "regression at %s exit %d (%.1fs)\n", apexv1.LiftTag, t.Exit, t.Secs)
 	}
@@ -400,4 +404,15 @@ func printLift(w io.Writer, r *apexv1.LiftResult) {
 		fmt.Fprintf(w, "  %d [%s] %s at %s, %s at the lift commit — %s\n", i+1, c.Verdict, at, apexv1.LiftTag, after, c.Cmd)
 	}
 	fmt.Fprintf(w, "next: apex-plan with %s (the judged v1.0.0 migration entry), then a fresh read-only review of it, then yours\n", r.Disposition)
+}
+
+// printLiftPreCommit says what the lift's skeleton did with git's
+// pre-commit hook (Q89).
+func printLiftPreCommit(w io.Writer, r *apexv1.LiftResult) {
+	if r.Init == nil {
+		return
+	}
+	if pc := preCommitLine(r.Init.PreCommit); pc != "" {
+		fmt.Fprintln(w, pc)
+	}
 }

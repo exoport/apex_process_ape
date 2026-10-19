@@ -214,6 +214,11 @@ the project (H27):
     settings.shared   .claude/settings.json not ignored by git: an ignored
                       one shares ape's hooks with no other checkout (only
                       ape task sessions get them inline)
+    hooks.pre-commit  git's pre-commit hook does not run ape's secret scan
+                      (project check's notice hooks.pre-commit-absent): WARN
+                      when absent — a fresh clone; ape project init installs
+                      it —, another tool's hook without the line, or not
+                      executable
   None of v0's rows run there: --strict is green on a healthy v1 project.
 
   Anywhere else: the rows below, v0's included, plus apex.v0, which WARNs
