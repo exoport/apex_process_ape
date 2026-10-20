@@ -5288,10 +5288,18 @@ The commit:
                  which; "revealed" lists the files under .claude/ it un-ignored and did not
                  commit (a skill of your own: commit it or ignore it by name)
   writes         development/lift-disposition.md (16 KB, unless its candidates need
-                 more): the binding-rule candidates (CLAUDE.md list items,
-                 project-context "don't miss" items, team-memory gotcha titles), EVERY
-                 one, with an empty Disposition column for apex-plan, then a fresh
-                 read-only review, then the person, who deletes it. Then "Code and
+                 more): the binding-rule candidates, EVERY one: CLAUDE.md's list
+                 items and, from project-context.md and team-memory, every section
+                 but a pure overview (a heading titled overview, introduction,
+                 about, purpose, summary or table of contents) — its list items of
+                 three words or more and its rule-shaped paragraphs (must, never,
+                 always, do not, avoid, only, required, prefer, shall, forbidden),
+                 whole; a team-memory entry with neither is listed by its
+                 paragraphs, else by its title. Grouped by source and section (JSON
+                 rule_candidates[].section, the heading path); text found twice is
+                 listed once with both sources (also_in). An empty Disposition
+                 column for apex-plan, then a fresh read-only review, then the
+                 person, who deletes it. Then "Code and
                  tests that read deleted v0 state": every kept code, test, script,
                  Makefile or CI file (not docs, not evidence) that names a path the
                  lift deletes outside its comments (SQL's -- and /* */ too) — by its

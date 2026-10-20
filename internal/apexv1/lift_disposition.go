@@ -16,15 +16,33 @@ import (
 // read-only session reviews it, then the person does; the person deletes
 // it. Its full lists go to _apex/state/lift-disposition.json, which git
 // ignores (R3). It holds the binding-rule candidates — the rules v0 kept in
-// CLAUDE.md, project-context's "don't miss" list and team-memory's
-// gotchas, which v1 has no file for — and everything the lift left for a
-// reader: ids it did not edit, ADR gaps, references to removed paths.
+// CLAUDE.md, project-context.md and team-memory, which v1 has no file
+// for — and everything the lift left for a reader: ids it did not edit,
+// ADR gaps, references to removed paths.
+//
+// RG-4 (D252, D257): the candidates were CLAUDE.md's list items,
+// project-context's "don't miss" section and team-memory's gotcha titles,
+// so on the rehearsals 46–78 rows stood for 94–163 project-context list
+// items and 37–249 team-memory ones; every other rule section was deleted
+// with its file, recorded nowhere. Now every section of both files counts
+// but a pure overview: its list items and its rule-shaped paragraphs, and
+// a team-memory entry whose body has neither is listed by its paragraphs,
+// else by its title.
 
 var (
-	dontMissRe     = regexp.MustCompile(`(?i)don'?t[- ]?miss`)
-	gotchaRe       = regexp.MustCompile(`(?i)gotcha`)
-	entryDateTail  = regexp.MustCompile(`\s+[—–-]+\s+\d{4}-\d{2}-\d{2}\s*$`)
+	entryDateTail  = regexp.MustCompile(`\s+[—–-]+\s+\d{4}-\d{2}-\d{2}(?:\s*\([^()]*\))?\s*$`)
 	minRuleWordsRe = regexp.MustCompile(`\S+\s+\S+\s+\S+`)
+	// overviewRe is a pure overview's heading: its section is a summary
+	// of the project, not a rule (RG-4).
+	overviewRe = regexp.MustCompile(`(?i)^(?:project\s+)?(?:overview|introduction|about|purpose|summary|table\s+of\s+contents)$`)
+	// ruleWordRe makes a paragraph rule-shaped (RG-4).
+	ruleWordRe   = regexp.MustCompile(`(?i)\b(?:must|never|always|do\s+not|don['’]t|avoid|only|required|prefer|shall|forbidden)\b`)
+	thematicRe   = regexp.MustCompile(`^\s{0,3}(?:(?:-\s*){3,}|(?:\*\s*){3,}|(?:_\s*){3,})$`)
+	headingNumRe = regexp.MustCompile(`^\d+(?:\.\d+)*\.?\s+`)
+	quoteRe      = regexp.MustCompile(`^\s{0,3}>\s?`)
+	// citationLineRe is the line v0's retrospectives cite an entry's
+	// sources on: where a rule came from, not a rule.
+	citationLineRe = regexp.MustCompile(`(?i)^[*_]*sources?[*_]*:`)
 )
 
 // listItems returns the list items of lines[from:to] outside code, each
@@ -38,7 +56,7 @@ func listItems(lines []mdLine) []LiftCandidate {
 			continue
 		}
 		if m := listItemRe.FindStringSubmatch(l.Text); m != nil {
-			out = append(out, LiftCandidate{Text: strings.TrimSpace(m[1]), Source: itoaLine(l.N)})
+			out = append(out, LiftCandidate{Text: strings.TrimSpace(m[1]), Source: itoaLine(l.N), line: l.N})
 			cur = len(out) - 1
 			continue
 		}
@@ -60,27 +78,211 @@ func listItems(lines []mdLine) []LiftCandidate {
 
 func itoaLine(n int) string { return strconv.Itoa(n) }
 
-// sectionLines returns the body of every heading (any level) whose title
-// matches re, up to the next heading of the same or a higher level.
-func sectionLines(doc string, re *regexp.Regexp) [][]mdLine {
-	lines := splitLines(doc)
-	var out [][]mdLine
-	for i := 0; i < len(lines); i++ {
-		lv, t := headingLevel(lines[i])
-		if lv == 0 || !re.MatchString(t) {
-			continue
+// frontMatterEnd is the index of the first line after a leading YAML
+// front matter block (0 when there is none).
+func frontMatterEnd(lines []mdLine) int {
+	if len(lines) == 0 || strings.TrimSpace(lines[0].Text) != "---" {
+		return 0
+	}
+	for i := 1; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i].Text) == "---" {
+			return i + 1
 		}
-		j := i + 1
-		for j < len(lines) {
-			if lv2, _ := headingLevel(lines[j]); lv2 > 0 && lv2 <= lv {
-				break
-			}
-			j++
+	}
+	return 0
+}
+
+// mdHeading is one open heading of a heading-path walk.
+type mdHeading struct {
+	level int
+	title string
+}
+
+// headingPaths returns, per line number, the heading path a line sits
+// under: its titles joined with " > ", a document's lone H1 (its title)
+// left out.
+func headingPaths(lines []mdLine) map[int]string {
+	out := map[int]string{}
+	var stack []mdHeading
+	h1 := soleTitle(lines)
+	for _, l := range lines {
+		if lv, t := headingLevel(l); lv > 0 {
+			stack = pushHeading(stack, lv, t, h1)
 		}
-		out = append(out, lines[i+1:j])
-		i = j - 1
+		out[l.N] = joinPath(stack)
 	}
 	return out
+}
+
+// soleTitle reports whether a document has exactly one H1: its title,
+// not a section.
+func soleTitle(lines []mdLine) bool {
+	n := 0
+	for _, l := range lines {
+		if lv, _ := headingLevel(l); lv == 1 {
+			n++
+		}
+	}
+	return n == 1
+}
+
+func pushHeading(stack []mdHeading, lv int, t string, soleH1 bool) []mdHeading {
+	for len(stack) > 0 && stack[len(stack)-1].level >= lv {
+		stack = stack[:len(stack)-1]
+	}
+	if lv == 1 && soleH1 {
+		return stack
+	}
+	return append(stack, mdHeading{lv, t})
+}
+
+func joinPath(stack []mdHeading) string {
+	parts := make([]string, len(stack))
+	for i, h := range stack {
+		parts[i] = h.title
+	}
+	return strings.Join(parts, " > ")
+}
+
+// isOverview reports whether a heading names a pure overview section.
+func isOverview(title string) bool {
+	t := strings.Trim(headingNumRe.ReplaceAllString(strings.TrimSpace(title), ""), "*_`: ")
+	return overviewRe.MatchString(t)
+}
+
+// ruleCandidates returns the rule candidates of a v0 rule document
+// (project-context.md, team-memory): every list item of three words or
+// more and every rule-shaped paragraph (outside code, lists, tables and
+// headings: the paragraph whole), in every section but a pure overview
+// and its subsections, each with its heading path. With entries (team
+// memory), each H3+ heading is an entry, and every entry is a rule: one
+// whose body gives no candidate is listed by its paragraphs, or, with
+// none, by its title, so no entry goes unrecorded.
+func ruleCandidates(doc string, entries bool) []LiftCandidate {
+	lines := splitLines(doc)
+	lines = lines[frontMatterEnd(lines):]
+	w := &ruleWalk{entries: entries, soleH1: soleTitle(lines), item: -1, listed: map[int]bool{}, lastListed: -1}
+	for _, l := range lines {
+		w.line(l)
+	}
+	w.flush()
+	w.closeTo(1)
+	keep := w.out[:0]
+	for i, c := range w.out {
+		if w.listed[i] || isRule(c) {
+			c.Source = itoaLine(c.line)
+			keep = append(keep, c)
+		}
+	}
+	return keep
+}
+
+// ruleWalk is one ruleCandidates pass over a document.
+type ruleWalk struct {
+	entries, soleH1 bool
+	out             []LiftCandidate
+	stack           []ruleHeading
+	para            []mdLine
+	// item is the list item being read (its index in out), -1 when none.
+	item int
+	// listed are an entry's own paragraphs or title, listed because
+	// nothing else in it was: kept whatever their shape; lastListed is
+	// the last of them.
+	listed     map[int]bool
+	lastListed int
+}
+
+// ruleHeading is an open heading of a ruleWalk.
+type ruleHeading struct {
+	mdHeading
+	line, from int
+	skip       bool
+	// prose is an entry's paragraphs that are not rule-shaped.
+	prose []LiftCandidate
+}
+
+func (w *ruleWalk) line(l mdLine) {
+	t := strings.TrimSpace(l.Text)
+	if lv, title := headingLevel(l); lv > 0 {
+		w.flush()
+		w.closeTo(lv)
+		skip := w.skipping() || isOverview(title)
+		w.stack = append(w.stack, ruleHeading{mdHeading: mdHeading{lv, entryDateTail.ReplaceAllString(title, "")}, line: l.N, from: len(w.out), skip: skip})
+		return
+	}
+	switch {
+	case l.InCode, t == "", thematicRe.MatchString(l.Text), tableRowRe.MatchString(l.Text), strings.HasPrefix(t, "<!--"):
+		w.flush()
+	case listItemRe.MatchString(l.Text):
+		w.flush()
+		if !w.skipping() {
+			w.out = append(w.out, LiftCandidate{Text: strings.TrimSpace(listItemRe.FindStringSubmatch(l.Text)[1]), line: l.N, Section: w.path()})
+			w.item = len(w.out) - 1
+		}
+	case w.item >= 0:
+		// A continuation, indented or lazy, belongs to its item.
+		w.out[w.item].Text += " " + t
+	default:
+		w.para = append(w.para, l)
+	}
+}
+
+func (w *ruleWalk) path() string {
+	hs := make([]mdHeading, 0, len(w.stack))
+	for _, h := range w.stack {
+		if h.level != 1 || !w.soleH1 {
+			hs = append(hs, h.mdHeading)
+		}
+	}
+	return joinPath(hs)
+}
+
+func (w *ruleWalk) skipping() bool { return len(w.stack) > 0 && w.stack[len(w.stack)-1].skip }
+
+// flush ends a paragraph: a candidate when it is rule-shaped, else, in an
+// entry, held for the entry.
+func (w *ruleWalk) flush() {
+	if len(w.para) > 0 && !w.skipping() {
+		b := make([]string, 0, len(w.para))
+		for _, l := range w.para {
+			b = append(b, strings.TrimSpace(quoteRe.ReplaceAllString(l.Text, "")))
+		}
+		c := LiftCandidate{Text: strings.TrimSpace(strings.Join(b, " ")), line: w.para[0].N, Section: w.path()}
+		switch top := len(w.stack) - 1; {
+		case ruleWordRe.MatchString(c.Text):
+			w.out = append(w.out, c)
+		case w.entries && top >= 0 && w.stack[top].level >= 3:
+			w.stack[top].prose = append(w.stack[top].prose, c)
+		}
+	}
+	w.para, w.item = nil, -1
+}
+
+// closeTo closes the open headings of level lv and deeper; an entry that
+// gave no candidate is listed by its paragraphs, else its title.
+func (w *ruleWalk) closeTo(lv int) {
+	for len(w.stack) > 0 && w.stack[len(w.stack)-1].level >= lv {
+		h := w.stack[len(w.stack)-1]
+		w.stack = w.stack[:len(w.stack)-1]
+		if !w.entries || h.level < 3 || h.skip || slices.ContainsFunc(w.out[h.from:], isRule) || w.lastListed >= h.from {
+			continue
+		}
+		prose := slices.DeleteFunc(h.prose, func(c LiftCandidate) bool { return !isRule(c) })
+		if len(prose) == 0 {
+			prose = []LiftCandidate{{Text: h.title, line: h.line, Section: w.path()}}
+		}
+		for _, c := range prose {
+			w.listed[len(w.out)], w.lastListed = true, len(w.out)
+			w.out = append(w.out, c)
+		}
+	}
+}
+
+// isRule reports whether a list item or paragraph of a rule document is
+// a candidate: three words or more, and not the "Source: Epic N
+// retrospective" line v0's retrospectives put under each entry.
+func isRule(c LiftCandidate) bool {
+	return minRuleWordsRe.MatchString(c.Text) && !citationLineRe.MatchString(c.Text)
 }
 
 func (lf *lifter) candidates() []LiftCandidate {
@@ -90,6 +292,14 @@ func (lf *lifter) candidates() []LiftCandidate {
 			c.Source = src + ":" + c.Source
 			out = append(out, c)
 		}
+	}
+	// withSections fills each list item's heading path from doc.
+	withSections := func(doc string, cs []LiftCandidate) []LiftCandidate {
+		paths := headingPaths(splitLines(doc))
+		for i := range cs {
+			cs[i].Section = paths[cs[i].line]
+		}
+		return cs
 	}
 	if doc := lf.claudeBefore; doc != "" {
 		// The managed block is the v0 framework's, not the project's.
@@ -108,28 +318,50 @@ func (lf *lifter) candidates() []LiftCandidate {
 				lines = append(lines, l)
 			}
 		}
-		add("CLAUDE.md", listItems(lines))
+		add("CLAUDE.md", withSections(doc, listItems(lines)))
 	}
 	if doc, ok := lf.texts["AGENTS.md"]; ok {
-		add("AGENTS.md", listItems(splitLines(doc)))
+		add("AGENTS.md", withSections(doc, listItems(splitLines(doc))))
 	}
 	if lf.projectContext != "" {
-		for _, sec := range sectionLines(lf.readRel(lf.projectContext), dontMissRe) {
-			add(LiftTag+":"+lf.projectContext, listItems(sec))
-		}
+		add(LiftTag+":"+lf.projectContext, ruleCandidates(lf.readRel(lf.projectContext), false))
 	}
 	if tm := lf.rel(lf.layout.Cfg.Paths.TeamMemory); tm != "" {
 		if doc := lf.readRel(tm); doc != "" {
-			for _, sec := range sectionLines(doc, gotchaRe) {
-				for _, l := range sec {
-					if lv, t := headingLevel(l); lv >= 3 {
-						out = append(out, LiftCandidate{Text: entryDateTail.ReplaceAllString(t, ""), Source: LiftTag + ":" + tm + ":" + itoaLine(l.N)})
-					}
-				}
-			}
+			add(LiftTag+":"+tm, ruleCandidates(doc, true))
 		}
 	}
+	return dedupCandidates(out)
+}
+
+// dedupCandidates lists identical text once — compared without case,
+// spacing or a closing period — with the other places in AlsoIn.
+func dedupCandidates(cs []LiftCandidate) []LiftCandidate {
+	seen := map[string]int{}
+	var out []LiftCandidate
+	for _, c := range cs {
+		k := strings.ToLower(strings.TrimRight(strings.Join(strings.Fields(c.Text), " "), ".;:"))
+		if i, ok := seen[k]; ok {
+			out[i].AlsoIn = append(out[i].AlsoIn, c.Source)
+			continue
+		}
+		seen[k] = len(out)
+		out = append(out, c)
+	}
 	return out
+}
+
+// candidateGroup is the disposition's heading for a candidate: its
+// source file, then its section.
+func candidateGroup(c LiftCandidate) string {
+	file := c.Source
+	if i := strings.LastIndex(file, ":"); i > 0 {
+		file = file[:i]
+	}
+	if c.Section == "" {
+		return "`" + file + "`"
+	}
+	return "`" + file + "` — " + strings.ReplaceAll(c.Section, "\n", " ")
 }
 
 func cell(s string) string {
@@ -261,20 +493,7 @@ func (lf *lifter) dispositionWith(lim dispLimits) string {
 
 	p("## Binding-rule candidates\n\n")
 	p("Disposition is one of: `kept in AGENTS.md` · `gated by <cmd>` · `ADR-NNNN` · `docs/<page>` · `dropped: <reason>`.\n\n")
-	if len(r.Candidates) == 0 {
-		p("None found (no CLAUDE.md list items, no project-context \"don't miss\" section, no team-memory gotchas).\n\n")
-	} else {
-		p("| # | Candidate | Source | Disposition |\n|---|---|---|---|\n")
-		for i, c := range r.Candidates {
-			if i == lim.rules {
-				p("\n… and %d more candidate(s), numbered on from %d, past this file's %d KB ceiling: in `%s` (rule_candidates), in the checkout that lifted\n",
-					len(r.Candidates)-i, i+1, liftDispositionCeiling>>10, report)
-				break
-			}
-			p("| %d | %s | `%s` | |\n", i+1, cell(c.Text), c.Source)
-		}
-		p("\n")
-	}
+	writeCandidates(&b, r.Candidates, lim.rules, report)
 
 	p("## Gate commands\n\n")
 	switch r.Gates.Source {
@@ -372,6 +591,35 @@ func (lf *lifter) dispositionWith(lim dispLimits) string {
 		p("- %s\n", s)
 	}
 	return b.String()
+}
+
+// writeCandidates is the disposition's binding-rule table, grouped by
+// source and section (RG-4) and numbered through: at most maxRows rows
+// (all of them when maxRows < 0), then a line saying how many more there
+// are and where.
+func writeCandidates(b *strings.Builder, cands []LiftCandidate, maxRows int, report string) {
+	p := func(format string, args ...any) { fmt.Fprintf(b, format, args...) }
+	if len(cands) == 0 {
+		p("None found (no CLAUDE.md list items, no project-context or team-memory rules).\n\n")
+		return
+	}
+	group := ""
+	for i, c := range cands {
+		if i == maxRows {
+			p("\n… and %d more candidate(s), numbered on from %d, past this file's %d KB ceiling: in `%s` (rule_candidates), in the checkout that lifted\n",
+				len(cands)-i, i+1, liftDispositionCeiling>>10, report)
+			break
+		}
+		if g := candidateGroup(c); i == 0 || g != group {
+			if i > 0 {
+				p("\n")
+			}
+			p("### %s\n\n| # | Candidate | Source | Disposition |\n|---|---|---|---|\n", g)
+			group = g
+		}
+		p("| %d | %s | `%s` | |\n", i+1, cell(c.Text), strings.Join(append([]string{c.Source}, c.AlsoIn...), "` · `"))
+	}
+	p("\n")
 }
 
 // writeADRTable is the disposition's ADR table: old → new, status and

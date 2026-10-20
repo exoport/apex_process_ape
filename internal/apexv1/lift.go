@@ -103,6 +103,15 @@ type LiftFileChange struct {
 type LiftCandidate struct {
 	Text   string `json:"text"`
 	Source string `json:"source"`
+	// Section is the heading path the candidate sits under in its
+	// source ("Critical Implementation Rules > Testing Rules"; a
+	// team-memory entry's title is its last part), "" above the first
+	// heading (RG-4).
+	Section string `json:"section,omitempty"`
+	// AlsoIn are the other places the same text was found ("file:line"):
+	// it is listed once (RG-4).
+	AlsoIn []string `json:"also_in,omitempty"`
+	line   int
 }
 
 // LiftResult is the lift's report (and, with DryRun, its plan).
