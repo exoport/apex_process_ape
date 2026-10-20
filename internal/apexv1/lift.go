@@ -273,6 +273,13 @@ type lifter struct {
 	tagLogs []string
 }
 
+// existsAtTag reports whether rel (project-relative) is in the tree the
+// lift reads: the tag's, before anything is written.
+func (lf *lifter) existsAtTag(rel string) bool {
+	_, err := os.Stat(filepath.Join(lf.root, filepath.FromSlash(rel)))
+	return err == nil
+}
+
 // readRel reads a file as the tag has it — for the inputs the lift
 // deletes (project-context, team memory) — with ADR citations
 // renumbered.
@@ -748,7 +755,11 @@ func (lf *lifter) plan() error {
 		if !a.canon {
 			date = gitFirstDate(ctx, lf.root, a.rel)
 		}
-		la := convertADR(*a, newNum[i], rw, date)
+		src := *a
+		if np, ok := pathMap[a.rel]; ok && !a.canon {
+			src.body = rebaseLinks(a.body, a.rel, np, pathMap, lf.existsAtTag)
+		}
+		la := convertADR(src, newNum[i], rw, date)
 		la.Path = decisionsRel + "/" + la.Path
 		if first, ok := firstOf[i]; ok {
 			la.Gaps = append(la.Gaps, "a second apex-v0 record with id "+la.Old+": citations of that id were rewritten to ADR-"+fmtNum4(newNum[first]))

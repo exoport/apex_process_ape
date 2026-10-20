@@ -196,14 +196,15 @@ func identIDs(s string) []string {
 type adrRewriter struct {
 	num   map[int]int
 	paths map[string]string // old project-relative path → new
-	// pathRe matches a path to a v0 ADR record ("…/adrs/adr-0004_slug.md").
+	// pathRe matches a path to a v0 ADR record ("…/adrs/adr-0004_slug.md"),
+	// its leading chain of ./ and ../ segments in group 1.
 	pathRe *regexp.Regexp
 }
 
 func newADRRewriter(num map[int]int, paths map[string]string, adrsRel string) *adrRewriter {
 	r := &adrRewriter{num: num, paths: paths}
 	if adrsRel != "" {
-		r.pathRe = regexp.MustCompile(`(?:\./)?` + regexp.QuoteMeta(adrsRel) + `/[A-Za-z0-9_.-]+\.md`)
+		r.pathRe = regexp.MustCompile(`((?:\.\.?/)*)` + regexp.QuoteMeta(adrsRel) + `/[A-Za-z0-9_.-]+\.md`)
 	}
 	return r
 }
@@ -220,10 +221,16 @@ func (r *adrRewriter) rewrite(s string) (out string, n int, unresolved []string)
 		return s, 0, nil
 	}
 	if r.pathRe != nil {
+		// RG-5, tenax: `../../development/governance/adrs/adr-0062_x.md` in
+		// a docs page became `../.development/decisions/0063-x.md` — the
+		// match began at the second `./` and the root-relative path took
+		// its place. The whole leading ./ and ../ chain is the link's own,
+		// kept as written; only the root-relative part is replaced.
 		s = r.pathRe.ReplaceAllStringFunc(s, func(m string) string {
-			if np, ok := r.paths[strings.TrimPrefix(m, "./")]; ok {
+			lead := r.pathRe.FindStringSubmatch(m)[1]
+			if np, ok := r.paths[m[len(lead):]]; ok {
 				n++
-				return np
+				return lead + np
 			}
 			return m
 		})
