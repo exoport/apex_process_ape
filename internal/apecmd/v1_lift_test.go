@@ -175,3 +175,46 @@ func TestProjectLift_DryRunListsEveryHashed(t *testing.T) {
 	require.Len(t, plan.Hashed, 60)
 	require.Equal(t, 60, plan.HashedTotal)
 }
+
+// RG-6 (D254): inside `ape framework update` only the lift's stderr is
+// shown, and mdpdf's and cortex's updates printed no regression verdict.
+// Under --from-update the verdict lines go to stderr, once; by hand they
+// stay on stdout.
+func TestProjectLift_FromUpdatePrintsTheVerdictOnStderr(t *testing.T) {
+	const red = "regression exit 1 [red-after-lift] — LIFT FAILURE: red at the lift commit (exit 1: TestStoryFiles), green at apex-v0-final"
+	const recorded = "regression verdict recorded in development/lift-disposition.md (## Regression, commit "
+	for _, fromUpdate := range []bool{true, false} {
+		root := v0Repo(t)
+		for rel, content := range map[string]string{
+			"development/project-context.md": "# Project context\n\n## Code Validation\n\n```sh\nsh ./suite.sh\n```\n",
+			"suite.sh":                       "#!/bin/sh\ntest -f development/implementation/3-2_retry-publish.md || { echo '--- FAIL: TestStoryFiles (0.00s)'; exit 1; }\n",
+		} {
+			require.NoError(t, os.WriteFile(filepath.Join(root, filepath.FromSlash(rel)), []byte(content), 0o644))
+		}
+		v1Git(t, root, "add", "-A")
+		v1Git(t, root, "commit", "-q", "-m", "gates")
+		remote := filepath.Join(t.TempDir(), "r.git")
+		v1Git(t, root, "init", "-q", "--bare", remote)
+		v1Git(t, root, "remote", "add", "origin", remote)
+		v1Git(t, root, "push", "-q", "-u", "origin", "main")
+		v1Git(t, root, "tag", "-a", apexv1.LiftTag, "-m", "final")
+		v1Git(t, root, "push", "-q", "origin", apexv1.LiftTag)
+
+		args := []string{"lift", "--cwd", root}
+		if fromUpdate {
+			args = append(args, "--from-update")
+		}
+		stdout, stderr, err := v1Exec(t, newProjectCmd, args...)
+		require.NoError(t, err)
+		require.Contains(t, stdout, "apex: lift from apex-v0 v0.29.3")
+		shown, other := stderr, stdout
+		if !fromUpdate {
+			shown, other = stdout, stderr
+		}
+		require.Contains(t, shown, "regression at apex-v0-final exit 0", "from-update %v", fromUpdate)
+		require.Contains(t, shown, red, "from-update %v", fromUpdate)
+		require.Contains(t, shown, recorded)
+		require.Contains(t, shown, apexv1.LiftRegressionSubject+") and _apex/state/lift-disposition.json (regression)")
+		require.NotContains(t, other, "[red-after-lift]", "not twice")
+	}
+}

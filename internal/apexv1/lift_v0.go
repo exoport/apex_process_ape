@@ -28,6 +28,9 @@ const (
 	// LiftSubjectPrefix starts the lift commit's subject: how other code
 	// finds the v1 epoch.
 	LiftSubjectPrefix = "apex: lift"
+	// LiftRegressionSubject is the subject of the commit after it that
+	// records the regression verdict in the disposition file (RG-6).
+	LiftRegressionSubject = "apex: lift regression verdict"
 	// LiftDisposition is the file the lift writes for review, relative
 	// to the development folder (D47 Q4).
 	LiftDisposition = "lift-disposition.md"

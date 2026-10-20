@@ -186,6 +186,40 @@ type LiftResult struct {
 	// the worst command's. Absent for a command that does not split,
 	// which runs and is judged whole.
 	RegressionCommands []LiftRegressionCommand `json:"regression_commands,omitempty"`
+	// RegressionCommit is the commit after the lift commit that records
+	// the verdict in the disposition file's `## Regression` (RG-6):
+	// "apex: lift regression verdict". Absent when no regression ran: the
+	// lift commit's disposition file says why.
+	RegressionCommit string `json:"regression_commit,omitempty"`
+}
+
+// LiftRegressionRecord is the lift's regression verdict as recorded
+// (RG-6, D254): `regression` in lift-disposition.json, and the disposition
+// file's `## Regression`, where apex-plan reads it (the v1.0.0 migration
+// entry, item 2). Its names are that entry's (A22): the LiftRegression*
+// verdicts, their notes, and regression_new_failures. Verdict is empty
+// when no regression ran; Note says why.
+type LiftRegressionRecord struct {
+	Verdict     string   `json:"verdict"`
+	Note        string   `json:"note"`
+	NewFailures []string `json:"regression_new_failures"`
+	// Commit is the lift commit the run was at.
+	Commit   string                        `json:"commit,omitempty"`
+	Commands []LiftRegressionRecordCommand `json:"commands,omitempty"`
+}
+
+// LiftRegressionRecordCommand is one command as it ran at both points:
+// the whole regression command, or one of a split chain's (R12, R30).
+type LiftRegressionRecordCommand struct {
+	Cmd     string `json:"cmd"`
+	Verdict string `json:"verdict"`
+	Note    string `json:"note"`
+	// ExitAtTag is null when it did not run at the tag.
+	ExitAtTag   *int     `json:"exit_at_tag"`
+	ExitAfter   int      `json:"exit_after"`
+	NewFailures []string `json:"regression_new_failures"`
+	Log         string   `json:"log"`
+	LogAtTag    string   `json:"log_at_tag,omitempty"`
 }
 
 // LiftRegressionCommand is one command of a split regression chain,
@@ -260,6 +294,9 @@ type lifter struct {
 	// reportJSON is the report, written to res.Report once the commit
 	// stands.
 	reportJSON string
+	// regression is the verdict as recorded (RG-6): set at the plan when
+	// no regression runs, after the run otherwise.
+	regression *LiftRegressionRecord
 	// claudeBefore is CLAUDE.md with citations rewritten, managed block
 	// still in: the line numbers of the tag.
 	claudeBefore string
@@ -860,6 +897,9 @@ func (lf *lifter) plan() error {
 	sort.Slice(lf.res.Changed, func(i, j int) bool { return lf.res.Changed[i].File < lf.res.Changed[j].File })
 	lf.res.Disposition = lf.devRel + "/" + LiftDisposition
 	lf.res.Report = (&Project{Root: lf.root}).StateRel() + "/" + LiftReport
+	if why := lf.regressionSkipped(); why != "" {
+		lf.regression = &LiftRegressionRecord{Note: why, NewFailures: []string{}}
+	}
 	lf.reportJSON = lf.report()
 	lf.writes[lf.res.Disposition] = lf.disposition()
 	lf.res.CommitMessage = lf.commitMessage()
@@ -1220,7 +1260,97 @@ func (lf *lifter) apply() error {
 		return err
 	}
 	lf.liftRegression(p)
+	return lf.recordRegression()
+}
+
+// regressionSkipped says why the lift runs no regression command; "" when
+// it runs one.
+func (lf *lifter) regressionSkipped() string {
+	switch {
+	case lf.res.Gates.Regression == "":
+		return "no regression command was extracted: apex-plan sets `regression:` in _apex/config.yaml"
+	case lf.opt.NoVerifyRun:
+		return "not run (--no-verify-run)"
+	}
+	return ""
+}
+
+// recordRegression records the verdict of the run at the lift commit
+// (RG-6, D254: mdpdf and cortex, lifted by `ape framework update`, had it
+// nowhere — not in the disposition file, not in its JSON, not in the
+// commit): `regression` in the JSON, and a `## Regression` section in the
+// disposition file, committed on its own as "apex: lift regression
+// verdict" so the lift commit is never rewritten. Nothing when no
+// regression ran: the lift commit's disposition file says why.
+func (lf *lifter) recordRegression() error {
+	if lf.regression != nil || lf.res.RegressionVerdict == "" {
+		return nil
+	}
+	lf.regression = lf.regressionRecord()
+	lf.reportJSON = lf.report()
+	if err := liftWrite(filepath.Join(lf.root, filepath.FromSlash(lf.res.Report)), lf.reportJSON); err != nil {
+		return &FailError{Code: CodeLiftWriteFailed, Msg: "writing " + lf.res.Report + ": " + err.Error() + " — the lift commit stands; its regression verdict is in this output"}
+	}
+	md := lf.writes[lf.res.Disposition]
+	var b strings.Builder
+	writeRegression(&b, lf.regression, lf.res.Report, false)
+	if len(md)+b.Len() > liftDispositionCeiling {
+		b.Reset()
+		writeRegression(&b, lf.regression, lf.res.Report, true)
+	}
+	md += b.String()
+	rel := lf.res.Disposition
+	fail := func(what string, err error) error {
+		return &FailError{Code: CodeCommitFailed, Msg: what + ": " + err.Error() + " — the lift commit stands; its regression verdict is in this output and in " + lf.res.Report +
+			"; `git checkout -- " + rel + "` restores the file"}
+	}
+	if err := liftWrite(filepath.Join(lf.root, filepath.FromSlash(rel)), md); err != nil {
+		return fail("writing "+rel, err)
+	}
+	if _, err := git(lf.ctx, lf.root, "add", "--", rel); err != nil {
+		return fail("staging "+rel, err)
+	}
+	if err := ScanCommit(lf.ctx, lf.root, "the lift's regression verdict commit", rel); err != nil {
+		return err
+	}
+	msg := LiftRegressionSubject + "\n\nThe regression command at the lift commit " + short(lf.res.Commit) + ", judged against its run at " + LiftTag + ": " +
+		lf.regression.Verdict + ".\nRecorded in " + rel + " (## Regression), for apex-plan.\n"
+	if _, err := git(lf.ctx, lf.root, "commit", "--no-verify", "-q", "-m", msg, "--", rel); err != nil {
+		return fail("the regression verdict commit failed", err)
+	}
+	lf.writes[rel] = md
+	lf.res.RegressionCommit = HeadSHA(lf.ctx, lf.root)
 	return nil
+}
+
+// regressionRecord is the verdict of the run at the lift commit, as
+// recorded: the worst command's, and each command's.
+func (lf *lifter) regressionRecord() *LiftRegressionRecord {
+	r := lf.res
+	rec := &LiftRegressionRecord{Verdict: r.RegressionVerdict, Note: r.RegressionNote, NewFailures: nonNil(r.RegressionNewFailures), Commit: r.Commit}
+	cmds := r.RegressionCommands
+	if len(cmds) == 0 && r.Regression != nil {
+		cmds = []LiftRegressionCommand{{Cmd: r.Gates.Regression, Verdict: r.RegressionVerdict, Note: r.RegressionNote, NewFailures: r.RegressionNewFailures, Regression: r.Regression, RegressionAtTag: r.RegressionAtTag}}
+	}
+	for _, c := range cmds {
+		rc := LiftRegressionRecordCommand{Cmd: c.Cmd, Verdict: c.Verdict, Note: c.Note, NewFailures: nonNil(c.NewFailures)}
+		if c.Regression != nil {
+			rc.ExitAfter, rc.Log = c.Regression.Exit, c.Regression.Log
+		}
+		if t := c.RegressionAtTag; t != nil {
+			exit := t.Exit
+			rc.ExitAtTag, rc.LogAtTag = &exit, t.Log
+		}
+		rec.Commands = append(rec.Commands, rc)
+	}
+	return rec
+}
+
+func nonNil(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
 }
 
 // removals are the paths the lift removes: the deleted v0 families, the
@@ -1248,12 +1378,8 @@ func (lf *lifter) removals() []string {
 // caused from one it found (L4). A top-level && chain, and a ( … ) block
 // in it that splits, runs and is judged command by command (R12, R30).
 func (lf *lifter) liftRegression(p *Project) {
-	switch {
-	case lf.res.Gates.Regression == "":
-		lf.res.RegressionNote = "no regression command was extracted: apex-plan sets `regression:` in _apex/config.yaml"
-		return
-	case lf.opt.NoVerifyRun:
-		lf.res.RegressionNote = "not run (--no-verify-run)"
+	if why := lf.regressionSkipped(); why != "" {
+		lf.res.RegressionNote = why
 		return
 	}
 	parts := liftParts(lf.res.Gates.Regression)

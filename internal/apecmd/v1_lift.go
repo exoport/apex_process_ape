@@ -21,7 +21,8 @@ func newProjectLiftCmd() *cobra.Command {
 		Use:   "lift",
 		Short: "Lift an APEX v0 project to v1 in one commit (the mechanical half of the migration)",
 		Long: `Lift an APEX v0 project (framework v0.15.0–v0.31.x) to the v1 layout, in ONE commit
-whose subject starts "apex: lift" — the v1 epoch. The judgment half (which rule lives
+whose subject starts "apex: lift" — the v1 epoch (once the regression command has run,
+a second commit records its verdict, below). The judgment half (which rule lives
 where, what M1 delivers) is apex-plan's, from the disposition file this writes.
 
 Before: a person tags the commit to lift and pushes the tag. The tag is the archive of
@@ -246,12 +247,22 @@ that does not split (a line that changes the shell's state, a construct left ope
 one command, run as written. The exit code stays 0: the
 commit stands either way, and the verdict is in --json and the output.
 
+The verdict is also recorded where apex-plan reads it (RG-6): ` + "`regression`" + ` in
+_apex/state/lift-disposition.json — verdict, note, regression_new_failures, commit, and
+commands (cmd, verdict, note, exit_at_tag, exit_after, regression_new_failures, log,
+log_at_tag), one per command run — and a "## Regression" section of the disposition
+file (the verdict and its note, then one line per command with its exits and logs),
+committed on its own after the lift commit as "apex: lift regression verdict"
+(regression_commit in --json). With no run (no command, --no-verify-run) the lift
+commit's disposition file says why, and the JSON has the note with an empty verdict.
+
 --from-update is how the framework's v1.0.0 migration entry runs it inside
 ` + "`ape framework update`" + `: uncommitted changes under .claude/skills/, _apex/ (not
 config.yaml or state/), .aboard/ and .gitignore are the install's, left out of the lift
 commit for the update's own; skills the v1 install placed are never deleted. An untracked
 .claude/settings.json (the update's .claude/ shape un-ignored it) is no refusal: the lift
-merges the v1 hooks into it and commits it.
+merges the v1 hooks into it and commits it. The regression verdict lines go to stderr,
+which the update shows (its stdout is not).
 
 Exit codes: 0 lifted (or planned) · 1 refused or failed (code in --json) · 2 usage.`,
 		Example: "  ape project lift --dry-run\n  ape project lift --json\n  ape project lift --exclude 'schema/core/**' --exclude deploy/init/00-bootstrap.sh",
@@ -286,7 +297,12 @@ Exit codes: 0 lifted (or planned) · 1 refused or failed (code in --json) · 2 u
 				}
 				return v1Fail(cmd, &f, err, partial)
 			}
-			return v1Emit(cmd.OutOrStdout(), &f, res, func(w io.Writer) { printLift(w, res) })
+			// RG-6: inside `ape framework update` only a command's stderr
+			// is shown, so the verdict goes there (and not twice).
+			if opt.FromUpdate && !res.DryRun {
+				printLiftRegression(cmd.ErrOrStderr(), res)
+			}
+			return v1Emit(cmd.OutOrStdout(), &f, res, func(w io.Writer) { printLift(w, res, !opt.FromUpdate) })
 		},
 	}
 	addV1Flags(cmd, &f)
@@ -336,7 +352,9 @@ func liftApe(root, running, self string, dryRun bool, haveBingo func() bool) *ap
 	return a
 }
 
-func printLift(w io.Writer, r *apexv1.LiftResult) {
+// printLift prints the lift; regression says whether its regression
+// verdict lines are among them (under --from-update they go to stderr).
+func printLift(w io.Writer, r *apexv1.LiftResult, regression bool) {
 	verb := func(done, plan string) string {
 		if r.DryRun {
 			return plan
@@ -418,6 +436,16 @@ func printLift(w io.Writer, r *apexv1.LiftResult) {
 	}
 	fmt.Fprintf(w, "commit    %s  %s\n", r.Commit, strings.SplitN(r.CommitMessage, "\n", 2)[0])
 	printLiftPreCommit(w, r)
+	if regression {
+		printLiftRegression(w, r)
+	}
+	fmt.Fprintf(w, "next: apex-plan with %s (the judged v1.0.0 migration entry), then a fresh read-only review of it, then yours\n", r.Disposition)
+}
+
+// printLiftRegression is the lift's regression verdict: the runs at the
+// tag and at the lift commit, each command of a split chain, and where the
+// verdict is recorded (RG-6).
+func printLiftRegression(w io.Writer, r *apexv1.LiftResult) {
 	if t := r.RegressionAtTag; t != nil {
 		fmt.Fprintf(w, "regression at %s exit %d (%.1fs)\n", apexv1.LiftTag, t.Exit, t.Secs)
 	}
@@ -437,7 +465,12 @@ func printLift(w io.Writer, r *apexv1.LiftResult) {
 		}
 		fmt.Fprintf(w, "  %d [%s] %s at %s, %s at the lift commit — %s\n", i+1, c.Verdict, at, apexv1.LiftTag, after, c.Cmd)
 	}
-	fmt.Fprintf(w, "next: apex-plan with %s (the judged v1.0.0 migration entry), then a fresh read-only review of it, then yours\n", r.Disposition)
+	switch {
+	case r.RegressionCommit != "":
+		fmt.Fprintf(w, "regression verdict recorded in %s (## Regression, commit %s %s) and %s (regression)\n", r.Disposition, short(r.RegressionCommit), apexv1.LiftRegressionSubject, r.Report)
+	case r.Commit != "":
+		fmt.Fprintf(w, "regression not run: recorded in %s (## Regression) and %s (regression)\n", r.Disposition, r.Report)
+	}
 }
 
 // printLiftGitIgnore says what the lift does to the root .gitignore's
