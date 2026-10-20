@@ -130,6 +130,18 @@ eval's E-R7-1 and E2 residual (D219).
   pointer, and `project check` lists the `roadmap.next-inline` notice. A project an rc.7b move
   left that way is repaired by running `ape next move` again.
 
+### rc.7d: R7j-1, a prompt Claude Code generated never grants a person act (D238)
+
+- **Fixes an E2 bypass (high):** `UserPromptSubmit` also fires for a background command's
+  `<task-notification>`, which ape recorded as the person's prompt, so a background command
+  the model named after a phrase (`approve M2`) granted the act. A grant now needs the prompt's
+  transcript entry to be a person's typed message (`origin.kind == "human"`); any other or
+  absent origin — task-notifications, Agent results, Monitor events, system reminders — grants
+  nothing, in pre-tool and again when the command uses the grant.
+- `ape hook user-prompt` records such prompts as `kind: "notification"`; in a turn a
+  notification opened, the person's latest typed prompt is the one judged (same single-use
+  rules). `make check-hooks` asserts that the typed seed prompt's transcript entry is `human`.
+
 ### rc.7d: R7h-1, lasting scenarios that check what seq-08 removed (D232, D233; Q130–Q133)
 
 - **`ape decision standard` records what it removed** (`standard.removed: [{path, id}]` in
