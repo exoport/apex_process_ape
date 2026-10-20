@@ -143,7 +143,7 @@ type UpdateSummary struct {
 	EffortDefaultsInstalled bool `json:"effortDefaultsInstalled" yaml:"effortDefaultsInstalled"`
 	// StandardADRInstalled reports whether the framework carried APEX's
 	// standard ADR-0001 (_apex/standards/adr-0001.md, D205).
-	StandardADRInstalled bool `json:"standardADRInstalled" yaml:"standardADRInstalled"`
+	StandardADRInstalled bool `json:"standardAdrInstalled" yaml:"standardAdrInstalled"`
 	// ChangeRoutesInstalled reports whether the framework carried the
 	// escalation-route table `ape change` prints from. False on a
 	// framework that predates it — the verb then names the route and
