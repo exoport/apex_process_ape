@@ -234,9 +234,9 @@ func approvedSince(m *Milestone) time.Time {
 // (every run when it is not approved): each run's manifest cost, or what
 // ape measured when a limit stopped it, whichever is more — a stopped
 // session's manifest records the stopped step's transcript scan (D159),
-// and the limit's own measure may be the later of the two. A fix's runs — whose --args names a change of `milestone:
+// and the limit's own measure may be the later of the two. A tweak's runs — whose --args names a change of `milestone:
 // none` (D40) — count toward no milestone.
-func milestoneSpend(m *Milestone, runs []cost.RunCost, stops []LimitStop, fixes map[string]bool) float64 {
+func milestoneSpend(m *Milestone, runs []cost.RunCost, stops []LimitStop, tweaks map[string]bool) float64 {
 	since := approvedSince(m)
 	stopped := map[string]float64{}
 	for i := range stops {
@@ -246,7 +246,7 @@ func milestoneSpend(m *Milestone, runs []cost.RunCost, stops []LimitStop, fixes 
 	}
 	total := 0.0
 	for _, run := range runs {
-		if run.StartedAt.Before(since) || fixes[RunChangeArg(run.Args)] {
+		if run.StartedAt.Before(since) || tweaks[RunChangeArg(run.Args)] {
 			continue
 		}
 		c := run.CostUSD
@@ -287,11 +287,11 @@ func (p *Project) TaskLimits(skill string) (*TaskLimits, error) {
 }
 
 // TaskLimitsFor is TaskLimits for a session started with --args args: a
-// fix's session (args names a change of `milestone: none`, D40) counts
+// tweak's session (args names a change of `milestone: none`, D40) counts
 // toward no milestone, so no milestone budget applies to it.
 func (p *Project) TaskLimitsFor(ctx context.Context, skill, args string) (*TaskLimits, error) {
-	if p.IsFixRun(ctx, args) {
-		return nil, nil //nolint:nilnil // a fix's session: no budget applies
+	if p.IsTweakRun(ctx, args) {
+		return nil, nil //nolint:nilnil // a tweak's session: no budget applies
 	}
 	var m *Milestone
 	if rm := p.roadmap(); rm != nil {
@@ -303,7 +303,7 @@ func (p *Project) TaskLimitsFor(ctx context.Context, skill, args string) (*TaskL
 	runs, _ := cost.RunCosts(p.Root)
 	tl := &TaskLimits{
 		Milestone: m.ID, Skill: skill, Budget: *m.Budget,
-		SpentUSD: milestoneSpend(m, runs, p.milestoneStops(m.ID), p.fixIDs(ctx)),
+		SpentUSD: milestoneSpend(m, runs, p.milestoneStops(m.ID), p.tweakIDs(ctx)),
 	}
 	if tl.SpentUSD >= tl.Budget {
 		return nil, &FailError{Code: "milestone.budget-exceeded", Msg: fmt.Sprintf(

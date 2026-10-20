@@ -64,8 +64,8 @@ type ChangeStatus struct {
 	AttemptsCap   int `json:"attempts_cap,omitempty"`
 	// Branch is the change's branch, change/<id>, when it has one (D38).
 	Branch string `json:"branch,omitempty"`
-	// Lane is "fix" for a change of `milestone: none` (D40), else
-	// "milestone". Approved is a fix's approval; a fix without one awaits
+	// Lane is "tweak" for a change of `milestone: none` (D40, D240), else
+	// "milestone". Approved is a tweak's approval; a tweak without one awaits
 	// `ape change approve <id> --by <who>`.
 	Lane     string    `json:"lane"`
 	Approved *Approval `json:"approved,omitempty"`
@@ -294,11 +294,11 @@ type StatusReport struct {
 	Milestones []MilestoneLine  `json:"milestones"`
 	Changes    []ChangeStatus   `json:"changes"`
 	Archived   int              `json:"archived"`
-	// Fixes are the approved fixes not archived nor blocked, in the order
+	// Tweaks are the approved tweaks not archived nor blocked, in the order
 	// they run (D40): started ones first, then by approval time. The first
 	// runs ahead of milestone work, at the loop's next change boundary —
 	// or alone, `ape task apex-loop --args <id>`.
-	Fixes []string `json:"fixes"`
+	Tweaks []string `json:"tweaks"`
 	// PreExistingRed is what was red at a change's baseline that is not
 	// the change's own: the planner's to roadmap (backlog 37).
 	PreExistingRed []PreExistingRed `json:"pre_existing_red"`
@@ -362,7 +362,7 @@ type StatusConfig struct {
 //
 //nolint:gocyclo // one section per part of the report, each guarded by what it reads
 func (p *Project) Status() *StatusReport {
-	r := &StatusReport{Root: p.Root, Initialized: p.IsV1(), Changes: []ChangeStatus{}, Milestones: []MilestoneLine{}, Fixes: []string{}, OutsideFlow: []OutsideFlow{}, RoadmapNext: []string{}}
+	r := &StatusReport{Root: p.Root, Initialized: p.IsV1(), Changes: []ChangeStatus{}, Milestones: []MilestoneLine{}, Tweaks: []string{}, OutsideFlow: []OutsideFlow{}, RoadmapNext: []string{}}
 	cfg, cfgErr := LoadConfig(p.Root)
 	if cfgErr == nil && cfg.ProjectName != "" {
 		r.Project = cfg.ProjectName
@@ -396,7 +396,7 @@ func (p *Project) Status() *StatusReport {
 			r.Milestones = append(r.Milestones, line)
 		}
 		if m := rm.Current(); m != nil {
-			r.Milestone = p.milestoneStatus(m, runs, p.fixIDs(ctx))
+			r.Milestone = p.milestoneStatus(m, runs, p.tweakIDs(ctx))
 			if rec := recs[m.ID]; rec != nil {
 				r.Milestone.BaseSHA = rec.Approval.Base()
 			}
@@ -416,8 +416,8 @@ func (p *Project) Status() *StatusReport {
 		cs := ChangeStatus{ID: c.ID, Lane: LaneMilestone}
 		if c.Doc != nil {
 			cs.Title, cs.Milestone = c.Doc.Title, c.Doc.Meta.Milestone
-			if c.Doc.IsFix() {
-				cs.Lane = LaneFix
+			if c.Doc.IsTweak() {
+				cs.Lane = LaneTweak
 			}
 		}
 		if c.State == nil {
@@ -429,7 +429,7 @@ func (p *Project) Status() *StatusReport {
 			continue
 		}
 		cs.Status = c.State.Status
-		if cs.Lane == LaneFix {
+		if cs.Lane == LaneTweak {
 			cs.Approved = c.State.Approved
 		}
 		if branches[c.ID] {
@@ -483,7 +483,7 @@ func (p *Project) Status() *StatusReport {
 		}
 		r.Changes = append(r.Changes, cs)
 	}
-	sortFixesFirst(r.Changes)
+	sortTweaksFirst(r.Changes)
 	// Archived changes a person has yet to accept human-review tasks of
 	// (H4): listed last, so they stay visible after the archive.
 	r.Changes = append(r.Changes, p.archivedAwaitingHuman()...)
@@ -496,8 +496,8 @@ func (p *Project) Status() *StatusReport {
 		}
 	}
 	for i := range r.Changes {
-		if c := &r.Changes[i]; c.runnableFix() {
-			r.Fixes = append(r.Fixes, c.ID)
+		if c := &r.Changes[i]; c.runnableTweak() {
+			r.Tweaks = append(r.Tweaks, c.ID)
 		}
 	}
 	r.Archived = len(p.ArchivedIDs())
@@ -525,22 +525,22 @@ func (p *Project) statusBase(branch string) string {
 	return ""
 }
 
-// runnableFix reports an approved fix that is neither blocked nor
+// runnableTweak reports an approved tweak that is neither blocked nor
 // unreadable: one the orchestrator runs ahead of milestone work (D40).
-func (c *ChangeStatus) runnableFix() bool {
-	return c.Lane == LaneFix && c.Approved != nil && c.Status != StatusBlocked && c.Status != "invalid" && c.Status != StatusArchived
+func (c *ChangeStatus) runnableTweak() bool {
+	return c.Lane == LaneTweak && c.Approved != nil && c.Status != StatusBlocked && c.Status != "invalid" && c.Status != StatusArchived
 }
 
-// sortFixesFirst orders the changes as `ape status` lists them (D40):
-// approved fixes first — started ones before drafts, then by approval
-// time — then milestone changes, then fixes awaiting approval; by id
+// sortTweaksFirst orders the changes as `ape status` lists them (D40):
+// approved tweaks first — started ones before drafts, then by approval
+// time — then milestone changes, then tweaks awaiting approval; by id
 // within each group.
-func sortFixesFirst(cs []ChangeStatus) {
+func sortTweaksFirst(cs []ChangeStatus) {
 	group := func(c *ChangeStatus) int {
 		switch {
-		case c.Lane == LaneFix && c.Approved != nil:
+		case c.Lane == LaneTweak && c.Approved != nil:
 			return 0
-		case c.Lane == LaneFix:
+		case c.Lane == LaneTweak:
 			return 2
 		}
 		return 1
@@ -573,14 +573,14 @@ func sortFixesFirst(cs []ChangeStatus) {
 
 // milestoneStatus is the current milestone with its last gate run and
 // the spend of runs started since its approval.
-func (p *Project) milestoneStatus(m *Milestone, runs []cost.RunCost, fixes map[string]bool) *MilestoneStatus {
+func (p *Project) milestoneStatus(m *Milestone, runs []cost.RunCost, tweaks map[string]bool) *MilestoneStatus {
 	ms := &MilestoneStatus{ID: m.ID, Title: m.Title, Status: m.Status, StatusText: m.StatusText, Gate: m.Gate, Budget: m.Budget}
 	ms.GateLast = p.LastGateRun(m.ID)
 	ms.Stops = p.milestoneStops(m.ID)
 	if ms.Stops == nil {
 		ms.Stops = []LimitStop{}
 	}
-	ms.SpentUSD = round2(milestoneSpend(m, runs, ms.Stops, fixes))
+	ms.SpentUSD = round2(milestoneSpend(m, runs, ms.Stops, tweaks))
 	ms.BudgetEnforced = p.limits().BudgetEnforced() && m.Budget != nil
 	ctx := context.Background()
 	ms.ConsecutiveBlocks, ms.ConsecutiveBlocksCap = p.consecutiveBlocks(ctx, m.ID), p.limits().ConsecutiveBlocksCap()
@@ -618,10 +618,10 @@ func nextStepWhy(r *StatusReport) (next, why string) {
 	if !r.Initialized {
 		return "run `ape project init`", "this directory has no APEX v1 layout yet (no _apex/state/)"
 	}
-	// An approved fix runs ahead of milestone work (D40).
+	// An approved tweak runs ahead of milestone work (D40).
 	for i := range r.Changes {
-		if c := &r.Changes[i]; c.runnableFix() {
-			return fixNext(c, r.Branch), "an approved fix runs ahead of milestone work (D40), one at a time, in approval order"
+		if c := &r.Changes[i]; c.runnableTweak() {
+			return tweakNext(c, r.Branch), "an approved tweak runs ahead of milestone work (D40), one at a time, in approval order"
 		}
 	}
 	m := r.Milestone
@@ -738,11 +738,11 @@ func (p *Project) delegableTasks(ctx context.Context, cfg Config, c ChangeInfo, 
 	return out
 }
 
-// fixNext is the next step for an approved fix: it runs ahead of
+// tweakNext is the next step for an approved tweak: it runs ahead of
 // milestone work, at the orchestrator's next change boundary (never in
 // parallel), or alone when no milestone run is active.
-func fixNext(c *ChangeStatus, branch string) string {
-	what := "fix " + c.ID + " (approved by " + c.Approved.By + ", " + c.Status
+func tweakNext(c *ChangeStatus, branch string) string {
+	what := "tweak " + c.ID + " (approved by " + c.Approved.By + ", " + c.Status
 	if c.Branch != "" && branch != c.Branch {
 		what += ", on " + c.Branch
 	}
@@ -893,18 +893,18 @@ func (r *StatusReport) acceptedRedLine() string {
 	return ""
 }
 
-// laneLabel is the brief's third column: the milestone, or the fix lane
+// laneLabel is the brief's third column: the milestone, or the tweak lane
 // and its approval (D40).
 func (c *ChangeStatus) laneLabel() string {
 	switch {
-	case c.Lane != LaneFix:
+	case c.Lane != LaneTweak:
 		return c.Milestone
 	case c.Approved != nil:
-		return "fix (approved by " + c.Approved.By + ")"
+		return "tweak (approved by " + c.Approved.By + ")"
 	case c.Status == StatusDraft:
-		return "fix — awaiting approval: `ape change approve " + c.ID + " --by <who>`"
+		return "tweak — awaiting approval: `ape change approve " + c.ID + " --by <who>`"
 	}
-	return "fix"
+	return "tweak"
 }
 
 // preExistingRedLine is one line naming what was red at a baseline and is

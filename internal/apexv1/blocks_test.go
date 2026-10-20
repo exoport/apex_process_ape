@@ -140,7 +140,7 @@ func TestLimits_ConsecutiveBlocks(t *testing.T) {
 	_, err = p.NewChange(ctx(), "add-bow", "M1", []string{"greeting"}, nil)
 	require.Equal(t, CodeBlocksExceeded, failCode(t, err))
 	_, err = p.NewChange(ctx(), "fix-typo", MilestoneNone, []string{"greeting"}, nil)
-	require.NoError(t, err, "a fix counts toward no milestone")
+	require.NoError(t, err, "a tweak counts toward no milestone")
 	require.NoError(t, p.OrchestratorLimits(ctx(), "fix-typo"))
 
 	// A person's re-approval resets the count; its gate must run, red

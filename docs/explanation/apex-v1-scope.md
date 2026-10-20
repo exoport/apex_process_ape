@@ -36,7 +36,7 @@ verifies and review rounds stay on `change/<id>`. Archive keeps the branch tip a
 The base branch also receives **records**, which are not code:
 
 - `apex: project init`, and the lift commit `apex: lift from APEX v0 …`;
-- milestone records (proposed, approved, gate results, close), decisions accepted, fixes approved;
+- milestone records (proposed, approved, gate results, close), decisions accepted, tweaks approved;
 - the change's draft and its plan (written by `apex-change` before the branch exists);
 - `ape next add` lines under the roadmap's `## Next`, and acceptances of archived changes.
 
@@ -44,19 +44,20 @@ So "the base only receives verified changes" is true for code, not for every com
 generated from commit history should filter `apex:` subjects. The squash subject follows
 `commit.subject` in `_apex/config.yaml` (for example `{type}: {title}` with the change's `type:`).
 
-## Fixes are a queue, not an interrupt
+## Tweaks are a queue, not an interrupt
 
-A fix (`milestone: none`) is approved by a person with `ape change approve`, and the orchestrator
-runs approved fixes first at its next change boundary. One checkout cannot hold two actors: the
-orchestrator's working tree sits on `change/<id>` most of the time. So fixes are planned and approved
-**between runs**: wait for the run to end, or `ape run stop` it, plan and approve the fix, and start
+A tweak (`milestone: none`) is a change a person asked for outside the roadmap. Its `type:` says
+what it is (`fix` for a defect, `feat` for a small feature). A person approves it with `ape change approve`, and the orchestrator runs approved
+tweaks first at its next change boundary. One checkout cannot hold two actors: the
+orchestrator's working tree sits on `change/<id>` most of the time. So tweaks are planned and approved
+**between runs**: wait for the run to end, or `ape run stop` it, plan and approve the tweak, and start
 the run again. There is no run lock. If archive finds the base branch checked out in another
 worktree, it stops with `git.base-checked-out`, naming the worktree. That is an environment problem,
 so the orchestrator stops and does not re-plan.
 
 ## What only a person does
 
-Some actions are a person's by design: approving a milestone or a fix, archiving past an unaccepted
+Some actions are a person's by design: approving a milestone or a tweak, archiving past an unaccepted
 human-review task (`--allow-pending-human`), answering a blocked change (`ape change answer`), and
 closing a milestone on a red gate (`ape milestone close --accept-red "<reason>" --by <who>`). ape
 refuses these when it runs under a model, which it detects by `APE_SESSION` (every session ape

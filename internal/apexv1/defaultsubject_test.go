@@ -80,7 +80,7 @@ func TestCheck_UntypedChangeInFlight(t *testing.T) {
 	requireCode(t, err, CodeCheckFailed)
 }
 
-// Q110: change new writes type: — --type, else fix for a fix and feat
+// Q110: change new writes type: — --type, else fix for a tweak and feat
 // otherwise; an unknown --type is usage.type; a project whose types lack
 // the default gets none.
 func TestNewChange_Type(t *testing.T) {

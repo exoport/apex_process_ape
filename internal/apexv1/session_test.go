@@ -25,7 +25,7 @@ func TestModelSession(t *testing.T) {
 	require.Contains(t, ue.Msg, "--accept-red is for a person")
 }
 
-// D47 Q6: a model never approves a milestone or a fix; nothing is
+// D47 Q6: a model never approves a milestone or a tweak; nothing is
 // written when one tries.
 func TestApprovals_PersonOnly(t *testing.T) {
 	files := baseFiles()
@@ -42,13 +42,13 @@ func TestApprovals_PersonOnly(t *testing.T) {
 		require.True(t, ok, "%v", err)
 		require.Equal(t, CodePersonOnly, ue.Code)
 		require.Contains(t, ue.Msg, "ape milestone approve is for a person")
-		_, err = p.ApproveFix(ctx(), "fix-typo", "ann")
+		_, err = p.ApproveTweak(ctx(), "fix-typo", "ann")
 		require.ErrorContains(t, err, "ape change approve is for a person")
 		t.Setenv(k, "")
 	}
 	require.Equal(t, head, HeadSHA(ctx(), p.Root), "nothing written")
 	_, err := p.ApproveMilestone(ctx(), "M1", "ann", nil)
 	require.NoError(t, err)
-	_, err = p.ApproveFix(ctx(), "fix-typo", "ann")
+	_, err = p.ApproveTweak(ctx(), "fix-typo", "ann")
 	require.NoError(t, err)
 }

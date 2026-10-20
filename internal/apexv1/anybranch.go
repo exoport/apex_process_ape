@@ -18,11 +18,11 @@ import (
 //
 //   - a started change's on its branch change/<id> (D38) — the working
 //     tree when HEAD is on it, else that branch's tip;
-//   - a change with no branch of its own (a draft, an approved fix not
+//   - a change with no branch of its own (a draft, an approved tweak not
 //     started yet) on the base branch — the working tree when HEAD is on
 //     the base, else, with HEAD on another change's branch, the base's
 //     tip: that branch's copy of the folder is the one it was cut with,
-//     and the base has moved on since (a fix planned and approved there).
+//     and the base has moved on since (a tweak planned and approved there).
 //
 // A write to a branch HEAD is not on is a commit there without a checkout
 // (commitOnBranch, editOnBranch): the working tree, its index and HEAD

@@ -748,7 +748,7 @@ func newProjectOperatorInterfaceCmd() *cobra.Command {
 		Short: "Bring a project made before rc.7 to the operator interface (the v1.0.0_seq-07 migration)",
 		Long: `Since rc.7 (D171) apex-orchestrator is the operator's interface — a skill a person
 opens in their own Claude Code session by typing /apex-orchestrator — and the unattended
-runner of one approved milestone or fix is apex-loop. This brings a project that ape
+runner of one approved milestone or tweak is apex-loop. This brings a project that ape
 project init or the lift made before rc.7 there; the framework's migration
 v1.0.0_seq-07 runs it (command: ape project operator-interface; check: ape project
 operator-interface --check). A project init or the lift made with rc.7b has nothing to do.
@@ -892,14 +892,14 @@ func newStatusCmd() *cobra.Command {
   - each milestone's newest gate run (D170): JSON milestones[].last_gate {sha (the commit
     the gate ran at), exit, at, log}, absent before its gate ever ran
   - the checked-out branch (JSON branch; "(on <branch>)" in the first line)
-  - fixes first (trial decision D40): a change with "milestone: none" is a fix (JSON
-    changes[].lane "fix"; else "milestone"). Approved fixes (changes[].approved: {by, at,
-    plan_digest}) are listed before milestone changes — started ones first, then by
-    approval time — and JSON "fixes" holds the ids of those not blocked, in the order they
+  - tweaks first (trial decision D40, D240): a change with "milestone: none" is a tweak
+    (JSON changes[].lane "tweak"; else "milestone"). Approved tweaks (changes[].approved:
+    {by, at, plan_digest}) are listed before milestone changes — started ones first, then
+    by approval time — and JSON "tweaks" holds the ids of those not blocked, in the order they
     run: the first runs ahead of milestone work, at the loop's next change boundary
     (never in parallel), or alone with ` + "`ape task apex-loop --args <id>`" + `, and next
-    points at it. A fix awaiting approval is listed last, with the command a person runs
-    (` + "`ape change approve <id> --by <who>`" + `). A fix's runs (` + "`ape task <skill> --args <fix-id>`" + `)
+    points at it. A tweak awaiting approval is listed last, with the command a person runs
+    (` + "`ape change approve <id> --by <who>`" + `). A tweak's runs (` + "`ape task <skill> --args <tweak-id>`" + `)
     count toward no milestone's spend
   - every change not archived, with its status, blocked reason, red checks from its
     last verify (JSON failing: "T1 (exit 1)", "T2 (vacuous: …)", "S (unrun: $X is unset

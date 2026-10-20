@@ -72,7 +72,7 @@ func buildState(r *apexv1.StatusReport, now time.Time) map[string]any {
 		milestoneCard(r),
 		changesCard(r),
 		personCard(r),
-		fixesCard(r),
+		tweaksCard(r),
 		roadmapCard(r),
 		roadmapNextCard(r),
 		outsideFlowCard(r),
@@ -262,7 +262,7 @@ func changeWhy(c *apexv1.ChangeStatus) string {
 }
 
 // personCard is what waits for a person: human-review tasks not accepted
-// (awaiting_human), and fixes awaiting approval. Rendered when empty too:
+// (awaiting_human), and tweaks awaiting approval. Rendered when empty too:
 // an ABSENT panel cannot be told from one that stopped being computed.
 func personCard(r *apexv1.StatusReport) map[string]any {
 	var items []any
@@ -271,8 +271,8 @@ func personCard(r *apexv1.StatusReport) map[string]any {
 		if len(c.AwaitingHuman) > 0 {
 			items = append(items, fmt.Sprintf("%s: accept %s — `ape change accept %s`", c.ID, strings.Join(c.AwaitingHuman, ", "), c.ID))
 		}
-		if c.Lane == apexv1.LaneFix && c.Approved == nil && c.Status != apexv1.StatusArchived {
-			items = append(items, fmt.Sprintf("%s: a fix awaiting approval — `ape change approve %s --by <who>`", c.ID, c.ID))
+		if c.Lane == apexv1.LaneTweak && c.Approved == nil && c.Status != apexv1.StatusArchived {
+			items = append(items, fmt.Sprintf("%s: a tweak awaiting approval — `ape change approve %s --by <who>`", c.ID, c.ID))
 		}
 	}
 	body := []any{caption("Nothing waiting on a person.")}
@@ -283,11 +283,11 @@ func personCard(r *apexv1.StatusReport) map[string]any {
 	return card(fmt.Sprintf("Awaiting a person — %d", len(items)), tone, body)
 }
 
-func fixesCard(r *apexv1.StatusReport) map[string]any {
-	body := []any{caption("No approved fix waiting.")}
-	if len(r.Fixes) > 0 {
-		items := make([]any, len(r.Fixes))
-		for i, id := range r.Fixes {
+func tweaksCard(r *apexv1.StatusReport) map[string]any {
+	body := []any{caption("No approved tweak waiting.")}
+	if len(r.Tweaks) > 0 {
+		items := make([]any, len(r.Tweaks))
+		for i, id := range r.Tweaks {
 			items[i] = id
 		}
 		body = []any{
@@ -295,7 +295,7 @@ func fixesCard(r *apexv1.StatusReport) map[string]any {
 			caption("In the order they run; the first runs ahead of milestone work at the next change boundary."),
 		}
 	}
-	return card(fmt.Sprintf("Fixes queue — %d", len(r.Fixes)), "", body)
+	return card(fmt.Sprintf("Tweaks queue — %d", len(r.Tweaks)), "", body)
 }
 
 func roadmapCard(r *apexv1.StatusReport) map[string]any {

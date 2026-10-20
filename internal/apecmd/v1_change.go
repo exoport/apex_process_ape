@@ -14,7 +14,7 @@ import (
 func newChangeCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "change",
-		Short: "The unit of change: new, check, approve (fixes), start, verify, review, accept, block, answer, archive, tool",
+		Short: "The unit of change: new, check, approve (tweaks), start, verify, review, accept, block, answer, archive, tool",
 		Long: `A change is development/changes/<id>/change.md (written by the model) plus state.json
 (written only by ape). Its lifecycle:
 
@@ -45,7 +45,7 @@ Branch per change (trial decision D38):
     exit 1, code change.wrong-branch: ` + "`git switch change/<id>`" + `)
   - records from any branch (D51 Q17): check, diff, approve, accept, block, answer and
     abandon find a change wherever its records live — a started change's on change/<id>,
-    a change with no branch of its own (a draft, an approved fix not started) on the base
+    a change with no branch of its own (a draft, an approved tweak not started) on the base
     branch, read from the base's tip when HEAD is on another change's branch (that
     branch's copy is the one it was cut with) — and commit there, without a checkout
     when HEAD is elsewhere: HEAD, the index and the working tree stay as they were
@@ -58,16 +58,17 @@ Branch per change (trial decision D38):
   - a change's status is read from its own branch when HEAD is elsewhere, so
     ` + "`ape status`" + ` on the base branch shows every change's real status
 
-Fix lane (trial decision D40): a change with "milestone: none" is a fix — asked for by a
-person outside the roadmap (apex-change with a request). It is approved on its own,
-` + "`ape change approve <id> --by <who>`" + ` (on the base branch), instead of through a milestone,
-and otherwise lives like any change: its branch, baseline, checks, a review in a separate
-session, the delta merged at archive. It counts toward no milestone gate, no milestone's
-regression baseline, and no milestone's spend or budget. Fixes form a queue: planned and
+Tweak lane (trial decision D40, D240): a change with "milestone: none" is a tweak — asked
+for by a person outside the roadmap (apex-change with a request). The lane says where a
+change comes from, its type: what it is (feat, fix, …; ` + "`ape change new --help`" + `). A
+tweak is approved on its own, ` + "`ape change approve <id> --by <who>`" + ` (on the base
+branch), instead of through a milestone, and otherwise lives like any change: its branch,
+baseline, checks, a review in a separate session, the delta merged at archive. It counts toward no milestone gate, no milestone's
+regression baseline, and no milestone's spend or budget. Tweaks form a queue: planned and
 approved between runs (or ` + "`ape run stop`" + `, plan, approve, restart), never overlapping a
-run (D45). An approved fix runs ahead of milestone work, at the loop's next change
+run (D45). An approved tweak runs ahead of milestone work, at the loop's next change
 boundary; with no milestone run active, ` + "`ape task apex-loop --args <id>`" + ` runs it
-alone. ` + "`ape status`" + ` lists approved fixes first.
+alone. ` + "`ape status`" + ` lists approved tweaks first.
 
 One checkout, one operator (D45): archive and abandon switch to the base branch (abandon
 from another change's branch commits on it without a checkout), so they refuse when another
@@ -183,7 +184,7 @@ change branch, change/<other> (exit 1, code branch.change-branch; `+"`git switch
 <id> is a verb-led kebab slug, ^[a-z][a-z0-9-]{2,39}$, unique across active AND archived
 changes (development/archive/changes/, development/archive/ itself as an older ape archived
 them, and an older ape's development/changes/archive/).
---milestone none makes the change a fix (trial decision D40): what apex-change writes for
+--milestone none makes the change a tweak (trial decision D40, D240): what apex-change writes for
 a person's request outside the roadmap. It needs no roadmap entry, inherits no Out of
 scope, is approved on its own (`+"`ape change approve <id> --by <who>`"+`) instead of through a
 milestone, and counts toward no milestone; it may touch capabilities and carry a delta
@@ -210,7 +211,7 @@ milestone sets it back to 0, inside the archive's commit. At limits.consecutive_
 `+"`ape task apex-loop`"+` for it refuse with exit 1, code milestone.blocks-exceeded,
 action stop, and `+"`ape status --json`"+` reports it under milestone.diagnostics. A person deals
 with the blocked changes (answer or abandon them) and resets the count by approving the
-milestone again: `+"`ape milestone approve <M> --by <who>`"+`. Fixes count toward no milestone.
+milestone again: `+"`ape milestone approve <M> --by <who>`"+`. Tweaks count toward no milestone.
 
 Exit codes: 0 ok · 1 id taken (incl. archive), milestone not in roadmap, the milestone past
 limits.consecutive_blocks, or HEAD on a change branch · 2 usage (incl. usage.type).`,
@@ -220,7 +221,7 @@ limits.consecutive_blocks, or HEAD on a change branch · 2 usage (incl. usage.ty
 		&f,
 		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
 			if milestone == "" {
-				return v1Fail(cmd, &f, &apexv1.UsageError{Code: "usage.milestone", Msg: "--milestone is required (e.g. M1, or none for a fix)"}, nil)
+				return v1Fail(cmd, &f, &apexv1.UsageError{Code: "usage.milestone", Msg: "--milestone is required (e.g. M1, or none for a tweak)"}, nil)
 			}
 			res, err := p.NewChangeOfType(cmd.Context(), id, milestone, typ, splitList(touches), splitList(paths))
 			if err != nil {
@@ -235,7 +236,7 @@ limits.consecutive_blocks, or HEAD on a change branch · 2 usage (incl. usage.ty
 				fmt.Fprintf(w, "%s  draft  %s\n", res.ID, res.Path)
 			})
 		})
-	cmd.Flags().StringVar(&milestone, "milestone", "", "milestone id from roadmap.md, or none for a fix (required)")
+	cmd.Flags().StringVar(&milestone, "milestone", "", "milestone id from roadmap.md, or none for a tweak (required)")
 	cmd.Flags().StringVar(&touches, "touches", "", "comma-separated capability slugs (required)")
 	cmd.Flags().StringVar(&paths, "paths", "", "comma-separated globs, for overlap detection")
 	cmd.Flags().StringVar(&typ, "type", "", "change.md's type: (a commit type); default fix for --milestone none, feat otherwise")
@@ -249,7 +250,7 @@ func newChangeCheckCmd() *cobra.Command {
 		"Validate change.md: shape, caps, delta against specs, a check on every task",
 		`Validate one change and list every failure:
 
-  - frontmatter id = folder, milestone in roadmap.md (or "none": a fix, D40, approved
+  - frontmatter id = folder, milestone in roadmap.md (or "none": a tweak, D40, approved
     with `+"`ape change approve`"+`), touches non-empty kebab slugs, decisions exist in
     decisions/, paths are valid globs; type: (the archive commit's {type}, D47) one of
     the project's commit types — _apex/config.yaml commit.types (D120), default feat,
@@ -325,37 +326,37 @@ func newChangeApproveCmd() *cobra.Command {
 	var by string
 	cmd := v1ChangeLeaf(
 		"approve <id> --by <who>",
-		"Approve a fix (a change with milestone: none), so it can start",
-		`Record a person approving a fix (trial decision D40): a change with "milestone: none",
+		"Approve a tweak (a change with milestone: none), so it can start",
+		`Record a person approving a tweak (trial decision D40, D240): a change with "milestone: none",
 written by apex-change for a person's request outside the roadmap. A milestone change is
 approved through its milestone (`+"`ape milestone approve <M> --by <who>`"+`); approve refuses one
-(exit 1, change.approve-milestone). The approval is what `+"`ape change start`"+` of a fix needs
+(exit 1, change.approve-milestone). The approval is what `+"`ape change start`"+` of a tweak needs
 in place of an approved milestone (else exit 1, change.not-approved).
 
-  - the fix must pass `+"`ape change check <id>`"+` and not be started yet (status draft, no
+  - the tweak must pass `+"`ape change check <id>`"+` and not be started yet (status draft, no
     change/<id> branch; else exit 1, change.wrong-status)
   - recorded in state.json as approved: {by, at, plan_digest} and committed alone on the
     base branch as "apex: <id> approved" (trailer "Change: <id>"), from any branch (D51
-    Q17): with HEAD on a change's branch, the fix is read and checked as the base holds
+    Q17): with HEAD on a change's branch, the tweak is read and checked as the base holds
     it and the approval committed there without a checkout (refused when the base is
     checked out in another worktree: git.base-checked-out)
-  - the approval is of the plan change.md has now: a fix whose plan (change.md outside
+  - the approval is of the plan change.md has now: a tweak whose plan (change.md outside
     ## Why and ## Notes) changed since is refused at start until approved again
   - re-approving the same plan is a no-op (exit 0, JSON "already": true, nothing written)
   - only a person approves (D47 Q6): refused in a model session — APE_SESSION or
     CLAUDECODE set, a `+"`!`"+` line inside Claude Code included — with exit 2, code
     session.person-only; run it from a plain terminal, or, in the person's own Claude
-    Code session, the person types "approve <fix-id>" in that turn (E2: `+"`ape hook pre-tool --help`"+`;
+    Code session, the person types "approve <tweak-id>" in that turn (E2: `+"`ape hook pre-tool --help`"+`;
     --by is then git config user.name, recorded with the prompt)
 
-Fixes form a queue: planned and approved between runs (or `+"`ape run stop`"+`, plan, approve,
-restart), never overlapping a run (D45). An approved fix runs ahead of milestone work, at
+Tweaks form a queue: planned and approved between runs (or `+"`ape run stop`"+`, plan, approve,
+restart), never overlapping a run (D45). An approved tweak runs ahead of milestone work, at
 the loop's next change boundary; with no milestone run active,
 `+"`ape task apex-loop --args <id>`"+` runs it alone. `+"`ape status`"+` lists approved
-fixes first (JSON "fixes", changes[].lane "fix", changes[].approved) and points next at the
-first. A fix counts toward no milestone gate and no milestone's spend or budget.
+tweaks first (JSON "tweaks", changes[].lane "tweak", changes[].approved) and points next at
+the first. A tweak counts toward no milestone gate and no milestone's spend or budget.
 
-Exit codes: 0 approved (or already) · 1 not a fix, check red, started, or the base branch
+Exit codes: 0 approved (or already) · 1 not a tweak, check red, started, or the base branch
 checked out in another worktree · 2 usage (no --by), or a model session.`,
 		"  ape change approve fix-login-redirect --by diego",
 		&f,
@@ -363,16 +364,16 @@ checked out in another worktree · 2 usage (no --by), or a model session.`,
 			if err := v1PersonAct(cmd, p, personCallOf(cmd, cmd.Flags().Args())); err != nil {
 				return v1Fail(cmd, &f, err, nil)
 			}
-			res, err := p.ApproveFix(cmd.Context(), id, personBy(cmd.Context(), by))
+			res, err := p.ApproveTweak(cmd.Context(), id, personBy(cmd.Context(), by))
 			if err != nil {
 				return v1Fail(cmd, &f, err, nil)
 			}
 			return v1Emit(cmd.OutOrStdout(), &f, res, func(w io.Writer) {
 				if res.Already {
-					fmt.Fprintf(w, "fix %s: already approved by %s at %s (nothing written)\n", id, res.Approved.By, res.Approved.At)
+					fmt.Fprintf(w, "tweak %s: already approved by %s at %s (nothing written)\n", id, res.Approved.By, res.Approved.At)
 					return
 				}
-				fmt.Fprintf(w, "fix %s: approved by %s — it runs ahead of milestone work: `ape task apex-loop --args %s`, or the loop's next change boundary\n",
+				fmt.Fprintf(w, "tweak %s: approved by %s — it runs ahead of milestone work: `ape task apex-loop --args %s`, or the loop's next change boundary\n",
 					id, res.Approved.By, id)
 			})
 		})
@@ -389,8 +390,8 @@ func newChangeStartCmd() *cobra.Command {
 
   1. `+"`ape change check <id>`"+` must be green, and its milestone approved — through ape: the
      approval record in milestones.json, not the Status line alone (H2; else exit 1,
-     milestone.status-unrecorded: a person runs `+"`ape milestone approve <M> --by <who>`"+`) — or, for a fix
-     (milestone: none, D40), the fix approved for the plan it has
+     milestone.status-unrecorded: a person runs `+"`ape milestone approve <M> --by <who>`"+`) — or, for a tweak
+     (milestone: none, D40), the tweak approved for the plan it has
      (`+"`ape change approve <id> --by <who>`"+`; else exit 1, change.not-approved)
   2. refused with exit 3 if another active change (in-progress, verified, reviewed —
      not blocked; read from its own branch) also ADDs, MODIFIES or REMOVES one of the
@@ -428,7 +429,7 @@ re-baselining it only resumes there (JSON "resumed": true). Re-start keeps base_
 A blocked change is re-planned on its branch (change.md there), then started again.
 
 Resume after the base moved (D40): start on a change that has its branch first checks
-whether the base branch moved ahead of base_sha (a fix or another change landed there).
+whether the base branch moved ahead of base_sha (a tweak or another change landed there).
 If so ape catches the change up — the one path start, verify and archive share:
   - start only: refused while the base branch is behind its upstream (exit 1,
     base.behind-upstream: pull)
@@ -475,7 +476,7 @@ change.replans-exceeded, action person; the refused re-plan is not recorded). A 
 milestone whose changes were blocked limits.consecutive_blocks (default 2) times in a row is
 not started (exit 1, code milestone.blocks-exceeded, action stop; see `+"`ape change new --help`"+`).
 
-Exit codes: 0 started (or resumed) · 1 check red, milestone (or fix) not approved, a vacuous
+Exit codes: 0 started (or resumed) · 1 check red, milestone (or tweak) not approved, a vacuous
 task check, wrong status, dirty tree, detached HEAD, HEAD on another change's branch, the base
 behind its upstream, or git failed · 2 usage ·
 3 requirement conflict with another active change, or the change does not rebase onto
@@ -976,7 +977,7 @@ delegate may take now (changes[].delegable).
   - any other fail stays a person's (D78, as D188 amends it): one that names no in-diff
     defect ("no verdict" included), a second fail of the task after a return, or a
     fail on an archived change (ape cannot reopen it: a person accepts the task, or has
-    a fix change planned). The task stays awaiting_human, ape status shows the verdict
+    a tweak planned). The task stays awaiting_human, ape status shows the verdict
     (JSON changes[].delegate.<T>: {verdict, reason, run, at, defects, returned}), exit 1
     delegate.fail (action person); JSON outcome.to_person says why: no-defect-in-diff,
     second-fail, archived or not-reviewed (outcome.returns lists the earlier returns)
@@ -1081,7 +1082,7 @@ question only a person can answer. A blocked change lets the stop hook allow a s
 `+"`ape change start <id>`"+` resumes it. Recorded where the change's records live, from any
 branch (D51 Q17; `+"`ape change --help`"+`): a started change on its branch, change/<id>
 (D38), where it stays — re-plan it there and start it again, or abandon it; a change with
-no branch (a draft, an approved fix) on the base branch. Without a checkout when HEAD is
+no branch (a draft, an approved tweak) on the base branch. Without a checkout when HEAD is
 elsewhere. A milestone change's block is counted in milestones.json on the base branch
 (limits.consecutive_blocks).
 

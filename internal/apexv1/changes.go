@@ -188,7 +188,7 @@ func (p *Project) checkChange(id string, withCaps bool) []Finding {
 	case c.Meta.Milestone == "":
 		add(1, "frontmatter has no milestone")
 	case c.Meta.Milestone == MilestoneNone:
-		// A fix (D40): approved on its own, in no milestone.
+		// A tweak (D40): approved on its own, in no milestone.
 	case rm == nil || rm.Find(c.Meta.Milestone) == nil:
 		add(1, "milestone "+c.Meta.Milestone+" is not in roadmap.md")
 	}
@@ -536,7 +536,7 @@ func changeSkeleton(id, milestone, typ string, touches, paths, outOfScope []stri
 	b.WriteString("---\n")
 	b.WriteString("# " + titleFromSlug(id) + "\n\n")
 	if milestone == MilestoneNone {
-		b.WriteString("## Why\n<!-- the request this fix answers, and why it cannot wait for a milestone -->\n\n")
+		b.WriteString("## Why\n<!-- the request this tweak answers, and why it cannot wait for a milestone -->\n\n")
 	} else {
 		b.WriteString("## Why\n<!-- why this change, now, toward " + milestone + " -->\n\n")
 	}
@@ -598,7 +598,7 @@ func (p *Project) NewChangeOfType(ctx context.Context, id, milestone, typ string
 	if folder, ok := datedFolders(dirNames(p.OldArchiveDir()))[id]; ok {
 		return nil, p.idArchived(id, filepath.Join(p.OldArchiveDir(), folder))
 	}
-	// A fix (D40) belongs to no milestone: nothing to look up, no Out of
+	// A tweak (D40) belongs to no milestone: nothing to look up, no Out of
 	// scope to inherit.
 	var outOfScope []string
 	if milestone != MilestoneNone {
@@ -608,7 +608,7 @@ func (p *Project) NewChangeOfType(ctx context.Context, id, milestone, typ string
 		}
 		ms := rm.Find(milestone)
 		if ms == nil {
-			return nil, &FailError{Code: CodeMilestoneNotFound, Msg: "milestone " + milestone + " is not in roadmap.md — `ape milestone new` adds one, or `--milestone none` makes the change a fix"}
+			return nil, &FailError{Code: CodeMilestoneNotFound, Msg: "milestone " + milestone + " is not in roadmap.md — `ape milestone new` adds one, or `--milestone none` makes the change a tweak"}
 		}
 		outOfScope = ms.OutOfScope
 		// Past limits.consecutive_blocks, no change of it is planned (D49).

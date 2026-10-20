@@ -140,7 +140,7 @@ apex-orchestrator is refused (exit 2, code skill.renamed, action stop), and
 so is the same skill through ape service submit task and an ape script's
 RunTask: since rc.7 (D171) it is the operator's interface, a skill a person
 opens in their own Claude Code session by typing /apex-orchestrator, and the
-unattended runner of one approved milestone or fix is apex-loop. The
+unattended runner of one approved milestone or tweak is apex-loop. The
 refusal carries both pointers: ` + "`ape task apex-loop --args <M>`" + ` (the run's own
 --args) and /apex-orchestrator. It is no alias: a stopped run's older resume
 line fails loudly instead of starting the wrong skill. A loop run an older
@@ -151,7 +151,7 @@ A session of apex-loop is also refused (exit 1, code
 milestone.blocks-exceeded) when the milestone it runs — --args M<n>, else
 the current one — has had limits.consecutive_blocks (default 2) changes
 blocked in a row; a person deals with them and re-approves the milestone,
-which resets the count. A fix's run (--args <fix-id>) is not refused.
+which resets the count. A tweak's run (--args <tweak-id>) is not refused.
 
 --prompt-file <path> reads the prompt from a file, and "-" reads it
 from stdin. It is how a printed escalation command carries the

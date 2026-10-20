@@ -62,7 +62,7 @@ import (
 // The guarded acts, as person_act.act records them.
 const (
 	ActMilestoneApprove  = "milestone approve"
-	ActFixApprove        = "change approve"
+	ActTweakApprove      = "change approve"
 	ActAnswer            = "change answer"
 	ActAcceptTask        = "change accept"
 	ActAcceptConfig      = "project accept-config"
@@ -84,7 +84,7 @@ type PersonActSpec struct {
 // PersonActs are the 8 guarded acts (D47 Q6, D45, OI-4).
 var PersonActs = []PersonActSpec{
 	{ActMilestoneApprove, "ape milestone approve <M>", "approve <M>", true},
-	{ActFixApprove, "ape change approve <fix-id>", "approve <fix-id>", false},
+	{ActTweakApprove, "ape change approve <tweak-id>", "approve <tweak-id>", false},
 	{ActAnswer, `ape change answer <change-id> --text "<answer>"`, "answer <change-id>: <answer>", false},
 	{ActAcceptTask, "ape change accept <change-id> T<n>", "accept T<n> of <change-id>", false},
 	{ActAcceptConfig, "ape project accept-config", "accept the config", false},
@@ -156,7 +156,7 @@ func (c PersonCall) Spec() PersonActSpec {
 // Phrase is what the person types for this call.
 func (c PersonCall) Phrase() string {
 	switch c.Act {
-	case ActMilestoneApprove, ActFixApprove:
+	case ActMilestoneApprove, ActTweakApprove:
 		return "approve " + c.Target
 	case ActAnswer:
 		return "answer " + c.Target + ": " + c.Text

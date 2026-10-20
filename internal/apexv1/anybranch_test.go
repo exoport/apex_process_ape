@@ -10,20 +10,20 @@ import (
 )
 
 // fixOnMainOnly is add-wave started (HEAD on change/add-wave) and, planned
-// on main after that branch was cut, the fix fix-hug: its records exist
+// on main after that branch was cut, the tweak fix-hug: its records exist
 // only on main.
 func fixOnMainOnly(t *testing.T) *Project {
 	t.Helper()
 	p := startedWave(t)
 	run(t, p.Root, "switch", "-q", "main")
-	addFix(t, p, "fix-hug")
+	addTweak(t, p, "fix-hug")
 	run(t, p.Root, "switch", "-q", ChangeBranch("add-wave"))
 	require.NoDirExists(t, p.ChangeDir("fix-hug"))
 	return p
 }
 
 // onlyMainMoved asserts a command left this checkout as it was — HEAD,
-// change/add-wave's tip, a clean tree, no fix folder written here — and
+// change/add-wave's tip, a clean tree, no tweak folder written here — and
 // that main got exactly one commit, subject, touching only paths under
 // the prefixes given. It returns main's new tip.
 func onlyMainMoved(t *testing.T, p *Project, mainBefore, subject string, prefixes ...string) string {
@@ -39,7 +39,7 @@ func onlyMainMoved(t *testing.T, p *Project, mainBefore, subject string, prefixe
 	return run(t, p.Root, "rev-parse", "main")
 }
 
-// D51 Q17: with HEAD on another change's branch, a fix whose records exist
+// D51 Q17: with HEAD on another change's branch, a tweak whose records exist
 // only on the base branch is listed by status and found, checked,
 // approved, blocked, answered and abandoned there — each a commit on main,
 // the working tree and HEAD of change/add-wave untouched.
@@ -60,11 +60,11 @@ func TestAnyBranch_FixOnTheBaseOnly(t *testing.T) {
 	require.Len(t, pv.Specs, 1)
 	require.Contains(t, pv.Specs[0].Diff, "+### Requirement: Hug")
 
-	res, err := p.ApproveFix(ctx(), "fix-hug", "ann")
+	res, err := p.ApproveTweak(ctx(), "fix-hug", "ann")
 	require.NoError(t, err)
 	mainTip = onlyMainMoved(t, p, mainTip, "apex: fix-hug approved", "development/changes/fix-hug/state.json")
 	require.Equal(t, mainTip, res.Commit)
-	require.Equal(t, []string{"fix-hug"}, p.Status().Fixes)
+	require.Equal(t, []string{"fix-hug"}, p.Status().Tweaks)
 
 	_, err = p.Block(ctx(), "fix-hug", "needs a person")
 	require.NoError(t, err)
@@ -74,7 +74,7 @@ func TestAnyBranch_FixOnTheBaseOnly(t *testing.T) {
 	require.Equal(t, "main", ci.Branch)
 	require.Equal(t, StatusBlocked, ci.State.Status)
 	require.Equal(t, "needs a person", *ci.State.BlockedReason)
-	require.Equal(t, 0, p.consecutiveBlocks(ctx(), "M1"), "a fix counts toward no milestone")
+	require.Equal(t, 0, p.consecutiveBlocks(ctx(), "M1"), "a tweak counts toward no milestone")
 
 	_, err = p.AnswerChange(ctx(), "fix-hug", "hug gently", "ann")
 	require.NoError(t, err)
@@ -91,31 +91,31 @@ func TestAnyBranch_FixOnTheBaseOnly(t *testing.T) {
 	require.Equal(t, StatusAbandoned, st.Status)
 	require.Equal(t, "not needed", st.AbandonedReason)
 	require.Equal(t, "hug gently", st.Answer.Text)
-	require.Equal(t, fixDoc("fix-hug"), run(t, p.Root, "show", "main:"+ab.ArchivedTo+"/change.md")+"\n")
+	require.Equal(t, tweakDoc("fix-hug"), run(t, p.Root, "show", "main:"+ab.ArchivedTo+"/change.md")+"\n")
 	require.Equal(t, head, HeadSHA(ctx(), p.Root))
 
 	_, err = p.requireChange(ctx(), "fix-hug")
 	require.Equal(t, "change.archived", failCode(t, err))
-	require.NotContains(t, p.Status().Fixes, "fix-hug")
+	require.NotContains(t, p.Status().Tweaks, "fix-hug")
 }
 
-// D51 Q17: a fix this branch was cut with, approved on main since, is read
+// D51 Q17: a tweak this branch was cut with, approved on main since, is read
 // as main has it — this branch's copy is stale.
 func TestAnyBranch_StaleCopyOnTheChangeBranch(t *testing.T) {
 	p := fixture(t, baseFiles())
 	addChange(t, p, "add-wave", waveChange("add-wave"))
-	addFix(t, p, "fix-hug")
+	addTweak(t, p, "fix-hug")
 	_, err := p.Start(ctx(), "add-wave", RunOptions{})
 	require.NoError(t, err)
 	require.FileExists(t, p.StateFile("fix-hug"), "cut with the draft")
 	run(t, p.Root, "switch", "-q", "main")
-	_, err = p.ApproveFix(ctx(), "fix-hug", "ann")
+	_, err = p.ApproveTweak(ctx(), "fix-hug", "ann")
 	require.NoError(t, err)
 	run(t, p.Root, "switch", "-q", ChangeBranch("add-wave"))
 
 	require.Nil(t, state(t, p, "fix-hug").Approved, "this branch's copy")
-	require.Equal(t, []string{"fix-hug"}, p.Status().Fixes, "status reads main's")
-	res, err := p.ApproveFix(ctx(), "fix-hug", "bob")
+	require.Equal(t, []string{"fix-hug"}, p.Status().Tweaks, "status reads main's")
+	res, err := p.ApproveTweak(ctx(), "fix-hug", "bob")
 	require.NoError(t, err)
 	require.True(t, res.Already)
 	require.Equal(t, "ann", res.Approved.By)
@@ -163,8 +163,8 @@ func TestAnyBranch_AbandonAStartedChangeFromAnotherChangeBranch(t *testing.T) {
 	commitAll(t, p, "design")
 	tip := HeadSHA(ctx(), p.Root)
 	run(t, p.Root, "switch", "-q", "main")
-	addFix(t, p, "fix-hug")
-	_, err := p.ApproveFix(ctx(), "fix-hug", "ann")
+	addTweak(t, p, "fix-hug")
+	_, err := p.ApproveTweak(ctx(), "fix-hug", "ann")
 	require.NoError(t, err)
 	_, err = p.Start(ctx(), "fix-hug", RunOptions{})
 	require.NoError(t, err)

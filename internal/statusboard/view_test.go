@@ -30,7 +30,7 @@ func sampleReport() *apexv1.StatusReport {
 		},
 		Changes: []apexv1.ChangeStatus{
 			{
-				ID: "fix-tz", Lane: apexv1.LaneFix, Status: apexv1.StatusInProgress, Branch: "change/fix-tz",
+				ID: "fix-tz", Lane: apexv1.LaneTweak, Status: apexv1.StatusInProgress, Branch: "change/fix-tz",
 				Approved: &apexv1.Approval{By: "diego", At: "2026-10-17"}, AwaitingHuman: []string{}, Attempts: 1, AttemptsCap: 5,
 			},
 			{
@@ -42,10 +42,10 @@ func sampleReport() *apexv1.StatusReport {
 				Failing: []string{"T1 (exit 1)"}, AwaitingHuman: []string{},
 				Answer: &apexv1.Answer{By: "diego", Text: "drop the farewell"},
 			},
-			{ID: "fix-csv", Lane: apexv1.LaneFix, Status: apexv1.StatusDraft, AwaitingHuman: []string{}},
+			{ID: "fix-csv", Lane: apexv1.LaneTweak, Status: apexv1.StatusDraft, AwaitingHuman: []string{}},
 		},
 		Archived:    3,
-		Fixes:       []string{"fix-tz"},
+		Tweaks:      []string{"fix-tz"},
 		RoadmapNext: []string{"2026-10-16 the CSV export ignores --tz (from add-wave)"},
 		OutsideFlow: []apexv1.OutsideFlow{{SHA: "0123456789abcdef", Subject: "hotfix", Files: []string{"main.go"}}},
 		LatestRun:   &apexv1.LatestRun{Skill: "apex-apply", RunID: "20261017-0900", Status: "failed", Stopped: "usage_limit", Resets: "11pm"},
@@ -58,7 +58,7 @@ func sampleReport() *apexv1.StatusReport {
 func emptyReport() *apexv1.StatusReport {
 	return &apexv1.StatusReport{
 		Project: "toy", Root: "/srv/toy", Initialized: true,
-		Milestones: []apexv1.MilestoneLine{}, Changes: []apexv1.ChangeStatus{}, Fixes: []string{},
+		Milestones: []apexv1.MilestoneLine{}, Changes: []apexv1.ChangeStatus{}, Tweaks: []string{},
 		RoadmapNext: []string{}, OutsideFlow: []apexv1.OutsideFlow{},
 	}
 }
@@ -85,12 +85,12 @@ func TestTheViewShowsEverySection(t *testing.T) {
 		// roadmap with accept_red
 		`"title":"Roadmap"`, `"note":"accepted red by diego: flaky CI"`,
 		// changes: id, lane, status, branch, awaiting_human, flaky, answer
-		`"title":"Changes — 4"`, `"branch":"change/add-wave"`, `"lane":"fix"`, `"person":"T3"`, `"flaky":"T2"`,
+		`"title":"Changes — 4"`, `"branch":"change/add-wave"`, `"lane":"tweak"`, `"person":"T3"`, `"flaky":"T2"`,
 		`blocked: spec conflict · failing: T1 (exit 1) · answered by diego: drop the farewell`, `1/5 attempts`,
-		// awaiting a person: an unaccepted human-review task, a fix awaiting approval
-		`"title":"Awaiting a person — 2"`, "add-wave: accept T3", "fix-csv: a fix awaiting approval",
-		// fixes queue, Next, outside_flow, latest_run
-		`"title":"Fixes queue — 1"`, `"fix-tz"`,
+		// awaiting a person: an unaccepted human-review task, a tweak awaiting approval
+		`"title":"Awaiting a person — 2"`, "add-wave: accept T3", "fix-csv: a tweak awaiting approval",
+		// tweaks queue, Next, outside_flow, latest_run
+		`"title":"Tweaks queue — 1"`, `"fix-tz"`,
 		`"title":"Next — 1"`, "the CSV export ignores --tz (from add-wave)",
 		`"title":"Outside the change flow — 1"`, `"sha":"0123456"`, `"subject":"hotfix"`,
 		`"title":"Latest run"`, `"value":"usage_limit"`, `"value":"11pm"`,
@@ -107,7 +107,7 @@ func TestAnEmptyProjectRendersEveryPanel(t *testing.T) {
 	t.Parallel()
 	v := viewJSON(t, emptyReport())
 	for _, want := range []string{
-		"No current milestone", "No change in flight.", "Nothing waiting on a person.", "No approved fix waiting.",
+		"No current milestone", "No change in flight.", "Nothing waiting on a person.", "No approved tweak waiting.",
 		"No milestone in roadmap.md.", "Nothing noticed out of scope.", `"title":"Outside the change flow — 0"`,
 		"No ape task run yet.",
 	} {

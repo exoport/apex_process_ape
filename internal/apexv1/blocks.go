@@ -29,7 +29,7 @@ import (
 //     refuse (milestone.blocks-exceeded, action stop: the run stops), and
 //     `ape status --json` reports it on the milestone. A person resets it
 //     by approving the milestone again (`ape milestone approve`), after
-//     dealing with the blocked changes. Fixes (milestone: none) count
+//     dealing with the blocked changes. Tweaks (milestone: none) count
 //     toward no milestone.
 
 // Codes of the loop limits.
@@ -41,10 +41,10 @@ const (
 
 // noteBlocked counts a change just blocked toward its milestone's
 // consecutive blocks, in milestones.json on the change's base branch,
-// from whichever branch HEAD is on (editOnBranch). A fix counts toward
+// from whichever branch HEAD is on (editOnBranch). A tweak counts toward
 // no milestone; outside git nothing is counted.
 func (p *Project) noteBlocked(ctx context.Context, ci ChangeInfo) error {
-	if ci.Doc == nil || ci.Doc.IsFix() || ci.Doc.Meta.Milestone == "" || !p.isWorkTree(ctx) {
+	if ci.Doc == nil || ci.Doc.IsTweak() || ci.Doc.Meta.Milestone == "" || !p.isWorkTree(ctx) {
 		return nil
 	}
 	m := ci.Doc.Meta.Milestone
@@ -97,7 +97,7 @@ func (p *Project) blockAndCount(ctx context.Context, ci ChangeInfo, reason strin
 // base branch, inside its one commit. Nothing when there is nothing to
 // reset.
 func (p *Project) resetBlocks(ctx context.Context, c *Change) error {
-	if c == nil || c.IsFix() {
+	if c == nil || c.IsTweak() {
 		return nil
 	}
 	recs, err := p.LoadMilestoneRecords()
@@ -157,9 +157,9 @@ var milestoneIDRe = regexp.MustCompile(`^M\d+$`)
 // OrchestratorLimits refuses a loop session for a milestone past
 // limits.consecutive_blocks (milestone.blocks-exceeded): the milestone
 // args names (`ape task apex-loop --args M2`), else
-// the current one. A fix's run (args names a fix) is not refused.
+// the current one. A tweak's run (args names a tweak) is not refused.
 func (p *Project) OrchestratorLimits(ctx context.Context, args string) error {
-	if p.IsFixRun(ctx, args) {
+	if p.IsTweakRun(ctx, args) {
 		return nil
 	}
 	m := RunChangeArg(args)

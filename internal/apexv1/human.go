@@ -254,8 +254,8 @@ func (p *Project) archivedAwaitingHuman() []ChangeStatus {
 			PendingHuman: pending, AwaitingHuman: pending,
 			Accepted: c.State.Accepted, Delegate: p.delegateStatuses(c.ID, c.State),
 		}
-		if c.Doc.IsFix() {
-			cs.Lane = LaneFix
+		if c.Doc.IsTweak() {
+			cs.Lane = LaneTweak
 		}
 		out = append(out, cs)
 	}

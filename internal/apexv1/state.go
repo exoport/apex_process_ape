@@ -129,13 +129,13 @@ type Verify struct {
 	Regression *RegressionVerdict `json:"regression,omitempty"`
 }
 
-// Approval records a person approving a fix — a change with
+// Approval records a person approving a tweak — a change with
 // `milestone: none` (D40), which has no milestone to be approved through.
 type Approval struct {
 	By string `json:"by"`
 	At string `json:"at"`
 	// PlanDigest is the plan (change.md outside ## Why and ## Notes) the
-	// person approved: start refuses a fix whose plan changed since.
+	// person approved: start refuses a tweak whose plan changed since.
 	PlanDigest string `json:"plan_digest"`
 }
 
@@ -222,7 +222,7 @@ type State struct {
 	Replans          []Replan          `json:"replans,omitempty"`
 	// Rebases are the catch-ups with a base branch that moved (D40).
 	Rebases []Rebase `json:"rebases,omitempty"`
-	// Approved is a fix's approval (D40); nil for a milestone change.
+	// Approved is a tweak's approval (D40); nil for a milestone change.
 	Approved *Approval `json:"approved,omitempty"`
 	// Regression is the regression command's baseline (backlog 32): run
 	// at the first start, kept across re-starts unless the command changed.

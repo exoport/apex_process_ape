@@ -5,56 +5,57 @@ import (
 	"strings"
 )
 
-// The fix lane (trial decision D40). A fix is a change a person asked
-// for outside the roadmap: `milestone: none` in its frontmatter. It is
-// approved on its own — `ape change approve <id> --by <who>`, the
-// approval a milestone change gets from its milestone — and otherwise
+// The tweak lane (trial decision D40; named "tweak" since D240, so it
+// never reads as the conventional commit type fix). A tweak is a change
+// a person asked for outside the roadmap: `milestone: none` in its
+// frontmatter. It is approved on its own — `ape change approve <id> --by
+// <who>`, the approval a milestone change gets from its milestone — and otherwise
 // lives like any change: its branch, baseline, checks, a review in a
 // separate session, the delta merged at archive. It counts toward no
 // milestone: not toward the gate's changes in flight, not toward the
 // gate's regression baseline, not toward a milestone's spend or budget.
-// An approved fix runs ahead of milestone work, at the orchestrator's next
-// change boundary, never in parallel; `ape status` lists approved fixes
-// first and points `next` at the first of them.
+// An approved tweak runs ahead of milestone work, at the orchestrator's
+// next change boundary, never in parallel; `ape status` lists approved
+// tweaks first and points `next` at the first of them.
 
-// MilestoneNone is a fix's milestone.
+// MilestoneNone is a tweak's milestone.
 const MilestoneNone = "none"
 
 // Lanes of a change, as `ape status` reports them.
 const (
-	LaneFix       = "fix"
+	LaneTweak     = "tweak"
 	LaneMilestone = "milestone"
 )
 
-// CodeNotApproved: start of a fix nobody approved, or whose plan changed
+// CodeNotApproved: start of a tweak nobody approved, or whose plan changed
 // since its approval.
 const CodeNotApproved = "change.not-approved"
 
-// IsFix reports a change of the fix lane: `milestone: none`.
-func (c *Change) IsFix() bool { return c != nil && c.Meta.Milestone == MilestoneNone }
+// IsTweak reports a change of the tweak lane: `milestone: none`.
+func (c *Change) IsTweak() bool { return c != nil && c.Meta.Milestone == MilestoneNone }
 
 // ApproveResult is what `ape change approve` reports.
 type ApproveResult struct {
 	ID       string    `json:"id"`
 	Status   string    `json:"status"`
 	Approved *Approval `json:"approved"`
-	// Already: the fix was approved for this plan before; nothing was
+	// Already: the tweak was approved for this plan before; nothing was
 	// written.
 	Already bool   `json:"already,omitempty"`
 	Commit  string `json:"commit,omitempty"`
 }
 
-// ApproveFix records a person approving a fix (D40): its approval, like a
-// milestone's, is a record on the base branch — committed there as
+// ApproveTweak records a person approving a tweak (D40): its approval,
+// like a milestone's, is a record on the base branch — committed there as
 // "apex: <id> approved", from any branch (D51 Q17: without a checkout when
-// HEAD is on a change's branch, the fix checked as the base holds it). Only a
-// fix (`milestone: none`) is approved this way; a milestone change is
-// approved through its milestone. The fix must pass `ape change check` and
-// not be started. Re-approving the same plan is a no-op; a plan changed
+// HEAD is on a change's branch, the tweak checked as the base holds it).
+// Only a tweak (`milestone: none`) is approved this way; a milestone change
+// is approved through its milestone. The tweak must pass `ape change check`
+// and not be started. Re-approving the same plan is a no-op; a plan changed
 // since its approval is approved again (recorded anew).
-func (p *Project) ApproveFix(ctx context.Context, id, by string) (*ApproveResult, error) {
-	// A model never approves its own fix (D47 Q6).
-	if err := requirePerson(ctx, ActFixApprove, "ape change approve"); err != nil {
+func (p *Project) ApproveTweak(ctx context.Context, id, by string) (*ApproveResult, error) {
+	// A model never approves its own tweak (D47 Q6).
+	if err := requirePerson(ctx, ActTweakApprove, "ape change approve"); err != nil {
 		return nil, err
 	}
 	if err := p.recoverArchive(ctx); err != nil {
@@ -62,13 +63,13 @@ func (p *Project) ApproveFix(ctx context.Context, id, by string) (*ApproveResult
 	}
 	by = strings.TrimSpace(by)
 	if by == "" {
-		return nil, &UsageError{Code: "usage.by", Msg: "--by names the person approving the fix"}
+		return nil, &UsageError{Code: "usage.by", Msg: "--by names the person approving the tweak"}
 	}
 	ci, err := p.requireChange(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	if !ci.Doc.IsFix() {
+	if !ci.Doc.IsTweak() {
 		m := ci.Doc.Meta.Milestone
 		return nil, &FailError{Code: "change.approve-milestone", Msg: "change " + id + " belongs to milestone " + m +
 			", and a milestone change is approved through its milestone — a person runs `ape milestone approve " + m + " --by <who>`"}
@@ -76,10 +77,10 @@ func (p *Project) ApproveFix(ctx context.Context, id, by string) (*ApproveResult
 	st := ci.State
 	started := ci.Branch == ChangeBranch(id) || st.BaseSHA != "" || p.isWorkTree(ctx) && p.branchExists(ctx, ChangeBranch(id))
 	if (st.Status != StatusDraft && st.Status != StatusBlocked && st.Status != StatusAnswered) || started {
-		return nil, &FailError{Code: CodeWrongStatus, Msg: "fix " + id + " is " + st.Status + " and was started — approve applies to a fix not started yet (a draft)"}
+		return nil, &FailError{Code: CodeWrongStatus, Msg: "tweak " + id + " is " + st.Status + " and was started — approve applies to a tweak not started yet (a draft)"}
 	}
 	if fs := p.CheckChangeAnywhere(ctx, id); len(fs) > 0 {
-		return nil, &FailError{Code: CodeCheckFailed, Msg: "fix " + id + " does not pass `ape change check` — fix change.md first, then approve", Findings: fs}
+		return nil, &FailError{Code: CodeCheckFailed, Msg: "tweak " + id + " does not pass `ape change check` — fix change.md first, then approve", Findings: fs}
 	}
 	digest := ci.Doc.PlanDigest()
 	if a := st.Approved; a != nil && a.PlanDigest == digest {
@@ -96,25 +97,25 @@ func (p *Project) ApproveFix(ctx context.Context, id, by string) (*ApproveResult
 	return &ApproveResult{ID: id, Status: st.Status, Approved: st.Approved, Commit: commit}, nil
 }
 
-// requireFixApproved is start's gate for a fix, in place of an approved
-// milestone: a person's approval of the plan it now has.
-func requireFixApproved(ci ChangeInfo) error {
+// requireTweakApproved is start's gate for a tweak, in place of an
+// approved milestone: a person's approval of the plan it now has.
+func requireTweakApproved(ci ChangeInfo) error {
 	id, a := ci.ID, ci.State.Approved
 	switch {
 	case a == nil:
-		return &FailError{Code: CodeNotApproved, Msg: "fix " + id + " (milestone: none) is not approved — a person runs `ape change approve " + id + " --by <who>`"}
+		return &FailError{Code: CodeNotApproved, Msg: "tweak " + id + " (milestone: none) is not approved — a person runs `ape change approve " + id + " --by <who>`"}
 	case a.PlanDigest != "" && a.PlanDigest != ci.Doc.PlanDigest() && ci.State.PlanDigest == "":
-		return &FailError{Code: CodeNotApproved, Msg: "fix " + id + "'s plan changed since " + a.By + " approved it — a person approves it again: `ape change approve " + id + " --by <who>`"}
+		return &FailError{Code: CodeNotApproved, Msg: "tweak " + id + "'s plan changed since " + a.By + " approved it — a person approves it again: `ape change approve " + id + " --by <who>`"}
 	}
 	return nil
 }
 
-// fixIDs is every fix's id, unarchived and archived: whose runs count
+// tweakIDs is every tweak's id, unarchived and archived: whose runs count
 // toward no milestone.
-func (p *Project) fixIDs(ctx context.Context) map[string]bool {
+func (p *Project) tweakIDs(ctx context.Context) map[string]bool {
 	out := map[string]bool{}
 	for _, c := range append(p.changes(ctx), p.archivedChanges()...) {
-		if c.Doc.IsFix() {
+		if c.Doc.IsTweak() {
 			out[c.ID] = true
 		}
 	}
@@ -133,9 +134,9 @@ func RunChangeArg(args string) string {
 	return ""
 }
 
-// IsFixRun reports a run whose --args names a fix: it counts toward no
-// milestone's spend or budget.
-func (p *Project) IsFixRun(ctx context.Context, args string) bool {
+// IsTweakRun reports a run whose --args names a tweak: it counts toward
+// no milestone's spend or budget.
+func (p *Project) IsTweakRun(ctx context.Context, args string) bool {
 	id := RunChangeArg(args)
-	return id != "" && p.fixIDs(ctx)[id]
+	return id != "" && p.tweakIDs(ctx)[id]
 }

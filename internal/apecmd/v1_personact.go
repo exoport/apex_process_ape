@@ -49,7 +49,7 @@ func personCallOf(cmd *cobra.Command, args []string) *apexv1.PersonCall {
 	case "milestone approve":
 		c.Act, c.Target = apexv1.ActMilestoneApprove, args[0]
 	case "change approve":
-		c.Act, c.Target = apexv1.ActFixApprove, args[0]
+		c.Act, c.Target = apexv1.ActTweakApprove, args[0]
 	case "change answer":
 		c.Act, c.Target, c.Text = apexv1.ActAnswer, args[0], str("text")
 	case "project accept-config":

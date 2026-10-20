@@ -10,8 +10,8 @@ import (
 )
 
 // Resume after the base moved (trial decision D40). A change's base
-// branch moves while the change is worked on — a fix lands, another change
-// is archived. ape, never the model, brings the change up to date: at
+// branch moves while the change is worked on — a tweak lands, another
+// change is archived. ape, never the model, brings the change up to date: at
 // `ape change start` on a change that has its branch, at `ape change
 // verify`, and at `ape change archive` — one path, catchUp. When the base
 // branch holds commits change/<id> does not, ape

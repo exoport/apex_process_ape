@@ -157,7 +157,7 @@ func runDelegateSession(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, id, t
 			why += " (no verdict; " + sessionEnded(res.TaskExit) + "; log " + res.Log + ")"
 		}
 		return v1Fail(cmd, f, &apexv1.FailError{Code: "delegate.fail", Msg: "the delegate failed " + task + " of " + id + ": " + why + delegateToPerson(outcome) +
-			" — the task still awaits a person (`ape change accept " + id + " --task " + task + " --by <who>`)" + delegateFixOption(outcome)}, res)
+			" — the task still awaits a person (`ape change accept " + id + " --task " + task + " --by <who>`)" + delegateTweakOption(outcome)}, res)
 	}
 	return v1Emit(cmd.OutOrStdout(), f, res, func(w io.Writer) {
 		fmt.Fprintf(w, "change %s: %s accepted by %s (run %s): %s\n", id, task, outcome.Accepted.By, outcome.Accepted.Run, outcome.Reason)
@@ -187,13 +187,13 @@ func delegateToPerson(o *apexv1.DelegateOutcome) string {
 	return ""
 }
 
-// delegateFixOption is the person's option for an archived change's
-// fail: a fix change (D188 Q107).
-func delegateFixOption(o *apexv1.DelegateOutcome) string {
+// delegateTweakOption is the person's option for an archived change's
+// fail: a tweak (D188 Q107, D240).
+func delegateTweakOption(o *apexv1.DelegateOutcome) string {
 	if o.ToPerson != apexv1.ToPersonArchived {
 		return ""
 	}
-	return ", or has a fix change planned for what it found (apex-change with the reason, `--milestone none`; a person approves it: `ape change approve <fix-id> --by <who>`)"
+	return ", or has a tweak planned for what it found (apex-change with the reason, `--milestone none`; a person approves it: `ape change approve <tweak-id> --by <who>`)"
 }
 
 // startDelegateSession starts the detached delegate session for an

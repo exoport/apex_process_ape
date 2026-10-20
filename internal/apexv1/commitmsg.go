@@ -168,7 +168,7 @@ func subjectFallback(c *Change, cc CommitConfig) bool {
 }
 
 // DefaultChangeType is the type: `ape change new` writes when --type is
-// not given (Q110): fix for a fix (milestone none), feat otherwise — or
+// not given (Q110): fix for a tweak (milestone none), feat otherwise — or
 // none when that type is not among the project's commit types.
 func DefaultChangeType(milestone string, types []string) string {
 	t := "feat"

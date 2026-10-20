@@ -37,10 +37,10 @@ func TestStatus_NextWhy(t *testing.T) {
 			Initialized: true, Milestone: m(MilestoneApproved),
 			Changes: []ChangeStatus{{ID: "c1", Milestone: "M1", Status: StatusReviewed, AwaitingHuman: []string{"T2"}}},
 		}, "human-review acceptance of c1"},
-		"fix first": {&StatusReport{
+		"tweak first": {&StatusReport{
 			Initialized: true, Milestone: m(MilestoneApproved),
-			Changes: []ChangeStatus{{ID: "fix-x", Milestone: MilestoneNone, Lane: LaneFix, Status: StatusDraft, Approved: &Approval{By: "p"}}},
-		}, "an approved fix runs ahead"},
+			Changes: []ChangeStatus{{ID: "fix-x", Milestone: MilestoneNone, Lane: LaneTweak, Status: StatusDraft, Approved: &Approval{By: "p"}}},
+		}, "an approved tweak runs ahead"},
 		"gate green":   {&StatusReport{Initialized: true, Milestone: &MilestoneStatus{ID: "M1", Status: MilestoneApproved, GateLast: &GateRun{Exit: 0, SHA: "abcdef1234"}}}, "last gate run was green"},
 		"nothing open": {&StatusReport{Initialized: true, Milestone: m(MilestoneApproved)}, "no change of it is open"},
 	} {

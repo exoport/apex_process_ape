@@ -39,7 +39,7 @@ const (
 )
 
 // OrchestratorSkill is the loop skill, apex-loop: the unattended runner of
-// one approved milestone or fix, whose ape task run may start child
+// one approved milestone or tweak, whose ape task run may start child
 // sessions (D62). It was apex-orchestrator until rc.7 (D171, Q95); the
 // identifier keeps its name.
 const OrchestratorSkill = "apex-loop"
@@ -155,6 +155,6 @@ func RenamedSkill(verb, skill, args string) error {
 		target = a
 	}
 	return &UsageError{Code: CodeSkillRenamed, Action: ActionStop, Msg: fmt.Sprintf(
-		"%s %s refused: since rc.7 apex-orchestrator is the operator's interface, a skill you open in your own Claude Code session, and the unattended runner of a milestone or fix is apex-loop (D171)"+
-			" — run the milestone or approved fix unattended with `ape task apex-loop --args %s`, or talk to APEX: run `claude` in the project and type `/apex-orchestrator`", verb, skill, target)}
+		"%s %s refused: since rc.7 apex-orchestrator is the operator's interface, a skill you open in your own Claude Code session, and the unattended runner of a milestone or tweak is apex-loop (D171)"+
+			" — run the milestone or approved tweak unattended with `ape task apex-loop --args %s`, or talk to APEX: run `claude` in the project and type `/apex-orchestrator`", verb, skill, target)}
 }

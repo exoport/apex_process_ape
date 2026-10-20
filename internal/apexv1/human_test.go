@@ -44,7 +44,7 @@ func TestAccept_ArchivedChange(t *testing.T) {
 	c := r.Changes[0]
 	require.Equal(t, StatusArchived, c.Status)
 	require.Equal(t, []string{"T2"}, c.AwaitingHuman)
-	require.Empty(t, r.Fixes)
+	require.Empty(t, r.Tweaks)
 	brief := r.Brief()
 	require.Contains(t, brief, "Changes: none open (1 archived)")
 	require.Contains(t, brief, "Archived, human review not accepted")

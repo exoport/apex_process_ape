@@ -80,10 +80,13 @@ func TestMatchAct(t *testing.T) {
 }
 
 // A12: one line per guarded act, the change id the target of
-// --allow-pending-human (DESIGN-ANSWERS 3).
+// --allow-pending-human (DESIGN-ANSWERS 3); a milestone-less change is a
+// tweak (D240).
 func TestPersonActGrammar(t *testing.T) {
 	g := PersonActGrammar()
 	require.Len(t, strings.Split(g, "\n"), 8)
+	require.Regexp(t, `(?m)^  ape change approve <tweak-id> +approve <tweak-id>$`, g)
+	require.NotContains(t, g, "fix-id")
 	require.Contains(t, g, "allow pending human on <change-id>")
 	require.Contains(t, g, "accept T<n> of <change-id>")
 	require.Len(t, PersonActs, 8)

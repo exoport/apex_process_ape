@@ -75,7 +75,7 @@ func (p *Project) Start(ctx context.Context, id string, opt RunOptions) (*StartR
 		return nil, err
 	}
 	// No change of a milestone past limits.consecutive_blocks starts (D49).
-	if ci, err := p.requireChange(ctx, id); err == nil && !ci.Doc.IsFix() {
+	if ci, err := p.requireChange(ctx, id); err == nil && !ci.Doc.IsTweak() {
 		if err := p.blocksExceeded(ctx, ci.Doc.Meta.Milestone); err != nil {
 			return nil, err
 		}
@@ -292,11 +292,11 @@ func replansSinceAnswer(st *State) int {
 	return len(st.Replans) - st.Answer.ReplansBefore
 }
 
-// requireApproved is start's approval gate: a fix's own approval (D40),
+// requireApproved is start's approval gate: a tweak's own approval (D40),
 // else the change's milestone approved.
 func (p *Project) requireApproved(ci ChangeInfo) error {
-	if ci.Doc.IsFix() {
-		return requireFixApproved(ci)
+	if ci.Doc.IsTweak() {
+		return requireTweakApproved(ci)
 	}
 	var ms *Milestone
 	if rm := p.roadmap(); rm != nil {

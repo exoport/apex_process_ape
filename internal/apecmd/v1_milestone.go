@@ -223,7 +223,7 @@ _apex/state/logs/gate-<M>/), and the project's regression command from _apex/con
 when one is configured — its milestone tier, "regression: {change: <cmd>, milestone:
 <cmd>}", else the one command (H10). The gate is green only when all pass — the regression command
 only needs not to be newly red: it is judged against the earliest regression baseline,
-for the same command, recorded by any change of the milestone (active or archived; a fix,
+for the same command, recorded by any change of the milestone (active or archived; a tweak,
 milestone: none, is no change of any milestone and never supplies it — D40);
 red there and red now is reported (JSON run.regression.pre_existing_red), not failed —
 unless, with failing tests named by both runs (as for ` + "`ape change verify`" + `), a test fails
@@ -291,7 +291,7 @@ func newMilestoneCloseCmd() *cobra.Command {
 		Short: "Run the gate; on exit 0 write Status: done (<ts> <sha>)",
 		Long: `Close an approved milestone. Refused while a change of this milestone is in-progress,
 verified or reviewed (archive or block it first) — each change's status read from its own
-branch, change/<id>; a fix in flight (milestone: none, D40) counts toward no milestone and
+branch, change/<id>; a tweak in flight (milestone: none, D40) counts toward no milestone and
 does not hold the close — and on a change branch (see ` + "`ape milestone --help`" + `). Otherwise runs the gate (recorded as by
 ` + "`ape milestone gate`" + `) and, only on exit 0, writes "Status: done (<ts> <sha>)" into
 roadmap.md, committed with milestones.json as "apex: <M> done". Green means the gate command

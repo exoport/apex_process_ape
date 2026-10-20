@@ -38,7 +38,7 @@ type v1BudgetWatch struct {
 
 // newV1BudgetWatch decides the session's budget limit, or refuses to start
 // it (apexv1 FailError milestone.budget-exceeded). nil, nil when no budget
-// applies — also for a fix's session (args names a change of `milestone:
+// applies — also for a tweak's session (args names a change of `milestone:
 // none`, D40), which counts toward no milestone.
 func newV1BudgetWatch(ctx context.Context, p *apexv1.Project, skill, args string) (*v1BudgetWatch, error) {
 	tl, err := p.TaskLimitsFor(ctx, skill, args)
