@@ -62,9 +62,10 @@ func TestV1_TweakLaneAndResumeAfterTheBaseMoved(t *testing.T) {
 
 	// The milestone change is paused; a person's request becomes a tweak.
 	git("switch", "-q", base)
-	out, code := runApe(t, ape, project, env, "change", "new", "fix-hug", "--milestone", "none", "--touches", "greeting")
+	out, code := runApe(t, ape, project, env, "change", "new", "fix-hug", "--milestone", "none", "--touches", "greeting", "--json")
 	require.Equal(t, 2, code, "a tweak says what it is: --type is required (Q135): %s", out)
-	require.Contains(t, out, "usage.type")
+	require.Contains(t, out, `"code": "usage.type"`)
+	require.NoDirExists(t, filepath.Join(project, "development", "changes", "fix-hug"))
 	apeOK("change", "new", "fix-hug", "--milestone", "none", "--type", "fix", "--touches", "greeting")
 	require.NoError(t, writeFile(filepath.Join(project, "development", "changes", "fix-hug", "change.md"), v1Tweak))
 	git("add", "-A")
