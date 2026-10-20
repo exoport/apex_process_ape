@@ -130,6 +130,18 @@ eval's E-R7-1 and E2 residual (D219).
   pointer, and `project check` lists the `roadmap.next-inline` notice. A project an rc.7b move
   left that way is repaired by running `ape next move` again.
 
+### rc.7h: the startup check on a monochrome screen (D269, D270)
+
+- **The startup check accepts claude's placeholder hint on a monochrome screen**: with
+  `NO_COLOR` set or `TERM=dumb`, claude draws its hint (`❯ Try "fix lint errors"`) in the normal
+  weight, and rc.7f's check, which reads the hint from its faint cells, declared a working claude
+  broken ("the REPL came up without an empty ❯ prompt line") — on 2.1.304 and 2.1.305 alike, on
+  every start that showed the hint. A `❯` row between the two rules of claude's input box, and
+  not a numbered menu row, is now the empty input: the check types nothing, so what stands
+  there is claude's own. Runs are unchanged (they need only the footer).
+- `make check-claude` gains `startup_probe_monochrome_hint` (the hint forced on, `NO_COLOR`).
+- The Claude Code surface baseline is reviewed through 2.1.305.
+
 ### rc.7g: no lift source is skipped (D262, D264; RG-4b, RG-4c)
 
 - **An overview is read like every other section** (RG-4b): rc.7f skipped a project-context or
