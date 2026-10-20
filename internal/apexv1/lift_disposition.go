@@ -613,18 +613,19 @@ func writeCandidates(b *strings.Builder, cands []LiftCandidate, maxRows int, rep
 	group := ""
 	for i, c := range cands {
 		if i == maxRows {
-			p("\n… and %d more candidate(s), numbered on from %d, past this file's %d KB ceiling: in `%s` (rule_candidates), in the checkout that lifted\n",
-				len(cands)-i, i+1, liftDispositionCeiling>>10, report)
+			p("\n… and %d more candidate(s), numbered on from %d, past this file's %d KB ceiling: in `%s` (rule_candidates), in the checkout that lifted. %s\n",
+				len(cands)-i, i+1, liftDispositionCeiling>>10, report, omittedGroups(cands[i:]))
 			break
 		}
 		if g := candidateGroup(c); i == 0 || g != group {
 			if i > 0 {
 				p("\n")
 			}
-			p("### %s\n\n| # | Candidate | Source | Disposition |\n|---|---|---|---|\n", g)
+			p("### %s\n\n| # | Candidate | Line | Disposition |\n|---|---|---|---|\n", g)
 			group = g
 		}
-		p("| %d | %s | `%s` | |\n", i+1, cell(c.Text), strings.Join(append([]string{c.Source}, c.AlsoIn...), "` · `"))
+		// The group heading names the file: the row keeps its line (Q136).
+		p("| %d | %s | `%s` | |\n", i+1, cell(c.Text), strings.Join(append([]string{candidateLine(c.Source)}, c.AlsoIn...), "` · `"))
 	}
 	p("\n")
 }
@@ -976,4 +977,42 @@ func standardSourceNote(sa *StandardADRResult) string {
 		return sa.Source + ", framework " + sa.FrameworkVersion
 	}
 	return sa.Source
+}
+
+// candidateLine is a candidate's line number from its source
+// (`<file>:<line>`), the file being its group's heading (Q136); the
+// source whole when it has no line.
+func candidateLine(src string) string {
+	if i := strings.LastIndex(src, ":"); i > 0 && i < len(src)-1 {
+		return src[i+1:]
+	}
+	return src
+}
+
+// omittedGroupsMax bounds the groups the overflow line names.
+const omittedGroupsMax = 12
+
+// omittedGroups says, per source and section, how many candidates went
+// to the JSON only (Q136): a reviewer of the .md sees which sections were
+// cut, the most-cut first.
+func omittedGroups(cands []LiftCandidate) string {
+	count := map[string]int{}
+	var order []string
+	for _, c := range cands {
+		g := candidateGroup(c)
+		if count[g] == 0 {
+			order = append(order, g)
+		}
+		count[g]++
+	}
+	sort.SliceStable(order, func(i, j int) bool { return count[order[i]] > count[order[j]] })
+	parts := make([]string, 0, min(len(order), omittedGroupsMax)+1)
+	for i, g := range order {
+		if i == omittedGroupsMax {
+			parts = append(parts, fmt.Sprintf("and %d more section(s)", len(order)-i))
+			break
+		}
+		parts = append(parts, fmt.Sprintf("%s (%d)", g, count[g]))
+	}
+	return "By section: " + strings.Join(parts, "; ") + "."
 }

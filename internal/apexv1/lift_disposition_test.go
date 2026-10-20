@@ -264,14 +264,14 @@ func TestLift_CandidatesFromEverySection(t *testing.T) {
 	d := string(disp)
 	pc := "apex-v0-final:development/project-context.md"
 	for _, want := range []string{
-		"### `CLAUDE.md`\n\n| # | Candidate | Source | Disposition |\n|---|---|---|---|\n| 1 | NEVER push a tag without the operator's explicit say-so | `CLAUDE.md:5` | |\n",
-		"| 2 | Commit messages follow Conventional Commits, always | `CLAUDE.md:6` · `" + pc + ":55` | |\n",
-		"### `" + pc + "` — Technology Stack & Versions\n\n| # | Candidate | Source | Disposition |\n|---|---|---|---|\n| 4 | Go toolchain pinned exactly by go.mod's toolchain line. | `" + pc + ":21` | |\n",
+		"### `CLAUDE.md`\n\n| # | Candidate | Line | Disposition |\n|---|---|---|---|\n| 1 | NEVER push a tag without the operator's explicit say-so | `5` | |\n",
+		"| 2 | Commit messages follow Conventional Commits, always | `6` · `" + pc + ":55` | |\n",
+		"### `" + pc + "` — Technology Stack & Versions\n\n| # | Candidate | Line | Disposition |\n|---|---|---|---|\n| 4 | Go toolchain pinned exactly by go.mod's toolchain line. | `21` | |\n",
 		"### `" + pc + "` — Critical Implementation Rules > Testing Rules\n",
-		"| A shared fixture is read-only: never write to it from a test, and always copy it into t.TempDir(). | `" + pc + ":32` | |",
+		"| A shared fixture is read-only: never write to it from a test, and always copy it into t.TempDir(). | `32` | |",
 		"### `apex-v0-final:development/team-memory.md` — Process & Workflow Rules > Never invent an undesigned artifact\n",
-		"| If an AC asserts a mechanism nobody designed, refuse to fabricate it. | `apex-v0-final:development/team-memory.md:9` | |",
-		"| The audit gate exits 1 until the signal package has tests. | `apex-v0-final:development/team-memory.md:24` | |",
+		"| If an AC asserts a mechanism nobody designed, refuse to fabricate it. | `9` | |",
+		"| The audit gate exits 1 until the signal package has tests. | `24` | |",
 	} {
 		require.Contains(t, d, want)
 	}
@@ -293,4 +293,23 @@ func TestLift_CandidatesFromEverySection(t *testing.T) {
 	require.Contains(t, report.Candidates, map[string]any{
 		"text": "Commit messages follow Conventional Commits, always", "source": "CLAUDE.md:6", "also_in": []any{pc + ":55"},
 	})
+}
+
+// Q136: past the ceiling, the overflow line says which sections went to
+// the JSON only, the most-cut first, and the row's source cell is its line.
+func TestCandidateOverflow_NamesTheCutSections(t *testing.T) {
+	tm := "apex-v0-final:development/team-memory.md"
+	cands := []LiftCandidate{
+		{Text: "a", Source: tm + ":3", Section: "Gotchas"},
+		{Text: "b", Source: tm + ":9", Section: "Process"},
+		{Text: "c", Source: tm + ":12", Section: "Process"},
+	}
+	require.Equal(t, "By section: `"+tm+"` — Process (2); `"+tm+"` — Gotchas (1).", omittedGroups(cands))
+	require.Equal(t, "12", candidateLine(tm+":12"))
+	require.Equal(t, "CLAUDE.md", candidateLine("CLAUDE.md"))
+	var b strings.Builder
+	writeCandidates(&b, cands, 1, "_apex/state/lift-disposition.json")
+	require.Contains(t, b.String(), "| 1 | a | `3` | |")
+	require.Contains(t, b.String(), "… and 2 more candidate(s), numbered on from 2")
+	require.Contains(t, b.String(), "By section: `"+tm+"` — Process (2).")
 }
