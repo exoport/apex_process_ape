@@ -119,6 +119,7 @@ func prepareInstall(ctx context.Context, repo, projectRoot string, sel *framewor
 		return nil, nil, false, err
 	}
 	v1 = framework.IsV1Release(src)
+	projectV1 := apexV1Project(projectRoot)
 	// A default update never goes backwards: a candidate installed by
 	// name, newer than the newest final release, stays until --version
 	// says otherwise.
@@ -126,10 +127,30 @@ func prepareInstall(ctx context.Context, repo, projectRoot string, sel *framewor
 		if meta, mErr := framework.ReadMetadata(projectRoot); mErr == nil &&
 			framework.InstalledIsAhead(meta.Framework.VersionTag, tag) {
 			cleanup()
-			fmt.Fprintf(os.Stdout, "framework: installed %s is newer than the newest release %s (a candidate, installed by "+
-				"name); keeping it. Pass --version %s to go back to the release.\n", meta.Framework.VersionTag, tag, tag)
+			if projectV1 && !v1 {
+				// RG-3: never point an apex-v1 project at an apex-v0 release.
+				fmt.Fprintf(os.Stdout, "framework: installed %s is newer than the newest release %s, an apex-v0 release; keeping it "+
+					"(an apex-v1 project never goes back to apex-v0). Pass --version <the apex-v1 release> to change it.\n",
+					meta.Framework.VersionTag, tag)
+			} else {
+				fmt.Fprintf(os.Stdout, "framework: installed %s is newer than the newest release %s (a candidate, installed by "+
+					"name); keeping it. Pass --version %s to go back to the release.\n", meta.Framework.VersionTag, tag, tag)
+			}
 			return nil, nil, v1, errKeepInstalled
 		}
+	}
+	// RG-3: an apex-v1 project never takes an apex-v0 release — its
+	// migrations call verbs apex-v1 ape no longer has, and the install
+	// would replace the apex-v1 skills.
+	if projectV1 && !v1 {
+		cleanup()
+		label := tag
+		if label == "" {
+			label = "the framework's working tree"
+		}
+		return nil, nil, v1, usageErrExit(ExitRunFailed, fmt.Errorf("%s is an apex-v0 release and this is an apex-v1 project: "+
+			"an apex-v1 project never goes back to apex-v0, so nothing was installed — pass --version <an apex-v1 release> "+
+			"(or, if a downgrade was really meant, restore the project from git)", label))
 	}
 	if err := checkApeMinimum(ctx, os.Stdout, src, tag, projectRoot, commit, updateApe); err != nil {
 		cleanup()
@@ -693,4 +714,14 @@ func gitOut(ctx context.Context, dir string, args ...string) (string, error) {
 		return "", err
 	}
 	return string(out), nil
+}
+
+// apexV1Project reports an APEX v1 project: its installed framework is
+// an apex-v1 release, or its tree has the apex-v1 layout.
+func apexV1Project(projectRoot string) bool {
+	if framework.IsV1Release(projectRoot) {
+		return true
+	}
+	p, err := apexv1.Open(projectRoot)
+	return err == nil && p.IsV1()
 }
