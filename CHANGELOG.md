@@ -130,6 +130,23 @@ eval's E-R7-1 and E2 residual (D219).
   pointer, and `project check` lists the `roadmap.next-inline` notice. A project an rc.7b move
   left that way is repaired by running `ape next move` again.
 
+### rc.7g: no lift source is skipped (D262, D264; RG-4b, RG-4c)
+
+- **An overview is read like every other section** (RG-4b): rc.7f skipped a project-context or
+  team-memory section titled overview, introduction, about, purpose, summary or table of
+  contents, and the rehearsals found binding rules there. Its list items and rule-shaped
+  paragraphs are candidates now; a fact among them is one apex-plan drops with a reason. A list
+  item that is only links (a table of contents) is not a candidate.
+- **The notes inside `## Code Validation`'s code blocks are candidates** (RG-4b): a command's
+  `#` comment, shown with its command and continued by the deeper-indented comment lines under
+  it, and a run of comment lines. The commands still go to AGENTS.md `## Commands`.
+- **CLAUDE.md is read whole** (RG-4c), not only its list items: outside the apex-v0 managed block,
+  every paragraph, table body row and code-block comment of three words or more is a candidate,
+  whatever its wording. CLAUDE.md is the instruction file every session loads, and seven of the
+  ten rules cortex's review found unrecorded there were not rule-worded (plain prose, table
+  cells, a comment in the repo-structure block). A CLAUDE.md list item now needs three words, as
+  everywhere else. project-context.md and team-memory keep the rule-word test for paragraphs.
+
 ### rc.7f: the final candidate's fixes (D247, D251–D259)
 
 - **The startup check reads Claude Code's placeholder hint as an empty prompt** (E-R7e-1): a
