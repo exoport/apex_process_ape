@@ -130,6 +130,27 @@ eval's E-R7-1 and E2 residual (D219).
   pointer, and `project check` lists the `roadmap.next-inline` notice. A project an rc.7b move
   left that way is repaired by running `ape next move` again.
 
+### rc.7f: the final candidate's fixes (D247, D251–D259)
+
+- **The startup check reads Claude Code's placeholder hint as an empty prompt** (E-R7e-1): a
+  `❯` row holding only faint text — or claude's reverse-video cursor over the hint's first letter,
+  then faint text — is the idle prompt; typed text and a menu row still fail. Turn the hint on
+  with `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION` to reproduce it.
+- **An apex-v1 project never takes an apex-v0 release** (RG-3): `ape framework update|setup`
+  refuses it (exit 1, nothing installed), and the keep-the-installed-rc line names no apex-v0
+  version.
+- **The lift's binding-rule candidates come from every section** (RG-4): every project-context
+  section but a pure overview, and every team-memory entry's body — list items and rule-shaped
+  paragraphs — not only "Don't Miss" and the gotcha titles. `rule_candidates[]` gains `section`
+  and `also_in`; the .md groups the table by source and section, each row showing its line, and
+  past its 48 KB ceiling the overflow line names how many rows each section sent to the JSON.
+- **The lift's ADR link rewrite keeps a link's `./` / `../` prefix** (RG-5), and a moved
+  record's own relative links are re-based to still point at the same files.
+- **The lift records its regression verdict** (RG-6, RG-6a): `regression` in
+  `_apex/state/lift-disposition.json` (seq-05's verdict names and notes, `regression_new_failures`),
+  a `## Regression` section committed as `apex: lift regression verdict`, and the verdict lines
+  on stderr under `ape framework update`.
+
 ### rc.7e: the lane `milestone: none` is a **tweak** (D240, Q135)
 
 - **The lane is renamed tweak** everywhere a person or a skill reads it, since "fix" collided
