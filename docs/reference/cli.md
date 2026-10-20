@@ -2196,7 +2196,9 @@ runs' output beside its log as <name>.try<k>.log), and listed by `ape status`. R
 for scenario checks) are recorded in state.json; output under _apex/state/logs/<id>/.
 What a check leaves in the tree outside development/ — files it created, tracked files it
 changed — is undone after it and reported (JSON "stray_files"); files that were there
-before it ran are never touched.
+before it ran are never touched. A red scenario of the lasting spec whose check names
+what `ape decision standard` removed says so on its line and in results[].stale_names
+(D232; see `ape decision standard --help`).
 With "regression: <cmd>" in _apex/config.yaml (with tiers, its change tier), the
 regression command runs too (recorded in the results with kind "regression") and is judged against the change's regression
 baseline (JSON "regression": {cmd, exit, baseline_exit, pre_existing_red, failed,
@@ -2876,7 +2878,23 @@ In order:
              not rewritten. A proposed supersede of a standard ape wrote is a person's
              pending opt-out and is left. No other ADR is renumbered
 A write is its own commit, "apex: ADR-0001 standard <framework version>" (or "… ape's
-own copy" when no payload is installed). decision.accepted-edited accepts exactly that
+own copy" when no payload is installed). Its decisions.json record lists what the verb
+removed, standard.removed: [{path, id}] ([] when nothing; kept across later writes;
+D232 Q130).
+
+Stale scenarios (D232 Q131): a scenario of a lasting spec
+(development/specs/<capability>/spec.md) whose check: names what it removed — its path,
+file name or ADR id, or "Supersedes: ADR-0001" once it removed a supersede — can never
+pass again. The verb lists each, after a write and on any later run ("stale scenario
+<spec>:<line>: …"; under --check, what the write would leave stale), and ape project
+check shows the notice spec.check-names-removed (action replan) while one exists; a
+check that asserts the name's absence (! test -e <path>, [ ! -f <path> ]) is not stale.
+The spec is never edited here (Q132): a change retires the scenario with a REMOVED
+delta citing the migration v1.0.0_seq-08 — never by recreating the records or by
+superseding ADR-0001 again, which opts the project out. A project whose seq-08 ran
+before the record (rc.7b) has none; for it, a check naming a decisions/ file that does
+not exist, or an ADR-0001 file name that is not the standard's, is read as stale
+(Q133). decision.accepted-edited accepts exactly that
 change of an accepted ADR-0001 — its bytes equal the digest ape recorded for a shipped
 standard — and still refuses a hand edit. When a release changes the standard and no
 entry runs this, ape project check lists the notice decision.standard-stale.
@@ -2894,7 +2912,8 @@ migration's check: 0 applied, 1 not applied.
 JSON: {"action": "created"|"replaced"|"kept"|"opted-out"|"differs", "path", "source":
 "_apex/standards/adr-0001.md"|"ape", "framework_version", "replaces" (the file it
 replaced), "opted_out_by": [ADR-NNNN, …], "removed_adrs": [{id, path, citations:
-["<file>:<line>", …]}], "commit"}. Under --check it says what is due, under "result"
+["<file>:<line>", …]}], "commit", "stale_scenarios": [{spec, requirement, scenario,
+line, names}]}. Under --check it says what is due, under "result"
 beside the failure's ok/exit/diagnostics (exit 1).
 
 Exit codes: 0 written, or nothing due (--check: nothing due) · 1 refused, or (--check)
@@ -4142,7 +4161,9 @@ under timeouts.check (idle 15m, max 2h), the regression command under timeouts.r
 (idle 30m, max 2h) — killed at idle without progress (output or CPU time) or at max: exit
 124, reason idle|ceiling; --timeout sets max for all three. A vacuous or unrun gate command, scenario or regression command is
 red (see `ape change verify --help`; JSON reason/detail). Files the gate
-or a check leaves outside development/ are undone and reported ("stray_files"). The run (exit, sha, time,
+or a check leaves outside development/ are undone and reported ("stray_files"). A red scenario
+whose check names what `ape decision standard` removed says so on its line and in
+run.spec_failed[].stale_names (D232; see `ape decision standard --help`). The run (exit, sha, time,
 output hash, last lines) goes to _apex/state/logs/gate-<M>.json (gitignored; shown by
 `ape status`). When the result differs from the recorded one (green vs red), or is
 the first, _apex/state/milestones.json is updated and committed as
@@ -4808,6 +4829,10 @@ line}; [] when none, beside the findings on a failure too), they never change th
                            under apex-plan's "Next — not milestones:" label — while it
                            lives in development/next.md (D217): `ape next move` moves
                            it (the framework's migration v1.0.0_seq-09 runs it)
+  spec.check-names-removed (action replan) a lasting spec scenario's check names what
+                           `ape decision standard` removed (D232; see its --help), so it
+                           can never pass: a change retires it with a REMOVED delta
+                           citing v1.0.0_seq-08 — never a new supersede of ADR-0001
 
 Exit codes: 0 green · 1 findings (listed on stderr, or under "findings" with --json) · 2 usage.
 
