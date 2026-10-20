@@ -314,11 +314,15 @@ func TestLift_FullRun(t *testing.T) {
 	p, err := Open(root)
 	require.NoError(t, err)
 
-	// One commit on the tag, the tree clean.
-	require.Equal(t, "apex: lift from apex-v0 v0.30.0", subjects(t, p)[0])
-	require.Equal(t, tagSHA, run(t, root, "rev-parse", "HEAD~1"))
+	// The lift commit on the tag, the regression verdict's on it (RG-6),
+	// the tree clean.
+	require.Equal(t, []string{LiftRegressionSubject, "apex: lift from apex-v0 v0.30.0"}, subjects(t, p)[:2])
+	require.Equal(t, tagSHA, run(t, root, "rev-parse", "HEAD~2"))
+	require.Equal(t, res.Commit, run(t, root, "rev-parse", "HEAD~1"))
+	require.Equal(t, res.RegressionCommit, run(t, root, "rev-parse", "HEAD"))
+	require.Equal(t, "development/lift-disposition.md", run(t, root, "show", "--name-only", "--format=", "HEAD"))
 	require.Empty(t, run(t, root, "status", "--porcelain"))
-	msg := run(t, root, "log", "-1", "--format=%B")
+	msg := run(t, root, "log", "-1", "--format=%B", "HEAD~1")
 	require.Contains(t, msg, "ADR-0004 -> ADR-0003  0003-limit-names.md")
 	require.Contains(t, msg, "ADR-0006 -> ADR-0004  0004-limit-64.md")
 
@@ -472,7 +476,7 @@ func main() { fmt.Println(greet("ADR-0004")) }
 	// D217: the lift writes the new layout directly — Next in next.md,
 	// committed, the roadmap pointing at it — so seq-09 has nothing to do.
 	require.Contains(t, read(t, p, "development/roadmap.md"), NextPointer)
-	require.Contains(t, run(t, root, "show", "--name-only", "--format=", "HEAD"), "development/next.md")
+	require.Contains(t, run(t, root, "show", "--name-only", "--format=", "HEAD~1"), "development/next.md")
 	_, err = p.NextMoveCheck()
 	require.NoError(t, err)
 

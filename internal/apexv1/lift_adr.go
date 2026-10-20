@@ -3,6 +3,7 @@ package apexv1
 import (
 	"context"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -207,13 +208,13 @@ func loadADRs(root, dirAbs string, canon bool) (out []v0ADR, bad []string) {
 		if e.IsDir() || !strings.HasSuffix(strings.ToLower(name), ".md") || strings.EqualFold(name, "README.md") {
 			continue
 		}
-		path := filepath.Join(dirAbs, name)
-		data, err := os.ReadFile(path)
+		file := filepath.Join(dirAbs, name)
+		data, err := os.ReadFile(file)
 		if err != nil {
 			continue
 		}
-		rel := path
-		if r, err := filepath.Rel(root, path); err == nil && !strings.HasPrefix(r, "..") {
+		rel := file
+		if r, err := filepath.Rel(root, file); err == nil && !strings.HasPrefix(r, "..") {
 			rel = filepath.ToSlash(r)
 		}
 		a, ok := parseV0ADR(rel, name, string(data))
@@ -454,4 +455,78 @@ func (lf *lifter) planStandardADR(all []v0ADR, stdAt int) {
 	}
 	lf.writes[rel] = lf.std.doc
 	lf.res.StandardADR = res
+}
+
+// RG-5's in-record case: a v0 record moves from governance/adrs/ to
+// decisions/, one folder less deep, so its own relative links resolve
+// elsewhere after the lift: `../../architecture.md` misses, a sibling
+// `adr-0005_x.md` names a file that is gone.
+
+// recordLinkRe is a markdown link's target: inline, `](target)` (groups
+// 1 and 2), or a reference definition, `[x]: target` (groups 3 and 4).
+var recordLinkRe = regexp.MustCompile(`(\]\(\s*)([^)\s]+)|^(\s*\[[^\]]+\]:\s*)(\S+)`)
+
+// rebaseLinks re-bases the relative links of a record moved from the
+// path from to the path to (both project-relative) so each still points at
+// the same file, and a link to a moved record at its new path. Only a
+// target that exists says is there at the tag, or a moved record, is
+// re-based; links
+// in code, absolute ones, URLs and bare anchors are left as written.
+func rebaseLinks(body, from, to string, paths map[string]string, exists func(rel string) bool) string {
+	fromDir, toDir := path.Dir(from), path.Dir(to)
+	raw := strings.Split(body, "\n")
+	for _, l := range splitLines(body) {
+		if l.InCode {
+			continue
+		}
+		raw[l.N-1] = recordLinkRe.ReplaceAllStringFunc(raw[l.N-1], func(m string) string {
+			sm := recordLinkRe.FindStringSubmatch(m)
+			lead, target := sm[1], sm[2]
+			if sm[3] != "" {
+				lead, target = sm[3], sm[4]
+			}
+			if nt, ok := rebaseTarget(target, fromDir, toDir, paths, exists); ok {
+				return lead + nt
+			}
+			return m
+		})
+	}
+	return strings.Join(raw, "\n")
+}
+
+// rebaseTarget is target, a link written in fromDir, as written from
+// toDir; ok is false when it is not a relative link to a known path, or
+// reads the same.
+func rebaseTarget(target, fromDir, toDir string, paths map[string]string, exists func(rel string) bool) (string, bool) {
+	file, frag := target, ""
+	if i := strings.IndexAny(target, "#?"); i >= 0 {
+		file, frag = target[:i], target[i:]
+	}
+	if file == "" || strings.HasPrefix(file, "/") || strings.Contains(file, ":") {
+		return "", false
+	}
+	at := path.Join(fromDir, file)
+	if at == ".." || strings.HasPrefix(at, "../") {
+		return "", false
+	}
+	if np, ok := paths[at]; ok {
+		at = np
+	} else if !exists(at) {
+		return "", false
+	}
+	rel, err := filepath.Rel(filepath.FromSlash(toDir), filepath.FromSlash(at))
+	if err != nil {
+		return "", false
+	}
+	rel = filepath.ToSlash(rel)
+	if strings.HasPrefix(file, "./") && !strings.HasPrefix(rel, "../") {
+		rel = "./" + rel
+	}
+	if strings.HasSuffix(file, "/") && !strings.HasSuffix(rel, "/") {
+		rel += "/"
+	}
+	if rel+frag == target {
+		return "", false
+	}
+	return rel + frag, true
 }

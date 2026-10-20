@@ -438,6 +438,8 @@ type liftReport struct {
 	Candidates          []LiftCandidate  `json:"rule_candidates"`
 	Gates               LiftGates        `json:"gates"`
 	Readings            []string         `json:"readings,omitempty"`
+	// Regression is the lift's regression verdict (RG-6).
+	Regression *LiftRegressionRecord `json:"regression,omitempty"`
 }
 
 func (lf *lifter) report() string {
@@ -446,6 +448,7 @@ func (lf *lifter) report() string {
 		Version: r.Version, Tag: LiftTag, TagSHA: r.TagSHA, Deleted: r.Deleted, ADRs: r.ADRs, Changed: r.Changed,
 		Skipped: r.Skipped, GoUnformatted: r.GoUnformatted, Hashed: lf.hashedAll, V0StateReaders: r.V0StateReaders, UnresolvedCitations: r.UnresolvedCitations,
 		IDsLeft: r.IDsLeft, DanglingRefs: r.DanglingRefs, Candidates: r.Candidates, Gates: r.Gates, Readings: r.Readings,
+		Regression: lf.regression,
 	}, "", "  ")
 	if err != nil {
 		return "{}\n"
@@ -590,6 +593,10 @@ func (lf *lifter) dispositionWith(lim dispLimits) string {
 	for _, s := range r.Readings {
 		p("- %s\n", s)
 	}
+	// No regression runs: the section says why, in the lift commit (RG-6).
+	if lf.regression != nil {
+		writeRegression(&b, lf.regression, report, false)
+	}
 	return b.String()
 }
 
@@ -620,6 +627,60 @@ func writeCandidates(b *strings.Builder, cands []LiftCandidate, maxRows int, rep
 		p("| %d | %s | `%s` | |\n", i+1, cell(c.Text), strings.Join(append([]string{c.Source}, c.AlsoIn...), "` · `"))
 	}
 	p("\n")
+}
+
+// writeRegression is the disposition file's `## Regression` (RG-6): the
+// lift's regression verdict and note, in the names the v1.0.0 migration
+// entry reads, then one line per command with its exits and logs, each
+// with its note. compact (when the file would pass its ceiling) keeps only
+// the worst command's note — the one that entry branches on ("failing as
+// it did there", "the output changed after the lift"), which the .md must
+// carry, the JSON being in the lifting checkout only (RG-6a, D259); the
+// report has every one.
+func writeRegression(b *strings.Builder, rec *LiftRegressionRecord, report string, compact bool) {
+	p := func(format string, args ...any) { fmt.Fprintf(b, format, args...) }
+	p("\n## Regression\n\n")
+	if rec.Verdict == "" {
+		p("Verdict: none — %s; nothing was compared with a run at %s.\n", rec.Note, LiftTag)
+		return
+	}
+	p("The `regression:` command ran at %s, before the lift wrote anything, and at the lift commit (%s); the second run is judged against the first. ", LiftTag, short(rec.Commit))
+	p("The whole record is `regression` in `%s`, in the checkout that lifted.\n\n", report)
+	worst := 0
+	for i := range rec.Commands {
+		if liftVerdictRank(rec.Commands[i].Verdict) == liftVerdictRank(rec.Verdict) {
+			worst = i
+			break
+		}
+	}
+	if n := len(rec.Commands); n > 1 {
+		// The notes are on the commands' lines: the chain's is not repeated.
+		p("Verdict: `%s` — the worst of the %d commands below, each run on its own at both points, past a red one: %d, `%s`.\n\n",
+			rec.Verdict, n, worst+1, strings.ReplaceAll(rec.Commands[worst].Cmd, "\n", " ⏎ "))
+	} else {
+		p("Verdict: `%s` — %s\n\n", rec.Verdict, rec.Note)
+	}
+	if len(rec.NewFailures) > 0 {
+		p("regression_new_failures: `%s`\n\n", strings.Join(rec.NewFailures, "`, `"))
+	}
+	for i, c := range rec.Commands {
+		at := "not run at " + LiftTag
+		if c.ExitAtTag != nil {
+			at = fmt.Sprintf("exit %d at %s", *c.ExitAtTag, LiftTag)
+		}
+		p("%d. `%s` — `%s`: %s, exit %d after the lift", i+1, strings.ReplaceAll(c.Cmd, "\n", " ⏎ "), c.Verdict, at, c.ExitAfter)
+		if len(c.NewFailures) > 0 {
+			p("; regression_new_failures: `%s`", strings.Join(c.NewFailures, "`, `"))
+		}
+		p(". Logs: `%s`", c.Log)
+		if c.LogAtTag != "" {
+			p(", `%s`", c.LogAtTag)
+		}
+		if len(rec.Commands) > 1 && (!compact || i == worst) {
+			p(". %s", c.Note)
+		}
+		p("\n")
+	}
 }
 
 // writeADRTable is the disposition's ADR table: old → new, status and

@@ -463,3 +463,146 @@ func TestLift_DispositionStaysReviewable(t *testing.T) {
 	require.Contains(t, got, "development/lift-disposition.md: the lift's disposition list awaits review")
 	require.NotContains(t, got, "lift-disposition.json", "nothing to delete")
 }
+
+// RG-6 (D254): mdpdf and cortex, lifted by `ape framework update`, had
+// the regression verdict nowhere durable — not in the disposition file,
+// not in its JSON, not in the commit — so apex-plan re-derived it (tenax's
+// said "green" where the lift had said red-after-lift). It is recorded in
+// the JSON and in a `## Regression` section committed after the lift, in
+// the names the v1.0.0 migration entry (seq-05) reads (A22).
+func TestLift_RecordsTheRegressionVerdict(t *testing.T) {
+	// cortex's shape: a red lint, pre-existing, and a suite with an
+	// environmental failure at the tag plus a test reading the v0 corpus.
+	root := liftFixture(t, false)
+	require.NoError(t, os.WriteFile(filepath.Join(root, "lint.sh"), []byte("#!/bin/sh\necho 'x.go:1: unused'\nexit 1\n"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "gotest.sh"), []byte("#!/bin/sh\necho '--- FAIL: TestNeedsPostgres (0.01s)'\n"+
+		"test -f development/team-memory.md || echo '--- FAIL: TestKnownUnwiredList (0.00s)'\necho 'FAIL\tgithub.com/x/cortex\t0.5s'\nexit 1\n"), 0o755))
+	run(t, root, "add", "-A")
+	run(t, root, "commit", "-q", "-m", "gates")
+	root = liftWithGatesAt(t, root, "sh ./lint.sh\nsh ./gotest.sh")
+	res, err := Lift(ctx(), root, LiftOptions{})
+	require.NoError(t, err)
+	require.Equal(t, LiftRegressionRedAtTagNewFailures, res.RegressionVerdict)
+
+	// The JSON: regression, with every command.
+	var report struct {
+		Regression *struct {
+			Verdict     string   `json:"verdict"`
+			Note        string   `json:"note"`
+			NewFailures []string `json:"regression_new_failures"`
+			Commit      string   `json:"commit"`
+			Commands    []struct {
+				Cmd         string   `json:"cmd"`
+				Verdict     string   `json:"verdict"`
+				Note        string   `json:"note"`
+				ExitAtTag   *int     `json:"exit_at_tag"`
+				ExitAfter   int      `json:"exit_after"`
+				NewFailures []string `json:"regression_new_failures"`
+				Log         string   `json:"log"`
+				LogAtTag    string   `json:"log_at_tag"`
+			} `json:"commands"`
+		} `json:"regression"`
+	}
+	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(res.Report)))
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(data, &report))
+	rg := report.Regression
+	require.NotNil(t, rg, "regression is in %s", res.Report)
+	require.Equal(t, LiftRegressionRedAtTagNewFailures, rg.Verdict)
+	require.Equal(t, res.RegressionNote, rg.Note)
+	require.Equal(t, []string{"TestKnownUnwiredList"}, rg.NewFailures)
+	require.Equal(t, res.Commit, rg.Commit)
+	require.Len(t, rg.Commands, 2)
+	lint, suite := rg.Commands[0], rg.Commands[1]
+	require.Equal(t, "sh ./lint.sh", lint.Cmd)
+	require.Equal(t, LiftRegressionRedAtTag, lint.Verdict)
+	require.Contains(t, lint.Note, "failing as it did there", "seq-05's note, word for word")
+	require.Equal(t, []string{}, lint.NewFailures)
+	require.Equal(t, "sh ./gotest.sh", suite.Cmd)
+	require.Equal(t, LiftRegressionRedAtTagNewFailures, suite.Verdict)
+	require.Equal(t, []string{"TestKnownUnwiredList"}, suite.NewFailures)
+	for _, c := range rg.Commands {
+		require.NotNil(t, c.ExitAtTag)
+		require.Equal(t, 1, *c.ExitAtTag)
+		require.Equal(t, 1, c.ExitAfter)
+		require.FileExists(t, filepath.Join(root, filepath.FromSlash(c.Log)))
+		require.FileExists(t, filepath.Join(root, filepath.FromSlash(c.LogAtTag)))
+	}
+
+	// The .md: `## Regression`, in its own commit on the lift commit.
+	p := &Project{Root: root}
+	require.Equal(t, []string{LiftRegressionSubject, "apex: lift from apex-v0 v0.30.0"}, subjects(t, p)[:2])
+	require.Equal(t, res.Commit, run(t, root, "rev-parse", "HEAD~1"))
+	require.Equal(t, res.RegressionCommit, run(t, root, "rev-parse", "HEAD"))
+	require.Equal(t, "development/lift-disposition.md", run(t, root, "show", "--name-only", "--format=", "HEAD"))
+	require.NotContains(t, run(t, root, "show", "HEAD~1:development/lift-disposition.md"), "## Regression", "the lift commit is not rewritten")
+	require.Empty(t, run(t, root, "status", "--porcelain"))
+	md := read(t, p, "development/lift-disposition.md")
+	_, sec, ok := strings.Cut(md, "\n## Regression\n")
+	require.True(t, ok, md)
+	for _, want := range []string{
+		"Verdict: `red-at-tag-new-failures` — the worst of the 2 commands below, each run on its own at both points, past a red one: 2, `sh ./gotest.sh`.\n",
+		"regression_new_failures: `TestKnownUnwiredList`",
+		"1. `sh ./lint.sh` — `red-at-tag`: exit 1 at apex-v0-final, exit 1 after the lift. Logs: `_apex/state/logs/lift/regression-1.log`, `_apex/state/logs/lift/regression-1-at-tag.log`. red at the lift commit",
+		"failing as it did there",
+		"2. `sh ./gotest.sh` — `red-at-tag-new-failures`: exit 1 at apex-v0-final, exit 1 after the lift; regression_new_failures: `TestKnownUnwiredList`. Logs: `_apex/state/logs/lift/regression-2.log`, `_apex/state/logs/lift/regression-2-at-tag.log`.",
+		"`regression` in `_apex/state/lift-disposition.json`",
+	} {
+		require.Contains(t, sec, want)
+	}
+	require.Contains(t, run(t, root, "log", "-1", "--format=%B"), "judged against its run at apex-v0-final: red-at-tag-new-failures.")
+}
+
+// RG-6: with no run, the lift commit's disposition file says why, and no
+// second commit is made.
+func TestLift_RecordsWhyNoRegressionRan(t *testing.T) {
+	root := liftWithGates(t, "true")
+	res, err := Lift(ctx(), root, LiftOptions{NoVerifyRun: true})
+	require.NoError(t, err)
+	require.Empty(t, res.RegressionCommit)
+	p := &Project{Root: root}
+	require.Equal(t, "apex: lift from apex-v0 v0.30.0", subjects(t, p)[0])
+	require.Contains(t, read(t, p, "development/lift-disposition.md"), "\n## Regression\n\nVerdict: none — not run (--no-verify-run); nothing was compared with a run at apex-v0-final.\n")
+	var report struct {
+		Regression map[string]any `json:"regression"`
+	}
+	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(res.Report)))
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(data, &report))
+	require.Equal(t, map[string]any{"verdict": "", "note": "not run (--no-verify-run)", "regression_new_failures": []any{}}, report.Regression)
+}
+
+// RG-6a (D259, framework 12:56): the compact `## Regression` (the .md past
+// its ceiling) left out every command's note, so a red-at-tag worst lost
+// the note seq-05 branches on — "failing as it did there" or "the output
+// changed after the lift" — while the JSON holding it is in the lifting
+// checkout only. Compact keeps the worst command's note, one line.
+func TestWriteRegression_CompactKeepsTheWorstNote(t *testing.T) {
+	exit := func(n int) *int { return &n }
+	red := func(sha string) *CheckResult { return &CheckResult{Exit: 1, Log: "after.log", OutputSHA256: sha} }
+	for _, c := range []struct {
+		name, afterSHA, afterOut, phrase string
+	}{
+		{"failing as it did there", "a", "lint: 1 issue\n", "failing as it did there"},
+		{"the output changed after the lift", "b", "lint: 2 issues\n", "the output changed after the lift"},
+	} {
+		v, note, _ := judgeLiftRegression(red("a"), red(c.afterSHA), "lint: 1 issue\n", c.afterOut)
+		require.Equal(t, LiftRegressionRedAtTag, v, c.name)
+		require.Contains(t, note, c.phrase, c.name)
+		rec := &LiftRegressionRecord{Verdict: LiftRegressionRedAtTag, Note: "the chain's note", NewFailures: []string{}, Commit: "0123456789", Commands: []LiftRegressionRecordCommand{
+			{Cmd: "true", Verdict: LiftRegressionGreen, Note: "green at the lift commit, as at apex-v0-final", ExitAtTag: exit(0), Log: "r1.log", LogAtTag: "r1-at-tag.log"},
+			{Cmd: "make lint", Verdict: LiftRegressionRedAtTag, Note: note, ExitAtTag: exit(1), ExitAfter: 1, Log: "r2.log", LogAtTag: "r2-at-tag.log"},
+			{Cmd: "flutter test", Verdict: LiftRegressionCannotRun, Note: "cannot run here (exit 127 …)", ExitAtTag: exit(127), ExitAfter: 127, Log: "r3.log", LogAtTag: "r3-at-tag.log"},
+		}}
+		var full, compact strings.Builder
+		writeRegression(&full, rec, "_apex/state/lift-disposition.json", false)
+		writeRegression(&compact, rec, "_apex/state/lift-disposition.json", true)
+		require.Contains(t, compact.String(), "Verdict: `red-at-tag` — the worst of the 3 commands below, each run on its own at both points, past a red one: 2, `make lint`.\n", c.name)
+		require.Contains(t, compact.String(), "\n2. `make lint` — `red-at-tag`: exit 1 at apex-v0-final, exit 1 after the lift. Logs: `r2.log`, `r2-at-tag.log`. "+note+"\n", c.name)
+		require.Equal(t, 1, strings.Count(compact.String(), c.phrase), "%s: the worst's note, once", c.name)
+		require.Contains(t, compact.String(), "\n1. `true` — `green`: exit 0 at apex-v0-final, exit 0 after the lift. Logs: `r1.log`, `r1-at-tag.log`\n", "the others' notes are left out")
+		require.NotContains(t, compact.String(), "cannot run here", c.name)
+		require.Contains(t, full.String(), "cannot run here", "the full form keeps every note")
+		require.Less(t, compact.Len(), full.Len())
+	}
+}
