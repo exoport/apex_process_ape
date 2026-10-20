@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/vt"
 )
 
@@ -81,6 +82,68 @@ func (s *screen) text() string {
 		end--
 	}
 	return strings.Join(lines[:end], "\n")
+}
+
+// idlePrompt reports whether a row of the grid is claude's prompt line with
+// nothing typed on it: the ❯ glyph first (blank cells before it allowed),
+// then only cells that are blank — U+00A0 included — or drawn faint, the
+// first of them possibly reverse video.
+//
+// Faint is how claude draws the placeholder it sometimes puts on an empty
+// prompt (2.1.294: `❯` U+00A0, then SGR 2 `Try "refactor <filepath>"` SGR
+// 22). The text of that row is not empty, so emptyPromptRe rejects it; the
+// cells say what the text cannot — nothing on the line was typed. Read from
+// the attributes, never the wording, so a new hint changes nothing.
+//
+// Reverse video is claude's own cursor. It hides the terminal's and, in some
+// terminals (measured under tmux on 2.1.294 and 2.1.304, not in the eval's),
+// draws one over the hint's first character: SGR 7 `T` SGR 27, then SGR 2
+// `ry …`. So a reverse cell is accepted only where an empty input's cursor
+// sits — the first thing after the glyph — and only with faint cells after
+// it; a lone reverse character is one typed with the cursor on it.
+//
+// A typed line is drawn in the normal weight, and so is a menu row (`❯ 1.
+// …`): both still fail.
+func (s *screen) idlePrompt() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for y := range s.term.Height() {
+		if s.idlePromptRow(y) {
+			return true
+		}
+	}
+	return false
+}
+
+// idlePromptRow is idlePrompt for row y. The caller holds s.mu.
+func (s *screen) idlePromptRow(y int) bool {
+	blank := func(c *uv.Cell) bool {
+		return c == nil || c.Content == "" || c.Content == " " || c.Content == "\u00a0"
+	}
+	width := s.term.Width()
+	x := 0
+	for x < width && blank(s.term.CellAt(x, y)) {
+		x++
+	}
+	if x == width || s.term.CellAt(x, y).Content != ReadyGlyph {
+		return false
+	}
+	drawn, cursor, faint := false, false, false
+	for x++; x < width; x++ {
+		c := s.term.CellAt(x, y)
+		switch {
+		case blank(c):
+			continue
+		case c.Style.Attrs&uv.AttrFaint != 0:
+			faint = true
+		case c.Style.Attrs&uv.AttrReverse != 0 && !drawn:
+			cursor = true
+		default:
+			return false
+		}
+		drawn = true
+	}
+	return !cursor || faint
 }
 
 // close releases the goroutine draining the emulator's answers. The grid

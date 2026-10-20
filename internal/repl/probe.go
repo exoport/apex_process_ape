@@ -87,9 +87,13 @@ func ProbeClaude(ctx context.Context, claudeBin string) ProbeResult {
 	// 2.1.270 broken, because its prompt line is `❯` plus U+00A0 and
 	// emptyPromptRe did not accept the no-break space. The live
 	// startup_probe subtest caught the probe; the probe caught the regex.
+	var grid *screen
+	if s, ok := lookup(name); ok {
+		grid = s.screen
+	}
 	deadline := time.Now().Add(probeFooterWait)
 	for {
-		footer, prompt := strings.Contains(pane, readyFooter), emptyPromptRe.MatchString(pane)
+		footer, prompt := probeSignals(pane, grid)
 		if footer && prompt {
 			res.Verdict, res.Pane = ProbeVerified, pane
 			return res
@@ -109,6 +113,20 @@ func ProbeClaude(ctx context.Context, claudeBin string) ProbeResult {
 		time.Sleep(ReadyPollInterval)
 		pane, _ = CapturePane(pctx, name)
 	}
+}
+
+// probeSignals reads the two ready signals off a ready REPL: the footer, and
+// an empty ❯ prompt line. The prompt is empty when emptyPromptRe matches the
+// pane, or when the grid's ❯ row holds nothing typed — only blank or faint
+// cells, and claude's own cursor (see screen.idlePrompt). claude sometimes
+// draws a faint placeholder hint there (`❯ Try "refactor <filepath>"`), and a
+// probe reading only the text declared that working claude broken,
+// nondeterministically, on the first run after an update (E-R7e-1). Probe
+// only: replReady and emptyPromptRe's other callers are unchanged.
+func probeSignals(pane string, grid *screen) (footer, prompt bool) {
+	footer = strings.Contains(pane, readyFooter)
+	prompt = emptyPromptRe.MatchString(pane) || (grid != nil && grid.idlePrompt())
+	return footer, prompt
 }
 
 // judgeNotReady classifies a readiness failure: a claude ape could not
