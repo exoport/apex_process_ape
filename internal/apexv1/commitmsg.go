@@ -168,17 +168,15 @@ func subjectFallback(c *Change, cc CommitConfig) bool {
 }
 
 // DefaultChangeType is the type: `ape change new` writes when --type is
-// not given (Q110): fix for a tweak (milestone none), feat otherwise — or
-// none when that type is not among the project's commit types.
+// not given (Q110): feat for a milestone's change — or none when feat is
+// not among the project's commit types. A tweak (milestone none) has no
+// default (Q135, D240): it says what it is, so an off-roadmap feature is
+// never typed fix; "" for it, and change new refuses it without --type.
 func DefaultChangeType(milestone string, types []string) string {
-	t := "feat"
-	if milestone == MilestoneNone {
-		t = "fix"
-	}
-	if !slices.Contains(types, t) {
+	if milestone == MilestoneNone || !slices.Contains(types, "feat") {
 		return ""
 	}
-	return t
+	return "feat"
 }
 
 // archiveSubject renders the squash commit's subject from the template.

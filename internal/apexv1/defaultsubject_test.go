@@ -80,14 +80,25 @@ func TestCheck_UntypedChangeInFlight(t *testing.T) {
 	requireCode(t, err, CodeCheckFailed)
 }
 
-// Q110: change new writes type: — --type, else fix for a tweak and feat
-// otherwise; an unknown --type is usage.type; a project whose types lack
-// the default gets none.
+// Q110: change new writes type: — --type, else feat for a milestone's
+// change; an unknown --type is usage.type; a project whose types lack
+// the default gets none. Q135 (D240): a tweak has no default — without
+// --type it is usage.type, naming the project's types, and nothing is
+// written; with one it is written as given.
 func TestNewChange_Type(t *testing.T) {
 	p := fixture(t, baseFiles())
+	head := HeadSHA(ctx(), p.Root)
+	_, err := p.NewChangeOfType(ctx(), "add-hug", MilestoneNone, "", []string{"greeting"}, nil)
+	requireCode(t, err, "usage.type")
+	require.ErrorContains(t, err, "--milestone none needs --type: a tweak says what it is: feat, fix, perf, refactor, docs, test, build, ci, chore")
+	require.Equal(t, head, HeadSHA(ctx(), p.Root), "nothing committed")
+	require.NoDirExists(t, p.ChangeDir("add-hug"), "nothing written")
+	_, err = p.NewChange(ctx(), "add-hug", MilestoneNone, []string{"greeting"}, nil)
+	requireCode(t, err, "usage.type")
 	for _, c := range []struct{ id, milestone, typ, want string }{
 		{"add-wave", "M1", "", "feat"},
-		{"fix-typo", MilestoneNone, "", "fix"},
+		{"fix-typo", MilestoneNone, "fix", "fix"},
+		{"add-shout", MilestoneNone, "feat", "feat"},
 		{"document-it", "M1", "docs", "docs"},
 	} {
 		res, err := p.NewChangeOfType(ctx(), c.id, c.milestone, c.typ, []string{"greeting"}, nil)
@@ -97,7 +108,7 @@ func TestNewChange_Type(t *testing.T) {
 		require.Equal(t, c.want, ch.Meta.Type, c.id)
 	}
 	require.NotContains(t, findingMessages(p.CheckChange("add-wave")), "type", "a skeleton's type passes")
-	_, err := p.NewChangeOfType(ctx(), "add-hug", "M1", "feature", []string{"greeting"}, nil)
+	_, err = p.NewChangeOfType(ctx(), "add-hug", "M1", "feature", []string{"greeting"}, nil)
 	requireCode(t, err, "usage.type")
 	require.ErrorContains(t, err, "feat, fix, perf")
 
@@ -112,4 +123,7 @@ func TestNewChange_Type(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "edit", res.Type)
 	require.Contains(t, read(t, q, "development/changes/add-hug/change.md"), "\ntype: edit\n")
+	_, err = q.NewChangeOfType(ctx(), "add-bow", MilestoneNone, "", []string{"greeting"}, nil)
+	requireCode(t, err, "usage.type")
+	require.ErrorContains(t, err, "a tweak says what it is: draft, edit — ", "the project's own types")
 }

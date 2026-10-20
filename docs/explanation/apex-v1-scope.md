@@ -47,7 +47,8 @@ generated from commit history should filter `apex:` subjects. The squash subject
 ## Tweaks are a queue, not an interrupt
 
 A tweak (`milestone: none`) is a change a person asked for outside the roadmap. Its `type:` says
-what it is (`fix` for a defect, `feat` for a small feature). A person approves it with `ape change approve`, and the orchestrator runs approved
+what it is (`fix` for a defect, `feat` for a small feature), so `ape change new --milestone none`
+needs `--type`. A person approves it with `ape change approve`, and the orchestrator runs approved
 tweaks first at its next change boundary. One checkout cannot hold two actors: the
 orchestrator's working tree sits on `change/<id>` most of the time. So tweaks are planned and approved
 **between runs**: wait for the run to end, or `ape run stop` it, plan and approve the tweak, and start

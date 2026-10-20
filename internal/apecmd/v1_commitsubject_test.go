@@ -22,7 +22,14 @@ func TestCommitSubject_CLI(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(stdout), &res), stdout)
 	require.Equal(t, "feat", res.Type)
 
-	_, _, err = v1Exec(t, newChangeCmd, "new", "fix-typo", "--milestone", "none", "--touches", "greeting", "--cwd", root)
+	// Q135 (D240): a tweak says what it is — no default type, exit 2
+	// usage.type naming the project's types, nothing written.
+	stdout, _, err = v1Exec(t, newChangeCmd, "new", "fix-typo", "--milestone", "none", "--touches", "greeting", "--json", "--cwd", root)
+	require.Equal(t, ExitUsage, exitCodeOf(t, err))
+	require.Contains(t, stdout, `"code": "usage.type"`)
+	require.Contains(t, stdout, "a tweak says what it is: feat, fix, perf")
+	require.NoDirExists(t, filepath.Join(root, "development", "changes", "fix-typo"))
+	_, _, err = v1Exec(t, newChangeCmd, "new", "fix-typo", "--milestone", "none", "--type", "fix", "--touches", "greeting", "--cwd", root)
 	require.NoError(t, err)
 	doc, err := os.ReadFile(filepath.Join(root, "development", "changes", "fix-typo", "change.md"))
 	require.NoError(t, err)

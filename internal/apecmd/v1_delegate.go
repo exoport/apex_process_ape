@@ -193,7 +193,7 @@ func delegateTweakOption(o *apexv1.DelegateOutcome) string {
 	if o.ToPerson != apexv1.ToPersonArchived {
 		return ""
 	}
-	return ", or has a tweak planned for what it found (apex-change with the reason, `--milestone none`; a person approves it: `ape change approve <tweak-id> --by <who>`)"
+	return ", or has a tweak planned for what it found (apex-change with the reason, `--milestone none --type fix`; a person approves it: `ape change approve <tweak-id> --by <who>`)"
 }
 
 // startDelegateSession starts the detached delegate session for an

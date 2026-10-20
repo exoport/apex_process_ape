@@ -139,7 +139,7 @@ func TestLimits_ConsecutiveBlocks(t *testing.T) {
 	run(t, p.Root, "switch", "-q", "main")
 	_, err = p.NewChange(ctx(), "add-bow", "M1", []string{"greeting"}, nil)
 	require.Equal(t, CodeBlocksExceeded, failCode(t, err))
-	_, err = p.NewChange(ctx(), "fix-typo", MilestoneNone, []string{"greeting"}, nil)
+	_, err = p.NewChangeOfType(ctx(), "fix-typo", MilestoneNone, "fix", []string{"greeting"}, nil)
 	require.NoError(t, err, "a tweak counts toward no milestone")
 	require.NoError(t, p.OrchestratorLimits(ctx(), "fix-typo"))
 

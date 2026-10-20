@@ -44,6 +44,7 @@ func TestDelegateToPerson(t *testing.T) {
 	}
 	opt := delegateTweakOption(&apexv1.DelegateOutcome{ToPerson: apexv1.ToPersonArchived})
 	require.Contains(t, opt, "has a tweak planned")
+	require.Contains(t, opt, "`--milestone none --type fix`")
 	require.Contains(t, opt, "`ape change approve <tweak-id> --by <who>`")
 	require.Empty(t, delegateTweakOption(&apexv1.DelegateOutcome{ToPerson: apexv1.ToPersonSecondFail}))
 }

@@ -192,9 +192,11 @@ like any change.
 --type is change.md's type: (Q110), the archive commit's {type} — the default subject is
 "{type}: {title}" (D193): one of the project's commit types (_apex/config.yaml
 commit.types, default feat, fix, perf, refactor, docs, test, build, ci, chore; else exit 2,
-usage.type). Without it ape writes fix for --milestone none and feat otherwise (none
-when that type is not among the project's commit types); the planner may change it
-before start. JSON "type" is the type written.
+usage.type). It is required with --milestone none (exit 2, usage.type, naming the
+project's types; Q135): a tweak says what it is — fix for a defect, feat for a small
+feature — so an off-roadmap feature never lands under Fixed. Without it a milestone's
+change gets feat (none when feat is not among the project's commit types); the planner
+may change it before start. JSON "type" is the type written.
 --touches lists the capabilities the change adds to or modifies (kebab slugs; new ones
 are fine — a capability is born from its first change). --paths are globs used for
 overlap detection. Overlap (shared touches or paths) with another unarchived change
@@ -214,9 +216,10 @@ with the blocked changes (answer or abandon them) and resets the count by approv
 milestone again: `+"`ape milestone approve <M> --by <who>`"+`. Tweaks count toward no milestone.
 
 Exit codes: 0 ok · 1 id taken (incl. archive), milestone not in roadmap, the milestone past
-limits.consecutive_blocks, or HEAD on a change branch · 2 usage (incl. usage.type).`,
+limits.consecutive_blocks, or HEAD on a change branch · 2 usage (incl. usage.type: --type
+unknown, or missing with --milestone none).`,
 		"  ape change new add-tenant-delete --milestone M2 --touches tenants --paths 'internal/api/**'\n"+
-			"  ape change new fix-login-redirect --milestone none --touches auth\n"+
+			"  ape change new fix-login-redirect --milestone none --type fix --touches auth\n"+
 			"  ape change new document-the-api --milestone M2 --touches api --type docs",
 		&f,
 		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
@@ -239,7 +242,7 @@ limits.consecutive_blocks, or HEAD on a change branch · 2 usage (incl. usage.ty
 	cmd.Flags().StringVar(&milestone, "milestone", "", "milestone id from roadmap.md, or none for a tweak (required)")
 	cmd.Flags().StringVar(&touches, "touches", "", "comma-separated capability slugs (required)")
 	cmd.Flags().StringVar(&paths, "paths", "", "comma-separated globs, for overlap detection")
-	cmd.Flags().StringVar(&typ, "type", "", "change.md's type: (a commit type); default fix for --milestone none, feat otherwise")
+	cmd.Flags().StringVar(&typ, "type", "", "change.md's type: (a commit type); required with --milestone none, default feat otherwise")
 	return cmd
 }
 

@@ -39,7 +39,7 @@ The system SHALL hug.
 // change is paused; then the milestone change is resumed with `change
 // start`, which rebases it onto the tweak and re-baselines it at main's
 // tip; it verifies green and archives. main gets exactly two commits: the
-// tweak, then the change.
+// tweak, then the change. A tweak without --type is refused (Q135).
 func TestV1_TweakLaneAndResumeAfterTheBaseMoved(t *testing.T) {
 	ape, project, _, env := reviewProject(t)
 	git := func(args ...string) string {
@@ -62,11 +62,14 @@ func TestV1_TweakLaneAndResumeAfterTheBaseMoved(t *testing.T) {
 
 	// The milestone change is paused; a person's request becomes a tweak.
 	git("switch", "-q", base)
-	apeOK("change", "new", "fix-hug", "--milestone", "none", "--touches", "greeting")
+	out, code := runApe(t, ape, project, env, "change", "new", "fix-hug", "--milestone", "none", "--touches", "greeting")
+	require.Equal(t, 2, code, "a tweak says what it is: --type is required (Q135): %s", out)
+	require.Contains(t, out, "usage.type")
+	apeOK("change", "new", "fix-hug", "--milestone", "none", "--type", "fix", "--touches", "greeting")
 	require.NoError(t, writeFile(filepath.Join(project, "development", "changes", "fix-hug", "change.md"), v1Tweak))
 	git("add", "-A")
 	git("commit", "-q", "-m", "plan: fix-hug")
-	_, code := runApe(t, ape, project, env, "change", "start", "fix-hug")
+	_, code = runApe(t, ape, project, env, "change", "start", "fix-hug")
 	require.Equal(t, 1, code, "a tweak starts only once a person approved it")
 	_, code = runApe(t, ape, project, env, "change", "approve", "add-wave", "--by", "ann")
 	require.Equal(t, 1, code, "a milestone change is approved through its milestone")
@@ -110,7 +113,7 @@ func TestV1_TweakLaneAndResumeAfterTheBaseMoved(t *testing.T) {
 	require.Equal(t, mainBefore, git("rev-parse", "HEAD~1"))
 
 	// The milestone change resumes: start catches it up with main.
-	out := apeOK("change", "start", "add-wave", "--json")
+	out = apeOK("change", "start", "add-wave", "--json")
 	//nolint:tagliatelle // ape's snake_case --json contract
 	var start struct {
 		Status  string `json:"status"`

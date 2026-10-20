@@ -574,7 +574,8 @@ func (p *Project) NewChange(ctx context.Context, id, milestone string, touches, 
 
 // NewChangeOfType validates id and writes the change skeleton and a draft
 // state. typ is change.md's type: (Q110), one of the project's commit
-// types (else usage.type); "" takes DefaultChangeType.
+// types (else usage.type); "" takes DefaultChangeType — for a milestone's
+// change only: a tweak needs one (usage.type, Q135).
 func (p *Project) NewChangeOfType(ctx context.Context, id, milestone, typ string, touches, paths []string) (*NewChangeResult, error) {
 	if err := p.recoverArchive(ctx); err != nil {
 		return nil, err
@@ -631,6 +632,11 @@ func (p *Project) NewChangeOfType(ctx context.Context, id, milestone, typ string
 	}
 	types := p.commitConfig().TypeList()
 	switch typ = strings.TrimSpace(typ); {
+	case typ == "" && milestone == MilestoneNone:
+		// A tweak says what it is (Q135, D240): no default, so an
+		// off-roadmap feature never lands as fix.
+		return nil, &UsageError{Code: "usage.type", Msg: "--milestone none needs --type: a tweak says what it is: " + strings.Join(types, ", ") +
+			" — pass the one it is as --type (_apex/config.yaml commit.types)"}
 	case typ == "":
 		typ = DefaultChangeType(milestone, types)
 	case !slices.Contains(types, typ):
