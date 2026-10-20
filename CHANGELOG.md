@@ -130,6 +130,17 @@ eval's E-R7-1 and E2 residual (D219).
   pointer, and `project check` lists the `roadmap.next-inline` notice. A project an rc.7b move
   left that way is repaired by running `ape next move` again.
 
+### rc.7e: the lane `milestone: none` is a **tweak** (D240, Q135)
+
+- **The lane is renamed tweak** everywhere a person or a skill reads it, since "fix" collided
+  with the conventional `type: fix`: `ape status --json` `tweaks` (was `fixes`) and
+  `changes[].lane: "tweak"` (was `"fix"`); `next` / `next_why`, the brief, the board and the
+  messages say "tweak"; the phrase grammar reads `ape change approve <tweak-id>  approve
+  <tweak-id>`. No code id changes (none named the lane). Unchanged: `--milestone none`,
+  `milestone: none`, `type: fix`, the diagnostics' `fix` field.
+- **`ape change new --milestone none` needs `--type`** (`usage.type`, exit 2): a tweak says
+  what it is (feat, fix, …); a milestone change still defaults to `feat`.
+
 ### rc.7d: R7j-1, a prompt Claude Code generated never grants a person act (D238)
 
 - **Fixes an E2 bypass (high):** `UserPromptSubmit` also fires for a background command's
