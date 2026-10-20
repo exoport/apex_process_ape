@@ -5152,7 +5152,8 @@ ape project lift [flags]
 ```
 
 Lift an APEX v0 project (framework v0.15.0–v0.31.x) to the v1 layout, in ONE commit
-whose subject starts "apex: lift" — the v1 epoch. The judgment half (which rule lives
+whose subject starts "apex: lift" — the v1 epoch (once the regression command has run,
+a second commit records its verdict, below). The judgment half (which rule lives
 where, what M1 delivers) is apex-plan's, from the disposition file this writes.
 
 Before: a person tags the commit to lift and pushes the tag. The tag is the archive of
@@ -5377,12 +5378,22 @@ that does not split (a line that changes the shell's state, a construct left ope
 one command, run as written. The exit code stays 0: the
 commit stands either way, and the verdict is in --json and the output.
 
+The verdict is also recorded where apex-plan reads it (RG-6): `regression` in
+_apex/state/lift-disposition.json — verdict, note, regression_new_failures, commit, and
+commands (cmd, verdict, note, exit_at_tag, exit_after, regression_new_failures, log,
+log_at_tag), one per command run — and a "## Regression" section of the disposition
+file (the verdict and its note, then one line per command with its exits and logs),
+committed on its own after the lift commit as "apex: lift regression verdict"
+(regression_commit in --json). With no run (no command, --no-verify-run) the lift
+commit's disposition file says why, and the JSON has the note with an empty verdict.
+
 --from-update is how the framework's v1.0.0 migration entry runs it inside
 `ape framework update`: uncommitted changes under .claude/skills/, _apex/ (not
 config.yaml or state/), .aboard/ and .gitignore are the install's, left out of the lift
 commit for the update's own; skills the v1 install placed are never deleted. An untracked
 .claude/settings.json (the update's .claude/ shape un-ignored it) is no refusal: the lift
-merges the v1 hooks into it and commits it.
+merges the v1 hooks into it and commits it. The regression verdict lines go to stderr,
+which the update shows (its stdout is not).
 
 Exit codes: 0 lifted (or planned) · 1 refused or failed (code in --json) · 2 usage.
 
