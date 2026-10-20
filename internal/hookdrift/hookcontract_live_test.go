@@ -9,7 +9,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/exoport/apex_process_ape/internal/apexv1"
+	"github.com/exoport/apex_process_ape/internal/runlog"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 // TestLive_HookContract is hookdrift's own gate, and it exists because the
@@ -93,8 +96,9 @@ func TestLive_HookContract(t *testing.T) {
 	// attempt below, because retrying that would be re-rolling until the
 	// answer is convenient — the precise thing this package exists to stop.
 	var rep *Report
+	var project string
 	for attempt := 1; attempt <= seedAttempts; attempt++ {
-		project := seedProject(t)
+		project = seedProject(t)
 		runSeed(t, apeBin, project)
 
 		// Judge only what this run wrote: the window starts at the test, so
@@ -132,6 +136,55 @@ func TestLive_HookContract(t *testing.T) {
 				rep.Judged, o.Seen, o.Event, o.Field)
 		})
 	}
+
+	// E2 (D238) rests on one more field, in the transcript rather than a
+	// hook payload: a prompt grants a person act only when its transcript
+	// entry carries origin.kind "human", which Claude Code writes on every
+	// typed prompt and on nothing it generates (a task-notification, an
+	// Agent result, a Monitor event). Dropped or renamed, nothing errors:
+	// every grant is silently refused. The seed's prompt is typed into the
+	// PTY, so its entry must read as the person's through the very reader
+	// pre-tool uses.
+	t.Run("transcript_origin_human", func(t *testing.T) {
+		transcript := seedTranscript(t, project)
+		prompts := apexv1.TranscriptPrompts(transcript)
+		require.NotEmptyf(t, prompts, "the seeded session's transcript %s holds no user message ape can read", transcript)
+		var seed *apexv1.TranscriptPrompt
+		for i := range prompts {
+			if strings.Contains(prompts[i].Text, seedPrompt[:40]) {
+				seed = &prompts[i]
+				break
+			}
+		}
+		require.NotNilf(t, seed, "no user message in %s holds the seed prompt", transcript)
+		require.Equalf(t, "human", seed.Origin,
+			"DRIFT: Claude Code %s wrote the typed seed prompt's transcript entry with origin.kind %q, not \"human\". "+
+				"`ape hook pre-tool` grants a person act only on that field (D238), so every person act in a "+
+				"person's Claude Code session is now refused.", rep.Judged, seed.Origin)
+		for _, m := range prompts {
+			if strings.HasPrefix(strings.TrimSpace(m.Text), "<task-notification>") {
+				require.NotEqualf(t, "human", m.Origin,
+					"DRIFT: Claude Code %s marks a task-notification's transcript entry as typed by a person "+
+						"(origin.kind \"human\"); E2's allow-list would let it grant a person act.", rep.Judged)
+			}
+		}
+	})
+}
+
+// seedTranscript is the seeded `ape prompt` session's own transcript, as
+// its prompt.yaml records it.
+func seedTranscript(t *testing.T, project string) string {
+	t.Helper()
+	metas, err := filepath.Glob(filepath.Join(runlog.PromptsRoot(project), "*", "prompt.yaml"))
+	require.NoError(t, err)
+	require.Lenf(t, metas, 1, "expected the one seeded prompt run under %s", runlog.PromptsRoot(project))
+	data, err := os.ReadFile(metas[0])
+	require.NoError(t, err)
+	var meta runlog.PromptMeta
+	require.NoError(t, yaml.Unmarshal(data, &meta))
+	require.NotEmptyf(t, meta.TranscriptPath, "%s records no transcript_path", metas[0])
+	require.FileExists(t, meta.TranscriptPath)
+	return meta.TranscriptPath
 }
 
 // seedAttempts bounds the reseeding above. Three is enough for a step the
@@ -150,6 +203,13 @@ func seedIsAdequate(r *Report) bool {
 	return true
 }
 
+// seedPrompt is the one prompt the seeding session is typed.
+const seedPrompt = "Delegate this task; do not do it yourself. Call the Task tool exactly once to " +
+	"spawn one general-purpose subagent, and have THAT subagent read README.md in the current " +
+	"directory and report back the text of its first heading. You must not read README.md " +
+	"yourself — the delegation is the point of this exercise. When the subagent reports back, " +
+	"tell me the heading and stop. Do not create, modify or delete any files."
+
 // runSeed drives one unattended session in project.
 //
 // The prompt forbids doing the work directly, because that is the shortcut
@@ -159,11 +219,7 @@ func seedIsAdequate(r *Report) bool {
 // delegation the only way to comply.
 func runSeed(t *testing.T, apeBin, project string) {
 	t.Helper()
-	const seed = "Delegate this task; do not do it yourself. Call the Task tool exactly once to " +
-		"spawn one general-purpose subagent, and have THAT subagent read README.md in the current " +
-		"directory and report back the text of its first heading. You must not read README.md " +
-		"yourself — the delegation is the point of this exercise. When the subagent reports back, " +
-		"tell me the heading and stop. Do not create, modify or delete any files."
+	seed := seedPrompt
 
 	// Haiku keeps it to fractions of a cent; the timeouts are backstops for
 	// a session that hangs rather than expected durations.
