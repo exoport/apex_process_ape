@@ -99,9 +99,20 @@ func AppendNextLines(roadmap []byte, lines []string) []byte {
 			at--
 		}
 	case label >= 0:
+		// The label's list runs over blank lines (R7b-1) to the first
+		// milestone or the first other line: the new lines go after its
+		// last item.
+		limit := len(ls)
+		if firstH2 >= 0 {
+			limit = firstH2
+		}
 		at = label + 1
-		for at < len(ls) && (firstH2 < 0 || at < firstH2) && isListLine(ls[at]) {
-			at++
+		for j := label + 1; j < limit; j++ {
+			if isListLine(ls[j]) {
+				at = j + 1
+			} else if strings.TrimSpace(ls[j]) != "" {
+				break
+			}
 		}
 	}
 	var out []string
@@ -142,7 +153,7 @@ func NextItems(roadmap string) []string {
 		if lv, _ := headingLevel(l); lv == 2 {
 			break
 		}
-		if !l.InCode && nextLabelRe.MatchString(strings.TrimSpace(l.Text)) {
+		if t := strings.TrimSpace(l.Text); !l.InCode && (nextLabelRe.MatchString(t) || nextPointerRe.MatchString(t)) {
 			out = append(out, nextListItems(lines[i+1:], true, true)...)
 			break
 		}
@@ -163,9 +174,10 @@ func NextFileItems(doc string) []string {
 }
 
 // nextListItems reads the list items of body. Under a label (label) the list
-// ends at the first line that is not a list line, as AppendNextLines
-// places them; elsewhere blank lines and prose between items are passed
-// over. A heading ends the list (atHeading), or only the item before it.
+// runs over blank lines (R7b-1) and ends at the first other line that is
+// not a list line, as AppendNextLines places them; elsewhere blank lines
+// and prose between items are passed over. A heading ends the list
+// (atHeading), or only the item before it.
 func nextListItems(body []mdLine, label, atHeading bool) []string {
 	out := []string{}
 	in := false
@@ -189,7 +201,7 @@ func nextListItems(body []mdLine, label, atHeading bool) []string {
 			}
 		case in && t != "" && isListLine(l.Text):
 			out[len(out)-1] += " " + t
-		case label:
+		case label && t != "":
 			return out
 		default:
 			in = false

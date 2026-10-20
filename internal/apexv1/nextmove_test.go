@@ -77,6 +77,23 @@ func TestPlanNextMove(t *testing.T) {
 			wantNext: nextMDSkeleton + "\n- a\n",
 			moved:    []string{"a"},
 		},
+		// R7b-1 (pdfa): the label's block runs to the first milestone, so the
+		// items after a blank line inside it move too.
+		"a blank line inside the label's block (R7b-1)": {
+			roadmap:  "# Roadmap\n\nNext — not milestones:\n- 2026-10-19 a (from add-x)\n- 2026-10-19 b (from add-x)\n\n- 2026-10-19 c\n- 2026-10-19 d\n\n## M1 — A\n",
+			wantRM:   "# Roadmap\n\n" + NextPointer + "\n\n## M1 — A\n",
+			wantNext: nextMDSkeleton + "\n- 2026-10-19 a (from add-x)\n- 2026-10-19 b (from add-x)\n\n- 2026-10-19 c\n- 2026-10-19 d\n",
+			moved:    []string{"2026-10-19 a (from add-x)", "2026-10-19 b (from add-x)", "2026-10-19 c", "2026-10-19 d"},
+		},
+		// R7b-1's repair: a project an rc.7b move left with items under the
+		// pointer has them appended to next.md, the pointer kept.
+		"items left under the pointer by an earlier move (R7b-1)": {
+			roadmap:  "# Roadmap\n\n" + NextPointer + "\n\n- 2026-10-19 c\n- 2026-10-19 d\n\n## M1 — A\n",
+			next:     new(nextMDSkeleton + "\n- 2026-10-19 a (from add-x)\n- 2026-10-19 b (from add-x)\n"),
+			wantRM:   "# Roadmap\n\n" + NextPointer + "\n\n## M1 — A\n",
+			wantNext: nextMDSkeleton + "\n- 2026-10-19 a (from add-x)\n- 2026-10-19 b (from add-x)\n- 2026-10-19 c\n- 2026-10-19 d\n",
+			moved:    []string{"2026-10-19 c", "2026-10-19 d"},
+		},
 		"a Next heading in code is not one": {
 			roadmap:  "# Roadmap\n\n## M1 — A\n```\n## Next\n- x\n```\n",
 			wantRM:   "# Roadmap\n\n" + NextPointer + "\n\n## M1 — A\n```\n## Next\n- x\n```\n",

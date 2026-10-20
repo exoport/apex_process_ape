@@ -119,6 +119,17 @@ eval's E-R7-1 and E2 residual (D219).
   `project check`: the notice `roadmap.next-inline` while the roadmap still holds Next, and
   `next.bad-item` for a malformed `next.md` item.
 
+### rc.7c: R7b-1, a Next block split by a blank line (D223)
+
+- **apex-plan's Next list runs over blank lines** to the first milestone (or the first line
+  that is not a list line): the reader counts every item, `ape next add` appends after the
+  last one, and `ape next move` carries all of them. rc.7b stopped at the first blank line, so
+  pdfa's seq-09 moved 6 items and left 5 in the roadmap.
+- **Items left under the pointer are still Next:** `ape next move --check` reports them
+  (`next.move-pending`), `ape next move` appends them to `next.md` in order and keeps the
+  pointer, and `project check` lists the `roadmap.next-inline` notice. A project an rc.7b move
+  left that way is repaired by running `ape next move` again.
+
 ### rc.7b: eval's E-R7-1 and the E2 residual (D219)
 
 - **An apex-v0 → apex-v1 `ape framework update` succeeds in one run:** once an entry has

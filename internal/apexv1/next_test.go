@@ -162,3 +162,20 @@ func TestNextFileItems(t *testing.T) {
 	require.Equal(t, []string{"2026-10-01 a more of a", "b", "c"},
 		NextFileItems("# Next\n\nprose\n- 2026-10-01 a\n  more of a\n\n### Later\n* b\n```\n- not one\n```\n- c\n"))
 }
+
+// R7b-1 (pdfa): apex-plan's label block runs to the first milestone, blank
+// lines inside it allowed. The reader counts every item (rc.7b counted
+// the 6 before the blank line, not the 5 after), and next add appends
+// after the block's last item, not before the blank line.
+func TestNextItems_BlankLineInsideTheLabelBlock(t *testing.T) {
+	rm := "# Roadmap\n\nNext — not milestones:\n- 2026-10-19 a\n- 2026-10-19 b\n\n- 2026-10-19 c\n  more of c\n\n## M1 — A\n- not Next\n"
+	require.Equal(t, []string{"2026-10-19 a", "2026-10-19 b", "2026-10-19 c more of c"}, NextItems(rm))
+	got := string(AppendNextLines([]byte(rm), []string{"- 2026-10-20 d (from y)"}))
+	require.Equal(t, "# Roadmap\n\nNext — not milestones:\n- 2026-10-19 a\n- 2026-10-19 b\n\n- 2026-10-19 c\n  more of c\n- 2026-10-20 d (from y)\n\n## M1 — A\n- not Next\n", got)
+
+	// Items an earlier move left under the pointer are still Next.
+	residue := "# Roadmap\n\n" + NextPointer + "\n\n- 2026-10-19 c\n\n## M1 — A\n"
+	require.Equal(t, []string{"2026-10-19 c"}, NextItems(residue))
+	require.True(t, hasNextBlock(residue))
+	require.False(t, hasNextBlock("# Roadmap\n\n"+NextPointer+"\n\n## M1 — A\n- not Next\n"))
+}

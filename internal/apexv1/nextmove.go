@@ -37,14 +37,17 @@ type roadmapNextLayout struct {
 	// firstH2 is the first level-2 heading; len(lines) when none.
 	firstH2 int
 	// pointer is the line pointing at next.md (outside code and outside a
-	// Next section); -1 when none.
-	pointer int
+	// Next section); -1 when none. residue is what follows it up to the
+	// first milestone when that holds items ([pointer+1, residueEnd)): an
+	// earlier move that stopped at a blank line left them (R7b-1); -1 when
+	// none.
+	pointer, residueEnd int
 }
 
 // scanRoadmapNext finds a roadmap's Next block and pointer line, as
 // NextItems and AppendNextLines read them.
 func scanRoadmapNext(lines []mdLine) roadmapNextLayout {
-	l := roadmapNextLayout{label: -1, labelEnd: -1, firstH2: len(lines), pointer: -1}
+	l := roadmapNextLayout{label: -1, labelEnd: -1, firstH2: len(lines), pointer: -1, residueEnd: -1}
 	open := -1
 	for i, ln := range lines {
 		if lv, title := headingLevel(ln); lv > 0 && lv <= 2 {
@@ -74,21 +77,40 @@ func scanRoadmapNext(lines []mdLine) roadmapNextLayout {
 	if open >= 0 {
 		l.sections = append(l.sections, [2]int{open, len(lines)})
 	}
+	// The label's list, and a pointer's residue, run over blank lines
+	// (R7b-1) to the first milestone or other line; trailing blank lines
+	// stay with the roadmap.
 	if l.label >= 0 {
-		end := l.label + 1
-		for end < l.firstH2 && !lines[end].InCode && isListLine(lines[end].Text) {
-			end++
+		l.labelEnd = blockEnd(lines, l.label, l.firstH2)
+	}
+	if l.pointer >= 0 && l.pointer < l.firstH2 && l.pointer != l.label {
+		if end := blockEnd(lines, l.pointer, l.firstH2); end > l.pointer+1 {
+			l.residueEnd = end
 		}
-		l.labelEnd = end
 	}
 	return l
+}
+
+// blockEnd is the end of the list under line from: the line after its
+// last list line, blank lines inside it allowed (R7b-1), up to limit or
+// the first other line (from+1 when there is no list).
+func blockEnd(lines []mdLine, from, limit int) int {
+	end := from + 1
+	for j := from + 1; j < limit && !lines[j].InCode; j++ {
+		if isListLine(lines[j].Text) {
+			end = j + 1
+		} else if strings.TrimSpace(lines[j].Text) != "" {
+			break
+		}
+	}
+	return end
 }
 
 // hasNextBlock reports a roadmap that still holds Next: a `## Next`
 // section, or apex-plan's label above the first milestone.
 func hasNextBlock(roadmap string) bool {
 	l := scanRoadmapNext(splitLines(roadmap))
-	return l.label >= 0 || len(l.sections) > 0
+	return l.label >= 0 || len(l.sections) > 0 || l.residueEnd >= 0
 }
 
 // withNextPointer is roadmap with NextPointer above its first milestone
@@ -182,6 +204,9 @@ func (l roadmapNextLayout) chunks(lines []mdLine) []nextChunk {
 	if l.label >= 0 {
 		read(lines[l.label+1 : l.labelEnd])
 	}
+	if l.residueEnd >= 0 {
+		read(lines[l.pointer+1 : l.residueEnd])
+	}
 	for _, s := range l.sections {
 		read(lines[s[0]+1 : s[1]])
 	}
@@ -221,6 +246,13 @@ func (l roadmapNextLayout) moved(lines []mdLine) string {
 		if to, ok := section[i]; ok {
 			joined = true
 			i = to - 1
+			continue
+		}
+		if i == l.pointer && l.residueEnd >= 0 {
+			// The pointer stays; the items an earlier move left under it go.
+			out = append(out, outLine{text: lines[i].Text})
+			joined = true
+			i = l.residueEnd - 1
 			continue
 		}
 		ln := lines[i]
@@ -320,7 +352,7 @@ func planNextMove(roadmap string, next []byte, res *NextMoveResult) (newRoadmap,
 	}
 	res.Created = next == nil
 	res.PointerAdded = l.pointer < 0
-	res.Pending = res.Created || res.PointerAdded || l.label >= 0 || len(l.sections) > 0
+	res.Pending = res.Created || res.PointerAdded || l.label >= 0 || len(l.sections) > 0 || l.residueEnd >= 0
 	return l.moved(lines), string(appendNextMD(next, block))
 }
 
@@ -422,6 +454,9 @@ func (p *Project) nextInlineNotices() []Diagnostic {
 	at := l.label
 	if at < 0 && len(l.sections) > 0 {
 		at = l.sections[0][0]
+	}
+	if at < 0 && l.residueEnd >= 0 {
+		at = l.pointer // items an earlier move left under the pointer (R7b-1)
 	}
 	if at < 0 {
 		return nil
