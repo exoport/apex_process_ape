@@ -383,9 +383,12 @@ func (lf *lifter) dispositionWith(lim dispLimits) string {
 
 // writeRegression is the disposition file's `## Regression` (RG-6): the
 // lift's regression verdict and note, in the names the v1.0.0 migration
-// entry reads, then one line per command with its exits and logs. compact
-// leaves out the commands' notes (when the file would pass its ceiling);
-// the report has every one.
+// entry reads, then one line per command with its exits and logs, each
+// with its note. compact (when the file would pass its ceiling) keeps only
+// the worst command's note — the one that entry branches on ("failing as
+// it did there", "the output changed after the lift"), which the .md must
+// carry, the JSON being in the lifting checkout only (RG-6a, D259); the
+// report has every one.
 func writeRegression(b *strings.Builder, rec *LiftRegressionRecord, report string, compact bool) {
 	p := func(format string, args ...any) { fmt.Fprintf(b, format, args...) }
 	p("\n## Regression\n\n")
@@ -395,15 +398,15 @@ func writeRegression(b *strings.Builder, rec *LiftRegressionRecord, report strin
 	}
 	p("The `regression:` command ran at %s, before the lift wrote anything, and at the lift commit (%s); the second run is judged against the first. ", LiftTag, short(rec.Commit))
 	p("The whole record is `regression` in `%s`, in the checkout that lifted.\n\n", report)
-	if n := len(rec.Commands); n > 1 && !compact {
-		// Each command's note is on its line: the chain's is not repeated.
-		worst := 0
-		for i := range rec.Commands {
-			if liftVerdictRank(rec.Commands[i].Verdict) == liftVerdictRank(rec.Verdict) {
-				worst = i
-				break
-			}
+	worst := 0
+	for i := range rec.Commands {
+		if liftVerdictRank(rec.Commands[i].Verdict) == liftVerdictRank(rec.Verdict) {
+			worst = i
+			break
 		}
+	}
+	if n := len(rec.Commands); n > 1 {
+		// The notes are on the commands' lines: the chain's is not repeated.
 		p("Verdict: `%s` — the worst of the %d commands below, each run on its own at both points, past a red one: %d, `%s`.\n\n",
 			rec.Verdict, n, worst+1, strings.ReplaceAll(rec.Commands[worst].Cmd, "\n", " ⏎ "))
 	} else {
@@ -425,7 +428,7 @@ func writeRegression(b *strings.Builder, rec *LiftRegressionRecord, report strin
 		if c.LogAtTag != "" {
 			p(", `%s`", c.LogAtTag)
 		}
-		if len(rec.Commands) > 1 && !compact {
+		if len(rec.Commands) > 1 && (!compact || i == worst) {
 			p(". %s", c.Note)
 		}
 		p("\n")

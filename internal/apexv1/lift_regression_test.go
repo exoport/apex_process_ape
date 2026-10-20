@@ -571,3 +571,38 @@ func TestLift_RecordsWhyNoRegressionRan(t *testing.T) {
 	require.NoError(t, json.Unmarshal(data, &report))
 	require.Equal(t, map[string]any{"verdict": "", "note": "not run (--no-verify-run)", "regression_new_failures": []any{}}, report.Regression)
 }
+
+// RG-6a (D259, framework 12:56): the compact `## Regression` (the .md past
+// its ceiling) left out every command's note, so a red-at-tag worst lost
+// the note seq-05 branches on — "failing as it did there" or "the output
+// changed after the lift" — while the JSON holding it is in the lifting
+// checkout only. Compact keeps the worst command's note, one line.
+func TestWriteRegression_CompactKeepsTheWorstNote(t *testing.T) {
+	exit := func(n int) *int { return &n }
+	red := func(sha string) *CheckResult { return &CheckResult{Exit: 1, Log: "after.log", OutputSHA256: sha} }
+	for _, c := range []struct {
+		name, afterSHA, afterOut, phrase string
+	}{
+		{"failing as it did there", "a", "lint: 1 issue\n", "failing as it did there"},
+		{"the output changed after the lift", "b", "lint: 2 issues\n", "the output changed after the lift"},
+	} {
+		v, note, _ := judgeLiftRegression(red("a"), red(c.afterSHA), "lint: 1 issue\n", c.afterOut)
+		require.Equal(t, LiftRegressionRedAtTag, v, c.name)
+		require.Contains(t, note, c.phrase, c.name)
+		rec := &LiftRegressionRecord{Verdict: LiftRegressionRedAtTag, Note: "the chain's note", NewFailures: []string{}, Commit: "0123456789", Commands: []LiftRegressionRecordCommand{
+			{Cmd: "true", Verdict: LiftRegressionGreen, Note: "green at the lift commit, as at apex-v0-final", ExitAtTag: exit(0), Log: "r1.log", LogAtTag: "r1-at-tag.log"},
+			{Cmd: "make lint", Verdict: LiftRegressionRedAtTag, Note: note, ExitAtTag: exit(1), ExitAfter: 1, Log: "r2.log", LogAtTag: "r2-at-tag.log"},
+			{Cmd: "flutter test", Verdict: LiftRegressionCannotRun, Note: "cannot run here (exit 127 …)", ExitAtTag: exit(127), ExitAfter: 127, Log: "r3.log", LogAtTag: "r3-at-tag.log"},
+		}}
+		var full, compact strings.Builder
+		writeRegression(&full, rec, "_apex/state/lift-disposition.json", false)
+		writeRegression(&compact, rec, "_apex/state/lift-disposition.json", true)
+		require.Contains(t, compact.String(), "Verdict: `red-at-tag` — the worst of the 3 commands below, each run on its own at both points, past a red one: 2, `make lint`.\n", c.name)
+		require.Contains(t, compact.String(), "\n2. `make lint` — `red-at-tag`: exit 1 at apex-v0-final, exit 1 after the lift. Logs: `r2.log`, `r2-at-tag.log`. "+note+"\n", c.name)
+		require.Equal(t, 1, strings.Count(compact.String(), c.phrase), "%s: the worst's note, once", c.name)
+		require.Contains(t, compact.String(), "\n1. `true` — `green`: exit 0 at apex-v0-final, exit 0 after the lift. Logs: `r1.log`, `r1-at-tag.log`\n", "the others' notes are left out")
+		require.NotContains(t, compact.String(), "cannot run here", c.name)
+		require.Contains(t, full.String(), "cannot run here", "the full form keeps every note")
+		require.Less(t, compact.Len(), full.Len())
+	}
+}
