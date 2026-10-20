@@ -601,6 +601,8 @@ func TestContract_LiveApexTreeIsFullyAccountedFor(t *testing.T) {
 	// The aboard recipe library lives one level down; the directory that
 	// holds it is what appears at this level.
 	installed[path.Base(path.Dir(framework.SubtreeAboardRecipes))] = true
+	// So does the standard ADR-0001 (D205): its folder is what appears here.
+	installed[path.Base(path.Dir(framework.SubtreeStandardADR))] = true
 
 	// Declined, each with the reason. A file here is a decision.
 	declined := map[string]string{

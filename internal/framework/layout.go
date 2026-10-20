@@ -66,6 +66,10 @@ const (
 	// Absent on a framework that predates it, and then every spawn keeps
 	// ape's legacy default, so an older install behaves as it always did.
 	SubtreeEffortDefaults = "_apex/effort-defaults.yaml"
+	// SubtreeStandardADR is APEX's standard ADR-0001 (D205, D210): the
+	// install copies it into the project, where `ape decision standard`
+	// and init read it (ape's embedded copy is only the fallback).
+	SubtreeStandardADR = "_apex/standards/adr-0001.md"
 	// SubtreeChangeRoutes is the framework-owned table of what
 	// `ape change` prints when the lane escalates: per route, the ordered
 	// commands and the notes.
@@ -157,6 +161,8 @@ const (
 	// ProjectEffortDefaults is where the effort table lands, and where
 	// internal/effort reads it from.
 	ProjectEffortDefaults = "_apex/effort-defaults.yaml"
+	// ProjectStandardADR is where the standard ADR-0001 lands.
+	ProjectStandardADR = "_apex/standards/adr-0001.md"
 	// ProjectChangeRoutes is where the escalation-route table lands.
 	// Absent = `ape change` prints the route's name and no commands.
 	ProjectChangeRoutes = "_apex/change-routes.yaml"

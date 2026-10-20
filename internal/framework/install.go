@@ -141,6 +141,9 @@ type UpdateSummary struct {
 	// EffortDefaultsInstalled reports whether the framework carried the
 	// per-model effort table.
 	EffortDefaultsInstalled bool `json:"effortDefaultsInstalled" yaml:"effortDefaultsInstalled"`
+	// StandardADRInstalled reports whether the framework carried APEX's
+	// standard ADR-0001 (_apex/standards/adr-0001.md, D205).
+	StandardADRInstalled bool `json:"standardADRInstalled" yaml:"standardADRInstalled"`
 	// ChangeRoutesInstalled reports whether the framework carried the
 	// escalation-route table `ape change` prints from. False on a
 	// framework that predates it — the verb then names the route and
@@ -476,6 +479,7 @@ func installCore(ctx context.Context, opts *UpdateOptions, doBootstrap bool) (*U
 			AgentManifestInstalled:     lateTables.AgentManifest,
 			ApexHelpInstalled:          lateTables.ApexHelp,
 			EffortDefaultsInstalled:    lateTables.EffortDefaults,
+			StandardADRInstalled:       lateTables.StandardADR,
 			MigrationsInstalled:        len(migrationsInstalled),
 			MigrationPaths:             migrationsInstalled,
 			ApeCommandsInstalled:       apeCommandsInstalled,
@@ -582,6 +586,7 @@ func SimpleTables() []SimpleTable {
 		{SubtreeAgentManifest, ProjectAgentManifest, "agent manifest"},
 		{SubtreeApexHelp, ProjectApexHelp, "help table"},
 		{SubtreeEffortDefaults, ProjectEffortDefaults, "effort-defaults table"},
+		{SubtreeStandardADR, ProjectStandardADR, "standard ADR-0001"},
 	}
 }
 
@@ -592,6 +597,7 @@ type lateTableResult struct {
 	AgentManifest  bool
 	ApexHelp       bool
 	EffortDefaults bool
+	StandardADR    bool
 }
 
 // installLateTables copies the framework-owned files that need nothing
@@ -616,6 +622,10 @@ func installLateTables(frameworkRepo, projectRoot string) (lateTableResult, erro
 		SimpleTable{SubtreeEffortDefaults, ProjectEffortDefaults, "effort-defaults table"}); err != nil {
 		return out, err
 	}
+	if out.StandardADR, err = installTable(frameworkRepo, projectRoot,
+		SimpleTable{SubtreeStandardADR, ProjectStandardADR, "standard ADR-0001"}); err != nil {
+		return out, err
+	}
 	return out, nil
 }
 
@@ -630,7 +640,12 @@ func installTable(frameworkRepo, projectRoot string, tbl SimpleTable) (bool, err
 		}
 		return false, fmt.Errorf("stat %s: %w", tbl.What, err)
 	}
-	if err := CopyFile(src, filepath.Join(projectRoot, tbl.Project)); err != nil {
+	dst := filepath.Join(projectRoot, tbl.Project)
+	// A table in a folder of its own (the standard ADR-0001) needs it.
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return false, fmt.Errorf("create the folder of %s: %w", tbl.What, err)
+	}
+	if err := CopyFile(src, dst); err != nil {
 		return false, fmt.Errorf("copy %s: %w", tbl.What, err)
 	}
 	return true, nil

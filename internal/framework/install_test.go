@@ -1045,3 +1045,35 @@ func TestSetup_V1ReleaseWithoutPipelines(t *testing.T) {
 	require.False(t, res.Summary.GitignoreLockAdded)
 	require.NoFileExists(t, filepath.Join(proj, ".gitignore"))
 }
+
+// D205/D210: a framework that ships APEX's standard ADR-0001 has it
+// installed into the project, where `ape decision standard` reads it; a
+// framework without one installs nothing and says so.
+func TestSetup_InstallsTheStandardADR(t *testing.T) {
+	ctx := context.Background()
+	fw := t.TempDir()
+	body := "# ADR-0001: Record architecture decisions\n\nStatus: accepted\n"
+	require.NoError(t, os.MkdirAll(filepath.Join(fw, "_apex", "standards"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(fw, filepath.FromSlash(framework.SubtreeStandardADR)), []byte(body), 0o644))
+	fakeFramework(t, fw, "v0.0.71")
+	proj := newProject(t)
+
+	res, err := framework.Setup(ctx, &framework.UpdateOptions{
+		FrameworkRepo: fw, ProjectRoot: proj, NoFetch: true, ApeVersion: "0.0.6",
+		Bootstrapper: staticBootstrap("greeter"), Now: fixedNow,
+	})
+	require.NoError(t, err)
+	require.True(t, res.Summary.StandardADRInstalled)
+	got, err := os.ReadFile(filepath.Join(proj, filepath.FromSlash(framework.ProjectStandardADR)))
+	require.NoError(t, err)
+	require.Equal(t, body, string(got), "copied byte for byte")
+
+	fw2 := t.TempDir()
+	fakeFramework(t, fw2, "v0.0.71")
+	res, err = framework.Setup(ctx, &framework.UpdateOptions{
+		FrameworkRepo: fw2, ProjectRoot: newProject(t), NoFetch: true, ApeVersion: "0.0.6",
+		Bootstrapper: staticBootstrap("greeter"), Now: fixedNow,
+	})
+	require.NoError(t, err)
+	require.False(t, res.Summary.StandardADRInstalled)
+}
