@@ -70,10 +70,7 @@ func TestDecisionStandard_StaleScenariosCLI(t *testing.T) {
 
 	stdout, _, err = v1Exec(t, newDecisionCmd, "standard", "--json", "--cwd", root)
 	require.NoError(t, err, stdout)
-	var res struct {
-		Action         string                 `json:"action"`
-		StaleScenarios []apexv1.StaleScenario `json:"stale_scenarios"`
-	}
+	var res apexv1.StandardADRResult
 	require.NoError(t, json.Unmarshal([]byte(stdout), &res), stdout)
 	require.Equal(t, apexv1.StandardKept, res.Action)
 	require.Len(t, res.StaleScenarios, 1)

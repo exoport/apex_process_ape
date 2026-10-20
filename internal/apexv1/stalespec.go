@@ -282,14 +282,15 @@ func absenceAssertions(cmd string) func(i int) bool {
 				i++
 				segStart[i], frameNeg[i] = seg, stack[len(stack)-1].neg
 			}
-		case c == '$' && i+1 < len(cmd) && (cmd[i+1] == '(' || cmd[i+1] == '{'):
-			closer := byte(')')
-			if cmd[i+1] == '{' {
-				closer = '}'
+		case shellOpens(cmd, i, dq) > 0:
+			// A group or substitution: what is in it is negated when the
+			// command it sits in is.
+			w := shellOpens(cmd, i, dq)
+			stack = append(stack, frame{neg: negHere(i), closer: shellCloser(cmd[i+w-1]), inDouble: dq, segStart: seg})
+			if w == 2 {
+				i++
+				segStart[i], frameNeg[i] = seg, stack[len(stack)-2].neg
 			}
-			stack = append(stack, frame{neg: negHere(i), closer: closer, inDouble: dq, segStart: seg})
-			i++
-			segStart[i], frameNeg[i] = seg, stack[len(stack)-2].neg
 			seg, dq = i+1, false
 		case dq:
 			if c == '"' {
@@ -299,13 +300,6 @@ func absenceAssertions(cmd string) func(i int) bool {
 			sq = true
 		case c == '"':
 			dq = true
-		case c == '(' || c == '{' && (i+1 == len(cmd) || cmd[i+1] == ' '):
-			closer := byte(')')
-			if c == '{' {
-				closer = '}'
-			}
-			stack = append(stack, frame{neg: negHere(i), closer: closer, segStart: seg})
-			seg = i + 1
 		case (c == ')' || c == '}') && len(stack) > 1 && stack[len(stack)-1].closer == c:
 			f := stack[len(stack)-1]
 			stack = stack[:len(stack)-1]
@@ -320,6 +314,30 @@ func absenceAssertions(cmd string) func(i int) bool {
 		}
 		return frameNeg[i] || absenceRe.MatchString(cmd[segStart[i]:i])
 	}
+}
+
+// shellOpens is how many bytes at cmd[i] open a group or substitution
+// absenceAssertions follows: 2 for `$(` and `${` (also inside double
+// quotes), 1 for `(` and for a `{` followed by a blank (outside them), 0
+// for none.
+func shellOpens(cmd string, i int, inDouble bool) int {
+	switch {
+	case cmd[i] == '$' && i+1 < len(cmd) && (cmd[i+1] == '(' || cmd[i+1] == '{'):
+		return 2
+	case inDouble:
+		return 0
+	case cmd[i] == '(' || cmd[i] == '{' && (i+1 == len(cmd) || cmd[i+1] == ' '):
+		return 1
+	}
+	return 0
+}
+
+// shellCloser is the byte that closes what open opens.
+func shellCloser(open byte) byte {
+	if open == '{' {
+		return '}'
+	}
+	return ')'
 }
 
 // stalePointer is the pointer a stale scenario carries — in project
@@ -346,8 +364,9 @@ func (s *StaleScenario) Message() string {
 // staleScenarioNotices are project check's notices spec.check-names-removed
 // (Q131): one per stale scenario, at its heading. The exit is unchanged.
 func (p *Project) staleScenarioNotices() []Diagnostic {
-	var out []Diagnostic
-	for _, s := range p.StaleScenarios() {
+	ss := p.StaleScenarios()
+	out := make([]Diagnostic, 0, len(ss))
+	for _, s := range ss {
 		out = append(out, notice(Diagnostic{Code: CodeSpecCheckNamesRemoved, File: s.Spec, Line: s.Line, Message: s.Message()}))
 	}
 	return out

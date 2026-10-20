@@ -76,10 +76,11 @@ func staleOf(ss []StaleScenario) map[string][]string {
 	return out
 }
 
-func noticesOf(p *Project, code string) []Diagnostic {
+// staleNotices are project check's spec.check-names-removed notices.
+func staleNotices(p *Project) []Diagnostic {
 	var out []Diagnostic
 	for _, n := range p.Notices() {
-		if n.Code == code {
+		if n.Code == CodeSpecCheckNamesRemoved {
 			out = append(out, n)
 		}
 	}
@@ -94,7 +95,7 @@ func noticesOf(p *Project, code string) []Diagnostic {
 func TestStaleScenarios_PdfaSeq08(t *testing.T) {
 	p := pdfaProject(t)
 	require.Empty(t, p.StaleScenarios(), "before seq-08 nothing is removed")
-	require.Empty(t, noticesOf(p, CodeSpecCheckNamesRemoved))
+	require.Empty(t, staleNotices(p))
 
 	want := map[string][]string{
 		pdfaScenario1: {pdfaOld0001, standardSupersedes},
@@ -121,7 +122,7 @@ func TestStaleScenarios_PdfaSeq08(t *testing.T) {
 	require.NotContains(t, run(t, p.Root, "show", "--name-only", "--format=", "HEAD"), "specs/")
 	require.Equal(t, pdfaAgentContextSpec, read(t, p, pdfaSpec))
 
-	ns := noticesOf(p, CodeSpecCheckNamesRemoved)
+	ns := staleNotices(p)
 	require.Len(t, ns, 2)
 	require.Equal(t, ActionReplan, ns[0].Action)
 	require.Equal(t, SeverityNotice, ns[0].Severity)
@@ -141,11 +142,12 @@ func TestStaleScenarios_PdfaSeq08(t *testing.T) {
 
 	// A change that REMOVES the requirement retires both, as its archive
 	// leaves the spec: the notice is gone.
-	write(t, p, pdfaSpec, pdfaAgentContextSpec[:strings.Index(pdfaAgentContextSpec, "### Requirement: Decisions")]+
-		pdfaAgentContextSpec[strings.Index(pdfaAgentContextSpec, "### Requirement: CLAUDE.md"):])
+	head, _, _ := strings.Cut(pdfaAgentContextSpec, "### Requirement: Decisions")
+	_, tail, _ := strings.Cut(pdfaAgentContextSpec, "### Requirement: CLAUDE.md")
+	write(t, p, pdfaSpec, head+"### Requirement: CLAUDE.md"+tail)
 	commitAll(t, p, "archive: retire the seq-08 scenarios")
 	require.Empty(t, p.StaleScenarios())
-	require.Empty(t, noticesOf(p, CodeSpecCheckNamesRemoved))
+	require.Empty(t, staleNotices(p))
 }
 
 // Q130: a later run of the verb (a release that changes the standard)
@@ -191,7 +193,7 @@ func TestStaleScenarios_LegacyRecord(t *testing.T) {
 	commitAll(t, p, "as rc.7b left it")
 
 	require.Equal(t, map[string][]string{pdfaScenario1: {pdfaOld0001}, pdfaScenario2: {pdfa0031}}, staleOf(p.StaleScenarios()))
-	require.Len(t, noticesOf(p, CodeSpecCheckNamesRemoved), 2)
+	require.Len(t, staleNotices(p), 2)
 
 	// An existing decisions/ file and the standard's own name are not
 	// evidence; a bare ADR-0001 file name that is not the standard's is.
