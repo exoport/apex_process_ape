@@ -238,11 +238,13 @@ func TestFrameworkUpdate_KeepsACandidateAheadOfTheNewestRelease(t *testing.T) {
 // project's _apex/state/ — not even when the framework itself ships a file
 // at that path — and their commits take nothing from it.
 func TestFrameworkInstall_LeavesV1StateByteIdentical(t *testing.T) {
-	withApeVersion(t, "0.4.0")
+	withApeVersion(t, "1.0.0")
 	fw := releasedFramework(t, "v1.0.0")
 	for rel, body := range map[string]string{
 		"_apex/state/milestones.json": "{\"from\": \"the framework\"}\n",
 		"_apex/state/.gitignore":      "# the framework's\n",
+		// An apex-v1 release: a v1 project takes no other (RG-3).
+		framework.ProjectApeCommands: "min_ape_version: 1.0.0\n",
 	} {
 		require.NoError(t, os.MkdirAll(filepath.Dir(filepath.Join(fw, rel)), 0o755))
 		require.NoError(t, os.WriteFile(filepath.Join(fw, rel), []byte(body), 0o644))
@@ -350,6 +352,9 @@ func TestFrameworkUpdate_V1ProjectKeepsTheMigrationLedger(t *testing.T) {
 	stateBefore := treeBytes(t, state)
 
 	mk(framework.SubtreeMigrations+"/v1.1.0_seq-01_y.md", migrationEntry("v1.1.0_seq-01", "1.1.0", "y"))
+	// The project is apex-v1 now, so its next release must be one (RG-3).
+	mk(framework.ProjectApeCommands, "min_ape_version: 1.0.0\n")
+	withApeVersion(t, "1.0.0")
 	gitCommitAll(t, fw, "migration y")
 	gitRun(t, fw, "tag", "-a", "v1.1.0", "-m", "v1.1.0")
 
