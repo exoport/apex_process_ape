@@ -604,3 +604,16 @@ func (p *Project) adrCitations(ctx context.Context, id string, skip ...string) [
 	}
 	return cites
 }
+
+// StandardOptOut is the line `ape framework update` prints for a project
+// that opted out of APEX's standard ADR-0001 (D206: updates report it,
+// R7b-2), whose entry a check judges applied without a word; "" when the
+// project did not opt out.
+func (p *Project) StandardOptOut() string {
+	pl := p.planStandardADR()
+	if pl.Action != StandardOptedOut {
+		return ""
+	}
+	return "ADR-0001: opted out — " + strings.Join(pl.OptedOutBy, ", ") + " (accepted) supersedes APEX's standard, so the update leaves " +
+		pl.Path + " alone (D206; " + StandardADRPayload + " is the standard it declines)"
+}

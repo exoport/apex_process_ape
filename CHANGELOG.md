@@ -130,6 +130,13 @@ eval's E-R7-1 and E2 residual (D219).
   pointer, and `project check` lists the `roadmap.next-inline` notice. A project an rc.7b move
   left that way is repaired by running `ape next move` again.
 
+### rc.7c: R7b-2, an update reports a standard opt-out (D224)
+
+- **`ape framework update` says when a project opted out of the standard ADR-0001** (D206): an
+  accepted ADR superseding ADR-0001 makes the standard's entry judge itself applied without a
+  word, so the update now prints `ADR-0001: opted out — ADR-NNNN (accepted) supersedes APEX's
+  standard, so the update leaves … alone`.
+
 ### rc.7b: eval's E-R7-1 and the E2 residual (D219)
 
 - **An apex-v0 → apex-v1 `ape framework update` succeeds in one run:** once an entry has

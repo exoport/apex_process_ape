@@ -10,6 +10,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/exoport/apex_process_ape/internal/apexcfg"
+	"github.com/exoport/apex_process_ape/internal/apexv1"
 	"github.com/exoport/apex_process_ape/internal/framework"
 	"github.com/exoport/apex_process_ape/internal/migration"
 	"github.com/exoport/apex_process_ape/internal/runlog"
@@ -182,6 +183,7 @@ func runUpgradeMigrationsApplied(ctx context.Context, w io.Writer, projectRoot s
 		if blocked := migration.BlockingUnapplied(plan, nil); len(blocked) > 0 {
 			return nil, &blockingMigrationError{blocked: blocked}
 		}
+		reportStandardOptOut(w, projectRoot)
 		return nil, nil
 	}
 
@@ -208,7 +210,21 @@ func runUpgradeMigrationsApplied(ctx context.Context, w io.Writer, projectRoot s
 	if blocked := migration.BlockingUnapplied(plan, res); len(blocked) > 0 {
 		return ids, &blockingMigrationError{blocked: blocked}
 	}
+	reportStandardOptOut(w, projectRoot)
 	return ids, nil
+}
+
+// reportStandardOptOut says, on an APEX v1 project that opted out of the
+// standard ADR-0001, that the update left it alone (D206, R7b-2): the
+// standard's entry is judged applied by its check, which says nothing.
+func reportStandardOptOut(w io.Writer, projectRoot string) {
+	p, err := apexv1.Open(projectRoot)
+	if err != nil || !p.IsV1() {
+		return
+	}
+	if line := p.StandardOptOut(); line != "" {
+		fmt.Fprintln(w, line)
+	}
 }
 
 // ledgerStamp issues the ledger's applied_at stamps. In an APEX v1

@@ -222,6 +222,7 @@ func TestADRStandard_OptOut(t *testing.T) {
 	res, err := p.DecisionStandardCheck(ctx())
 	require.Equal(t, CodeStandardPending, ErrorCode(err), "a proposed supersede does not opt out")
 	require.Equal(t, StandardReplaced, res.Action)
+	require.Empty(t, p.StandardOptOut(), "R7b-2: no opt-out line yet")
 
 	fillADR(t, p, own.Path)
 	_, err = p.AcceptDecision(ctx(), own.ID, "ann")
@@ -237,6 +238,9 @@ func TestADRStandard_OptOut(t *testing.T) {
 	ns := standardNotices(p)
 	require.Equal(t, []string{CodeStandardSuperseded}, noticeCodesOf(ns))
 	require.Contains(t, ns[0].Message, "ADR-0002 is accepted and supersedes ADR-0001")
+	// R7b-2: the line framework update prints, since the standard's entry
+	// is judged applied by its check without a word.
+	require.Contains(t, p.StandardOptOut(), "ADR-0001: opted out — ADR-0002 (accepted) supersedes APEX's standard")
 }
 
 // Q120 on a project an rc.7 lift made: its ADR-0001 is the apex-v0
