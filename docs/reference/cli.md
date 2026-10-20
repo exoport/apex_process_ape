@@ -3652,7 +3652,8 @@ words. Each line is the command, then what the person types (the phrase grammar)
 A Bash command that runs one is allowed only when the prompt that opened this turn — the
 tool call's prompt_id is the prompt's — is recorded by `ape hook user-prompt`, the
 session's transcript holds the person's user message with that promptId and the same
-words, and the phrase is there: its words in order, the target exact (M2, T3, the change
+words (its origin.kind "human": a turn a notification opened is judged on the person's
+latest typed prompt, D238), and the phrase is there: its words in order, the target exact (M2, T3, the change
 id, ADR-0012; case aside), no negation word (not, no, never, don't and every n't, wait,
 hold, stop, cannot, nope) before them in their sentence nor among the three words after the
 target, and the sentence not a question; for an answer, the --text itself after the target.
@@ -3777,13 +3778,15 @@ ape hook user-prompt [flags]
 ```
 
 UserPromptSubmit hook (E2, D178). Appends {ts, session_id, transcript_path, prompt,
-prompt_id} — the prompt at most 64 KiB — to _apex/state/prompts/<session_id>.jsonl
+prompt_id, kind} — the prompt at most 64 KiB — to _apex/state/prompts/<session_id>.jsonl
 (ignored, never committed): what `ape hook pre-tool` grants a person act on (its --help
-has the phrase grammar). Records nothing in a session ape launched (APE_SESSION: ape types
-those prompts itself) or outside a v1 project. Never blocks the prompt: it prints nothing
-and exits 0, an error noted on stderr. `ape project init` registers it; missing, `ape project check`
-lists the notice hooks.prompt-absent and `ape doctor` the row hooks.prompt — and a person
-act from a Claude Code session is refused (session.person-only).
+has the phrase grammar). A prompt Claude Code generated (a <task-notification>, a
+<system-reminder>, tags only) is recorded as kind notification and never grants (D238).
+Records nothing in a session ape launched (APE_SESSION: ape types those prompts itself)
+or outside a v1 project. Never blocks the prompt: it prints nothing and exits 0, an error
+noted on stderr. `ape project init` registers it; missing, `ape project check` lists the notice
+hooks.prompt-absent and `ape doctor` the row hooks.prompt — and a person act from a Claude
+Code session is refused (session.person-only).
 
 The phrase grammar (A12; the same lines as `ape hook pre-tool --help`, which says how a
 grant is decided): each line is the command, then what the person types for it.
