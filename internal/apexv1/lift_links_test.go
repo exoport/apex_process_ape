@@ -75,7 +75,7 @@ func TestLift_ADRLinksResolveAfterTheLift(t *testing.T) {
 	}
 	write("docs/explanation/limits.md", "See [ADR-0006](../../development/governance/adrs/adr-0006_limit-64.md) and [the old one](./../../development/governance/adrs/adr-0004_limit-names.md).\n")
 	write("development/architecture.md", "# Architecture\n")
-	adr7, err := os.ReadFile(filepath.Join(root, "development/governance/adrs/adr-0007_serve-https.md"))
+	adr7, err := os.ReadFile(filepath.Join(root, "development", "governance", "adrs", "adr-0007_serve-https.md"))
 	require.NoError(t, err)
 	write("development/governance/adrs/adr-0007_serve-https.md", string(adr7)+"\nSee [ADR-0006](adr-0006_limit-64.md) and [the architecture](../../architecture.md).\n")
 	run(t, root, "add", "-A")

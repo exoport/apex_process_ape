@@ -208,13 +208,13 @@ func loadADRs(root, dirAbs string, canon bool) (out []v0ADR, bad []string) {
 		if e.IsDir() || !strings.HasSuffix(strings.ToLower(name), ".md") || strings.EqualFold(name, "README.md") {
 			continue
 		}
-		path := filepath.Join(dirAbs, name)
-		data, err := os.ReadFile(path)
+		file := filepath.Join(dirAbs, name)
+		data, err := os.ReadFile(file)
 		if err != nil {
 			continue
 		}
-		rel := path
-		if r, err := filepath.Rel(root, path); err == nil && !strings.HasPrefix(r, "..") {
+		rel := file
+		if r, err := filepath.Rel(root, file); err == nil && !strings.HasPrefix(r, "..") {
 			rel = filepath.ToSlash(r)
 		}
 		a, ok := parseV0ADR(rel, name, string(data))
@@ -466,10 +466,11 @@ func (lf *lifter) planStandardADR(all []v0ADR, stdAt int) {
 // 1 and 2), or a reference definition, `[x]: target` (groups 3 and 4).
 var recordLinkRe = regexp.MustCompile(`(\]\(\s*)([^)\s]+)|^(\s*\[[^\]]+\]:\s*)(\S+)`)
 
-// rebaseLinks re-bases the relative links of a record moved from from to
-// to (both project-relative) so each still points at the same file, and a
-// link to a moved record at its new path. Only a target that names a path
-// exists says is there at the tag, or a moved record, is re-based; links
+// rebaseLinks re-bases the relative links of a record moved from the
+// path from to the path to (both project-relative) so each still points at
+// the same file, and a link to a moved record at its new path. Only a
+// target that exists says is there at the tag, or a moved record, is
+// re-based; links
 // in code, absolute ones, URLs and bare anchors are left as written.
 func rebaseLinks(body, from, to string, paths map[string]string, exists func(rel string) bool) string {
 	fromDir, toDir := path.Dir(from), path.Dir(to)
