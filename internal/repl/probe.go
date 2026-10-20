@@ -121,11 +121,15 @@ func ProbeClaude(ctx context.Context, claudeBin string) ProbeResult {
 // cells, and claude's own cursor (see screen.idlePrompt). claude sometimes
 // draws a faint placeholder hint there (`❯ Try "refactor <filepath>"`), and a
 // probe reading only the text declared that working claude broken,
-// nondeterministically, on the first run after an update (E-R7e-1). Probe
-// only: replReady and emptyPromptRe's other callers are unchanged.
+// nondeterministically, on the first run after an update (E-R7e-1). On a
+// monochrome screen (NO_COLOR, TERM=dumb) the hint is not faint, so the
+// input box's frame says it instead: a ❯ row between claude's two rules,
+// not a menu row, is the empty input, since the probe types nothing (D269,
+// see screen.untypedInputBox). Probe only: replReady and emptyPromptRe's
+// other callers are unchanged.
 func probeSignals(pane string, grid *screen) (footer, prompt bool) {
 	footer = strings.Contains(pane, readyFooter)
-	prompt = emptyPromptRe.MatchString(pane) || (grid != nil && grid.idlePrompt())
+	prompt = emptyPromptRe.MatchString(pane) || (grid != nil && (grid.idlePrompt() || grid.untypedInputBox()))
 	return footer, prompt
 }
 

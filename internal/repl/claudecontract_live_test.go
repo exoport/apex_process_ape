@@ -72,6 +72,7 @@ func TestLive_ClaudeCodeContract(t *testing.T) {
 	t.Run("ready_signals", func(t *testing.T) { liveReadySignals(t, claudeBin) })
 	t.Run("emulators_agree", func(t *testing.T) { liveEmulatorsAgree(t, claudeBin) })
 	t.Run("startup_probe", func(t *testing.T) { liveStartupProbe(t, claudeBin) })
+	t.Run("startup_probe_monochrome_hint", func(t *testing.T) { liveStartupProbeMonochromeHint(t, claudeBin) })
 	t.Run("bg_shell_reap_switch", func(t *testing.T) { liveBGShellReapSwitch(t, claudeBin) })
 	t.Run("effort_env", func(t *testing.T) { liveEffortEnv(t, claudeBin) })
 	t.Run("model_settings_effort", func(t *testing.T) { liveModelSettingsEffort(t, claudeBin) })
@@ -321,6 +322,38 @@ func liveStartupProbe(t *testing.T, claudeBin string) {
 	res := ProbeClaude(context.Background(), claudeBin)
 	require.Equal(t, ProbeVerified, res.Verdict,
 		"the startup probe does not verify the installed claude: %s\npane:\n%s", res.Detail, res.Pane)
+}
+
+// liveStartupProbeMonochromeHint is the startup probe on the screen that
+// declared a working claude broken (atomix on 2.1.305, D269): claude's
+// placeholder hint on the prompt line, drawn with no attributes at all. The
+// hint is forced on (CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION) and colour off
+// (NO_COLOR) by a wrapper, because ape scrubs CLAUDE_* from the spawn's
+// environment. The subtest checks its own premise — the hint on the pane,
+// nothing drawn faint (SGR 2) in the bytes; claude's own reverse-video
+// cursor (SGR 7) may remain — so a claude that stopped drawing either is a
+// failure to look at, never a pass that measured nothing.
+func liveStartupProbeMonochromeHint(t *testing.T, claudeBin string) {
+	t.Helper()
+	wrapper := filepath.Join(t.TempDir(), "claude")
+	script := "#!/bin/sh\nexport CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=1 NO_COLOR=1\nexec '" +
+		strings.ReplaceAll(claudeBin, "'", `'\''`) + "' \"$@\"\n"
+	require.NoError(t, os.WriteFile(wrapper, []byte(script), 0o755))
+	hint := regexp.MustCompile(`(?m)^[\s\x{00a0}]*` + ReadyGlyph + `[\s\x{00a0}]+\S`)
+	faint := regexp.MustCompile(`\x1b\[(?:[0-9:]*;)*2(?:;[0-9:]*)*m`)
+	for attempt := 1; attempt <= 3; attempt++ {
+		res := ProbeClaude(context.Background(), wrapper)
+		require.Equal(t, ProbeVerified, res.Verdict,
+			"the startup probe rejects a working claude on a monochrome screen: %s\npane:\n%s", res.Detail, res.Pane)
+		if !hint.MatchString(res.Pane) {
+			t.Logf("attempt %d: claude drew no hint this time; probing again", attempt)
+			continue
+		}
+		require.False(t, faint.Match(res.Output), "premise: under NO_COLOR nothing is drawn faint; found %q", faint.FindAll(res.Output, -1))
+		t.Logf("attempt %d: the monochrome hint was read as an empty input", attempt)
+		return
+	}
+	t.Fatal("claude drew no placeholder hint in 3 probes with CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=1: the case this subtest exists for was not measured")
 }
 
 // liveBGShellReapSwitch checks the coupling behind ape's spawn default: the

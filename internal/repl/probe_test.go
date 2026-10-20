@@ -65,6 +65,7 @@ func TestJudgeNotReady(t *testing.T) {
 var probeHintCaptures = []struct{ file, hint string }{
 	{"claude-2.1.294-probe-hint.bin", "Try \"refactor <filepath>\""},
 	{"claude-2.1.304-probe-hint-cursor.bin", "Try \"how does <filepath> work?\""},
+	{"claude-2.1.305-probe-hint-mono.bin", "Try \"fix lint errors\""},
 }
 
 func readProbeHintCapture(t *testing.T, file string) []byte {
@@ -157,4 +158,53 @@ func TestProbeSignals_OnlyBlankOrFaintCellsAreEmpty(t *testing.T) {
 			require.Equal(t, tc.empty, prompt, "pane:\n%s", s.text())
 		})
 	}
+}
+
+// D269: on a monochrome screen (NO_COLOR, TERM=dumb) claude draws its hint in
+// the normal weight, so the cell rule above rejects it as typed text. The
+// input box's frame — a ❯ row between two rules of ─ — says it is claude's
+// empty input, which the probe accepts because it types nothing. A menu row
+// stays a menu row, framed or not, and half a frame, or a rule with a title
+// in it, is no frame.
+func TestProbeSignals_AFramedInputLineIsEmptyInMonochrome(t *testing.T) {
+	t.Parallel()
+	const rule = "────────────────────────────────────────"
+	const footerRow = "\r\n\x1b[3G⏵⏵ bypass permissions on (shift+tab to cycle)"
+	for _, tc := range []struct {
+		name, screen string
+		empty        bool
+	}{
+		{"a monochrome hint, framed", rule + "\r\n❯\u00a0Try\x1b[7G\"fix lint errors\"\r\n" + rule, true},
+		{"a blank input, framed", rule + "\r\n❯\u00a0\r\n" + rule, true},
+		{"indented, framed", rule + "\r\n  ❯ Try this\r\n" + rule, true},
+		{"a menu row, framed", rule + "\r\n❯\x1b[4G1. Yes, I trust this folder\r\n" + rule, false},
+		{"a rule above only", rule + "\r\n❯\u00a0Try this\r\nnot a rule", false},
+		{"a rule below only", "not a rule\r\n❯\u00a0Try this\r\n" + rule, false},
+		{"a titled rule is no rule", "── Title ──\r\n❯\u00a0Try this\r\n" + rule, false},
+		{"a line between rules with no glyph", rule + "\r\nTry this\r\n" + rule, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			s := newScreen()
+			defer s.close()
+			s.write([]byte("\x1b[1;1H" + tc.screen + footerRow))
+			footer, prompt := probeSignals(s.text(), s)
+			require.True(t, footer)
+			require.Equal(t, tc.empty, prompt, "pane:\n%s", s.text())
+		})
+	}
+}
+
+// The 2.1.305 capture (atomix, mmr7) is the case above in real bytes: no SGR
+// anywhere in it, so the cell rule alone rejects its hint — the defect — and
+// the frame accepts it.
+func TestProbeSignals_TheMonochromeCaptureNeedsTheFrame(t *testing.T) {
+	t.Parallel()
+	stream := readProbeHintCapture(t, "claude-2.1.305-probe-hint-mono.bin")
+	require.NotRegexp(t, `\x1b\[[0-9;:]*m`, string(stream), "premise: the capture has no SGR at all")
+	s := newScreen()
+	defer s.close()
+	s.write(stream)
+	require.False(t, s.idlePrompt(), "the cell rule alone (rc7f, E-R7e-1) rejects a hint that is not faint")
+	require.True(t, s.untypedInputBox())
 }

@@ -2,6 +2,7 @@ package repl
 
 import (
 	"io"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -145,6 +146,54 @@ func (s *screen) idlePromptRow(y int) bool {
 	}
 	return !cursor || faint
 }
+
+// untypedInputBox reports whether the grid shows claude's input line inside
+// its input box: a row with the ❯ glyph first, between the two horizontal
+// rules claude draws around the box, and not a numbered menu row (`❯ 1. …`).
+//
+// It does not look at what follows the glyph, so it says nothing about
+// whether anything was typed: it is for the startup probe alone, where ape
+// has typed nothing and whatever stands on that line is claude's own — the
+// placeholder hint. idlePrompt reads the hint from its faint cells, and on a
+// monochrome screen (NO_COLOR, TERM=dumb) there are none: the hint is drawn
+// in the normal weight, like typed text, and the probe declared a working
+// claude broken (atomix on 2.1.305, D269; 2.1.304 does the same with the
+// hint shown). The frame is drawn either way.
+func (s *screen) untypedInputBox() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for y := range s.term.Height() {
+		if s.inputBoxRow(y) {
+			return true
+		}
+	}
+	return false
+}
+
+// inputBoxRow is untypedInputBox for row y. The caller holds s.mu.
+func (s *screen) inputBoxRow(y int) bool {
+	text := func(y int) string {
+		var b strings.Builder
+		for x := range s.term.Width() {
+			if c := s.term.CellAt(x, y); c != nil {
+				b.WriteString(c.Content)
+			}
+		}
+		return strings.TrimSpace(strings.ReplaceAll(b.String(), "\u00a0", " "))
+	}
+	rule := func(y int) bool {
+		t := text(y)
+		return t != "" && strings.Trim(t, "─") == ""
+	}
+	if y < 1 || y+1 >= s.term.Height() {
+		return false
+	}
+	rest, ok := strings.CutPrefix(text(y), ReadyGlyph)
+	return ok && !menuRowRe.MatchString(rest) && rule(y-1) && rule(y+1)
+}
+
+// menuRowRe is the text after a menu row's ❯: a numbered option.
+var menuRowRe = regexp.MustCompile(`^\s*\d+[.)]`)
 
 // close releases the goroutine draining the emulator's answers. The grid
 // stays readable afterwards; a write after close still renders, and any
