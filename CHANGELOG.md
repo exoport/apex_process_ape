@@ -130,6 +130,20 @@ eval's E-R7-1 and E2 residual (D219).
   pointer, and `project check` lists the `roadmap.next-inline` notice. A project an rc.7b move
   left that way is repaired by running `ape next move` again.
 
+### rc.7d: R7h-1, lasting scenarios that check what seq-08 removed (D232, D233; Q130–Q133)
+
+- **`ape decision standard` records what it removed** (`standard.removed: [{path, id}]` in
+  decisions.json) and names every lasting spec scenario whose `check:` still reads it — a removed
+  path, its file name, a removed ADR id, or `Supersedes: ADR-0001` once a supersede went
+  (`stale_scenarios` in its JSON; a `stale scenario …` line). A check asserting absence is not
+  stale. ape never edits a spec.
+- **`project check` notice `spec.check-names-removed`** (action replan) per such scenario, and
+  a red scenario in `ape milestone gate` / `ape change verify` carries `stale_names` and a pointer
+  line: retire it with a change whose REMOVED delta cites v1.0.0_seq-08, never by recreating the
+  records or superseding ADR-0001 again (that would opt the project out, D205).
+- A project whose seq-08 ran on rc.7b (no `removed` record, pdfa) is read the same way from the
+  decisions/ paths its checks name that no longer exist.
+
 ### rc.7c: R7b-2, an update reports a standard opt-out (D224)
 
 - **`ape framework update` says when a project opted out of the standard ADR-0001** (D206): an
