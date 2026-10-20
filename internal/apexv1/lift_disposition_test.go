@@ -101,8 +101,10 @@ func TestLiftDispositionCeiling_IsTheCapsCeiling(t *testing.T) {
 }
 
 // rg4ProjectContext is a v0 project-context.md shaped like the
-// rehearsals' (RG-4): front matter, a title and its preamble, a pure
-// overview, rule sections nested two deep, gates, a table and code.
+// rehearsals' (RG-4): front matter, a title and its preamble, an
+// overview with a binding rule and a table of contents (RG-4b), rule
+// sections nested two deep, gates with notes in their fence (RG-4b), a
+// table and code.
 const rg4ProjectContext = `---
 project_name: 'rg4'
 sections_completed: ['overview', 'technology_stack']
@@ -115,11 +117,12 @@ _This file holds the rules that agents must follow here._
 ## Overview
 
 - Single Go module with three binaries and no daemon.
-- Every overview line must stay out of the candidates.
+- Never fold the release generator into the main binary.
 
 ### Layout
 
-- Never a candidate either: a subsection of the overview.
+- [Testing Rules](#testing-rules) · [Code Validation](#code-validation)
+- A subsection of the overview is read like any other.
 
 ## Technology Stack & Versions
 
@@ -150,7 +153,13 @@ The suite takes about two minutes on this host.
 ## Code Validation
 
 ` + "```sh" + `
-make test
+#!/bin/sh
+make test      # the full suite, adopted verbatim; do not narrow it
+               # to the packages a change touched
+make vet       # vet
+# the guard loop takes its default roots, so
+# it proves the rewiring
+for g in tools/ci/*.sh; do "$g" || exit 1; done   # every guard, NO argument
 ` + "```" + `
 
 Never pass a positional argument to the guard loop.
@@ -183,7 +192,7 @@ Source: Epic 1 retrospective
 
 ## Overview
 
-- An overview line in team memory is skipped too.
+- An overview line in team memory counts too (RG-4b).
 `
 
 // TestRuleCandidates_ProjectContext: RG-4 — every section but a pure
@@ -198,12 +207,77 @@ func TestRuleCandidates_ProjectContext(t *testing.T) {
 	}
 	require.Equal(t, []row{
 		{"_This file holds the rules that agents must follow here._", "8", ""},
-		{"Go toolchain pinned exactly by go.mod's toolchain line.", "21", "Technology Stack & Versions"},
-		{"Integration tests run against a real engine, never a mock.", "27", "Critical Implementation Rules > Testing Rules"},
-		{"Plain prose paragraphs are not rules unless they bind.", "29", "Critical Implementation Rules > Testing Rules"},
-		{"A shared fixture is read-only: never write to it from a test, and always copy it into t.TempDir().", "32", "Critical Implementation Rules > Testing Rules"},
-		{"Never pass a positional argument to the guard loop.", "51", "Code Validation"},
+		{"Single Go module with three binaries and no daemon.", "12", "Overview"},
+		{"Never fold the release generator into the main binary.", "13", "Overview"},
+		{"A subsection of the overview is read like any other.", "18", "Overview > Layout"},
+		{"Go toolchain pinned exactly by go.mod's toolchain line.", "22", "Technology Stack & Versions"},
+		{"Integration tests run against a real engine, never a mock.", "28", "Critical Implementation Rules > Testing Rules"},
+		{"Plain prose paragraphs are not rules unless they bind.", "30", "Critical Implementation Rules > Testing Rules"},
+		{"A shared fixture is read-only: never write to it from a test, and always copy it into t.TempDir().", "33", "Critical Implementation Rules > Testing Rules"},
+		{"Never pass a positional argument to the guard loop.", "58", "Code Validation"},
 	}, got)
+}
+
+// TestCodeValidationNotes: RG-4b (D262), from radix — the rule text
+// inside `## Code Validation`'s fence ("do not reduce it", "make audit is
+// NOT the route") was read by neither the gate extraction nor the prose
+// walk. A command's comment is a note shown with its command, continued
+// by deeper-indented comment lines; a run of comment-only lines is one
+// note; a note under three words, the shebang and the commands give none.
+func TestCodeValidationNotes(t *testing.T) {
+	type row struct{ text, source, section string }
+	cs := codeValidationNotes(rg4ProjectContext)
+	got := make([]row, 0, len(cs))
+	for _, c := range cs {
+		got = append(got, row{c.Text, c.Source, c.Section})
+	}
+	require.Equal(t, []row{
+		{"`make test` — the full suite, adopted verbatim; do not narrow it to the packages a change touched", "50", "Code Validation"},
+		{"the guard loop takes its default roots, so it proves the rewiring", "53", "Code Validation"},
+		{"`for g in tools/ci/*.sh; do \"$g\" || exit 1; done` — every guard, NO argument", "55", "Code Validation"},
+	}, got)
+	// The commands still go to AGENTS.md, and no note is one.
+	require.Equal(t, []string{"( make test\nmake vet\n" + `for g in tools/ci/*.sh; do "$g" || exit 1; done` + "\n)"},
+		extractGates("pc.md", rg4ProjectContext).Commands)
+	require.Empty(t, codeValidationNotes("# T\n\n## Rules\n\n```sh\nmake x # not under Code Validation, so not here\n```\n"))
+}
+
+// TestClaudeCandidates: RG-4c (D264), from cortex's review — ten CLAUDE.md
+// rules had no row, and seven of them were not rule-worded: plain prose,
+// table cells and a code block's comment. CLAUDE.md is read whole: every
+// paragraph of three words or more, every table body row (not the header,
+// not the separator), every code-block comment note, and its list items.
+func TestClaudeCandidates(t *testing.T) {
+	doc := "# Cortex\n\n> Project guidance for agents. Keep this file current.\n\n" +
+		"## Architecture\n\n| Layer | What |\n|---|---|\n| Memory plane | MCP session state is **not** the ledger. |\n\n" +
+		"**Hybrid versioning decision (settled).** Power users may still author native workflows.\n\n" +
+		"## Repo structure\n\n```\nREADME.md   # Human entry point.\n_output/    # GITIGNORED — never commit anything here.\n```\n\n" +
+		"- Two words\n- Keep commits small and focused\n\nOk then.\n"
+	type row struct{ text, source, section string }
+	cs := claudeCandidates(doc)
+	got := make([]row, 0, len(cs))
+	for _, c := range cs {
+		got = append(got, row{c.Text, c.Source, c.Section})
+	}
+	require.Equal(t, []row{
+		{"Project guidance for agents. Keep this file current.", "3", ""},
+		{"Memory plane | MCP session state is **not** the ledger.", "9", "Architecture"},
+		{"**Hybrid versioning decision (settled).** Power users may still author native workflows.", "11", "Architecture"},
+		{"`README.md` — Human entry point.", "16", "Repo structure"},
+		{"`_output/` — GITIGNORED — never commit anything here.", "17", "Repo structure"},
+		{"Keep commits small and focused", "21", "Repo structure"},
+	}, got)
+	// project-context keeps the rule-word test: the same prose gives none.
+	require.Empty(t, ruleCandidates("# P\n\n## A\n\nPower users may still author native workflows.\n\n| a | b |\n|---|---|\n| x y z | w |\n", false))
+}
+
+// TestRuleCandidates_TableOfContents: RG-4b — no section is skipped, but a
+// list item of links only names sections and binds nothing.
+func TestRuleCandidates_TableOfContents(t *testing.T) {
+	cs := ruleCandidates("# T\n\n## Table of Contents\n\n- [Testing Rules](#testing-rules)\n"+
+		"- [Code Validation](#code-validation), [Gotchas](#gotchas) and more\n- [A](#a) · [B](#b) · [C](#c)\n", false)
+	require.Len(t, cs, 1)
+	require.Equal(t, "[Code Validation](#code-validation), [Gotchas](#gotchas) and more", cs[0].Text)
 }
 
 // TestRuleCandidates_TeamMemory: RG-4 + D257 — every entry's body gives
@@ -222,16 +296,8 @@ func TestRuleCandidates_TeamMemory(t *testing.T) {
 		{"When a live run overturns a story's Task, the dev pass routes the change to apex-story-amend in the same cycle.", "14", "Process & Workflow Rules > Story amend on live change"},
 		{"Error handling", "18", "Process & Workflow Rules"},
 		{"The audit gate exits 1 until the signal package has tests.", "24", "Known Repo State"},
+		{"An overview line in team memory counts too (RG-4b).", "28", "Overview"},
 	}, got)
-}
-
-func TestIsOverview(t *testing.T) {
-	for _, h := range []string{"Overview", "Project Overview", "1. Introduction", "**About**", "Purpose:", "Summary", "Table of Contents"} {
-		require.True(t, isOverview(h), h)
-	}
-	for _, h := range []string{"Overview of the testing rules", "Technology Stack & Versions", "Critical Don't-Miss Rules", "Summary of gotchas"} {
-		require.False(t, isOverview(h), h)
-	}
 }
 
 // TestLift_CandidatesFromEverySection: RG-4 (D252, D257), from the radix
@@ -249,7 +315,8 @@ func TestLift_CandidatesFromEverySection(t *testing.T) {
 	for rel, content := range map[string]string{
 		"development/project-context.md": rg4ProjectContext + "\n## Commits\n\n- Commit messages follow Conventional Commits, always.\n",
 		"development/team-memory.md":     rg4TeamMemory,
-		"CLAUDE.md":                      string(claude),
+		"CLAUDE.md": strings.Replace(string(claude), "- ok\n",
+			"- ok\n\nThe `_output/` folder is scratch: never commit anything here.\n", 1),
 	} {
 		require.NoError(t, os.WriteFile(filepath.Join(root, filepath.FromSlash(rel)), []byte(content), 0o644))
 	}
@@ -264,18 +331,24 @@ func TestLift_CandidatesFromEverySection(t *testing.T) {
 	d := string(disp)
 	pc := "apex-v0-final:development/project-context.md"
 	for _, want := range []string{
-		"### `CLAUDE.md`\n\n| # | Candidate | Line | Disposition |\n|---|---|---|---|\n| 1 | NEVER push a tag without the operator's explicit say-so | `5` | |\n",
-		"| 2 | Commit messages follow Conventional Commits, always | `6` · `" + pc + ":55` | |\n",
-		"### `" + pc + "` — Technology Stack & Versions\n\n| # | Candidate | Line | Disposition |\n|---|---|---|---|\n| 4 | Go toolchain pinned exactly by go.mod's toolchain line. | `21` | |\n",
+		"### `CLAUDE.md`\n\n| # | Candidate | Line | Disposition |\n|---|---|---|---|\n| 1 | Project rules (see ADR-0003). | `3` | |\n| 2 | NEVER push a tag without the operator's explicit say-so | `5` | |\n",
+		"| 3 | Commit messages follow Conventional Commits, always | `6` · `" + pc + ":62` | |\n",
+		"### `" + pc + "` — Technology Stack & Versions\n\n| # | Candidate | Line | Disposition |\n|---|---|---|---|\n| 9 | Go toolchain pinned exactly by go.mod's toolchain line. | `22` | |\n",
 		"### `" + pc + "` — Critical Implementation Rules > Testing Rules\n",
-		"| A shared fixture is read-only: never write to it from a test, and always copy it into t.TempDir(). | `32` | |",
+		"| A shared fixture is read-only: never write to it from a test, and always copy it into t.TempDir(). | `33` | |",
+		// RG-4c (D264): a CLAUDE.md rule written as a paragraph.
+		"| The `_output/` folder is scratch: never commit anything here. | `9` | |",
+		// RG-4b (D262): the overview, and a note inside Code Validation's fence.
+		"### `" + pc + "` — Overview\n",
+		"| Never fold the release generator into the main binary. | `13` | |",
+		"| `make test` — the full suite, adopted verbatim; do not narrow it to the packages a change touched | `50` | |",
 		"### `apex-v0-final:development/team-memory.md` — Process & Workflow Rules > Never invent an undesigned artifact\n",
 		"| If an AC asserts a mechanism nobody designed, refuse to fabricate it. | `9` | |",
 		"| The audit gate exits 1 until the signal package has tests. | `24` | |",
 	} {
 		require.Contains(t, d, want)
 	}
-	for _, not := range []string{"overview", "Never a candidate", "two minutes", "never skip", "never parsed", "Source: Epic"} {
+	for _, not := range []string{"(#testing-rules)", "| ok |", "two minutes", "never skip", "never parsed", "Source: Epic"} {
 		require.NotContains(t, d, not)
 	}
 	require.Equal(t, 1, strings.Count(d, "Commit messages follow Conventional Commits"), "listed once")
@@ -287,11 +360,11 @@ func TestLift_CandidatesFromEverySection(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, json.Unmarshal(data, &report))
 	require.Contains(t, report.Candidates, map[string]any{
-		"text": "Integration tests run against a real engine, never a mock.", "source": pc + ":27",
+		"text": "Integration tests run against a real engine, never a mock.", "source": pc + ":28",
 		"section": "Critical Implementation Rules > Testing Rules",
 	})
 	require.Contains(t, report.Candidates, map[string]any{
-		"text": "Commit messages follow Conventional Commits, always", "source": "CLAUDE.md:6", "also_in": []any{pc + ":55"},
+		"text": "Commit messages follow Conventional Commits, always", "source": "CLAUDE.md:6", "also_in": []any{pc + ":62"},
 	})
 }
 

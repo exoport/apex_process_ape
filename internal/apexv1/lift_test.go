@@ -483,7 +483,8 @@ func main() { fmt.Println(greet("ADR-0004")) }
 	// The disposition file.
 	disp := read(t, p, "development/lift-disposition.md")
 	for _, want := range []string{
-		"| 1 | NEVER push a tag without the operator's explicit say-so | `5` | |",
+		"| 1 | Project rules (see ADR-0003). | `3` | |",
+		"| 2 | NEVER push a tag without the operator's explicit say-so | `5` | |",
 		"| Commit messages follow Conventional Commits, always | `6` |",
 		"The greeting is byte-identical across runs (ADR-0004) | `5`",
 		"Never log a visitor's name at any level",
@@ -499,8 +500,8 @@ func main() { fmt.Println(greet("ADR-0004")) }
 		require.Contains(t, disp, want)
 	}
 	// RG-4: every section counts, not only the don't-miss one.
-	require.Contains(t, disp, "### `apex-v0-final:development/project-context.md` — Workflow\n\n| # | Candidate | Line | Disposition |\n|---|---|---|---|\n| 8 | Every story gets two reviews. | `21` | |\n")
-	require.Contains(t, disp, "### `apex-v0-final:development/team-memory.md` — Conventions > Error handling\n\n| # | Candidate | Line | Disposition |\n|---|---|---|---|\n| 9 | Every HTTP handler returns an error to a single boundary. | `9` | |\n", "a team-memory entry that is not a gotcha, by its body (D257)")
+	require.Contains(t, disp, "### `apex-v0-final:development/project-context.md` — Workflow\n\n| # | Candidate | Line | Disposition |\n|---|---|---|---|\n| 9 | Every story gets two reviews. | `21` | |\n")
+	require.Contains(t, disp, "### `apex-v0-final:development/team-memory.md` — Conventions > Error handling\n\n| # | Candidate | Line | Disposition |\n|---|---|---|---|\n| 10 | Every HTTP handler returns an error to a single boundary. | `9` | |\n", "a team-memory entry that is not a gotcha, by its body (D257)")
 	// The full lists, whole, beside it (L11).
 	var report struct {
 		IDsLeft []LiftIDRef `json:"ids_left"`

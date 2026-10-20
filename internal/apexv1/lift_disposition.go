@@ -24,22 +24,30 @@ import (
 // project-context's "don't miss" section and team-memory's gotcha titles,
 // so on the rehearsals 46–78 rows stood for 94–163 project-context list
 // items and 37–249 team-memory ones; every other rule section was deleted
-// with its file, recorded nowhere. Now every section of both files counts
-// but a pure overview: its list items and its rule-shaped paragraphs, and
-// a team-memory entry whose body has neither is listed by its paragraphs,
-// else by its title.
+// with its file, recorded nowhere. Now every section of both files counts:
+// its list items and its rule-shaped paragraphs, and a team-memory entry
+// whose body has neither is listed by its paragraphs, else by its title.
+//
+// RG-4b (D262): rc7f still skipped a "pure overview" (a heading titled
+// overview, introduction, about, …), and the rc7f rehearsal reviews found
+// binding rules there — radix's "never fold radix-release-gen into
+// cmd/radix", mdpdf's import-cycle rule for pkg/mdpdf/signal. No section
+// is skipped now: an overview's facts are candidates apex-plan drops with
+// a reason. A list item that is only links (a table of contents) gives
+// none.
 
 var (
 	entryDateTail  = regexp.MustCompile(`\s+[—–-]+\s+\d{4}-\d{2}-\d{2}(?:\s*\([^()]*\))?\s*$`)
 	minRuleWordsRe = regexp.MustCompile(`\S+\s+\S+\s+\S+`)
-	// overviewRe is a pure overview's heading: its section is a summary
-	// of the project, not a rule (RG-4).
-	overviewRe = regexp.MustCompile(`(?i)^(?:project\s+)?(?:overview|introduction|about|purpose|summary|table\s+of\s+contents)$`)
+	// linksOnlyRe is a list item that is nothing but links, as in a table
+	// of contents: it names sections, it binds nothing (RG-4b).
+	linksOnlyRe = regexp.MustCompile(`^(?:\[[^\]]*\]\([^)]*\)[\s,;·|–—-]*)+$`)
+	// tableSepRe is a table's header separator row (RG-4c).
+	tableSepRe = regexp.MustCompile(`^\s*\|[\s:|-]*-[\s:|-]*\|\s*$`)
 	// ruleWordRe makes a paragraph rule-shaped (RG-4).
-	ruleWordRe   = regexp.MustCompile(`(?i)\b(?:must|never|always|do\s+not|don['’]t|avoid|only|required|prefer|shall|forbidden)\b`)
-	thematicRe   = regexp.MustCompile(`^\s{0,3}(?:(?:-\s*){3,}|(?:\*\s*){3,}|(?:_\s*){3,})$`)
-	headingNumRe = regexp.MustCompile(`^\d+(?:\.\d+)*\.?\s+`)
-	quoteRe      = regexp.MustCompile(`^\s{0,3}>\s?`)
+	ruleWordRe = regexp.MustCompile(`(?i)\b(?:must|never|always|do\s+not|don['’]t|avoid|only|required|prefer|shall|forbidden)\b`)
+	thematicRe = regexp.MustCompile(`^\s{0,3}(?:(?:-\s*){3,}|(?:\*\s*){3,}|(?:_\s*){3,})$`)
+	quoteRe    = regexp.MustCompile(`^\s{0,3}>\s?`)
 	// citationLineRe is the line v0's retrospectives cite an entry's
 	// sources on: where a rule came from, not a rule.
 	citationLineRe = regexp.MustCompile(`(?i)^[*_]*sources?[*_]*:`)
@@ -144,24 +152,37 @@ func joinPath(stack []mdHeading) string {
 	return strings.Join(parts, " > ")
 }
 
-// isOverview reports whether a heading names a pure overview section.
-func isOverview(title string) bool {
-	t := strings.Trim(headingNumRe.ReplaceAllString(strings.TrimSpace(title), ""), "*_`: ")
-	return overviewRe.MatchString(t)
-}
-
 // ruleCandidates returns the rule candidates of a v0 rule document
 // (project-context.md, team-memory): every list item of three words or
 // more and every rule-shaped paragraph (outside code, lists, tables and
-// headings: the paragraph whole), in every section but a pure overview
-// and its subsections, each with its heading path. With entries (team
+// headings: the paragraph whole), in every section, each with its
+// heading path. With entries (team
 // memory), each H3+ heading is an entry, and every entry is a rule: one
 // whose body gives no candidate is listed by its paragraphs, or, with
 // none, by its title, so no entry goes unrecorded.
 func ruleCandidates(doc string, entries bool) []LiftCandidate {
+	return ruleWalkDoc(doc, entries, false)
+}
+
+// claudeCandidates returns CLAUDE.md's candidates (RG-4c, D264). CLAUDE.md
+// is the project's own instruction file, read whole by every session, so
+// its prose binds whatever its wording: cortex's review found ten of its
+// rules with no row, and the rule-word test would have missed seven —
+// plain prose ("Keep this file current"), table cells ("MCP session state
+// is not the ledger") and a code block's comment ("_output/ … never commit
+// anything here"). So every paragraph of three words or more is a
+// candidate, every table body row (its cells joined), and every comment in
+// its code blocks (codeNotes), besides its list items.
+func claudeCandidates(doc string) []LiftCandidate {
+	cs := append(ruleWalkDoc(doc, false, true), codeNotes(splitLines(doc), 0, -1)...)
+	sort.SliceStable(cs, func(i, j int) bool { return cs[i].line < cs[j].line })
+	return cs
+}
+
+func ruleWalkDoc(doc string, entries, whole bool) []LiftCandidate {
 	lines := splitLines(doc)
 	lines = lines[frontMatterEnd(lines):]
-	w := &ruleWalk{entries: entries, soleH1: soleTitle(lines), item: -1, listed: map[int]bool{}, lastListed: -1}
+	w := &ruleWalk{entries: entries, whole: whole, soleH1: soleTitle(lines), item: -1, listed: map[int]bool{}, lastListed: -1}
 	for _, l := range lines {
 		w.line(l)
 	}
@@ -180,9 +201,15 @@ func ruleCandidates(doc string, entries bool) []LiftCandidate {
 // ruleWalk is one ruleCandidates pass over a document.
 type ruleWalk struct {
 	entries, soleH1 bool
-	out             []LiftCandidate
-	stack           []ruleHeading
-	para            []mdLine
+	// whole reads every paragraph as a candidate, not only a rule-shaped
+	// one, and every table body row (CLAUDE.md, RG-4c).
+	whole bool
+	// inTable is whether the previous line was a table row: a row after
+	// one is a body row, the first is the header.
+	inTable bool
+	out     []LiftCandidate
+	stack   []ruleHeading
+	para    []mdLine
 	// item is the list item being read (its index in out), -1 when none.
 	item int
 	// listed are an entry's own paragraphs or title, listed because
@@ -196,7 +223,6 @@ type ruleWalk struct {
 type ruleHeading struct {
 	mdHeading
 	line, from int
-	skip       bool
 	// prose is an entry's paragraphs that are not rule-shaped.
 	prose []LiftCandidate
 }
@@ -206,19 +232,28 @@ func (w *ruleWalk) line(l mdLine) {
 	if lv, title := headingLevel(l); lv > 0 {
 		w.flush()
 		w.closeTo(lv)
-		skip := w.skipping() || isOverview(title)
-		w.stack = append(w.stack, ruleHeading{mdHeading: mdHeading{lv, entryDateTail.ReplaceAllString(title, "")}, line: l.N, from: len(w.out), skip: skip})
+		w.inTable = false
+		w.stack = append(w.stack, ruleHeading{mdHeading: mdHeading{lv, entryDateTail.ReplaceAllString(title, "")}, line: l.N, from: len(w.out)})
 		return
 	}
+	row := !l.InCode && tableRowRe.MatchString(l.Text)
+	defer func() { w.inTable = row }()
 	switch {
-	case l.InCode, t == "", thematicRe.MatchString(l.Text), tableRowRe.MatchString(l.Text), strings.HasPrefix(t, "<!--"):
+	case row && w.whole && w.inTable:
+		w.flush()
+		if !tableSepRe.MatchString(l.Text) {
+			cells := strings.Split(strings.Trim(t, "|"), "|")
+			for i := range cells {
+				cells[i] = strings.TrimSpace(cells[i])
+			}
+			w.out = append(w.out, LiftCandidate{Text: strings.Join(cells, " | "), line: l.N, Section: w.path()})
+		}
+	case l.InCode, t == "", thematicRe.MatchString(l.Text), row, strings.HasPrefix(t, "<!--"):
 		w.flush()
 	case listItemRe.MatchString(l.Text):
 		w.flush()
-		if !w.skipping() {
-			w.out = append(w.out, LiftCandidate{Text: strings.TrimSpace(listItemRe.FindStringSubmatch(l.Text)[1]), line: l.N, Section: w.path()})
-			w.item = len(w.out) - 1
-		}
+		w.out = append(w.out, LiftCandidate{Text: strings.TrimSpace(listItemRe.FindStringSubmatch(l.Text)[1]), line: l.N, Section: w.path()})
+		w.item = len(w.out) - 1
 	case w.item >= 0:
 		// A continuation, indented or lazy, belongs to its item.
 		w.out[w.item].Text += " " + t
@@ -237,19 +272,17 @@ func (w *ruleWalk) path() string {
 	return joinPath(hs)
 }
 
-func (w *ruleWalk) skipping() bool { return len(w.stack) > 0 && w.stack[len(w.stack)-1].skip }
-
 // flush ends a paragraph: a candidate when it is rule-shaped, else, in an
 // entry, held for the entry.
 func (w *ruleWalk) flush() {
-	if len(w.para) > 0 && !w.skipping() {
+	if len(w.para) > 0 {
 		b := make([]string, 0, len(w.para))
 		for _, l := range w.para {
 			b = append(b, strings.TrimSpace(quoteRe.ReplaceAllString(l.Text, "")))
 		}
 		c := LiftCandidate{Text: strings.TrimSpace(strings.Join(b, " ")), line: w.para[0].N, Section: w.path()}
 		switch top := len(w.stack) - 1; {
-		case ruleWordRe.MatchString(c.Text):
+		case w.whole || ruleWordRe.MatchString(c.Text):
 			w.out = append(w.out, c)
 		case w.entries && top >= 0 && w.stack[top].level >= 3:
 			w.stack[top].prose = append(w.stack[top].prose, c)
@@ -264,7 +297,7 @@ func (w *ruleWalk) closeTo(lv int) {
 	for len(w.stack) > 0 && w.stack[len(w.stack)-1].level >= lv {
 		h := w.stack[len(w.stack)-1]
 		w.stack = w.stack[:len(w.stack)-1]
-		if !w.entries || h.level < 3 || h.skip || slices.ContainsFunc(w.out[h.from:], isRule) || w.lastListed >= h.from {
+		if !w.entries || h.level < 3 || slices.ContainsFunc(w.out[h.from:], isRule) || w.lastListed >= h.from {
 			continue
 		}
 		prose := slices.DeleteFunc(h.prose, func(c LiftCandidate) bool { return !isRule(c) })
@@ -280,9 +313,10 @@ func (w *ruleWalk) closeTo(lv int) {
 
 // isRule reports whether a list item or paragraph of a rule document is
 // a candidate: three words or more, and not the "Source: Epic N
-// retrospective" line v0's retrospectives put under each entry.
+// retrospective" line v0's retrospectives put under each entry, nor a
+// list item of links only.
 func isRule(c LiftCandidate) bool {
-	return minRuleWordsRe.MatchString(c.Text) && !citationLineRe.MatchString(c.Text)
+	return minRuleWordsRe.MatchString(c.Text) && !citationLineRe.MatchString(c.Text) && !linksOnlyRe.MatchString(c.Text)
 }
 
 func (lf *lifter) candidates() []LiftCandidate {
@@ -302,29 +336,38 @@ func (lf *lifter) candidates() []LiftCandidate {
 		return cs
 	}
 	if doc := lf.claudeBefore; doc != "" {
-		// The managed block is the v0 framework's, not the project's.
-		var lines []mdLine
+		// The managed block is the v0 framework's, not the project's: its
+		// lines are blanked, so every other line keeps its number.
+		// RG-4c (D264): CLAUDE.md gave its list items only, and cortex's
+		// review found ten rules written as paragraphs with no row; it now
+		// goes through the same filter as project-context.md.
+		raw := strings.Split(doc, "\n")
 		in := false
-		for _, l := range splitLines(doc) {
-			switch strings.TrimSpace(l.Text) {
+		for i, l := range raw {
+			switch strings.TrimSpace(l) {
 			case v0ManagedBegin:
 				in = true
+				raw[i] = ""
 				continue
 			case v0ManagedEnd:
 				in = false
+				raw[i] = ""
 				continue
 			}
-			if !in {
-				lines = append(lines, l)
+			if in {
+				raw[i] = ""
 			}
 		}
-		add("CLAUDE.md", withSections(doc, listItems(lines)))
+		add("CLAUDE.md", claudeCandidates(strings.Join(raw, "\n")))
 	}
 	if doc, ok := lf.texts["AGENTS.md"]; ok {
 		add("AGENTS.md", withSections(doc, listItems(splitLines(doc))))
 	}
 	if lf.projectContext != "" {
-		add(LiftTag+":"+lf.projectContext, ruleCandidates(lf.readRel(lf.projectContext), false))
+		doc := lf.readRel(lf.projectContext)
+		cs := append(ruleCandidates(doc, false), codeValidationNotes(doc)...)
+		sort.SliceStable(cs, func(i, j int) bool { return cs[i].line < cs[j].line })
+		add(LiftTag+":"+lf.projectContext, cs)
 	}
 	if tm := lf.rel(lf.layout.Cfg.Paths.TeamMemory); tm != "" {
 		if doc := lf.readRel(tm); doc != "" {

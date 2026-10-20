@@ -151,6 +151,82 @@ func hasPlaceholder(c string) bool {
 	return false
 }
 
+// codeValidationNotes returns the rule text inside the fenced blocks of
+// doc's `## Code Validation` section, which extractGates takes the
+// commands from and ruleCandidates, reading prose only, never sees
+// (RG-4b, D262): radix kept "full ruleset adopted verbatim; do not reduce
+// it" and "`make audit` is NOT the route" as shell comments there. A
+// comment after a command is a note on that command, shown with it, and
+// the comment-only lines right after it that are indented deeper than the
+// command continue it; any other run of comment-only lines is one note; a
+// blank line, a plain command or the fence's end closes a note. Notes of three words or more are candidates, with their heading
+// path; the commands themselves still go to AGENTS.md ## Commands.
+func codeValidationNotes(doc string) []LiftCandidate {
+	lines := splitLines(doc)
+	for i, l := range lines {
+		if lv, t := headingLevel(l); lv > 0 && strings.EqualFold(strings.TrimSpace(t), "Code Validation") {
+			return codeNotes(lines, i+1, lv)
+		}
+	}
+	return nil
+}
+
+// codeNotes returns the comment notes in the fenced blocks of lines from
+// index from: to the next heading of level or above, or to the end when
+// level is -1 (CLAUDE.md, RG-4c).
+func codeNotes(lines []mdLine, from, level int) []LiftCandidate {
+	paths := headingPaths(lines)
+	// note is one note being read: its candidate, and its comment text
+	// alone, which is what the three-word rule counts.
+	type note struct {
+		c       LiftCandidate
+		comment string
+	}
+	var out []note
+	cur := -1
+	// cmdIndent is the indent of the command whose note is open, -1 when
+	// the open note (if any) is a comment-only one.
+	cmdIndent := -1
+	indentOf := func(s string) int { return len(s) - len(strings.TrimLeft(s, " \t")) }
+	for _, l := range lines[from:] {
+		if lv, _ := headingLevel(l); lv > 0 && level > 0 && lv <= level {
+			break
+		}
+		t := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(l.Text), "$ "))
+		if !l.InCode || t == "" || strings.HasPrefix(t, "```") || strings.HasPrefix(t, "~~~") || strings.HasPrefix(t, "#!") {
+			cur = -1
+			continue
+		}
+		if strings.HasPrefix(t, "#") {
+			text := strings.TrimSpace(strings.TrimLeft(t, "#"))
+			switch {
+			case text == "":
+			case cur >= 0 && (cmdIndent < 0 || indentOf(l.Text) > cmdIndent):
+				out[cur].c.Text += " " + text
+				out[cur].comment += " " + text
+			default:
+				out = append(out, note{LiftCandidate{Text: text, line: l.N, Section: paths[l.N]}, text})
+				cur, cmdIndent = len(out)-1, -1
+			}
+			continue
+		}
+		cur = -1
+		cmd := stripShellComment(t)
+		if text := strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(t[len(cmd):]), "#")); text != "" {
+			out = append(out, note{LiftCandidate{Text: "`" + cmd + "` — " + text, line: l.N, Section: paths[l.N]}, text})
+			cur, cmdIndent = len(out)-1, indentOf(l.Text)
+		}
+	}
+	var keep []LiftCandidate
+	for _, n := range out {
+		if isRule(LiftCandidate{Text: n.comment}) {
+			n.c.Source = itoaLine(n.c.line)
+			keep = append(keep, n.c)
+		}
+	}
+	return keep
+}
+
 // stripShellComment drops a trailing ` # …` comment from one command
 // line: a # that starts a word outside quotes. Joined with &&, a kept
 // comment would swallow every command after it (L3: atomix's regression

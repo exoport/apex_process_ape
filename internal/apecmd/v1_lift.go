@@ -158,14 +158,18 @@ The commit:
                  which; "revealed" lists the files under .claude/ it un-ignored and did not
                  commit (a skill of your own: commit it or ignore it by name)
   writes         development/lift-disposition.md (16 KB, unless its candidates need
-                 more): the binding-rule candidates, EVERY one: CLAUDE.md's list
-                 items and, from project-context.md and team-memory, every section
-                 but a pure overview (a heading titled overview, introduction,
-                 about, purpose, summary or table of contents) — its list items of
-                 three words or more and its rule-shaped paragraphs (must, never,
+                 more): the binding-rule candidates, EVERY one: from
+                 project-context.md and team-memory, every section, an overview
+                 too — its list items of three words or more (not one that is
+                 only links) and its rule-shaped paragraphs (must, never,
                  always, do not, avoid, only, required, prefer, shall, forbidden),
                  whole; a team-memory entry with neither is listed by its
-                 paragraphs, else by its title. Grouped by source and section (JSON
+                 paragraphs, else by its title; the notes in ## Code
+                 Validation's code blocks (a command's # comment, with its
+                 command, or a run of comment lines), whose commands go to
+                 AGENTS.md ## Commands. CLAUDE.md, outside the apex-v0 managed
+                 block, is read whole: every list item, paragraph and table
+                 body row of three words or more, and every code-block note. Grouped by source and section (JSON
                  rule_candidates[].section, the heading path); text found twice is
                  listed once with both sources (also_in). An empty Disposition
                  column for apex-plan, then a fresh read-only review, then the
