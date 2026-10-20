@@ -546,6 +546,9 @@ func (p *Project) verify(ctx context.Context, ci ChangeInfo, opt RunOptions, kee
 	if err := interrupted(ctx, "the verify of "+id); err != nil {
 		return nil, err
 	}
+	// rc.7d (rc7d-std): a red scenario that checks what `ape decision
+	// standard` removed says so (Q131).
+	p.markStale(results)
 	// The checks are done: what they found is recorded, a signal or not.
 	ctx = context.WithoutCancel(ctx)
 	regression := skipped

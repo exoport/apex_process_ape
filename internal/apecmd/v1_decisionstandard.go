@@ -52,7 +52,23 @@ In order:
              not rewritten. A proposed supersede of a standard ape wrote is a person's
              pending opt-out and is left. No other ADR is renumbered
 A write is its own commit, "apex: ADR-0001 standard <framework version>" (or "… ape's
-own copy" when no payload is installed). decision.accepted-edited accepts exactly that
+own copy" when no payload is installed). Its decisions.json record lists what the verb
+removed, standard.removed: [{path, id}] ([] when nothing; kept across later writes;
+D232 Q130).
+
+Stale scenarios (D232 Q131): a scenario of a lasting spec
+(development/specs/<capability>/spec.md) whose check: names what it removed — its path,
+file name or ADR id, or "Supersedes: ADR-0001" once it removed a supersede — can never
+pass again. The verb lists each, after a write and on any later run ("stale scenario
+<spec>:<line>: …"; under --check, what the write would leave stale), and ape project
+check shows the notice spec.check-names-removed (action replan) while one exists; a
+check that asserts the name's absence (! test -e <path>, [ ! -f <path> ]) is not stale.
+The spec is never edited here (Q132): a change retires the scenario with a REMOVED
+delta citing the migration v1.0.0_seq-08 — never by recreating the records or by
+superseding ADR-0001 again, which opts the project out. A project whose seq-08 ran
+before the record (rc.7b) has none; for it, a check naming a decisions/ file that does
+not exist, or an ADR-0001 file name that is not the standard's, is read as stale
+(Q133). decision.accepted-edited accepts exactly that
 change of an accepted ADR-0001 — its bytes equal the digest ape recorded for a shipped
 standard — and still refuses a hand edit. When a release changes the standard and no
 entry runs this, ape project check lists the notice decision.standard-stale.
@@ -70,7 +86,8 @@ migration's check: 0 applied, 1 not applied.
 JSON: {"action": "created"|"replaced"|"kept"|"opted-out"|"differs", "path", "source":
 "_apex/standards/adr-0001.md"|"ape", "framework_version", "replaces" (the file it
 replaced), "opted_out_by": [ADR-NNNN, …], "removed_adrs": [{id, path, citations:
-["<file>:<line>", …]}], "commit"}. Under --check it says what is due, under "result"
+["<file>:<line>", …]}], "commit", "stale_scenarios": [{spec, requirement, scenario,
+line, names}]}. Under --check it says what is due, under "result"
 beside the failure's ok/exit/diagnostics (exit 1).
 
 Exit codes: 0 written, or nothing due (--check: nothing due) · 1 refused, or (--check)
@@ -92,6 +109,7 @@ a write due.`,
 				}
 				return v1Emit(cmd.OutOrStdout(), &f, res, func(w io.Writer) {
 					fmt.Fprintln(w, "ADR-0001: "+adrStandardLine(res)+"; nothing due")
+					printStaleScenarios(w, res.StaleScenarios)
 				})
 			}
 			res, err := p.DecisionStandard(cmd.Context())
@@ -110,12 +128,21 @@ a write due.`,
 				if res.Commit != "" {
 					fmt.Fprintf(w, "commit %.7s\n", res.Commit)
 				}
+				printStaleScenarios(w, res.StaleScenarios)
 			})
 		},
 	}
 	addV1Flags(cmd, &f)
 	cmd.Flags().BoolVar(&check, "check", false, "write nothing: exit 0 when nothing is due, 1 when a write of the standard is")
 	return cmd
+}
+
+// printStaleScenarios lists the lasting scenarios whose check names what
+// the verb removed (rc.7d, D232 Q131), one line each.
+func printStaleScenarios(w io.Writer, ss []apexv1.StaleScenario) {
+	for i := range ss {
+		fmt.Fprintf(w, "stale scenario %s:%d: %s\n", ss[i].Spec, ss[i].Line, ss[i].Message())
+	}
 }
 
 // adrStandardLine says what happened to ADR-0001, for init and ape

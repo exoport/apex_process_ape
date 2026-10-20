@@ -63,6 +63,10 @@ type CheckResult struct {
 	// last run's, the earlier ones beside it as <name>.try<k>.log.
 	Flaky bool `json:"flaky,omitempty"`
 	Tries int  `json:"tries,omitempty"`
+	// StaleNames: a red scenario of the lasting spec whose check names
+	// what `ape decision standard` removed (D232 Q131) — the names;
+	// StalePointer says how to retire it.
+	StaleNames []string `json:"stale_names,omitempty"`
 }
 
 // Red reports a result that fails its run: a non-zero exit that was not

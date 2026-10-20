@@ -564,6 +564,10 @@ line}; [] when none, beside the findings on a failure too), they never change th
                            under apex-plan's "Next — not milestones:" label — while it
                            lives in development/next.md (D217): ` + "`ape next move`" + ` moves
                            it (the framework's migration v1.0.0_seq-09 runs it)
+  spec.check-names-removed (action replan) a lasting spec scenario's check names what
+                           ` + "`ape decision standard`" + ` removed (D232; see its --help), so it
+                           can never pass: a change retires it with a REMOVED delta
+                           citing v1.0.0_seq-08 — never a new supersede of ADR-0001
 
 Exit codes: 0 green · 1 findings (listed on stderr, or under "findings" with --json) · 2 usage.`,
 		Example: "  ape project check\n  ape project check --json",

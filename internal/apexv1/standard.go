@@ -73,6 +73,13 @@ func StandardADRFile() string { return "0001-" + StandardADRSlug + ".md" }
 type StandardRecord struct {
 	FrameworkVersion string `json:"framework_version"`
 	SHA256           string `json:"sha256"`
+	// Removed is every file `ape decision standard` removed, from rc.7d
+	// on (D232 Q130): the apex-v0 ADR-0001 file it replaced, the proposed
+	// ADRs that superseded it; [] when a run of it removed nothing, and
+	// carried over when the standard is written again. Absent from a
+	// record init or the lift wrote, and from one an older ape's run of
+	// the verb wrote (Q133 then reads the project for it).
+	Removed *[]StandardRemoval `json:"removed,omitempty"`
 }
 
 // installedStandard is the standard's text for one project.
@@ -149,6 +156,10 @@ type StandardADRResult struct {
 	// the apex-v0 governance standard it replaces.
 	Removed []RemovedADR `json:"removed_adrs,omitempty"`
 	Commit  string       `json:"commit,omitempty"`
+	// StaleScenarios are the lasting specs' scenarios whose check names
+	// what the verb removed (D232 Q131) — under --check, what it is to
+	// remove: listed, never edited (Q132).
+	StaleScenarios []StaleScenario `json:"stale_scenarios,omitempty"`
 }
 
 // The standard ADR's actions.
@@ -249,33 +260,57 @@ func (p *Project) applyStandardADR(pl *standardPlan, cmd string) ([]string, erro
 		}
 		paths = append(paths, p.Rel(pl.old))
 	}
-	if err := p.writeStandardADR(pl.dst, pl.std, cmd); err != nil {
+	removed := pl.removals(p)
+	if err := p.writeStandardADR(pl.dst, pl.std, cmd, &removed); err != nil {
 		return nil, err
 	}
 	return append(paths, p.Rel(pl.dst), p.Rel(p.decisionsJSON()), p.Rel(p.StateGitignore())), nil
 }
 
+// removals are the files writing the plan's standard removes (Q130): the
+// old ADR-0001 file when its name is not the standard's, and the proposed
+// ADRs planRemovals added.
+func (pl *standardPlan) removals(p *Project) []StandardRemoval {
+	out := []StandardRemoval{}
+	if pl.old != "" && pl.old != pl.dst {
+		out = append(out, StandardRemoval{Path: p.Rel(pl.old), ID: StandardADRID})
+	}
+	for _, r := range pl.Removed {
+		out = append(out, StandardRemoval{Path: r.Path, ID: r.ID})
+	}
+	return out
+}
+
 // writeStandardADR writes the standard as ADR-0001 at path and records it
-// in decisions.json. It commits nothing.
-func (p *Project) writeStandardADR(path string, std installedStandard, cmd string) error {
+// in decisions.json, with removed (recordStandardADR). It commits nothing.
+func (p *Project) writeStandardADR(path string, std installedStandard, cmd string, removed *[]StandardRemoval) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
 	if err := writeFileAtomic(path, std.doc); err != nil {
 		return err
 	}
-	return p.recordStandardADR(std, cmd)
+	return p.recordStandardADR(std, cmd, removed)
 }
 
 // recordStandardADR records the standard ADR-0001 in decisions.json:
 // accepted by StandardBy(cmd), with its body digest (what project check
 // holds an accepted ADR to) and, as standard, the shipped version and the
-// digest of its bytes (D206 Q123).
-func (p *Project) recordStandardADR(std installedStandard, cmd string) error {
+// digest of its bytes (D206 Q123). removed is what this write removed
+// (D232 Q130), added to what the record holds; nil when the writer
+// records no removals (init, the lift), which carries the record's over.
+func (p *Project) recordStandardADR(std installedStandard, cmd string, removed *[]StandardRemoval) error {
 	recs := p.loadDecisionRecords()
+	var prev *[]StandardRemoval
+	if old, ok := recs[StandardADRID]; ok && old.Standard != nil {
+		prev = old.Standard.Removed
+	}
+	if removed != nil {
+		prev = mergeRemovals(prev, *removed)
+	}
 	recs[StandardADRID] = DecisionRecord{
 		AcceptedAt: Stamp(), By: StandardBy(cmd), BodySHA256: adrBodyDigest(std.doc),
-		Standard: &StandardRecord{FrameworkVersion: std.version, SHA256: bytesSHA256(std.doc)},
+		Standard: &StandardRecord{FrameworkVersion: std.version, SHA256: bytesSHA256(std.doc), Removed: prev},
 	}
 	return p.saveDecisionRecords(recs)
 }
@@ -295,7 +330,7 @@ func (p *Project) initStandardADR(res *InitResult) error {
 	recsExisted := fileExists(recs)
 	switch pl.Action {
 	case StandardCreated:
-		if err := p.writeStandardADR(pl.dst, pl.std, "ape project init"); err != nil {
+		if err := p.writeStandardADR(pl.dst, pl.std, "ape project init", nil); err != nil {
 			return err
 		}
 		res.Created = append(res.Created, pl.Path)
@@ -303,7 +338,7 @@ func (p *Project) initStandardADR(res *InitResult) error {
 		if _, ok := p.loadDecisionRecords()[StandardADRID]; ok {
 			return nil
 		}
-		if err := p.recordStandardADR(installedStandard{doc: pl.doc, source: pl.std.source, version: pl.std.version}, "ape project init"); err != nil {
+		if err := p.recordStandardADR(installedStandard{doc: pl.doc, source: pl.std.source, version: pl.std.version}, "ape project init", nil); err != nil {
 			return err
 		}
 	default:
@@ -468,8 +503,12 @@ func (p *Project) DecisionStandardCheck(ctx context.Context) (*StandardADRResult
 	pl := p.planStandardADR()
 	p.planRemovals(ctx, pl)
 	if !pl.Due() {
+		pl.StaleScenarios = p.StaleScenarios()
 		return &pl.StandardADRResult, nil
 	}
+	// rc.7d (rc7d-std): the scenarios the write would leave stale (Q131).
+	removed, _ := p.recordedRemovals()
+	pl.StaleScenarios = p.staleScenarios(append(removed, pl.removals(p)...), false, true)
 	what := []string{"ADR-0001 is absent"}
 	if pl.Action == StandardReplaced {
 		what[0] = pl.Replaces + " is not the installed standard (" + pl.std.label() + ")"
@@ -500,6 +539,7 @@ func (p *Project) DecisionStandard(ctx context.Context) (*StandardADRResult, err
 	p.planRemovals(ctx, pl)
 	res := &pl.StandardADRResult
 	if !pl.Due() {
+		res.StaleScenarios = p.StaleScenarios()
 		return res, nil
 	}
 	if !p.isWorkTree(ctx) {
@@ -531,6 +571,9 @@ func (p *Project) DecisionStandard(ctx context.Context) (*StandardADRResult, err
 		return res, commitFailed(err, "the standard ADR-0001 was written but its commit failed: "+err.Error())
 	}
 	res.Commit = sha
+	// rc.7d (rc7d-std): the lasting scenarios that check what it removed
+	// are listed, not edited (Q131, Q132).
+	res.StaleScenarios = p.StaleScenarios()
 	return res, nil
 }
 

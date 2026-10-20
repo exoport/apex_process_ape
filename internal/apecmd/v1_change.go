@@ -565,7 +565,9 @@ runs' output beside its log as <name>.try<k>.log), and listed by `+"`ape status`
 for scenario checks) are recorded in state.json; output under _apex/state/logs/<id>/.
 What a check leaves in the tree outside development/ — files it created, tracked files it
 changed — is undone after it and reported (JSON "stray_files"); files that were there
-before it ran are never touched.
+before it ran are never touched. A red scenario of the lasting spec whose check names
+what `+"`ape decision standard`"+` removed says so on its line and in results[].stale_names
+(D232; see `+"`ape decision standard --help`"+`).
 With "regression: <cmd>" in _apex/config.yaml (with tiers, its change tier), the
 regression command runs too (recorded in the results with kind "regression") and is judged against the change's regression
 baseline (JSON "regression": {cmd, exit, baseline_exit, pre_existing_red, failed,

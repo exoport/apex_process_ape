@@ -62,6 +62,9 @@ func (r *GateRun) Why() string {
 			if reason := r.SpecFailed[i].Reason; reason != "" {
 				name += " (" + reason + ")"
 			}
+			if len(r.SpecFailed[i].StaleNames) > 0 {
+				name += " (checks what ape decision standard removed: retire it, never re-supersede ADR-0001)"
+			}
 			names = append(names, name)
 		}
 		parts = append(parts, strconv.Itoa(n)+" spec scenario(s) red: "+strings.Join(limit(names, 5), ", "))
@@ -452,6 +455,9 @@ func (p *Project) runGate(ctx context.Context, id string, opt RunOptions) (*Gate
 		run.Regression.BaselineChange = change
 		results = results[:len(results)-1]
 	}
+	// rc.7d (rc7d-std): a red scenario that checks what `ape decision
+	// standard` removed says so (Q131).
+	p.markStale(results)
 	for i := range results {
 		if results[i].Exit != 0 {
 			results[i].Tail = lastN(results[i].Tail, 15)

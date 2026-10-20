@@ -183,7 +183,7 @@ Goal: Five.
 	require.NoError(t, err)
 	_, err = MergeHooks(p.SettingsJSON())
 	require.NoError(t, err)
-	require.NoError(t, p.writeStandardADR(filepath.Join(p.DecisionsDir(), StandardADRFile()), standardADR(p.Root), "test"))
+	require.NoError(t, p.writeStandardADR(filepath.Join(p.DecisionsDir(), StandardADRFile()), standardADR(p.Root), "test", nil))
 
 	ns := p.Notices()
 	require.Len(t, ns, 2)

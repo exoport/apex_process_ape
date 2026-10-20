@@ -19,6 +19,8 @@ var noticeCodes = []string{
 	CodeStandardDiffers, CodeStandardSuperseded, CodeStandardStale,
 	// rc.7b (rc7b-next).
 	CodeRoadmapNextInline,
+	// rc.7d (rc7d-std).
+	CodeSpecCheckNamesRemoved,
 }
 
 // The published list and the code agree: every code the source sets or a
@@ -81,6 +83,8 @@ func TestDiagnosticCodes_PublishedListMatchesTheCode(t *testing.T) {
 		"CodeStandardStale": CodeStandardStale, "CodeStandardPending": CodeStandardPending,
 		// rc.7b (rc7b-next).
 		"CodeNextMovePending": CodeNextMovePending, "CodeRoadmapNextInline": CodeRoadmapNextInline,
+		// rc.7d (rc7d-std).
+		"CodeSpecCheckNamesRemoved": CodeSpecCheckNamesRemoved,
 	}
 	for _, glob := range []string{"*.go", filepath.Join("..", "apecmd", "v1_*.go")} {
 		files, err := filepath.Glob(glob)

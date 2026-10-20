@@ -199,6 +199,10 @@ func printChecks(w io.Writer, rs []apexv1.CheckResult, tails bool) {
 		if r.Reason != "" {
 			fmt.Fprintln(w, "       "+r.Reason+": "+r.Detail)
 		}
+		// rc.7d (rc7d-std): D232 Q131.
+		if s := r.StalePointer(); s != "" && r.Red() {
+			fmt.Fprintln(w, "       stale ("+apexv1.CodeSpecCheckNamesRemoved+"): "+s)
+		}
 		if tails && r.Red() {
 			for _, l := range lastLinesOf(r.Tail, 15) {
 				fmt.Fprintln(w, "       | "+l)

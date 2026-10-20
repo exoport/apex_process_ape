@@ -177,7 +177,8 @@ func TestADRStandard_UpdateReplacesAndCommits(t *testing.T) {
 	require.Equal(t, payloadStandard, read(t, p, path))
 	rec := mustRecord(t, p.Root, StandardADRID)
 	require.Equal(t, "APEX standard (ape decision standard)", rec.By)
-	require.Equal(t, &StandardRecord{FrameworkVersion: "v1.0.1", SHA256: bytesSHA256(payloadStandard)}, rec.Standard)
+	// rc.7d: removed records what the verb removed, [] here (D232 Q130).
+	require.Equal(t, &StandardRecord{FrameworkVersion: "v1.0.1", SHA256: bytesSHA256(payloadStandard), Removed: &[]StandardRemoval{}}, rec.Standard)
 	require.NotContains(t, findingMessages(p.Check()), "ADR-0001", "the sanctioned replacement is no accepted-edited")
 	require.Empty(t, standardNotices(p))
 

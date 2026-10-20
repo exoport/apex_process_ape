@@ -1163,7 +1163,7 @@ func (lf *lifter) apply() error {
 	if err := recordLiftedDecisions(p, lf.res.ADRs); err != nil {
 		return err
 	}
-	if err := p.recordStandardADR(lf.std, "ape project lift"); err != nil {
+	if err := p.recordStandardADR(lf.std, "ape project lift", nil); err != nil {
 		return err
 	}
 	if fileExists(p.decisionsJSON()) {

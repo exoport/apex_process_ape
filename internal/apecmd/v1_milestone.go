@@ -236,7 +236,9 @@ under timeouts.check (idle 15m, max 2h), the regression command under timeouts.r
 (idle 30m, max 2h) — killed at idle without progress (output or CPU time) or at max: exit
 124, reason idle|ceiling; --timeout sets max for all three. A vacuous or unrun gate command, scenario or regression command is
 red (see ` + "`ape change verify --help`" + `; JSON reason/detail). Files the gate
-or a check leaves outside development/ are undone and reported ("stray_files"). The run (exit, sha, time,
+or a check leaves outside development/ are undone and reported ("stray_files"). A red scenario
+whose check names what ` + "`ape decision standard`" + ` removed says so on its line and in
+run.spec_failed[].stale_names (D232; see ` + "`ape decision standard --help`" + `). The run (exit, sha, time,
 output hash, last lines) goes to _apex/state/logs/gate-<M>.json (gitignored; shown by
 ` + "`ape status`" + `). When the result differs from the recorded one (green vs red), or is
 the first, _apex/state/milestones.json is updated and committed as

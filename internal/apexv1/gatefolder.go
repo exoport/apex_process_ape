@@ -192,5 +192,7 @@ func (p *Project) Notices() []Diagnostic {
 	// rc.7b (rc7b-adr).
 	out = append(out, p.standardADRNotices()...)
 	// rc.7b (rc7b-next).
-	return append(out, p.nextInlineNotices()...)
+	out = append(out, p.nextInlineNotices()...)
+	// rc.7d (rc7d-std).
+	return append(out, p.staleScenarioNotices()...)
 }
