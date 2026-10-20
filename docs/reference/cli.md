@@ -34,7 +34,7 @@ to v1 lifts it (`ape project lift`).
 Subcommands:
 
 - `aboard` — A shared visual board for a human and one or more agent sessions
-- `change` — The unit of change: new, check, approve (fixes), start, verify, review, accept, block, answer, archive, tool
+- `change` — The unit of change: new, check, approve (tweaks), start, verify, review, accept, block, answer, archive, tool
 - `chat` — Bridged claude REPL with hooks captured to a runlog
 - `config` — Resolve the project's APEX configuration
 - `costs` — Show this project's Claude cost rollup
@@ -1084,7 +1084,7 @@ Global flags:
 
 ## ape change
 
-The unit of change: new, check, approve (fixes), start, verify, review, accept, block, answer, archive, tool
+The unit of change: new, check, approve (tweaks), start, verify, review, accept, block, answer, archive, tool
 
 ```
 ape change
@@ -1120,7 +1120,7 @@ Branch per change (trial decision D38):
     exit 1, code change.wrong-branch: `git switch change/<id>`)
   - records from any branch (D51 Q17): check, diff, approve, accept, block, answer and
     abandon find a change wherever its records live — a started change's on change/<id>,
-    a change with no branch of its own (a draft, an approved fix not started) on the base
+    a change with no branch of its own (a draft, an approved tweak not started) on the base
     branch, read from the base's tip when HEAD is on another change's branch (that
     branch's copy is the one it was cut with) — and commit there, without a checkout
     when HEAD is elsewhere: HEAD, the index and the working tree stay as they were
@@ -1133,16 +1133,17 @@ Branch per change (trial decision D38):
   - a change's status is read from its own branch when HEAD is elsewhere, so
     `ape status` on the base branch shows every change's real status
 
-Fix lane (trial decision D40): a change with "milestone: none" is a fix — asked for by a
-person outside the roadmap (apex-change with a request). It is approved on its own,
-`ape change approve <id> --by <who>` (on the base branch), instead of through a milestone,
-and otherwise lives like any change: its branch, baseline, checks, a review in a separate
-session, the delta merged at archive. It counts toward no milestone gate, no milestone's
-regression baseline, and no milestone's spend or budget. Fixes form a queue: planned and
+Tweak lane (trial decision D40, D240): a change with "milestone: none" is a tweak — asked
+for by a person outside the roadmap (apex-change with a request). The lane says where a
+change comes from, its type: what it is (feat, fix, …; `ape change new --help`). A
+tweak is approved on its own, `ape change approve <id> --by <who>` (on the base
+branch), instead of through a milestone, and otherwise lives like any change: its branch,
+baseline, checks, a review in a separate session, the delta merged at archive. It counts toward no milestone gate, no milestone's
+regression baseline, and no milestone's spend or budget. Tweaks form a queue: planned and
 approved between runs (or `ape run stop`, plan, approve, restart), never overlapping a
-run (D45). An approved fix runs ahead of milestone work, at the loop's next change
+run (D45). An approved tweak runs ahead of milestone work, at the loop's next change
 boundary; with no milestone run active, `ape task apex-loop --args <id>` runs it
-alone. `ape status` lists approved fixes first.
+alone. `ape status` lists approved tweaks first.
 
 One checkout, one operator (D45): archive and abandon switch to the base branch (abandon
 from another change's branch commits on it without a checkout), so they refuse when another
@@ -1183,7 +1184,7 @@ Subcommands:
 - `abandon` — Move a change to the archive as abandoned, merging no delta; commit
 - `accept` — Accept a human-review task, in flight or archived — a person's act, or a delegate's (D75)
 - `answer` — A person answers a blocked change: status answered, the answer recorded
-- `approve` — Approve a fix (a change with milestone: none), so it can start
+- `approve` — Approve a tweak (a change with milestone: none), so it can start
 - `archive` — Catch change/<id> up with its base, squash-merge it with the delta and the archive move as one commit
 - `block` — Set blocked, with the reason shown by ape status
 - `check` — Validate change.md: shape, caps, delta against specs, a check on every task
@@ -1363,7 +1364,7 @@ delegate may take now (changes[].delegable).
   - any other fail stays a person's (D78, as D188 amends it): one that names no in-diff
     defect ("no verdict" included), a second fail of the task after a return, or a
     fail on an archived change (ape cannot reopen it: a person accepts the task, or has
-    a fix change planned). The task stays awaiting_human, ape status shows the verdict
+    a tweak planned). The task stays awaiting_human, ape status shows the verdict
     (JSON changes[].delegate.<T>: {verdict, reason, run, at, defects, returned}), exit 1
     delegate.fail (action person); JSON outcome.to_person says why: no-defect-in-diff,
     second-fail, archived or not-reviewed (outcome.returns lists the earlier returns)
@@ -1469,42 +1470,42 @@ Flags:
 
 ## ape change approve
 
-Approve a fix (a change with milestone: none), so it can start
+Approve a tweak (a change with milestone: none), so it can start
 
 ```
 ape change approve <id> --by <who> [flags]
 ```
 
-Record a person approving a fix (trial decision D40): a change with "milestone: none",
+Record a person approving a tweak (trial decision D40, D240): a change with "milestone: none",
 written by apex-change for a person's request outside the roadmap. A milestone change is
 approved through its milestone (`ape milestone approve <M> --by <who>`); approve refuses one
-(exit 1, change.approve-milestone). The approval is what `ape change start` of a fix needs
+(exit 1, change.approve-milestone). The approval is what `ape change start` of a tweak needs
 in place of an approved milestone (else exit 1, change.not-approved).
 
-  - the fix must pass `ape change check <id>` and not be started yet (status draft, no
+  - the tweak must pass `ape change check <id>` and not be started yet (status draft, no
     change/<id> branch; else exit 1, change.wrong-status)
   - recorded in state.json as approved: {by, at, plan_digest} and committed alone on the
     base branch as "apex: <id> approved" (trailer "Change: <id>"), from any branch (D51
-    Q17): with HEAD on a change's branch, the fix is read and checked as the base holds
+    Q17): with HEAD on a change's branch, the tweak is read and checked as the base holds
     it and the approval committed there without a checkout (refused when the base is
     checked out in another worktree: git.base-checked-out)
-  - the approval is of the plan change.md has now: a fix whose plan (change.md outside
+  - the approval is of the plan change.md has now: a tweak whose plan (change.md outside
     ## Why and ## Notes) changed since is refused at start until approved again
   - re-approving the same plan is a no-op (exit 0, JSON "already": true, nothing written)
   - only a person approves (D47 Q6): refused in a model session — APE_SESSION or
     CLAUDECODE set, a `!` line inside Claude Code included — with exit 2, code
     session.person-only; run it from a plain terminal, or, in the person's own Claude
-    Code session, the person types "approve <fix-id>" in that turn (E2: `ape hook pre-tool --help`;
+    Code session, the person types "approve <tweak-id>" in that turn (E2: `ape hook pre-tool --help`;
     --by is then git config user.name, recorded with the prompt)
 
-Fixes form a queue: planned and approved between runs (or `ape run stop`, plan, approve,
-restart), never overlapping a run (D45). An approved fix runs ahead of milestone work, at
+Tweaks form a queue: planned and approved between runs (or `ape run stop`, plan, approve,
+restart), never overlapping a run (D45). An approved tweak runs ahead of milestone work, at
 the loop's next change boundary; with no milestone run active,
 `ape task apex-loop --args <id>` runs it alone. `ape status` lists approved
-fixes first (JSON "fixes", changes[].lane "fix", changes[].approved) and points next at the
-first. A fix counts toward no milestone gate and no milestone's spend or budget.
+tweaks first (JSON "tweaks", changes[].lane "tweak", changes[].approved) and points next at
+the first. A tweak counts toward no milestone gate and no milestone's spend or budget.
 
-Exit codes: 0 approved (or already) · 1 not a fix, check red, started, or the base branch
+Exit codes: 0 approved (or already) · 1 not a tweak, check red, started, or the base branch
 checked out in another worktree · 2 usage (no --by), or a model session.
 
 Examples:
@@ -1667,7 +1668,7 @@ question only a person can answer. A blocked change lets the stop hook allow a s
 `ape change start <id>` resumes it. Recorded where the change's records live, from any
 branch (D51 Q17; `ape change --help`): a started change on its branch, change/<id>
 (D38), where it stays — re-plan it there and start it again, or abandon it; a change with
-no branch (a draft, an approved fix) on the base branch. Without a checkout when HEAD is
+no branch (a draft, an approved tweak) on the base branch. Without a checkout when HEAD is
 elsewhere. A milestone change's block is counted in milestones.json on the base branch
 (limits.consecutive_blocks).
 
@@ -1698,7 +1699,7 @@ ape change check <id> [flags]
 
 Validate one change and list every failure:
 
-  - frontmatter id = folder, milestone in roadmap.md (or "none": a fix, D40, approved
+  - frontmatter id = folder, milestone in roadmap.md (or "none": a tweak, D40, approved
     with `ape change approve`), touches non-empty kebab slugs, decisions exist in
     decisions/, paths are valid globs; type: (the archive commit's {type}, D47) one of
     the project's commit types — _apex/config.yaml commit.types (D120), default feat,
@@ -1816,7 +1817,7 @@ change branch, change/<other> (exit 1, code branch.change-branch; `git switch <b
 <id> is a verb-led kebab slug, ^[a-z][a-z0-9-]{2,39}$, unique across active AND archived
 changes (development/archive/changes/, development/archive/ itself as an older ape archived
 them, and an older ape's development/changes/archive/).
---milestone none makes the change a fix (trial decision D40): what apex-change writes for
+--milestone none makes the change a tweak (trial decision D40, D240): what apex-change writes for
 a person's request outside the roadmap. It needs no roadmap entry, inherits no Out of
 scope, is approved on its own (`ape change approve <id> --by <who>`) instead of through a
 milestone, and counts toward no milestone; it may touch capabilities and carry a delta
@@ -1824,9 +1825,11 @@ like any change.
 --type is change.md's type: (Q110), the archive commit's {type} — the default subject is
 "{type}: {title}" (D193): one of the project's commit types (_apex/config.yaml
 commit.types, default feat, fix, perf, refactor, docs, test, build, ci, chore; else exit 2,
-usage.type). Without it ape writes fix for --milestone none and feat otherwise (none
-when that type is not among the project's commit types); the planner may change it
-before start. JSON "type" is the type written.
+usage.type). It is required with --milestone none (exit 2, usage.type, naming the
+project's types; Q135): a tweak says what it is — fix for a defect, feat for a small
+feature — so an off-roadmap feature never lands under Fixed. Without it a milestone's
+change gets feat (none when feat is not among the project's commit types); the planner
+may change it before start. JSON "type" is the type written.
 --touches lists the capabilities the change adds to or modifies (kebab slugs; new ones
 are fine — a capability is born from its first change). --paths are globs used for
 overlap detection. Overlap (shared touches or paths) with another unarchived change
@@ -1843,16 +1846,17 @@ milestone sets it back to 0, inside the archive's commit. At limits.consecutive_
 `ape task apex-loop` for it refuse with exit 1, code milestone.blocks-exceeded,
 action stop, and `ape status --json` reports it under milestone.diagnostics. A person deals
 with the blocked changes (answer or abandon them) and resets the count by approving the
-milestone again: `ape milestone approve <M> --by <who>`. Fixes count toward no milestone.
+milestone again: `ape milestone approve <M> --by <who>`. Tweaks count toward no milestone.
 
 Exit codes: 0 ok · 1 id taken (incl. archive), milestone not in roadmap, the milestone past
-limits.consecutive_blocks, or HEAD on a change branch · 2 usage (incl. usage.type).
+limits.consecutive_blocks, or HEAD on a change branch · 2 usage (incl. usage.type: --type
+unknown, or missing with --milestone none).
 
 Examples:
 
 ```
   ape change new add-tenant-delete --milestone M2 --touches tenants --paths 'internal/api/**'
-  ape change new fix-login-redirect --milestone none --touches auth
+  ape change new fix-login-redirect --milestone none --type fix --touches auth
   ape change new document-the-api --milestone M2 --touches api --type docs
 ```
 
@@ -1862,10 +1866,10 @@ Flags:
 | ---- | ---- | ------- | ----------- |
 | `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
 | `--json` | bool | `false` | machine output (JSON on stdout) |
-| `--milestone` | string | `—` | milestone id from roadmap.md, or none for a fix (required) |
+| `--milestone` | string | `—` | milestone id from roadmap.md, or none for a tweak (required) |
 | `--paths` | string | `—` | comma-separated globs, for overlap detection |
 | `--touches` | string | `—` | comma-separated capability slugs (required) |
-| `--type` | string | `—` | change.md's type: (a commit type); default fix for --milestone none, feat otherwise |
+| `--type` | string | `—` | change.md's type: (a commit type); required with --milestone none, default feat otherwise |
 
 ## ape change review
 
@@ -1968,8 +1972,8 @@ Start a draft (or resume a blocked or answered) change:
 
   1. `ape change check <id>` must be green, and its milestone approved — through ape: the
      approval record in milestones.json, not the Status line alone (H2; else exit 1,
-     milestone.status-unrecorded: a person runs `ape milestone approve <M> --by <who>`) — or, for a fix
-     (milestone: none, D40), the fix approved for the plan it has
+     milestone.status-unrecorded: a person runs `ape milestone approve <M> --by <who>`) — or, for a tweak
+     (milestone: none, D40), the tweak approved for the plan it has
      (`ape change approve <id> --by <who>`; else exit 1, change.not-approved)
   2. refused with exit 3 if another active change (in-progress, verified, reviewed —
      not blocked; read from its own branch) also ADDs, MODIFIES or REMOVES one of the
@@ -2007,7 +2011,7 @@ re-baselining it only resumes there (JSON "resumed": true). Re-start keeps base_
 A blocked change is re-planned on its branch (change.md there), then started again.
 
 Resume after the base moved (D40): start on a change that has its branch first checks
-whether the base branch moved ahead of base_sha (a fix or another change landed there).
+whether the base branch moved ahead of base_sha (a tweak or another change landed there).
 If so ape catches the change up — the one path start, verify and archive share:
   - start only: refused while the base branch is behind its upstream (exit 1,
     base.behind-upstream: pull)
@@ -2054,7 +2058,7 @@ change.replans-exceeded, action person; the refused re-plan is not recorded). A 
 milestone whose changes were blocked limits.consecutive_blocks (default 2) times in a row is
 not started (exit 1, code milestone.blocks-exceeded, action stop; see `ape change new --help`).
 
-Exit codes: 0 started (or resumed) · 1 check red, milestone (or fix) not approved, a vacuous
+Exit codes: 0 started (or resumed) · 1 check red, milestone (or tweak) not approved, a vacuous
 task check, wrong status, dirty tree, detached HEAD, HEAD on another change's branch, the base
 behind its upstream, or git failed · 2 usage ·
 3 requirement conflict with another active change, or the change does not rebase onto
@@ -3642,7 +3646,7 @@ Person acts (E2; D178, D179): eight commands are a person's — from a terminal 
 Claude Code as always, or in the person's own Claude Code session on the person's own
 words. Each line is the command, then what the person types (the phrase grammar):
   ape milestone approve <M>                               approve <M>
-  ape change approve <fix-id>                             approve <fix-id>
+  ape change approve <tweak-id>                           approve <tweak-id>
   ape change answer <change-id> --text "<answer>"         answer <change-id>: <answer>
   ape change accept <change-id> T<n>                      accept T<n> of <change-id>
   ape project accept-config                               accept the config
@@ -3791,7 +3795,7 @@ Code session is refused (session.person-only).
 The phrase grammar (A12; the same lines as `ape hook pre-tool --help`, which says how a
 grant is decided): each line is the command, then what the person types for it.
   ape milestone approve <M>                               approve <M>
-  ape change approve <fix-id>                             approve <fix-id>
+  ape change approve <tweak-id>                           approve <tweak-id>
   ape change answer <change-id> --text "<answer>"         answer <change-id>: <answer>
   ape change accept <change-id> T<n>                      accept T<n> of <change-id>
   ape project accept-config                               accept the config
@@ -4044,7 +4048,7 @@ ape milestone close <M> [--accept-red "<reason>" --by <who>] [flags]
 
 Close an approved milestone. Refused while a change of this milestone is in-progress,
 verified or reviewed (archive or block it first) — each change's status read from its own
-branch, change/<id>; a fix in flight (milestone: none, D40) counts toward no milestone and
+branch, change/<id>; a tweak in flight (milestone: none, D40) counts toward no milestone and
 does not hold the close — and on a change branch (see `ape milestone --help`). Otherwise runs the gate (recorded as by
 `ape milestone gate`) and, only on exit 0, writes "Status: done (<ts> <sha>)" into
 roadmap.md, committed with milestones.json as "apex: <M> done". Green means the gate command
@@ -4151,7 +4155,7 @@ _apex/state/logs/gate-<M>/), and the project's regression command from _apex/con
 when one is configured — its milestone tier, "regression: {change: <cmd>, milestone:
 <cmd>}", else the one command (H10). The gate is green only when all pass — the regression command
 only needs not to be newly red: it is judged against the earliest regression baseline,
-for the same command, recorded by any change of the milestone (active or archived; a fix,
+for the same command, recorded by any change of the milestone (active or archived; a tweak,
 milestone: none, is no change of any milestone and never supplies it — D40);
 red there and red now is reported (JSON run.regression.pre_existing_red), not failed —
 unless, with failing tests named by both runs (as for `ape change verify`), a test fails
@@ -5412,7 +5416,7 @@ ape project operator-interface [--check] [flags]
 
 Since rc.7 (D171) apex-orchestrator is the operator's interface — a skill a person
 opens in their own Claude Code session by typing /apex-orchestrator — and the unattended
-runner of one approved milestone or fix is apex-loop. This brings a project that ape
+runner of one approved milestone or tweak is apex-loop. This brings a project that ape
 project init or the lift made before rc.7 there; the framework's migration
 v1.0.0_seq-07 runs it (command: ape project operator-interface; check: ape project
 operator-interface --check). A project init or the lift made with rc.7b has nothing to do.
@@ -6974,14 +6978,14 @@ Show where the project stands, from the records ape keeps:
   - each milestone's newest gate run (D170): JSON milestones[].last_gate {sha (the commit
     the gate ran at), exit, at, log}, absent before its gate ever ran
   - the checked-out branch (JSON branch; "(on <branch>)" in the first line)
-  - fixes first (trial decision D40): a change with "milestone: none" is a fix (JSON
-    changes[].lane "fix"; else "milestone"). Approved fixes (changes[].approved: {by, at,
-    plan_digest}) are listed before milestone changes — started ones first, then by
-    approval time — and JSON "fixes" holds the ids of those not blocked, in the order they
+  - tweaks first (trial decision D40, D240): a change with "milestone: none" is a tweak
+    (JSON changes[].lane "tweak"; else "milestone"). Approved tweaks (changes[].approved:
+    {by, at, plan_digest}) are listed before milestone changes — started ones first, then
+    by approval time — and JSON "tweaks" holds the ids of those not blocked, in the order they
     run: the first runs ahead of milestone work, at the loop's next change boundary
     (never in parallel), or alone with `ape task apex-loop --args <id>`, and next
-    points at it. A fix awaiting approval is listed last, with the command a person runs
-    (`ape change approve <id> --by <who>`). A fix's runs (`ape task <skill> --args <fix-id>`)
+    points at it. A tweak awaiting approval is listed last, with the command a person runs
+    (`ape change approve <id> --by <who>`). A tweak's runs (`ape task <skill> --args <tweak-id>`)
     count toward no milestone's spend
   - every change not archived, with its status, blocked reason, red checks from its
     last verify (JSON failing: "T1 (exit 1)", "T2 (vacuous: …)", "S (unrun: $X is unset
@@ -7192,7 +7196,7 @@ apex-orchestrator is refused (exit 2, code skill.renamed, action stop), and
 so is the same skill through ape service submit task and an ape script's
 RunTask: since rc.7 (D171) it is the operator's interface, a skill a person
 opens in their own Claude Code session by typing /apex-orchestrator, and the
-unattended runner of one approved milestone or fix is apex-loop. The
+unattended runner of one approved milestone or tweak is apex-loop. The
 refusal carries both pointers: `ape task apex-loop --args <M>` (the run's own
 --args) and /apex-orchestrator. It is no alias: a stopped run's older resume
 line fails loudly instead of starting the wrong skill. A loop run an older
@@ -7203,7 +7207,7 @@ A session of apex-loop is also refused (exit 1, code
 milestone.blocks-exceeded) when the milestone it runs — --args M<n>, else
 the current one — has had limits.consecutive_blocks (default 2) changes
 blocked in a row; a person deals with them and re-approves the milestone,
-which resets the count. A fix's run (--args <fix-id>) is not refused.
+which resets the count. A tweak's run (--args <tweak-id>) is not refused.
 
 --prompt-file <path> reads the prompt from a file, and "-" reads it
 from stdin. It is how a printed escalation command carries the
