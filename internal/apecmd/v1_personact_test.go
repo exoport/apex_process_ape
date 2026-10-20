@@ -29,13 +29,25 @@ func newE2Session(t *testing.T, root, session string) *e2Session {
 	return &e2Session{root: root, session: session, transcript: filepath.Join(t.TempDir(), session+".jsonl")}
 }
 
-// say is the person typing prompt: the transcript line Claude Code writes,
-// and the UserPromptSubmit hook.
+// say is the person typing prompt: the transcript line Claude Code writes
+// (origin.kind "human", D238), and the UserPromptSubmit hook.
 func (s *e2Session) say(t *testing.T, promptID, prompt string) {
+	t.Helper()
+	s.turn(t, promptID, prompt, map[string]any{"kind": "human"})
+}
+
+// notify is a prompt Claude Code generates — a background command's
+// task-notification: UserPromptSubmit fires for it too (D238).
+func (s *e2Session) notify(t *testing.T, promptID, prompt string) {
+	t.Helper()
+	s.turn(t, promptID, prompt, map[string]any{"kind": "task-notification", "producer": "session-task", "runId": "0mvgkz93n-db92659b"})
+}
+
+func (s *e2Session) turn(t *testing.T, promptID, prompt string, origin map[string]any) {
 	t.Helper()
 	line, err := json.Marshal(map[string]any{
 		"type": "user", "isSidechain": false, "userType": "external", "promptId": promptID, "sessionId": s.session,
-		"message": map[string]any{"role": "user", "content": prompt},
+		"origin": origin, "message": map[string]any{"role": "user", "content": prompt},
 	})
 	require.NoError(t, err)
 	f, err := os.OpenFile(s.transcript, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
@@ -183,6 +195,43 @@ func TestE2_MilestoneApproveOnThePersonsWords(t *testing.T) {
 	require.Contains(t, s.preTool(t, "p2", cmdline), "granted it once already")
 	_, _, err = v1Exec(t, newMilestoneCmd, "approve", "M2", "--cwd", root)
 	require.Equal(t, ExitUsage, exitCodeOf(t, err))
+}
+
+// R7j-1 (D238) through the hooks: framework's replay — a background
+// command the model described as "approve M2" ends, its notification opens
+// a turn, and the model runs the act — is denied, nothing granted, and the
+// command refuses; the person's typed "approve M2" grants it, in its own
+// turn or a notification turn after it, and by: quotes the person.
+func TestE2_D238_NotificationGrantsNoPersonAct(t *testing.T) {
+	root := e2Repo(t, "exit 1")
+	s := newE2Session(t, root, "f9ed1ecc")
+	cmdline := "ape milestone approve M2 --wait 9m --json"
+	notification := "<task-notification>\n<task-id>b8fyai6c2</task-id>\n<status>completed</status>\n" +
+		"<summary>Background command \"approve M2\" completed (exit code 0)</summary>\n</task-notification>"
+
+	s.say(t, "p1", "where are we?")
+	s.notify(t, "n1", notification)
+	reason := s.preTool(t, "n1", cmdline)
+	require.Contains(t, reason, "this turn was opened by a notification")
+	require.Contains(t, reason, "not by the person")
+	require.Contains(t, reason, "**approve M2**")
+	grants, _ := filepath.Glob(filepath.Join(root, "_apex", "state", "grants", "*.json"))
+	require.Empty(t, grants, "no grant written")
+	log, err := os.ReadFile(filepath.Join(root, "_apex", "state", "prompts", "f9ed1ecc.jsonl"))
+	require.NoError(t, err)
+	require.Contains(t, string(log), `"prompt_id":"p1","kind":"typed"`)
+	require.Contains(t, string(log), `"prompt_id":"n1","kind":"notification"`)
+	stdout, _, err := v1Exec(t, newMilestoneCmd, "approve", "M2", "--json", "--cwd", root)
+	require.Equal(t, ExitUsage, exitCodeOf(t, err), stdout)
+
+	// The person's words, then a notification turn: the typed prompt counts.
+	s.say(t, "p2", "approve M2")
+	s.notify(t, "n2", notification)
+	require.Empty(t, s.preTool(t, "n2", cmdline))
+	stdout, _, err = v1Exec(t, newMilestoneCmd, "approve", "M2", "--cwd", root)
+	require.NoError(t, err, stdout)
+	require.Contains(t, stdout, `: "approve M2")`)
+	require.NotContains(t, stdout, "Background command")
 }
 
 // Every guarded act refuses without a grant in a person's Claude Code

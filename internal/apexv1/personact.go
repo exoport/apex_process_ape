@@ -22,16 +22,19 @@ import (
 // own Claude Code session (CLAUDECODE set, no APE_SESSION) a person-only
 // command runs only on the person's own words:
 //
-//  1. `ape hook user-prompt` (UserPromptSubmit) records every prompt the
-//     person types, {ts, session_id, transcript_path, prompt, prompt_id},
-//     in _apex/state/prompts/<session>.jsonl (ignored). Under APE_SESSION
+//  1. `ape hook user-prompt` (UserPromptSubmit) records every prompt,
+//     {ts, session_id, transcript_path, prompt, prompt_id, kind}, in
+//     _apex/state/prompts/<session>.jsonl (ignored): kind typed, or
+//     notification for one Claude Code generated (D238). Under APE_SESSION
 //     it records nothing: ape types those prompts itself (T7).
 //  2. `ape hook pre-tool`, on a Bash command that runs a person-only act,
 //     grants it only when the tool call's prompt_id is the recorded
 //     prompt's (the prompt that opened this turn, Q102), the transcript's
-//     user message with that promptId holds the same words, and the
-//     matcher (OI-5) finds the act's words and its exact target there with
-//     no negation. The grant is _apex/state/grants/<sha256 of the
+//     user message with that promptId is the person's (origin.kind
+//     "human", D238) and holds the same words, and the matcher (OI-5)
+//     finds the act's words and its exact target there with no negation.
+//     A turn a notification opened is judged on the person's latest typed
+//     prompt instead (D238). The grant is _apex/state/grants/<sha256 of the
 //     command line>.json, single-use, for GrantTTL; a prompt grants each
 //     act and target once.
 //  3. The command consumes the grant (ConsumeGrant) and records
@@ -257,11 +260,92 @@ type PromptRecord struct {
 	TranscriptPath string `json:"transcript_path"`
 	Prompt         string `json:"prompt"`
 	PromptID       string `json:"prompt_id"`
+	// Kind is "typed", or "notification" for a prompt Claude Code
+	// generated rather than the person typed (D238): UserPromptSubmit
+	// fires for a background command's <task-notification> too, and its
+	// summary quotes a description the model chose. A notification record
+	// never grants. A record written before rc.7d has no kind: the
+	// transcript alone judges it.
+	Kind string `json:"kind,omitempty"`
+}
+
+// The kinds of a prompt record (D238).
+const (
+	promptTyped        = "typed"
+	promptNotification = "notification"
+)
+
+// notification reports whether r is a prompt Claude Code generated.
+func (r *PromptRecord) notification() bool { return r.Kind == promptNotification }
+
+// harnessTagPrefixes open a prompt Claude Code generates, never one a
+// person types (D238; measured on claude 2.1.294–2.1.304).
+var harnessTagPrefixes = []string{"<task-notification>", "<system-reminder>", "<local-command-"}
+
+// promptKindOf is the kind `ape hook user-prompt` records for prompt: a
+// notification when it starts with a harness tag or is nothing but
+// <tag>…</tag> blocks, else typed. The transcript's origin.kind is what
+// grants (transcriptHolds); this keeps a notification from ever being the
+// prompt a turn is judged on, even where the transcript cannot be read.
+func promptKindOf(prompt string) string {
+	s := strings.TrimSpace(prompt)
+	for _, tag := range harnessTagPrefixes {
+		if strings.HasPrefix(s, tag) {
+			return promptNotification
+		}
+	}
+	if tagBlocksOnly(s) {
+		return promptNotification
+	}
+	return promptTyped
+}
+
+// tagBlocksOnly reports whether s is one or more <name …>…</name> blocks
+// and nothing else but space between them.
+func tagBlocksOnly(s string) bool {
+	blocks := 0
+	for {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return blocks > 0
+		}
+		if !strings.HasPrefix(s, "<") {
+			return false
+		}
+		end := strings.IndexByte(s, '>')
+		if end < 2 {
+			return false
+		}
+		name, _, _ := strings.Cut(s[1:end], " ")
+		if name == "" || !tagName(name) {
+			return false
+		}
+		closing := "</" + name + ">"
+		at := strings.Index(s[end+1:], closing)
+		if at < 0 {
+			return false
+		}
+		s = s[end+1+at+len(closing):]
+		blocks++
+	}
+}
+
+// tagName reports whether name is an XML-ish tag name: a letter, then
+// letters, digits and - _ : .
+func tagName(name string) bool {
+	for i, r := range name {
+		letter := r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z'
+		if !letter && (i == 0 || !strings.ContainsRune("0123456789-_:.", r)) {
+			return false
+		}
+	}
+	return true
 }
 
 // RecordPrompt is `ape hook user-prompt`: it appends the prompt a person
-// typed to the session's log. Nothing under APE_SESSION (T7), nothing
-// outside a v1 project.
+// typed to the session's log, and a prompt Claude Code generated as kind
+// notification (D238). Nothing under APE_SESSION (T7), nothing outside a
+// v1 project.
 func RecordPrompt(payload HookPayload) error {
 	if os.Getenv(envApeSession) != "" {
 		return nil
@@ -280,7 +364,7 @@ func RecordPrompt(payload HookPayload) error {
 	}
 	rec := PromptRecord{
 		TS: Stamp(), SessionID: payload.SessionID, TranscriptPath: payload.TranscriptPath,
-		Prompt: prompt, PromptID: payload.PromptID,
+		Prompt: prompt, PromptID: payload.PromptID, Kind: promptKindOf(payload.Prompt),
 	}
 	data, err := json.Marshal(rec)
 	if err != nil {
@@ -309,24 +393,50 @@ func (p *Project) promptLogPath(sessionID string) string {
 	return filepath.Join(p.PromptsDir(), key+".jsonl")
 }
 
-// promptRecord is the session's last recorded prompt with promptID; nil
-// when there is none.
-func (p *Project) promptRecord(sessionID, promptID string) *PromptRecord {
+// promptRecords is the session's recorded prompts, oldest first.
+func (p *Project) promptRecords(sessionID string) []PromptRecord {
 	data, err := os.ReadFile(p.promptLogPath(sessionID))
 	if err != nil {
 		return nil
 	}
-	var found *PromptRecord
+	var recs []PromptRecord
 	for line := range strings.SplitSeq(string(data), "\n") {
 		var r PromptRecord
-		if line == "" || json.Unmarshal([]byte(line), &r) != nil {
+		if line == "" || json.Unmarshal([]byte(line), &r) != nil || r.SessionID != sessionID {
 			continue
 		}
-		if r.SessionID == sessionID && r.PromptID == promptID {
-			found = &r
+		recs = append(recs, r)
+	}
+	return recs
+}
+
+// promptRecord is the session's last recorded prompt with promptID; nil
+// when there is none.
+func (p *Project) promptRecord(sessionID, promptID string) *PromptRecord {
+	return lastRecord(p.promptRecords(sessionID), promptID)
+}
+
+func lastRecord(recs []PromptRecord, promptID string) *PromptRecord {
+	for i := len(recs) - 1; i >= 0; i-- {
+		if recs[i].PromptID == promptID {
+			return &recs[i]
 		}
 	}
-	return found
+	return nil
+}
+
+// latestTyped is the person's latest typed prompt among recs (D238): not
+// the turn's own prompt (skip), not a notification, recorded for this
+// transcript, and the transcript's message for its promptId a person's
+// (origin.kind "human"). nil when there is none.
+func latestTyped(recs []PromptRecord, skip, transcript string, origins map[string]string) *PromptRecord {
+	for i := len(recs) - 1; i >= 0; i-- {
+		r := &recs[i]
+		if r.PromptID != skip && !r.notification() && r.TranscriptPath == transcript && origins[r.PromptID] == originHuman {
+			return r
+		}
+	}
+	return nil
 }
 
 // grant is _apex/state/grants/<argv sha256>.json.
@@ -390,8 +500,9 @@ func (g *grant) ownSession() bool {
 
 // backing re-checks, at the moment of use, what grantVerdict checked when
 // it wrote the grant (D219): the recorded prompt for the grant's
-// (session_id, prompt_id) asks for c by the matcher, and the transcript's
-// user message with that promptId holds the same words. It returns the
+// (session_id, prompt_id) is typed and asks for c by the matcher, and the
+// transcript's user message with that promptId is the person's (D238:
+// origin.kind "human") and holds the same words. It returns the
 // prompt record and the matched sentence; ok false when either is gone or
 // does not match — a grant file nobody's words stand behind.
 func (p *Project) backing(g *grant, c PersonCall) (rec *PromptRecord, clause string, ok bool) {
@@ -399,7 +510,7 @@ func (p *Project) backing(g *grant, c PersonCall) (rec *PromptRecord, clause str
 		return nil, "", false
 	}
 	rec = p.promptRecord(g.SessionID, g.PromptID)
-	if rec == nil {
+	if rec == nil || rec.notification() {
 		return nil, "", false
 	}
 	quote, raw, matched := matchAct(rec.Prompt, c)
@@ -578,29 +689,61 @@ func RunBusyPersonAct(l *RunLock, c PersonCall) error {
 
 // grantVerdict grants c when the prompt that opened this turn asks for it
 // (Q102: the tool call's prompt_id is the prompt's), the transcript's
-// user message with that promptId holds the same words, and this prompt
-// has not granted the act and target before.
+// user message with that promptId is the person's (origin.kind "human",
+// D238) and holds the same words, and this prompt has not granted the act
+// and target before. A turn a notification opened — a prompt recorded as
+// kind notification, or one whose transcript message is not the person's
+// (a background command's or Agent's task-notification, a Monitor event,
+// anything Claude Code injects) — grants nothing of its own: the person's
+// latest typed prompt in the session is judged instead, under the same
+// rules (D238).
 func (p *Project) grantVerdict(ctx context.Context, payload HookPayload, c PersonCall) PreToolDecision {
 	if payload.PromptID == "" || payload.SessionID == "" {
 		return personActDenied(c, "this tool call names no prompt (no prompt_id in the hook payload), so no prompt can grant it")
 	}
-	rec := p.promptRecord(payload.SessionID, payload.PromptID)
-	if rec == nil {
+	transcript := payload.TranscriptPath
+	recs := p.promptRecords(payload.SessionID)
+	rec := lastRecord(recs, payload.PromptID)
+	ids := make([]string, 0, len(recs)+1)
+	ids = append(ids, payload.PromptID)
+	for _, r := range recs {
+		ids = append(ids, r.PromptID)
+	}
+	origins := transcriptOrigins(transcript, ids)
+	kind, seen := origins[payload.PromptID]
+	var opener string // what opened the turn, when it was not the person
+	switch {
+	case seen && kind != "" && kind != originHuman:
+		opener = `a notification (its transcript message's origin.kind is "` + kind + `")`
+	case rec != nil && rec.notification():
+		opener = "a notification (a prompt Claude Code generated, recorded as kind notification)"
+	case rec == nil:
 		return personActDenied(c, "no prompt of this turn is recorded — is `"+HookCmdUserPrompt+"` the project's UserPromptSubmit hook? (`ape project init` merges it into .claude/settings.json)")
+	}
+	why := "the person's message that opened this turn does not ask for it"
+	if opener != "" {
+		rec = latestTyped(recs, payload.PromptID, transcript, origins)
+		if rec == nil {
+			return personActDenied(c, "this turn was opened by "+opener+", not by the person, and the person has typed no prompt in this session that could grant it")
+		}
+		why = "this turn was opened by " + opener + ", not by the person, and the person's latest typed prompt (" + rec.TS + ") does not ask for it"
 	}
 	quote, raw, ok := matchAct(rec.Prompt, c)
 	if !ok {
-		return personActDenied(c, "the person's message that opened this turn does not ask for it")
+		return personActDenied(c, why)
 	}
-	transcript := payload.TranscriptPath
-	if transcript == "" || rec.TranscriptPath != transcript || !transcriptHolds(transcript, payload.PromptID, raw) {
+	if transcript == "" || rec.TranscriptPath != transcript || !transcriptHolds(transcript, rec.PromptID, raw) {
+		if k, at := origins[rec.PromptID]; at && k == "" {
+			return personActDenied(c, `the session's transcript does not mark the message as the person's (its entry carries no origin.kind "human", which Claude Code writes on every typed prompt)`)
+		}
 		return personActDenied(c, "the session's transcript does not show the person typing it in this turn")
 	}
+	promptID := rec.PromptID
 	if existing := loadGrant(p.grantPath(c.ArgvSHA256)); existing != nil && existing.live() && existing.matches(c) &&
-		existing.SessionID == payload.SessionID && existing.PromptID == payload.PromptID {
+		existing.SessionID == payload.SessionID && existing.PromptID == promptID {
 		return PreToolDecision{} // granted already, not used yet
 	}
-	issued := p.issuedPath(payload.SessionID, payload.PromptID, c)
+	issued := p.issuedPath(payload.SessionID, promptID, c)
 	if _, err := os.Stat(issued); err == nil {
 		return personActDenied(c, "the person's words in this turn granted it once already, and a grant is used once")
 	}
@@ -610,7 +753,7 @@ func (p *Project) grantVerdict(ctx context.Context, payload HookPayload, c Perso
 	}
 	p.pruneGrants()
 	g := grant{
-		SessionID: payload.SessionID, PromptID: payload.PromptID, PromptTS: rec.TS,
+		SessionID: payload.SessionID, PromptID: promptID, PromptTS: rec.TS,
 		Act: c.Act, Target: c.Target, Task: c.Task, ArgvSHA256: c.ArgvSHA256,
 		Quote: quoteFor(ctx, quote), Expires: now().Add(GrantTTL).UTC().Format(time.RFC3339Nano),
 	}
@@ -818,32 +961,118 @@ func redactText(ctx context.Context, s string) (string, bool) {
 // over 100 KB).
 const transcriptLineMax = 16 << 20
 
+// originHuman is the origin.kind Claude Code writes on the transcript
+// entry of every prompt a person types, typed slash commands included
+// (measured on claude 2.1.294–2.1.304; D238). A task-notification, an
+// Agent result, a Monitor event, a peer message carry another kind; a
+// local command's caveat and output carry none. It is an allow-list:
+// anything but "human" grants nothing.
+const originHuman = "human"
+
+// TranscriptPrompt is one user message of a transcript as E2 reads it: not
+// a tool result, not a meta or sidechain message. Origin is its
+// origin.kind, "" when the entry carries none.
+type TranscriptPrompt struct {
+	PromptID string
+	Origin   string
+	Text     string
+}
+
+// TranscriptPrompts is every user message of the transcript at path, in
+// order, as transcriptHolds reads them; nil when it cannot be read. The
+// live contract gate (make check-hooks) reads a real session's transcript
+// through it, so a Claude Code that stops writing origin.kind "human" on a
+// typed prompt fails a gate rather than silently refusing every grant.
+func TranscriptPrompts(path string) []TranscriptPrompt {
+	var out []TranscriptPrompt
+	scanTranscript(path, nil, func(m TranscriptPrompt) bool {
+		out = append(out, m)
+		return true
+	})
+	return out
+}
+
 // transcriptHolds reports whether the transcript at path has a person's
-// user message with promptID — not a tool result, not a meta or sidechain
-// message — whose text holds clause (spaces collapsed, case aside).
+// user message with promptID — origin.kind "human" (D238), not a tool
+// result, not a meta or sidechain message — whose text holds clause
+// (spaces collapsed, case aside).
 func transcriptHolds(path, promptID, clause string) bool {
+	want := strings.ToLower(normSpace(clause))
+	found := false
+	scanTranscript(path, []string{promptID}, func(m TranscriptPrompt) bool {
+		if m.PromptID == promptID && m.Origin == originHuman && strings.Contains(strings.ToLower(normSpace(m.Text)), want) {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
+}
+
+// transcriptOrigins maps each of ids that has a user message in the
+// transcript at path to its origin.kind: "human" when any of its messages
+// is the person's, else the first one's kind ("" for none). An id with no
+// message is absent.
+func transcriptOrigins(path string, ids []string) map[string]string {
+	origins := map[string]string{}
+	if path == "" || len(ids) == 0 {
+		return origins
+	}
+	scanTranscript(path, ids, func(m TranscriptPrompt) bool {
+		if k, ok := origins[m.PromptID]; !ok || (k != originHuman && m.Origin == originHuman) {
+			origins[m.PromptID] = m.Origin
+		}
+		return true
+	})
+	return origins
+}
+
+// scanTranscript calls fn, in order, with each user message of the
+// transcript at path (absolute) whose line holds one of ids (any line when
+// ids is nil), until fn returns false.
+func scanTranscript(path string, ids []string, fn func(TranscriptPrompt) bool) {
 	if !filepath.IsAbs(path) {
-		return false
+		return
 	}
 	f, err := os.Open(path)
 	if err != nil {
-		return false
+		return
 	}
 	defer func() { _ = f.Close() }()
-	want := strings.ToLower(normSpace(clause))
-	needle := []byte(promptID)
+	needles := make([][]byte, 0, len(ids))
+	for _, id := range ids {
+		if id != "" {
+			needles = append(needles, []byte(id))
+		}
+	}
+	if ids != nil && len(needles) == 0 {
+		return
+	}
 	r := bufio.NewReaderSize(f, 1<<20)
 	for {
 		line, err := readLine(r)
-		if len(line) > 0 && bytes.Contains(line, needle) {
-			if text, ok := personMessage(line, promptID); ok && strings.Contains(strings.ToLower(normSpace(text)), want) {
-				return true
+		if len(line) > 0 && holdsAny(line, needles) {
+			if m, ok := userMessage(line); ok && !fn(m) {
+				return
 			}
 		}
 		if err != nil {
-			return false
+			return
 		}
 	}
+}
+
+// holdsAny reports whether line holds one of needles; true for none.
+func holdsAny(line []byte, needles [][]byte) bool {
+	if len(needles) == 0 {
+		return true
+	}
+	for _, n := range needles {
+		if bytes.Contains(line, n) {
+			return true
+		}
+	}
+	return false
 }
 
 // readLine reads one line, keeping at most transcriptLineMax bytes of it.
@@ -861,39 +1090,44 @@ func readLine(r *bufio.Reader) ([]byte, error) {
 	}
 }
 
-// personMessage is the text of a transcript line that is a person's user
-// message with promptID.
-func personMessage(line []byte, promptID string) (string, bool) {
+// userMessage is a transcript line that is a user message — not meta, not
+// sidechain, text only (a tool result is text the model read, never a
+// prompt, T2) — with its promptId, origin.kind and text.
+func userMessage(line []byte) (TranscriptPrompt, bool) {
 	var e struct {
 		Type        string `json:"type"`
 		IsMeta      bool   `json:"isMeta"`
 		IsSidechain bool   `json:"isSidechain"`
 		PromptID    string `json:"promptId"`
-		Message     struct {
+		Origin      struct {
+			Kind string `json:"kind"`
+		} `json:"origin"`
+		Message struct {
 			Role    string          `json:"role"`
 			Content json.RawMessage `json:"content"`
 		} `json:"message"`
 	}
-	if json.Unmarshal(line, &e) != nil || e.Type != "user" || e.IsMeta || e.IsSidechain || e.PromptID != promptID || e.Message.Role != "user" {
-		return "", false
+	if json.Unmarshal(line, &e) != nil || e.Type != "user" || e.IsMeta || e.IsSidechain || e.PromptID == "" || e.Message.Role != "user" {
+		return TranscriptPrompt{}, false
 	}
-	var s string
-	if json.Unmarshal(e.Message.Content, &s) == nil {
-		return s, true
+	m := TranscriptPrompt{PromptID: e.PromptID, Origin: e.Origin.Kind}
+	if json.Unmarshal(e.Message.Content, &m.Text) == nil {
+		return m, true
 	}
 	var blocks []struct {
 		Type string `json:"type"`
 		Text string `json:"text"`
 	}
 	if json.Unmarshal(e.Message.Content, &blocks) != nil {
-		return "", false
+		return TranscriptPrompt{}, false
 	}
 	var b strings.Builder
 	for _, bl := range blocks {
 		if bl.Type != "text" {
-			return "", false // a tool result is text the model read, never a prompt (T2)
+			return TranscriptPrompt{}, false // a tool result is text the model read, never a prompt (T2)
 		}
 		b.WriteString(bl.Text + "\n")
 	}
-	return b.String(), true
+	m.Text = b.String()
+	return m, true
 }
