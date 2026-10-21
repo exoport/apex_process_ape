@@ -333,6 +333,7 @@ func TestE2_InProcessActsRecordThePrompt(t *testing.T) {
 	// ADR-0001 is APEX's standard (D205): the project's first is ADR-0002.
 	_, _, err = v1Exec(t, newDecisionCmd, "new", "use-sqlite", "--cwd", root)
 	require.NoError(t, err)
+	fillDecision(t, root, "0002-use-sqlite.md") // Q155: a skeleton is refused
 	s.say(t, "p2", "accept ADR-0002")
 	require.Empty(t, s.preTool(t, "p2", "ape decision accept ADR-0002"))
 	stdout, _, err = v1Exec(t, newDecisionCmd, "accept", "ADR-0002", "--cwd", root)
@@ -364,4 +365,21 @@ func TestE2_HookGuardsAndApeSession(t *testing.T) {
 	require.NotContains(t, string(data), `"p2"`, "nothing recorded under APE_SESSION")
 	_, _, err = v1Exec(t, newMilestoneCmd, "approve", "M2", "--cwd", root)
 	require.Equal(t, ExitUsage, exitCodeOf(t, err))
+}
+
+// fillDecision replaces the skeleton's placeholder comments in
+// development/decisions/<file> with prose and commits it.
+func fillDecision(t *testing.T, root, file string) {
+	t.Helper()
+	path := filepath.Join(root, "development", "decisions", file)
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	doc := string(data)
+	for _, ph := range []string{"<!-- the forces at play -->", "<!-- what we decided -->", "<!-- what becomes easier or harder -->"} {
+		require.Contains(t, doc, ph)
+		doc = strings.Replace(doc, ph, "Some prose.", 1)
+	}
+	require.NoError(t, os.WriteFile(path, []byte(doc), 0o644))
+	v1Git(t, root, "add", "-A")
+	v1Git(t, root, "commit", "-q", "-m", "docs: write "+file)
 }
