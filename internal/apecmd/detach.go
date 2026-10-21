@@ -739,7 +739,7 @@ func supervise(ctx context.Context, path string) error {
 	}
 	if err := child.Start(); err != nil {
 		releaseLocks()
-		return recordExitAndEmit(path, h, ExitRunFailed, err.Error())
+		return recordExitAndEmit(ctx, path, h, ExitRunFailed, err.Error())
 	}
 	h.ChildPID = child.Process.Pid
 	_ = recordChildPID(path, os.Getpid(), h.ChildPID)
@@ -795,14 +795,14 @@ wait:
 	if waitErr != nil {
 		msg = waitErr.Error()
 	}
-	return recordExitAndEmit(path, h, code, msg)
+	return recordExitAndEmit(ctx, path, h, code, msg)
 }
 
 // recordExitAndEmit records the exit, then logs the run's run-end (W3):
 // after the handle has it, so a waiter woken by the event reads the exit.
-func recordExitAndEmit(path string, h *detachedHandle, code int, msg string) error {
+func recordExitAndEmit(ctx context.Context, path string, h *detachedHandle, code int, msg string) error {
 	err := recordExit(path, h, code, msg)
-	emitDetachedRunEnd(h, code)
+	emitDetachedRunEnd(ctx, h, code)
 	return err
 }
 

@@ -82,13 +82,16 @@ type PersonActSpec struct {
 	Long bool
 }
 
+// actionAcceptConfig is the phrase a person types to accept the config.
+const actionAcceptConfig = "accept the config"
+
 // PersonActs are the 8 guarded acts (D47 Q6, D45, OI-4).
 var PersonActs = []PersonActSpec{
 	{ActMilestoneApprove, "ape milestone approve <M>", "approve <M>", true},
 	{ActTweakApprove, "ape change approve <tweak-id>", "approve <tweak-id>", false},
 	{ActAnswer, `ape change answer <change-id> --text "<answer>"`, "answer <change-id>: <answer>", false},
 	{ActAcceptTask, "ape change accept <change-id> T<n>", "accept T<n> of <change-id>", false},
-	{ActAcceptConfig, "ape project accept-config", "accept the config", false},
+	{ActAcceptConfig, "ape project accept-config", actionAcceptConfig, false},
 	{ActAcceptRed, `ape milestone close <M> --accept-red "<reason>"`, "accept red on <M>", true},
 	{ActAllowPendingHuman, "ape change archive <change-id> --allow-pending-human", "allow pending human on <change-id>", true},
 	{ActDecisionAccept, "ape decision accept <ADR-NNNN>", "accept <ADR-NNNN>", false},
@@ -164,7 +167,7 @@ func (c PersonCall) Phrase() string {
 	case ActAcceptTask:
 		return "accept " + c.Task + " of " + c.Target
 	case ActAcceptConfig:
-		return "accept the config"
+		return actionAcceptConfig
 	case ActAcceptRed:
 		return "accept red on " + c.Target
 	case ActAllowPendingHuman:

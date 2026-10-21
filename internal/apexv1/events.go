@@ -141,7 +141,8 @@ func (p *Project) appendEventsLocked(evs []Event) ([]Event, error) {
 		buf.WriteByte('\n')
 	}
 	out := make([]Event, len(evs))
-	for i, ev := range evs {
+	for i := range evs {
+		ev := evs[i]
 		seq++
 		ev.Seq, ev.At = seq, Stamp()
 		line, err := json.Marshal(ev)

@@ -1,6 +1,7 @@
 package apecmd
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -41,14 +42,12 @@ type waitResult struct {
 
 // statusWait runs `ape status` with args and --json, and returns the
 // result and the exit code.
-func statusWait(t *testing.T, root string, args ...string) (waitResult, int) {
+func statusWait(t *testing.T, root string, args ...string) (res waitResult, code int) {
 	t.Helper()
 	stdout, stderr, err := v1Exec(t, newStatusCmd, append([]string{"--json", "--cwd", root}, args...)...)
-	code := 0
 	if err != nil {
 		code = exitCodeOf(t, err)
 	}
-	var res waitResult
 	require.NoError(t, json.Unmarshal([]byte(stdout), &res), "stdout %s, stderr %s", stdout, stderr)
 	require.Equal(t, res.Seq, res.Wait.LastSeq, "seq at the top level and in wait (the conductor's decision)")
 	return res, code
@@ -184,7 +183,7 @@ func TestStatusWait_StoppedEdge(t *testing.T) {
 	require.NoError(t, writeHandle(path, h))
 	go func() {
 		time.Sleep(300 * time.Millisecond)
-		_ = recordExitAndEmit(path, h, 0, "")
+		_ = recordExitAndEmit(context.Background(), path, h, 0, "")
 	}()
 	res, code := statusWait(t, root, "--until", "stopped", "--wait", "20s")
 	require.Zero(t, code)

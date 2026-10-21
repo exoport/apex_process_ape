@@ -25,8 +25,8 @@ func eventsOf(t *testing.T, p *Project) []Event {
 func requireGapless(t *testing.T, evs []Event, n int) {
 	t.Helper()
 	require.Len(t, evs, n)
-	for i, ev := range evs {
-		require.EqualValues(t, i+1, ev.Seq, "seq %d is line %d", ev.Seq, i+1)
+	for i := range evs {
+		require.EqualValues(t, i+1, evs[i].Seq, "seq %d is line %d", evs[i].Seq, i+1)
 	}
 }
 
@@ -110,7 +110,7 @@ func TestEmit_SeqUnderConcurrentWriters(t *testing.T) {
 	}
 	p := fixture(t, baseFiles())
 	const perWriter, writers = 40, 4
-	child := exec.Command(os.Args[0], "-test.run=^TestEmit_SeqUnderConcurrentWriters$") //nolint:gosec,noctx // this test binary
+	child := exec.Command(os.Args[0], "-test.run=^TestEmit_SeqUnderConcurrentWriters$")
 	child.Env = append(os.Environ(), "APE_EVENTS_TEST_EMITTER=1", "APE_EVENTS_TEST_ROOT="+p.Root, "APE_EVENTS_TEST_N="+strconv.Itoa(perWriter))
 	var childOut bytes.Buffer
 	child.Stdout, child.Stderr = &childOut, &childOut

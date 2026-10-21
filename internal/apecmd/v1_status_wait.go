@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"time"
 
@@ -145,7 +146,7 @@ func statusWaitOpts(cmd *cobra.Command, until string, since int64, wait time.Dur
 // when stopped is waited for: it is the one part that costs a look at
 // every run.
 func waitLevelOf(ctx context.Context, p *apexv1.Project, withRuns bool) apexv1.WaitLevel {
-	r := p.Status()
+	r := p.Status() //nolint:contextcheck // Status reads the recorded state, and takes no context
 	l := apexv1.WaitLevel{Report: r, Persons: p.PersonActionsOf(ctx, r), Running: []string{}}
 	if withRuns {
 		l.Running = liveRuns(ctx, p, r)
@@ -208,7 +209,7 @@ func meets(conds []string, ev apexv1.Event, level func() apexv1.WaitLevel) strin
 
 // newestMeeting is the newest of evs that bears on cond, nil when none.
 func newestMeeting(cond string, evs []apexv1.Event) *apexv1.Event {
-	for i := len(evs) - 1; i >= 0; i-- {
+	for i := range slices.Backward(evs) {
 		if apexv1.EventMeets(cond, evs[i]) {
 			ev := evs[i]
 			return &ev
@@ -357,19 +358,20 @@ func waitLine(o *statusWaitOptions, rep statusWaitReport, waited time.Duration) 
 		return fmt.Sprintf("\nWaited %s: none of %s held — run the same command again with --since %d",
 			waited.Round(time.Second), strings.Join(o.until, ","), rep.LastSeq)
 	}
-	line := "\nWaited: " + *rep.Condition + " holds (" + rep.How + ")"
+	var line strings.Builder
+	line.WriteString("\nWaited: " + *rep.Condition + " holds (" + rep.How + ")")
 	if ev := rep.Event; ev != nil {
-		line += fmt.Sprintf(" — event %d %s", ev.Seq, ev.Event)
+		fmt.Fprintf(&line, " — event %d %s", ev.Seq, ev.Event)
 		for _, part := range []string{ev.Milestone, ev.Change, ev.Run, ev.Action, ev.Reason} {
 			if part != "" {
-				line += " · " + part
+				line.WriteString(" · " + part)
 			}
 		}
 	}
 	if *rep.Condition == apexv1.UntilPerson {
 		for _, a := range rep.PersonActions {
-			line += "\n  " + a.Action + " — " + a.Reason
+			line.WriteString("\n  " + a.Action + " — " + a.Reason)
 		}
 	}
-	return line
+	return line.String()
 }

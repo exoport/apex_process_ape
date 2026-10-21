@@ -43,7 +43,7 @@ func (a PersonAction) key() string { return a.Kind + "\x00" + a.Ref + "\x00" + a
 
 // PersonActions is every person act the project waits on now.
 func (p *Project) PersonActions(ctx context.Context) []PersonAction {
-	return p.PersonActionsOf(ctx, p.Status())
+	return p.PersonActionsOf(ctx, p.Status()) //nolint:contextcheck // Status reads the recorded state, and takes no context
 }
 
 // PersonActionsOf is PersonActions from a status report the caller has
@@ -107,7 +107,7 @@ func (p *Project) PersonActionsOf(ctx context.Context, r *StatusReport) []Person
 	if epoch := p.v1Epoch(ctx, "HEAD"); epoch != "" {
 		if fs := p.configFindings(ctx, epoch); len(fs) > 0 {
 			out = append(out, PersonAction{
-				Kind: ActAcceptConfig, Ref: "config", Action: "accept the config",
+				Kind: ActAcceptConfig, Ref: "config", Action: actionAcceptConfig,
 				Reason: "config.changed: " + fs[0].Message,
 			})
 		}
@@ -178,8 +178,8 @@ func (p *Project) EmitPersonDelta(ctx context.Context, r *StatusReport, warn io.
 	if err != nil {
 		_, _ = io.WriteString(warn, "events (person): "+err.Error()+" — not logged\n")
 	}
-	for _, ev := range logged {
-		p.runNotifier(ctx, ev, warn)
+	for i := range logged {
+		p.runNotifier(ctx, logged[i], warn)
 	}
 	return logged
 }

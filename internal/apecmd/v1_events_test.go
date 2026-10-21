@@ -26,9 +26,10 @@ func eventsAt(t *testing.T, root string) []apexv1.Event {
 func eventsNamed(t *testing.T, root, name string) []apexv1.Event {
 	t.Helper()
 	var out []apexv1.Event
-	for _, ev := range eventsAt(t, root) {
-		if ev.Event == name {
-			out = append(out, ev)
+	evs := eventsAt(t, root)
+	for i := range evs {
+		if evs[i].Event == name {
+			out = append(out, evs[i])
 		}
 	}
 	return out
@@ -82,9 +83,9 @@ func TestPerson_AfterAVerb(t *testing.T) {
 	_, _, err = v1Exec(t, newRootCmd, "change", "block", "add-wave", "--reason", "which greeting?", "--cwd", root)
 	require.NoError(t, err)
 	evs := eventsAt(t, root)
-	var names []string
-	for _, ev := range evs {
-		names = append(names, ev.Event)
+	names := make([]string, 0, len(evs))
+	for i := range evs {
+		names = append(names, evs[i].Event)
 	}
 	require.Equal(t, []string{"block", "person"}, names)
 	require.Equal(t, "M1", evs[0].Milestone, "block names the change's milestone")

@@ -25,9 +25,10 @@ func actionsOf(acts []PersonAction) []string {
 func personEvents(t *testing.T, p *Project) []Event {
 	t.Helper()
 	var out []Event
-	for _, ev := range p.EventsSince(0) {
-		if ev.Event == EventPerson {
-			out = append(out, ev)
+	evs := p.EventsSince(0)
+	for i := range evs {
+		if evs[i].Event == EventPerson {
+			out = append(out, evs[i])
 		}
 	}
 	return out
@@ -124,9 +125,10 @@ func TestGateEvents(t *testing.T) {
 	files[".gitignore"] = "green\n"
 	p := fixture(t, files)
 	gateEvents := func() []string {
-		var out []string
-		for _, ev := range p.EventsSince(0) {
-			out = append(out, ev.Event+" "+ev.Milestone)
+		evs := p.EventsSince(0)
+		out := make([]string, 0, len(evs))
+		for i := range evs {
+			out = append(out, evs[i].Event+" "+evs[i].Milestone)
 		}
 		return out
 	}
@@ -161,16 +163,17 @@ func TestGateEvents_CloseTurnsGreenAndAcceptRed(t *testing.T) {
 	p := fixture(t, files)
 	_, err := p.CloseMilestone(ctx(), "M1", RunOptions{})
 	require.NoError(t, err)
-	var names []string
-	for _, ev := range p.EventsSince(0) {
-		names = append(names, ev.Event)
+	evs := p.EventsSince(0)
+	names := make([]string, 0, len(evs))
+	for i := range evs {
+		names = append(names, evs[i].Event)
 	}
 	require.Equal(t, []string{EventGateGreen, EventMilestoneDone}, names)
 
 	q := fixture(t, baseFiles()) // ./gate.sh is missing: red
 	_, err = q.CloseMilestoneAcceptRed(ctx(), "M1", "known drift", "Ann Lee", RunOptions{})
 	require.NoError(t, err)
-	evs := q.EventsSince(0)
+	evs = q.EventsSince(0)
 	require.Len(t, evs, 1)
 	require.Equal(t, EventMilestoneDone, evs[0].Event)
 	require.Equal(t, "closed with its gate red, accepted by Ann Lee: known drift", evs[0].Reason)

@@ -86,12 +86,13 @@ func handleEvent(ctx context.Context, p *apexv1.Project, h *detachedHandle, ev a
 
 // emitDetachedRunEnd is the supervisor's run-end, once it has recorded
 // the exit: the stop reason it recorded, else the run's termination kind.
-func emitDetachedRunEnd(h *detachedHandle, code int) {
+func emitDetachedRunEnd(ctx context.Context, h *detachedHandle, code int) {
 	p, ok := v1ProjectAt(handleRoot(h))
 	if !ok {
 		return
 	}
-	ctx := context.Background()
+	// The run has ended: its event outlives a cancelled supervisor.
+	ctx = context.WithoutCancel(ctx)
 	reason := h.StopReason
 	if reason == "" {
 		if cur, err := readHandle(handlePath(p.Root, h.ID)); err == nil && cur.RunDir != "" {
