@@ -6909,7 +6909,7 @@ Examples:
   ape service --name ci --drain-timeout 5m
   # discovery + a task submission (stamped with this caller's depth):
   nats req '$SRV.PING.ape' ''
-  ape service submit task '{"project_root":"/abs/path/myproject","skill":"apex-plan","args":"M1"}'
+  ape service submit task '{"project_root":"/abs/path/myproject","skill":"apex-plan","args":"development/briefs/greeter.md"}'
 ```
 
 Flags:
@@ -6972,7 +6972,7 @@ BUSY_KEY): retry later. A refusal prints the daemon's message with its code.
 Examples:
 
 ```
-  ape service submit task '{"skill":"apex-plan","args":"M2"}'
+  ape service submit task '{"skill":"apex-plan","args":"add a --name flag to greet"}'
   ape service submit task '{"project_root":"/abs/repo","skill":"apex-loop","args":"M1"}' --name ci
 ```
 

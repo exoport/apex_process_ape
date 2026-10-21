@@ -158,6 +158,8 @@ Help text only: no command, flag, exit code or output changed.
   - `ape milestone approve --help` gives the gate's timeout as 30m without progress, 4h at most.
   - `ape status --help`: `--board` says the tab is quiet (aboard v0.4.0); the spend line names
     task runs.
+  - `ape service` and `ape service submit` examples give `apex-plan` a brief or a request, which
+    is what it takes, not a milestone id.
 
 ### rc.7o: a gate fixed after the work, a gate's own files, and bash in a sh check (Q145, RK-6, RN-1; D310–D313)
 
