@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -75,20 +76,26 @@ func TestLift_DispositionKeepsEveryCandidate(t *testing.T) {
 	require.NotContains(t, d, "check00.sh")
 }
 
-// R14: past the 48 KB ceiling, the candidates are cut, the file saying
-// how many and where they are.
-func TestLift_DispositionCutsCandidatesAtTheCeiling(t *testing.T) {
+// D274 (operator, before promotion): past the 48 KB ceiling the candidates
+// are no longer cut to the git-ignored JSON — apex-plan in any other clone
+// lost them (cortex on rc7f: 271 of 384). Every row is in the file, past
+// the ceiling; the other lists are already at their minimum (counts), and
+// the count line names the last row and the file's size.
+func TestLift_DispositionNeverCutsCandidatesPastTheCeiling(t *testing.T) {
 	d, n := liftWithCandidates(t, 400, 220)
-	require.LessOrEqual(t, len(d), liftDispositionCeiling)
-	require.Greater(t, len(d), liftDispositionCeiling-1024, "it fills the ceiling before it cuts")
-	m := regexp.MustCompile(`… and (\d+) more candidate\(s\), numbered on from (\d+), past this file's 48 KB ceiling: in ` + "`_apex/state/lift-disposition.json`" + ` \(rule_candidates\), in the checkout that lifted`).FindStringSubmatch(d)
-	require.NotNil(t, m, "the cut says how many and where")
-	var more, from int
-	_, err := fmt.Sscan(m[1]+" "+m[2], &more, &from)
+	require.Greater(t, len(d), liftDispositionCeiling, "400 candidates need more than 48 KB, and get it")
+	for i := range 400 {
+		require.Contains(t, d, fmt.Sprintf("| Rule %d: never write", i))
+	}
+	require.Contains(t, d, fmt.Sprintf("| %d | ", n), "the last candidate too")
+	require.NotContains(t, d, "more candidate")
+	m := regexp.MustCompile(`This file lists every candidate: (\d+) rows, numbered 1–(\d+) \(about (\d+) KB\)\. If a Read stops short, read on with offset/limit until row (\d+)\.`).FindStringSubmatch(d)
+	require.NotNil(t, m, "the count line")
+	require.Equal(t, []string{strconv.Itoa(n), strconv.Itoa(n), strconv.Itoa(n)}, []string{m[1], m[2], m[4]})
+	kb, err := strconv.Atoi(m[3])
 	require.NoError(t, err)
-	require.Contains(t, d, fmt.Sprintf("| %d | ", from-1), "numbered up to the cut")
-	require.NotContains(t, d, fmt.Sprintf("| %d | ", from))
-	require.Equal(t, from-1+more, n, "every candidate is in the file or counted")
+	require.Equal(t, (len(d)+1023)>>10, kb, "the size it states is the file's own (no regression section here: --no-verify-run)")
+	require.Contains(t, d, "- … and 60 more file(s) (in `_apex/state/lift-disposition.json`)", "the non-rule lists stay summarised")
 }
 
 // The ceiling is the caps' hard ceiling on AGENTS.md (caps.go).
@@ -368,21 +375,27 @@ func TestLift_CandidatesFromEverySection(t *testing.T) {
 	})
 }
 
-// Q136: past the ceiling, the overflow line says which sections went to
-// the JSON only, the most-cut first, and the row's source cell is its line.
-func TestCandidateOverflow_NamesTheCutSections(t *testing.T) {
+// D274: the table lists every candidate, and says first how many rows there
+// are and how big the file is, so a reader that reads it in parts can tell
+// it reached the last; there is no overflow line. Q136's row keeps its line.
+func TestWriteCandidates_EveryRowAndItsCount(t *testing.T) {
 	tm := "apex-v0-final:development/team-memory.md"
 	cands := []LiftCandidate{
 		{Text: "a", Source: tm + ":3", Section: "Gotchas"},
 		{Text: "b", Source: tm + ":9", Section: "Process"},
 		{Text: "c", Source: tm + ":12", Section: "Process"},
 	}
-	require.Equal(t, "By section: `"+tm+"` — Process (2); `"+tm+"` — Gotchas (1).", omittedGroups(cands))
 	require.Equal(t, "12", candidateLine(tm+":12"))
 	require.Equal(t, "CLAUDE.md", candidateLine("CLAUDE.md"))
 	var b strings.Builder
-	writeCandidates(&b, cands, 1, "_apex/state/lift-disposition.json")
-	require.Contains(t, b.String(), "| 1 | a | `3` | |")
-	require.Contains(t, b.String(), "… and 2 more candidate(s), numbered on from 2")
-	require.Contains(t, b.String(), "By section: `"+tm+"` — Process (2).")
+	writeCandidates(&b, cands, 7)
+	d := b.String()
+	require.True(t, strings.HasPrefix(d, "This file lists every candidate: 3 rows, numbered 1–3 (about 7 KB). If a Read stops short, read on with offset/limit until row 3.\n\n"), d)
+	for _, row := range []string{"| 1 | a | `3` | |", "| 2 | b | `9` | |", "| 3 | c | `12` | |"} {
+		require.Contains(t, d, row)
+	}
+	require.NotContains(t, d, "more candidate")
+	b.Reset()
+	writeCandidates(&b, nil, 1)
+	require.NotContains(t, b.String(), "This file lists", "no count line when there is nothing to list")
 }

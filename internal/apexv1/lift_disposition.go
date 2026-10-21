@@ -440,27 +440,31 @@ const liftDispositionCeiling = 48 << 10
 
 // dispLimits bound one rendering of the disposition file: files is how
 // many files a summary names (the rest are counted; the report has them
-// all), adrs how many ADR rows are listed, rules how many binding-rule
-// candidates (-1: all); readerCounts puts the v0 state readers as counts,
-// not one line per file.
+// all), adrs how many ADR rows are listed; readerCounts puts the v0 state
+// readers as counts, not one line per file. sizeKB is the rendering's own
+// size, for the candidate count line (render). The binding-rule
+// candidates have no limit: they are never cut (D274).
 type dispLimits struct {
-	files, adrs, rules int
-	readerCounts       bool
+	files, adrs  int
+	readerCounts bool
+	sizeKB       int
 }
 
 // dispSteps are tried in order until a rendering fits the cap: the
-// summaries down to counts, then the ADR table. The candidates and the v0
-// state readers are cut only past the ceiling (disposition).
-var dispSteps = []dispLimits{ //nolint:mnd // a table of render steps: each number is a row, not a tunable
-	{files: 40, adrs: -1, rules: -1},
-	{files: 20, adrs: -1, rules: -1},
-	{files: 10, adrs: -1, rules: -1},
-	{files: 5, adrs: -1, rules: -1},
-	{files: 3, adrs: -1, rules: -1},
-	{files: 0, adrs: -1, rules: -1},
-	{files: 0, adrs: 60, rules: -1},
-	{files: 0, adrs: 30, rules: -1},
-	{files: 0, adrs: 10, rules: -1},
+// summaries down to counts, then the ADR table. The v0 state readers are
+// counted only past the ceiling (disposition); the candidates never are.
+//
+//nolint:mnd // a table of render steps: each number is a row, not a tunable
+var dispSteps = []dispLimits{
+	{files: 40, adrs: -1},
+	{files: 20, adrs: -1},
+	{files: 10, adrs: -1},
+	{files: 5, adrs: -1},
+	{files: 3, adrs: -1},
+	{files: 0, adrs: -1},
+	{files: 0, adrs: 60},
+	{files: 0, adrs: 30},
+	{files: 0, adrs: 10},
 }
 
 // liftReport is lift-disposition.json: every list the lift made, whole.
@@ -500,13 +504,21 @@ func (lf *lifter) report() string {
 }
 
 // disposition renders the disposition file: within liftDispositionCap
-// when any step of dispSteps fits; else, every candidate and v0 state
-// reader kept, within liftDispositionCeiling; else with the readers as
-// counts; else with as many candidates as fit it.
+// when any step of dispSteps fits; else, every v0 state reader kept,
+// within liftDispositionCeiling; else with the readers as counts, at
+// whatever size the candidates need.
+//
+// The binding-rule candidates are never cut (D274). The JSON beside the
+// file is git-ignored and exists only in the checkout that lifted, so a
+// candidate cut to it was lost to apex-plan run in any other clone: on the
+// rc7f rehearsals 61–307 of each project's 213–441 candidates. Every row is
+// here, and the file says how many there are, so a reader that read it in
+// parts can tell it reached the last (writeCandidates). Measured with every
+// row kept: cortex 146 KB, tenax 99 KB, mdpdf 84 KB, radix 71 KB.
 func (lf *lifter) disposition() string {
 	var out string
 	for _, l := range dispSteps {
-		if out = lf.dispositionWith(l); len(out) <= liftDispositionCap {
+		if out = lf.render(l); len(out) <= liftDispositionCap {
 			return out
 		}
 	}
@@ -515,15 +527,16 @@ func (lf *lifter) disposition() string {
 	}
 	last := dispSteps[len(dispSteps)-1]
 	last.readerCounts = true
-	if out = lf.dispositionWith(last); len(out) <= liftDispositionCeiling {
-		return out
-	}
-	n := sort.Search(len(lf.res.Candidates), func(n int) bool {
-		last.rules = n + 1
-		return len(lf.dispositionWith(last)) > liftDispositionCeiling
-	})
-	last.rules = n
-	return lf.dispositionWith(last)
+	return lf.render(last)
+}
+
+// render is dispositionWith with the file's own size in its candidate
+// count line: rendered once to measure it, then with that size.
+func (lf *lifter) render(lim dispLimits) string {
+	const kib = 1 << 10
+	lim.sizeKB = 0
+	lim.sizeKB = (len(lf.dispositionWith(lim)) + kib - 1) / kib
+	return lf.dispositionWith(lim)
 }
 
 func (lf *lifter) dispositionWith(lim dispLimits) string {
@@ -535,11 +548,11 @@ func (lf *lifter) dispositionWith(lim dispLimits) string {
 	p("Lifted from apex-v0 %s; the apex-v0 state is archived at the tag `%s` (%s), read it as `git show %s:<path>`.\n\n", r.Version, LiftTag, short(r.TagSHA), LiftTag)
 	p("This file is the lift's hand-off. apex-plan fills the Disposition column and carries each kept rule to its one home;\n")
 	p("a fresh read-only session reviews the result; then the person does, and deletes this file.\n")
-	p("Long lists are summarised here; `%s` holds every one whole. Git ignores it: it is in the checkout that lifted, never committed.\n\n", report)
+	p("Every binding-rule candidate is in this file. The other long lists are summarised here; `%s` holds every one whole. Git ignores it: it is in the checkout that lifted, never committed.\n\n", report)
 
 	p("## Binding-rule candidates\n\n")
 	p("Disposition is one of: `kept in AGENTS.md` · `gated by <cmd>` · `ADR-NNNN` · `docs/<page>` · `dropped: <reason>`.\n\n")
-	writeCandidates(&b, r.Candidates, lim.rules, report)
+	writeCandidates(&b, r.Candidates, lim.sizeKB)
 
 	p("## Gate commands\n\n")
 	switch r.Gates.Source {
@@ -644,22 +657,20 @@ func (lf *lifter) dispositionWith(lim dispLimits) string {
 }
 
 // writeCandidates is the disposition's binding-rule table, grouped by
-// source and section (RG-4) and numbered through: at most maxRows rows
-// (all of them when maxRows < 0), then a line saying how many more there
-// are and where.
-func writeCandidates(b *strings.Builder, cands []LiftCandidate, maxRows int, report string) {
+// source and section (RG-4) and numbered through, every candidate (D274).
+// Its first line says how many rows there are and how big the file is
+// (sizeKB): past Claude Code's per-Read cap the file is read in parts, and
+// a reader that stopped short can tell.
+func writeCandidates(b *strings.Builder, cands []LiftCandidate, sizeKB int) {
 	p := func(format string, args ...any) { fmt.Fprintf(b, format, args...) }
 	if len(cands) == 0 {
 		p("None found (no CLAUDE.md list items, no project-context or team-memory rules).\n\n")
 		return
 	}
+	p("This file lists every candidate: %d rows, numbered 1–%d (about %d KB). If a Read stops short, read on with offset/limit until row %d.\n\n",
+		len(cands), len(cands), sizeKB, len(cands))
 	group := ""
 	for i, c := range cands {
-		if i == maxRows {
-			p("\n… and %d more candidate(s), numbered on from %d, past this file's %d KB ceiling: in `%s` (rule_candidates), in the checkout that lifted. %s\n",
-				len(cands)-i, i+1, liftDispositionCeiling>>10, report, omittedGroups(cands[i:]))
-			break
-		}
 		if g := candidateGroup(c); i == 0 || g != group {
 			if i > 0 {
 				p("\n")
@@ -1030,32 +1041,4 @@ func candidateLine(src string) string {
 		return src[i+1:]
 	}
 	return src
-}
-
-// omittedGroupsMax bounds the groups the overflow line names.
-const omittedGroupsMax = 12
-
-// omittedGroups says, per source and section, how many candidates went
-// to the JSON only (Q136): a reviewer of the .md sees which sections were
-// cut, the most-cut first.
-func omittedGroups(cands []LiftCandidate) string {
-	count := map[string]int{}
-	var order []string
-	for _, c := range cands {
-		g := candidateGroup(c)
-		if count[g] == 0 {
-			order = append(order, g)
-		}
-		count[g]++
-	}
-	sort.SliceStable(order, func(i, j int) bool { return count[order[i]] > count[order[j]] })
-	parts := make([]string, 0, min(len(order), omittedGroupsMax)+1)
-	for i, g := range order {
-		if i == omittedGroupsMax {
-			parts = append(parts, fmt.Sprintf("and %d more section(s)", len(order)-i))
-			break
-		}
-		parts = append(parts, fmt.Sprintf("%s (%d)", g, count[g]))
-	}
-	return "By section: " + strings.Join(parts, "; ") + "."
 }

@@ -5289,7 +5289,10 @@ The commit:
                  which; "revealed" lists the files under .claude/ it un-ignored and did not
                  commit (a skill of your own: commit it or ignore it by name)
   writes         development/lift-disposition.md (16 KB, unless its candidates need
-                 more): the binding-rule candidates, EVERY one: from
+                 more; they are never cut, whatever its size): the binding-rule
+                 candidates, EVERY one, under a line giving their count and the
+                 file's size ("N rows, numbered 1–N … read on with offset/limit
+                 until row N"): from
                  project-context.md and team-memory, every section, an overview
                  too — its list items of three words or more (not one that is
                  only links) and its rule-shaped paragraphs (must, never,
@@ -5327,12 +5330,11 @@ The commit:
                  with guard_test.go (folder match only)"); ADR gaps; ids left and
                  files not edited, counted per file; references in evidence and docs,
                  counted; readings at the tag. To fit 16 KB the summaries shrink to
-                 counts, then the ADR table to the ADRs with gaps; the candidates and
-                 the v0 state readers are never cut to fit it: the file grows past
-                 16 KB to hold them, up to 48 KB; past 48 KB the readers go to counts
-                 (saying so), and only then are the candidates cut, the file listing
-                 the first ones and saying how many more there are and where. Every
-                 list whole goes to
+                 counts, then the ADR table to the ADRs with gaps; the v0 state
+                 readers grow the file past 16 KB, up to 48 KB, and past that go to
+                 counts (saying so). The candidates are never cut: the file is as
+                 big as they need (cortex: 146 KB, 441 rows), since the JSON below
+                 is not in any other clone. Every non-rule list whole goes to
                  _apex/state/lift-disposition.json after the commit: ignored by the
                  state folder's whitelist, never committed, in this checkout only
 
