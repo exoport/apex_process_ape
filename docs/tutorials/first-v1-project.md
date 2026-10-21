@@ -6,8 +6,13 @@ framework's skills take over (`apex-plan`, then `apex-orchestrator`), so it need
 no model session and costs nothing.
 
 You need `ape` installed ([How to install ape](../how-to/install.md)), `git`,
-Claude Code on `PATH`, and read access to the APEX framework repository, which
+Claude Code on `PATH`, Go on `PATH` (the milestone's gate below is
+`go test ./...`), and read access to the APEX framework repository, which
 `ape framework setup` fetches (its `--help` says from where).
+
+ape runs the gate when you approve the milestone. Without Go the gate exits
+127, and ape refuses the approval with `milestone.gate-broken`. To follow along
+without Go, use a gate your machine can run, such as `test -x ./greet`.
 
 ## 1. Check the host
 
@@ -58,9 +63,17 @@ git add -A && git commit -q -m "plan: project.md and M1"
 ape project check
 ```
 
-`approve` is a person's act: ape refuses it inside a model session
+`approve` runs the gate first, and the gate must fail: a gate that already passes
+proves nothing the milestone adds, so ape refuses it (`milestone.gate-green`). Here
+there is no code yet, so `go test ./...` fails.
+
+`approve` is a person's act. ape refuses it inside a model session
 (`APE_SESSION` or `CLAUDECODE` set, which includes a `!` command typed in Claude
-Code). Run it from a plain terminal. `project check` is now green.
+Code), so run it from a plain terminal. In your own Claude Code session there is a
+second way: type `approve M1` yourself, and the session may then run the command
+for you ([What only a person does](../explanation/person-acts.md)).
+
+`project check` is now green.
 
 ## 5. Look at where the project stands
 
@@ -78,7 +91,15 @@ OK here, `skills.project` included, since step 2 installed the framework's skill
 
 ## Where to go next
 
-The changes of M1 are planned and delivered by the framework's skills, which call
-`ape change new|start|verify|review|archive` for you; `ape change --help` shows
-the lifecycle they follow. To run one skill yourself, see
+The changes of M1 are planned and delivered by the framework's skills. They call
+`ape change new|start|verify|review|archive` for you, following the lifecycle in
+[the change lifecycle reference](../reference/change-lifecycle.md). Start the
+work in one of two ways:
+
+- Open Claude Code in the project and type `/apex-orchestrator`. This is your own
+  session: it plans with you and starts the unattended run.
+- From a terminal, run the milestone unattended with `ape task apex-loop --args M1`.
+
+[The operator and the loop](../explanation/operator-and-loop.md) explains the
+difference. To run one skill yourself, see
 [How to run a single skill with `ape task`](../how-to/run-a-single-skill.md).

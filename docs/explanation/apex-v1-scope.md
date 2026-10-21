@@ -58,12 +58,26 @@ so the orchestrator stops and does not re-plan.
 
 ## What only a person does
 
-Some actions are a person's by design: approving a milestone or a tweak, archiving past an unaccepted
-human-review task (`--allow-pending-human`), answering a blocked change (`ape change answer`), and
-closing a milestone on a red gate (`ape milestone close --accept-red "<reason>" --by <who>`). ape
-refuses these when it runs under a model, which it detects by `APE_SESSION` (every session ape
-starts) or `CLAUDECODE` (every Claude Code Bash tool call). A `!` line typed inside Claude Code runs
-in that session's environment and counts as a model session too: run these from a plain terminal.
+Some actions are a person's by design:
+- approving a milestone or a tweak, including re-approving a milestone whose gate was fixed after
+  its work was done (`ape milestone approve <M> --accept-green "<reason>"`);
+- accepting a human-review task (`ape change accept`);
+- archiving past an unaccepted human-review task (`--allow-pending-human`);
+- answering a blocked change (`ape change answer`);
+- accepting a decision (`ape decision accept`) or a changed config (`ape project accept-config`);
+- closing a milestone on a red gate (`ape milestone close --accept-red "<reason>" --by <who>`).
+
+ape refuses these when it runs under a model, which it detects by `APE_SESSION` (every session ape
+starts) or `CLAUDECODE` (every Claude Code Bash tool call). A person does them in one of two ways:
+
+- **From a plain terminal.** A `!` line typed inside Claude Code runs in that session's
+  environment, so it counts as a model session.
+- **In the person's own Claude Code session, by typing the act** (E2). Type the phrase in that turn,
+  for example `approve M1` before the session runs `ape milestone approve M1`; ape then records
+  your words as the approval. `ape hook user-prompt --help` lists the phrases. `ape project init`
+  registers the hook that records them. Inside a session ape started, no phrase counts.
+
+See [What only a person does](person-acts.md).
 
 The same rule covers the guard overrides. The pre-tool hook denies `git tag`, `git push`,
 `git rebase`/`merge`/`cherry-pick` on a change branch, and `pkill`/`killall` in v1 sessions. An
