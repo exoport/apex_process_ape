@@ -164,7 +164,8 @@ milestone's run lock. It runs no `Gate:` command and no regression command, and 
 no `milestones.json`, no `gate-<M>.json`, no commit. It is allowed on a proposed milestone, which
 is when apex-plan runs it to see which of the plan's scenarios are red. Its output goes to
 `_apex/state/logs/gate-<M>-spec/` and `gate-<M>-spec.json`. JSON carries `spec_only: true` and
-`mode: "spec-only"`. A red scenario fails it with `gate.spec-red` (exit 1, action replan).
+`mode: "spec-only"`. A red scenario fails it with `gate.spec-red` (exit 1, action replan). A done
+milestone is refused as `gate` refuses it, with `milestone.done`, before any scenario runs.
 
 ### The gate changed since approval
 

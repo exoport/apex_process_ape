@@ -261,3 +261,39 @@ func TestRunGate_ApprovedMilestoneStillRuns(t *testing.T) {
 	require.FileExists(t, filepath.Join(p.LogsDir(), "gate-M1.log"))
 	clean(t, p, "milestone gate")
 }
+
+// Q162 (D350) for W2's --spec-only: a done milestone's spec-only run is
+// refused the same way, before any scenario runs: no gate-<M>-spec log or
+// record, nothing under _apex/state written, no commit.
+func TestRunSpecOnly_DoneMilestoneRefused(t *testing.T) {
+	p := fixture(t, gateFolderFiles())
+	_, err := p.CloseMilestone(ctx(), "M1", RunOptions{})
+	require.NoError(t, err)
+	head := HeadSHA(ctx(), p.Root)
+	before := stateSnapshot(t, p)
+
+	r, err := p.RunSpecOnly(ctx(), "M1", RunOptions{})
+	require.Nil(t, r)
+	fe, ok := errors.AsType[*FailError](err)
+	require.True(t, ok, "%v", err)
+	require.Equal(t, "milestone.done", fe.Code)
+	require.Empty(t, fe.Action, "the code's published action applies, as at approve")
+	require.Equal(t, ActionStop, ActionFor(fe.Code))
+	require.Equal(t, doneMilestoneGate(&Milestone{ID: "M1", StatusText: statusText(t, p, "M1")}).Msg, fe.Msg, "the gate's message")
+
+	require.NoFileExists(t, p.specOnlyPath("M1"))
+	require.NoDirExists(t, filepath.Join(p.LogsDir(), "gate-M1-spec"))
+	require.Equal(t, head, HeadSHA(ctx(), p.Root), "nothing committed")
+	require.Equal(t, before, stateSnapshot(t, p), "nothing under _apex/state written")
+	clean(t, p, "a refused spec-only run")
+}
+
+// statusText is the milestone's Status text as roadmap.md has it.
+func statusText(t *testing.T, p *Project, id string) string {
+	t.Helper()
+	_, rm, err := p.loadRoadmapDoc()
+	require.NoError(t, err)
+	m := rm.Find(id)
+	require.NotNil(t, m)
+	return m.StatusText
+}

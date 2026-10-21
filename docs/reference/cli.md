@@ -4286,7 +4286,7 @@ the close, which archived its gate folder; nothing is run, written or committed.
 command, no regression command, no live check (JSON live_skipped) — and records nothing: no milestones.json, no gate-<M>.json,
 no commit. It runs in this process (no detached worker, so never exit 75) under the
 milestone's run lock (run.busy beside a gate or close of it), with the same refusals as
-the gate, and is allowed on a proposed milestone: apex-plan runs it before the approval to
+the gate (a done milestone's milestone.done included), and is allowed on a proposed milestone: apex-plan runs it before the approval to
 see which scenarios of the plan are red. Output under _apex/state/logs/gate-<M>-spec/, the
 result beside it in gate-<M>-spec.json (never the gate's gate-<M>.json). JSON {milestone,
 spec_only: true, mode: "spec-only", spec_checks, spec_failed: [...], log, at, sha}; a red

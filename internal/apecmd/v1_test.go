@@ -242,6 +242,14 @@ func TestV1Commands_ExitCodes(t *testing.T) {
 	require.Contains(t, stdout, `"action": "stop"`)
 	require.Equal(t, head, v1Git(t, root, "rev-parse", "HEAD"))
 	require.Empty(t, v1Git(t, root, "status", "--porcelain"))
+	// And --spec-only (W2) refuses it the same way.
+	stdout, _, err = v1Exec(t, newMilestoneCmd, "gate", "M1", "--spec-only", "--json", "--cwd", root)
+	require.Equal(t, ExitRunFailed, exitCodeOf(t, err))
+	require.Contains(t, stdout, `"code": "milestone.done"`)
+	require.Contains(t, stdout, `"action": "stop"`)
+	require.NoFileExists(t, filepath.Join(root, "_apex", "state", "logs", "gate-M1-spec.json"))
+	require.Equal(t, head, v1Git(t, root, "rev-parse", "HEAD"))
+	require.Empty(t, v1Git(t, root, "status", "--porcelain"))
 
 	stdout, _, err = v1Exec(t, newStatusCmd, "--brief", "--cwd", root)
 	require.NoError(t, err)

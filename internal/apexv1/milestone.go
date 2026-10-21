@@ -656,9 +656,9 @@ func (p *Project) specOnlyPath(id string) string {
 // the way its gate runs them, without the Gate: command and the
 // regression command, and records nothing: no milestones.json, no last
 // gate run, no commit (W2 Part 4; apex-plan's step 8). Refused like the
-// gate on a change branch and, for an approved milestone, without its
-// approval record or with a changed gate; allowed on a proposed one,
-// which is when apex-plan runs it.
+// gate on a change branch, on a done milestone (Q162) and, for an
+// approved milestone, without its approval record or with a changed
+// gate; allowed on a proposed one, which is when apex-plan runs it.
 func (p *Project) RunSpecOnly(ctx context.Context, id string, opt RunOptions) (*SpecOnlyResult, error) {
 	if err := p.recoverArchive(ctx); err != nil {
 		return nil, err
@@ -674,7 +674,13 @@ func (p *Project) RunSpecOnly(ctx context.Context, id string, opt RunOptions) (*
 	if m == nil {
 		return nil, &FailError{Code: CodeMilestoneNotFound, Msg: "no milestone " + id + " in roadmap.md"}
 	}
-	if m.Status == MilestoneApproved {
+	switch m.Status {
+	case MilestoneDone:
+		// As the gate (Q162, D350): a done milestone's gate was recorded at
+		// its close and its gate folder archived; refused before anything
+		// runs or is written.
+		return nil, doneMilestoneGate(m)
+	case MilestoneApproved:
 		if err := p.requireApprovalRecord(m, true); err != nil {
 			return nil, err
 		}
