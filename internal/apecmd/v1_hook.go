@@ -33,8 +33,10 @@ the hook payload (JSON) on stdin.
                   development/specs/**, changes/*/state.json, archive/**, _apex/state/**,
                   an existing development/briefs/** file, and Bash commands that create,
                   delete or push a git tag, push at all, stop processes by name (pkill,
-                  killall), or rebase or merge on a change branch; grants a person act
-                  on the person's own words (E2), and denies one without them
+                  killall), or rebase or merge on a change branch; while ape runs a
+                  check in the checkout, denies an edit outside development/ that its
+                  cleanup would undo; grants a person act on the person's own words
+                  (E2), and denies one without them
   user-prompt     UserPromptSubmit: records the prompt a person typed, which is what
                   grants a person act (E2); never blocks the prompt
 
@@ -229,6 +231,13 @@ func newHookPreToolCmd() *cobra.Command {
 "permissionDecisionReason":"… specs change only through ape change archive"}}, an edit
 whose target is under development/specs/, is development/changes/*/state.json, is under
 development/archive/, or is under _apex/state/.
+
+A running check (RK-4b, Q144): while ape runs a check in this checkout (a verify, a gate,
+a baseline, a Stop hook's re-run), denies an edit outside development/ and _apex/state/,
+naming the check, its run and pid: when the check ends ape undoes what changed in the
+tree while it ran. The check's marker (_apex/state/runs/checking-*.json) counts only while
+the process that wrote it lives — its pid and that process's start time — so a check that
+crashed never blocks an edit.
 
 Briefs: denies an edit to a file that already exists under development/briefs/ (any
 depth) — a brief is a plan's input, dated and verbatim, and is history: a new or

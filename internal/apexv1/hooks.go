@@ -171,6 +171,12 @@ func PreTool(payload HookPayload) PreToolDecision {
 			return PreToolDecision{Deny: true, Path: p.Rel(target), Reason: reason}
 		}
 	}
+	// RK-4b (Q144): an edit a running check's cleanup would undo.
+	if rel := filepath.ToSlash(p.Rel(target)); rel != ".." && !strings.HasPrefix(rel, "../") && !filepath.IsAbs(rel) && !p.notCode(rel) {
+		if m := p.LiveCheck(); m != nil {
+			return PreToolDecision{Deny: true, Path: rel, Reason: checkRunningReason(rel, m)}
+		}
+	}
 	return PreToolDecision{}
 }
 

@@ -216,11 +216,15 @@ func (p *Project) runWithRetries(ctx context.Context, pc *PlannedCheck, logPath 
 		}
 		var before treeSnapshot
 		if inGit {
+			// RK-4b (Q144): the marker is up from before the snapshot to
+			// after the cleanup — the whole window an edit would be undone.
+			done := p.markChecking(pc.Cmd, path)
 			before = p.snapshot(ctx)
-		}
-		r = runCheck(ctx, p.Root, pc.Cmd, path, pc.LogNote, lim, vacuous, pc.Env...)
-		if inGit {
+			r = runCheck(ctx, p.Root, pc.Cmd, path, pc.LogNote, lim, vacuous, pc.Env...)
 			strays = append(strays, p.undoStrays(ctx, before)...)
+			done()
+		} else {
+			r = runCheck(ctx, p.Root, pc.Cmd, path, pc.LogNote, lim, vacuous, pc.Env...)
 		}
 		retry := r.Exit != 0 && r.Reason == "" && try < retries && ctx.Err() == nil
 		if !retry {

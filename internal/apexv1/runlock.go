@@ -38,20 +38,37 @@ type RunLock struct {
 	ID string `json:"id"`
 	// PID is the process running the checks — the detached worker, or the
 	// command itself when it runs in-process — and PGID its process group.
-	PID     int    `json:"pid"`
-	PGID    int    `json:"pgid,omitempty"`
-	Verb    string `json:"verb"`
-	Scope   string `json:"scope"`
-	SHA     string `json:"sha"`
-	Started string `json:"started"`
-	Log     string `json:"log"`
+	PID  int `json:"pid"`
+	PGID int `json:"pgid,omitempty"`
+	// PIDStart is when PID started (processStart, Q144): a lock whose pid
+	// now names a later process is as dead as one whose pid is gone.
+	PIDStart string `json:"pid_start,omitempty"`
+	Verb     string `json:"verb"`
+	Scope    string `json:"scope"`
+	SHA      string `json:"sha"`
+	Started  string `json:"started"`
+	Log      string `json:"log"`
 	// PersonAct is the person act the run carries out (D179, OI-12):
 	// what a re-run attaches by, and what its worker acts on.
 	PersonAct *PersonAct `json:"person_act,omitempty"`
 }
 
-// Alive reports whether the lock's process still runs.
-func (l *RunLock) Alive() bool { return processAlive(l.PID) }
+// Alive reports whether the lock's process still runs: its pid, and the
+// same process (its start time, when recorded and readable).
+func (l *RunLock) Alive() bool { return ownerAlive(l.PID, l.PIDStart) }
+
+// ownerAlive reports whether the process that recorded pid and start still
+// runs. Without a recorded or readable start time, the pid alone decides.
+func ownerAlive(pid int, start string) bool {
+	if !processAlive(pid) {
+		return false
+	}
+	if start == "" {
+		return true
+	}
+	cur, ok := processStart(pid)
+	return !ok || cur == start
+}
 
 // RunsDir is _apex/state/runs/, where run locks, results and logs live.
 func (p *Project) RunsDir() string {
@@ -97,7 +114,7 @@ func (p *Project) TakeRunLock(ctx context.Context, verb, scope string) (lock, he
 	}
 	l := &RunLock{
 		ID:  time.Now().UTC().Format("20060102-150405") + "-" + strconv.Itoa(os.Getpid()) + "-" + randomHex(3),
-		PID: os.Getpid(), PGID: ProcessGroup(), Verb: verb, Scope: scope,
+		PID: os.Getpid(), PGID: ProcessGroup(), PIDStart: selfStart(), Verb: verb, Scope: scope,
 		SHA: HeadSHA(ctx, p.Root), Started: Stamp(), Log: p.Rel(p.RunLogPath(scope)),
 	}
 	for range 3 {
@@ -129,6 +146,12 @@ func (p *Project) TakeRunLock(ctx context.Context, verb, scope string) (lock, he
 		return nil, nil, RunGone(cur)
 	}
 	return nil, nil, &FailError{Code: CodeRunInterrupted, Msg: "could not take the run lock " + p.Rel(p.RunLockPath(scope)) + " — it keeps changing; run the command again"}
+}
+
+// selfStart is this process's start identity, "" when unreadable.
+func selfStart() string {
+	s, _ := processStart(os.Getpid())
+	return s
 }
 
 func randomHex(n int) string {
@@ -166,6 +189,10 @@ func (p *Project) UpdateRunLock(l *RunLock) bool {
 	cur := p.LoadRunLock(l.Scope)
 	if cur == nil || cur.ID != l.ID {
 		return false
+	}
+	// The worker that takes the run over records its own start (Q144).
+	if s, ok := processStart(l.PID); ok {
+		l.PIDStart = s
 	}
 	data, err := json.MarshalIndent(l, "", "  ")
 	if err != nil {
