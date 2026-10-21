@@ -1,206 +1,231 @@
 # How to run a single skill with `ape task`
 
-Run one framework skill without authoring a pipeline YAML — everything a
-pipeline step gets (framework-agent prefix, preflight, bridge hooks,
-manifest, telemetry), with the parameters passed as flags. Execution is
-interactive-PTY only: claude runs as a REPL, the prompt is typed as
-keystrokes, and completion is detected via the bridge Stop hook.
+`ape task <skill>` runs one framework skill in its own unattended Claude Code
+session. ape spawns claude as a REPL in a PTY, types the skill invocation as
+keystrokes, waits for the Stop hook, and writes a run manifest. In an APEX v1
+project every skill of the loop runs this way: you start `apex-plan` or
+`apex-loop` with it, and the loop starts the other skills with it.
 
-## Basic run
-
-```bash
-ape task apex-shard-doc --args "--doc prd"
-```
-
-The skill must resolve under `.claude/skills/<name>/SKILL.md` (project)
-or `~/.claude/skills/` (user) — unknown skills fail preflight with exit
-code 2 before any claude spawn.
-
-## With a framework agent, model, and prompt
+## Run a skill
 
 ```bash
-ape task apex-create-prd \
-  --agent apex-agent-pm \
-  --model opus \
-  --prompt "a greeter CLI" --prompt-flag --prompt
+ape task apex-plan --args "<request>"
+ape task apex-loop --args M1
+ape task apex-apply --args <change-id>
 ```
 
-`--agent` fronts the skill exactly like a pipeline step:
-`/apex-agent-pm --autonomous -- apex-create-prd --autonomous …`.
-`--prompt-flag` names the skill flag the `--prompt` value is forwarded
-through (the `prompt_flag:` spec field equivalent).
+The skill must resolve under `.claude/skills/<name>/SKILL.md` (project) or
+`~/.claude/skills/` (user). An unknown skill fails preflight with exit 2 before
+claude is spawned.
 
-## Resuming from a handoff file
+`--args` is the skill's argument, typed after the skill name. Each v1 skill
+says what its argument is: a brief or a request for `apex-plan`, a milestone
+or tweak id for `apex-loop`, a change id for `apex-apply` and `apex-review`.
+
+### Long or multi-line arguments
+
+ape does not type a line longer than 700 characters. Claude Code turns a typed
+burst past 800 characters into a `[Pasted text #N]` placeholder that never
+runs as a skill. So when the line would be longer, ape writes the `--args`
+text, verbatim and with its newlines, to a file in the run directory,
+`stages/01-<skill>/step-01-<skill>.args.md`, and types a line that names that
+file instead. The step-start event records it as `args_file`.
+
+ape uses the same file, whatever the length, when the text would not arrive as
+written if typed: two or more spaces in a row, a tab, a line break, or any
+other control character. Leading and trailing whitespace of `--args` is not
+part of the text. Shorter, single-spaced, one-line text is typed as is.
+
+After typing, ape presses Enter once claude has drawn the line, then confirms
+the submit through the `UserPromptSubmit` hook, pressing Enter up to twice
+more. A line that is still not submitted ends the run with termination
+`prompt_not_submitted` (exit 1) rather than idling to the timeout.
+
+## Run the loop in the background
+
+The loop runs for hours, so start it detached:
 
 ```bash
-ape task apex-create-prd \
-  --agent apex-agent-pm \
-  --handoff _output/handoffs/2026-07-05-x-handoff.md --prompt-flag --prompt
+ape task apex-loop --args M1 --detach
+ape run wait <id> --wait 9m
 ```
 
-`--handoff <file>` is a shorthand for `--prompt`: it checks the file
-exists and derives the prompt `Read <abs-path> and follow the Resume
-Protocol inside it.` — the same continuation prompt the `/handoff`
-skill itself suggests when it writes a handoff doc. It still needs
-`--prompt-flag` to actually reach the skill, and is mutually exclusive
-with `--prompt` (exit code 2 if both are given, or if the file doesn't
-exist). It intentionally forwards a pointer to the file rather than
-inlining its contents — the prompt is typed into the REPL as literal
-keystrokes, and a multi-line value risks submitting early.
+`--detach` prints the run's id and returns at once. See
+[How to run ape in the background](detach-a-run.md).
 
-## Commit control — two independent layers
+`apex-orchestrator` is not run with `ape task`. It is your own interface to
+the project: you open it by typing `/apex-orchestrator` in your own Claude
+Code session, and it starts `apex-loop` for you. `ape task apex-orchestrator`
+is refused with exit 2, code `skill.renamed`, and the message names both
+`ape task apex-loop --args <M>` and `/apex-orchestrator`. It is not an alias,
+so an old resume line fails loudly instead of starting the wrong skill. See
+[The operator and the loop](../explanation/operator-and-loop.md).
 
-- `--no-commit` — **skill layer**: tells the skill/framework not to
-  commit. The no-agent invocation shape already carries it by
-  convention; with `--agent` it is injected into the skill invocation.
-- `--task-commit ["<msg>"]` — **task layer**, off by default: ape
-  commits the complete task working tree at the end of the run. A bare
-  flag derives the message `ape:task/<skill>`.
+## Choose the model and effort
 
-They compose: `--no-commit --task-commit "feat: X"` suppresses the
-framework's granular commits and produces exactly one whole-task
-commit. The dirty-tree gate applies only when `--task-commit` is given
-(bypass with `--commit-allow-dirty`).
+In an APEX v1 project ape decides the session's model and effort and records
+the decision in the run manifest as
+`launch: {model, model_source, effort, effort_source}`:
 
-## The commit-ownership assertion
+| | First match wins |
+| --- | --- |
+| **model** | `--model`; else `models.<skill>` in `_apex/config.yaml`; else the model of the ape session that started this one; else claude's default |
+| **effort** | `--effort`; else `models.<skill>.effort`; else the parent session's (skipped when `models.<skill>` names a model without an effort); else the top-level `effort:` in `_apex/config.yaml`; else none |
 
-Every dispatch is checked against the project's own declaration,
-`_apex/commit-owners.csv` — **the framework ships it, and
-[`ape framework update`](framework-update.md) installs it.** A project
-that has not updated against a framework carrying the roster has no file,
-and every dispatch's assertion is then skipped; the update run reports
-which of the two happened rather than leaving an absent roster to look
-like a deliberate choice.
+`models.<skill>` takes a model alone or a model with an effort:
 
-```csv
-skill,commit_kind,message_regex
-apex-story-batch-dev,dev,^dev: story \d+\.\d+ [a-z0-9 ]+$
-apex-story-batch-dev,review,^review: story \d+\.\d+ [a-z0-9 ]+$
+```yaml
+models:
+  apex-review: opus
+  apex-apply: {model: sonnet, effort: high}
 ```
 
-Two rows for one skill is the schema's shape, not a duplicate. Each regex
-carries its own anchors **in the file** and is compiled verbatim — `ape`
-adds none — and is matched against a commit's **subject line only**.
+`ape project init` writes defaults for the core skills. A bare family name
+(`opus`, `sonnet`, `haiku`, …) resolves to its current generation;
+`sonnet-5`, `claude-sonnet-5` or `opus[1m]` pin one.
 
-| Skill | Assertion across the dispatch |
-| ----- | ----------------------------- |
-| **absent** from the CSV | HEAD unchanged, no path staged that was not staged before, the stash unchanged, and HEAD's reflog no longer than it was |
-| **present** in the CSV | at least one commit, and every commit in `pre..HEAD` matching one of that skill's rows |
-| **no CSV in the project** | nothing is asserted; the verdict is `skipped` with a reason |
-| **present, dispatched with `--no-commit`** | producing no commit is `skipped` with a reason — the dispatch told it not to. Committing **anyway** is `dispatch.committed_under_no_commit`, reported instead of the message format even when the subject matches |
+The effort is passed as `claude --effort <level>`, which sets the session's
+effort only. `CLAUDE_CODE_EFFORT_LEVEL` is never set (an inherited one is
+removed), and `_apex/effort-defaults.yaml` is not read. The session's tools
+see the resolved values as `APE_SESSION_MODEL` and `APE_SESSION_EFFORT`.
 
-HEAD alone is not the check, and that is the point: `git add` and
-`git stash` both leave HEAD exactly where it was, and a stash silently
-destroys the caller's working tree. The committer side is a **per-commit
-predicate over the range**, not "HEAD advanced by one" — a batch dispatch
-makes a dev and a review commit per story, and all of them must match.
+Outside a v1 project, an unset `--effort` comes from the project's
+`_apex/effort-defaults.yaml`; see `ape config effort --help`.
 
-Even those three facts can end a dispatch where they started after a git
-write: `git stash push` then `pop`, or `git commit` then
-`git reset HEAD~1`. Both add entries to HEAD's reflog, so a non-committer
-whose HEAD reflog grew reports `dispatch.head_rewritten`, quoting the new
-entries. It is reported only when no other non-committer check fired,
-since a moved HEAD or a changed stash already explains them. A repo with
-no HEAD reflog (`core.logAllRefUpdates=false`) gives this check no
-evidence, so it stays silent while the other three still run. A reflog
-that shrank, because git expired old entries, is not a finding.
+## What refuses a session
 
-Three things it deliberately does not do:
+In an APEX v1 project these checks run before anything is spawned:
 
-- **A project with no CSV is not asserted at all.** With nothing
-  declaring which skills commit, neither assertion has a basis, so the
-  verdict is `skipped` with a reason rather than a guess. Enforcing the
-  non-committer branch there would convert "this project has not adopted
-  the declaration" into "this project asserts nothing may commit" — a
-  claim nobody made — and would fail every framework skill that
-  legitimately commits, on every project that has not adopted the CSV
-  yet. A CSV that exists but does not parse fails preflight instead:
-  degrading a broken declaration to an empty one would turn every
-  committer's assertion into the non-committer's, which is exactly the
-  inversion that lets a suppressed commit through.
-- **Rows naming a skill `ape` never dispatches are tolerated.** The
-  conducting session's own rows carry `apex-orchestrator`, a persona that
-  is adopted rather than dispatched, so the assertion never reaches them.
-- **A path the caller staged before the run is the caller's.** Only paths
-  the dispatch added are reported.
+- **The ape floor.** When `_apex/ape-commands.yaml` declares a
+  `min_ape_version` above this ape, the session is refused (exit 1, code
+  `ape.below-floor`) with the command that updates ape. A dev build or a
+  pseudo-version cannot be compared: ape warns and runs the session.
+- **The milestone budget.** Off by default. Turn it on in
+  `_apex/config.yaml`:
 
-`--task-commit` is `ape`'s own commit, in `ape`'s own derived format, made
-after the skill is done — it is not judged against a skill's declaration,
-and the assertion is skipped when that flag is set.
+  ```yaml
+  limits:
+    budget: enforce   # or off
+  ```
 
-**`--no-commit` does the same to the other half.** The roster is
-`skill,commit_kind,message_regex` — it has no conditionality column, and
-it declares the **shape** of a commit rather than its inevitability:
-*when this skill commits, the subject looks like this*. Reading it as
-"this skill always commits" would convict a declared committer for
-obeying `--no-commit`, which several framework skills mandate in their own
-text (`apex-sprint-planning`: "When `{no_commit}` is `true`: make NO
-commits and NO `git add`/`git stash`"). So under that flag, producing no
-commit is a **skip with a reason** rather than a violation — a suppressed
-commit means *the skill was permitted to commit and produced none*, never
-*the operator said not to and it complied*.
+  With `enforce`, and a `Budget:` line on the current milestone (the first not
+  done, and only once approved), a session is refused (exit 1, code
+  `milestone.budget-exceeded`) when the milestone's spend is already at its
+  budget. A running session is stopped when the spend reaches it: its runs
+  since approval, plus this session's live cost read from its transcripts
+  every 30 seconds, sub-agents included. The stop ends the run (exit 1) with
+  termination kind `budget` in the manifest, and is recorded under the
+  milestone's stops in `_apex/state/limit-stops.json`; `ape status` shows it.
+  Raising the `Budget:` line is a person's call.
+- **Consecutive blocks.** `ape task apex-loop` is refused (exit 1, code
+  `milestone.blocks-exceeded`) when the milestone it runs has had
+  `limits.consecutive_blocks` (default 2) changes blocked in a row. A person
+  deals with them and re-approves the milestone, which resets the count. A
+  tweak's run is not refused.
+- **An unparseable `_apex/config.yaml`** refuses every session (exit 2)
+  rather than run it with no limits.
+- **An APEX v0 project** is refused (exit 2): it runs its skills on the v0 ape
+  its `.bingo` pins.
 
-The flag excuses the absence of a commit and **forbids its presence**. A
-skill that commits anyway reports `dispatch.committed_under_no_commit` —
-reported *instead of* `dispatch.message_format`, including when the
-subject matches its declared shape perfectly. When the commit should not
-exist, its wording is not the defect, and naming the format would send you
-to fix a commit whose fix is deletion.
+The `limits:` block is guarded: a commit that changes it and is not ape's own
+makes `ape change start`, `verify` and `archive` refuse until a person accepts
+it with `ape project accept-config`, so a session cannot loosen its own
+limits. See [`_apex/config.yaml`](../reference/config-yaml.md).
 
-A violation exits **6** and prints each finding on stderr:
+## Sessions inside sessions
 
-```text
-Error: dispatch.stash_changed: the stash changed across the dispatch
-  (no stash, depth 0 → a1b2c3d4, depth 1) — a stash silently destroys the
-  caller's working tree, which is why the operating rules forbid it outright
+A session that ape started may start another only when it is ape's own
+`apex-loop` run, only a skill on the loop's allow-list, and only one child at
+a time. Anything else is refused with exit 2 (`session.depth`,
+`session.not-allowed`), or exit 3 when the loop already has a child running
+(`session.child-running`) or the project already has a loop run
+(`session.orchestrator-running`). There is no switch to turn the rule off. See
+[When ape runs inside a session ape started](../explanation/nested-ape-runs.md).
+
+## The loop relay
+
+A loop session's context grows with its milestone, so ape relays it. When the
+loop launches its next child with its context fill at or over
+`limits.context_relay`, the launch is refused (exit 2, code `session.relay`):
+the loop starts nothing, replies and ends, and the `ape task` process running
+it starts a fresh loop session with the same args, under the same lock.
+
+```yaml
+limits:
+  context_relay: 0.6   # 0 < x <= 0.95; default 0.6
+  relays: 5            # relays per loop run; default 5
 ```
 
-In a directory that is not a git repository the assertion cannot run. It
-reports that as **skipped**, never as a pass: "we could not look" and "we
-looked and it was clean" are different answers. The same applies when
-HEAD advanced but the commit subjects could not be read — a failed read
-is not evidence of a suppressed commit.
+The fill is the newest turn of the loop session's transcript (input, cache
+read and cache creation tokens) over its model's context window; an unknown
+window means no relay. The relayed session's manifest records `relay_of` and
+`relay`, and the JSON envelope carries `relays` and `relay_of`. Past
+`limits.relays` the launch is refused with `limits.relays` (exit 1) and the
+run stops with termination `relays`. `ape status --json` shows a live loop's
+fill and relays under `sessions[].relay`. Both keys are guarded, like every
+limit.
 
-Every verdict, including a skip, is also written to the run's
-`manifest.yaml` as `commit_contract`. The JSON envelope is ephemeral; a
-consumer that parses it, sees failure and discards stdout would otherwise
-leave nothing on disk saying why.
+## Usage limits and the notifier
 
-**Assert the verdict's shape, never the exit status.** A dispatch that
-asserted and held, and one that asserted nothing, are BOTH exit 0 — the
-skip is not a failure and must not fail a run. The two are told apart by
-the payload:
+When a claude.ai plan's usage limit stops the session, Claude Code draws its
+limit line and no hook fires again. ape reads the pane every 15 seconds; the
+same line on two reads with no hook between them ends the run (exit 14) with
+termination kind `usage_limit`, `resets` as printed and `resets_at` parsed.
+Run again after the reset.
 
-```json
-"commit_contract": {"skill":"apex-help","declared":false}
-"commit_contract": {"skill":"apex-help","declared":false,"skipped":true,
-                    "skip_reason":"--task-commit: ape makes this dispatch's commit itself, …"}
-```
+In an APEX v1 project, an optional `notify:` command in `_apex/config.yaml`
+runs (`sh -c`, 10-second timeout, output dropped) when a run stops on a limit,
+with `APE_EVENT`, `APE_CHANGE` and `APE_REASON` in its environment.
 
-The first is a **held** assertion. The second asserted nothing. A missing
-`skipped` key is the held verdict rather than an absent one — `omitempty`
-drops a false bool by design — so a check written against `$?` cannot
-tell them apart, and neither can one that only looks for the key's
-presence.
+## Commit control
 
-> **Reading a failing run:** `totals.commits_made` counts **ape's own**
-> boundary commits (`--task-commit`, per-step commits), never the ones the
-> dispatched skill made itself. A `commits_made: 0` on a run whose skill
-> committed six times is correct and expected — check `commit_contract`
-> and `git log`, not that field.
+APEX v1 skills commit their own work. Two flags change that:
+
+- `--no-commit` (skill layer) types `--no-commit` into the invocation, telling
+  the skill not to commit. Without it none is typed.
+- `--task-commit ["<msg>"]` (task layer, off by default): ape commits the
+  whole working tree at the end of the run. A bare flag derives the message
+  `ape:task/<skill>`. The dirty-tree gate applies only with this flag; bypass
+  it with `--commit-allow-dirty`.
+
+A run's commits are the range its HEAD moved over. A commit made while
+another ape session's run in the same checkout was going (other than this
+run's parent loop or its own children) cannot be attributed, so neither run
+claims it: both list it under `commits_shared`.
+
+### The commit-ownership assertion
+
+When a project declares commit ownership in `_apex/commit-owners.csv`, ape
+asserts every dispatch against it, writes the verdict to the manifest as
+`commit_contract`, and exits 6 on a violation. No APEX v1 release ships that
+file, so a v1 project is not asserted unless it adds one. A project with no
+file is reported as skipped, never as a pass.
+
+APEX v0 projects run the v0 ape their `.bingo` pins; its docs are at
+https://github.com/exoport/apex_process_ape/tree/v0.10.0/docs.
+
+## Prompt flags
+
+`--prompt`, `--prompt-file` and `--handoff` forward text through a skill flag
+named by `--prompt-flag`. Without `--prompt-flag` ape refuses (exit 2) rather
+than start the skill without the text. No APEX v1 skill takes one. To resume
+a handoff, paste its continuation line after `/clear`.
+
+`--prompt-file <path>` reads the text from a file, and `-` reads stdin, so
+text a person wrote never goes through the shell's argv. The text must be one
+line, with no control characters and no trailing backslash.
 
 ## Machine-readable result
 
 ```bash
-ape task apex-create-prd --agent apex-agent-pm --output-format json
+ape task apex-plan --args "<request>" --output-format json
 ```
 
-Progress streams to stderr; stdout carries only the result envelope:
+Progress streams to stderr. Stdout carries only the result envelope:
 
 ```json
 {
-  "skill": "apex-create-prd",
-  "agent": "apex-agent-pm",
+  "skill": "apex-plan",
   "model": "claude-opus-5",
   "success": true,
   "exit_code": 0,
@@ -215,46 +240,43 @@ Progress streams to stderr; stdout carries only the result envelope:
     "cache_creation_1h_input_tokens": 134753,
     "num_turns": 26
   },
-  "commits": ["SKILL:create-prd"],
-  "manifest_path": "_output/ape/tasks/apex-create-prd/20260702-120000-abc1234/manifest.yaml",
-  "commit_contract": {
-    "skill": "apex-create-prd",
-    "declared": false
-  },
+  "commits": ["<sha>"],
+  "manifest_path": "_apex/state/runs/tasks/apex-plan/20261021-120000-abc1234/manifest.yaml",
   "error": null
 }
 ```
 
-`commits` lists every commit made during the run (framework commits
-included), oldest first.
-
-`commit_contract` is the per-dispatch commit-ownership verdict described
-above. It is always present, including when the assertion passed and when
-it had to be skipped — a consumer must be able to tell "asserted and
-clean" from "could not assert", and a field that appears only on failure
-cannot. `declared` says which of the two assertions ran; `violations` and
-`skipped` / `skip_reason` appear only when they apply. Cost and usage come from the session
-transcript scan — the same telemetry pipeline steps record.
-`cache_creation_input_tokens` is the total ephemeral cache-write count;
-`cache_creation_5m_input_tokens` and `cache_creation_1h_input_tokens`
-break it into the two tiers (added in v0.0.37, additive — the total is
-their sum). The same split appears on each `model_usage` entry.
+`commits` lists every commit made during the run, the skill's own included,
+oldest first. `cache_creation_input_tokens` is the total cache-write count,
+and the 5m and 1h fields split it by tier. Other fields appear when they
+apply: `model_usage`, `sessions`, `commits_shared`, `commit_contract`,
+`relays`, `relay_of`.
 
 ## Artifacts
 
-Each run writes `manifest.yaml`, per-step ndjson, and runlog streams
-under `_output/ape/tasks/<skill>/<run-id>/` (a `latest` symlink tracks the
-newest run). Task runs appear in `ape costs` under `task:<skill>` after
-`ape costs roll`.
+In an APEX v1 project each run writes its manifest, per-step event stream and
+runlog streams under `_apex/state/runs/tasks/<skill>/<run-id>/`, a directory
+git ignores, with a `latest` symlink to the newest run. Elsewhere the same
+tree is under `{output_folder}/ape/tasks/`. Override the base with
+`--manifest-dir`. See [Run artefacts](run-artefacts.md).
+
+Task runs appear in `ape costs` under `task:<skill>` after `ape costs roll`;
+`ape costs run <run-id>` shows one.
 
 ## Exit codes
 
-| Code | Meaning                                                                  |
-| ---- | ------------------------------------------------------------------------ |
-| 0    | Success.                                                                 |
-| 1    | Skill ran but failed, Stop-wait error, or a backstop fired — the progress-aware idle window (`--idle-timeout`, default 60m) or a wall-clock ceiling a person set (`--max-duration`, off by default). |
-| 2    | Usage or preflight error (unknown skill/agent, bad flags).               |
-| 3    | REPL never became ready — trust-dialog dismissal failed, an unknown modal blocked, or the claude startup check found a claude ape cannot drive. The last pane snapshot is on stderr, and the raw terminal bytes are saved beside the run (`pty-tail-<stage>.bin`) or in the user cache for the startup check — see [run artefacts](run-artefacts.md). |
-| 5    | The session's own turn failed against the API and nothing followed — a `529`/`522`/… carried verbatim. Upstream and retryable: the skill did not misbehave, so a caller that knows its budget can decide to re-run. Reported ~3.5 min in, rather than waiting out `--idle-timeout`. |
-| 6    | The dispatch violated the project's declared commit ownership. Distinct from 1 because the skill's own work may have **succeeded**: the run finished and the repository is not in the state `_apex/commit-owners.csv` declared it would be. Only reported when nothing worse happened — a skill that crashed *and* left a stash is reported as the crash. |
-| 14   | A claude.ai plan's usage limit stopped the session: ape read Claude Code's limit line in the pane and ended the run (termination `usage_limit`, with `resets` / `resets_at`). Nothing failed; re-run after the reset. In an APEX v1 project the optional `notify:` command in `_apex/config.yaml` runs with `APE_EVENT=stop`. |
+| Code | Meaning |
+| ---- | ------- |
+| 0 | Success. |
+| 1 | The run failed: the skill failed, the idle window (`--idle-timeout`, default 60m) or a ceiling a person set (`--max-duration`) fired, or the typed line never submitted. Also a v1 refusal or stop: `ape.below-floor`, `milestone.budget-exceeded`, `milestone.blocks-exceeded`, `limits.relays`. |
+| 2 | Usage or preflight error: an unknown skill, bad flags, an unparseable v1 config, an APEX v0 project, `skill.renamed`, or the nesting rule (`session.depth`, `session.not-allowed`, `session.relay`). |
+| 3 | The REPL never became ready (the last pane is on stderr, and the raw bytes are saved beside the run), or a session lock another run holds (`session.child-running`, `session.orchestrator-running`). |
+| 5 | The session's own turn failed against the API and nothing followed. Upstream and retryable. |
+| 6 | The dispatch violated a declared commit ownership. The run itself may have succeeded. |
+| 14 | A claude.ai usage limit stopped the session. Run again after the reset. |
+
+## Related
+
+- [How to tune long-running steps](tune-long-running-steps.md)
+- [Choosing between `ape chat`, `ape task`, and `ape prompt`](../explanation/chat-task-prompt.md)
+- [CLI reference](../reference/cli.md#ape-task)

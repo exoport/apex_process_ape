@@ -1,218 +1,179 @@
-# How to read `_output/ape/`
+# How to find and read run artefacts
 
-Every `ape pipeline`, `ape task`, `ape prompt` or `ape chat` invocation drops
-artefacts under the project root. This document describes the layout and what
-each file is for.
+Every `ape task`, `ape prompt` and `ape chat`, and every change or milestone
+verb that runs checks, leaves records in the project. This page shows where
+they are, which of them git tracks, and what each file is for.
 
-PLAN-5 / C6.
+## In an APEX v1 project: `_apex/state/`
 
-## What ape owns
-
-The output folder is **the framework's**. Its path comes from `output_folder`
-in `_apex/config.yaml` — `_output` by default, but a project may point it
-anywhere — and the skills write handoffs, briefs and verify reports there.
-
-ape resolves that variable and owns exactly one subtree of it,
-**`{output_folder}/ape/`**, writing nothing outside it. Shown below at the
-default:
+An APEX v1 project keeps ape's records in `_apex/state/`, a folder only ape
+writes: the edit hook denies it to models, and `ape framework update` never
+touches it. `ape project init` creates it.
 
 ```text
-<project>/_output/                     ← framework-owned
-├── handoffs/                          ← framework
-├── governance/                        ← framework
-├── functionality/                     ← framework
-├── planning/                          ← framework
-├── implementation/                    ← framework
-├── framework-requests/                ← framework
-├── retrospective/                     ← framework
-├── ux-mockups/                        ← framework
-├── ux-wireframes/                     ← framework
-├── defer-*.md, retro-epic-*.md, …     ← framework (loose files, no dir)
-└── ape/                               ← ape owns this, and only this
-    ├── pipelines/<pipeline>/<run-id>/
+<project>/_apex/state/
+├── .gitignore            ← a whitelist: *, !.gitignore, !milestones.json, !decisions.json
+├── milestones.json       ← tracked: approvals, gate records, consecutive blocks
+├── decisions.json        ← tracked: the decision records
+├── project.json          ← ignored: init's record (initialized_at, brownfield, base_sha)
+├── attempts.json         ← ignored: red verifies per change
+├── limit-stops.json      ← ignored: sessions stopped at a limit, per milestone
+├── logs/                 ← ignored: check output (logs/<change-id>/, gate-<M>-approve.log)
+├── hooks/                ← ignored: the Stop hook's per-session verdicts and logs
+├── strays/               ← ignored: copies of files a check left behind and ape undid
+└── runs/                 ← ignored: ape's run records
     ├── tasks/<skill>/<run-id>/
     ├── prompts/<prompt-id>/
     ├── chats/<chat-id>/
+    ├── detached/<id>.json, <id>.log, <id>.out
+    ├── <change-id|M>.json, <change-id|M>.log
+    ├── sessions/
+    ├── relays/
+    ├── delegate/
     ├── service/
     └── cost-rollup.json
 ```
 
-### Two path shapes
+Only `milestones.json` and `decisions.json` are tracked. Everything else is
+ignored by the folder's own whitelist `.gitignore`, so a run never dirties
+the tree, and a file ape adds there later is ignored unless the whitelist
+names it.
 
-Run kinds nest in one of two ways, which is why the paths are not uniform:
+What sits in `runs/`:
 
-| Shape | Kinds | Path |
-| --- | --- | --- |
-| **Grouped** | pipelines, tasks | `<root>/<group>/<run-id>/` — grouped by pipeline name or skill name |
-| **Flat** | prompts, chats | `<root>/<id>/` — the id is unique on its own |
+| Path | What it is |
+| --- | --- |
+| `tasks/<skill>/<run-id>/` | One `ape task` run, with a `latest` symlink beside the run directories. See [Task runs](#task-runs). |
+| `prompts/<prompt-id>/` | One `ape prompt` session. See [Prompt sessions](#prompt-sessions). |
+| `chats/<chat-id>/` | One `ape chat` session. See [Chat sessions](#chat-sessions). |
+| `detached/` | The handle, log and stdout of each `ape task --detach` run. See [How to run ape in the background](detach-a-run.md). |
+| `<change-id\|M>.json`, `.log` | The run lock and log of a change or milestone verb running detached (`ape change verify`, `ape milestone gate`, …). |
+| `sessions/` | The nesting rule's locks: one `apex-loop` run per project, one child at a time. |
+| `relays/` | One record per live loop run, for the loop relay. Removed when the run ends. |
+| `delegate/` | One verdict per human-review delegate run (`ape change accept --delegate`). |
+| `service/` | `ape service`'s job logs. |
+| `cost-rollup.json` | The project cost rollup `ape costs` reads, rebuilt by `ape costs roll`. |
 
-A grouped kind has something worth grouping by: you run the `design` pipeline
-many times, and want its runs together. A prompt or chat has no such natural
-bucket. `service/` is neither — it holds `<job-id>.log` files, not run
-directories.
+Handles, locks, relays and verdicts are not runs: each session they belong to
+writes its own manifest under `tasks/`.
 
-> **A project that renames `output_folder`** gets its ape artifacts under
-> that folder too — `build/artifacts/ape/…` for `output_folder:
-> build/artifacts`. When the config is absent or does not parse (a bare
-> directory, a syntax error), ape falls back to the framework's own default,
-> `_output`.
+### `.gitignore`
 
-> **Moved in v0.0.53.** Pipeline and task runs used to live at
-> `_output/pipelines/` and `_output/tasks/`, as siblings of the framework's
-> own content, and ape ignored `output_folder` entirely. `ape framework
-> setup|update` relocates them into `{output_folder}/ape/` automatically — whole run directories at a time, never
-> overwriting, and reporting any run whose destination is already taken
-> rather than merging it. `ape doctor` reports a project that still needs it
-> (`runs.legacy_layout`), and `ape framework update --dry-run` shows what
-> would move. Until a project is relocated, cost rollups and the
-> hook-contract check read a project with no history — nothing is lost, it
-> is just somewhere ape no longer looks.
-
-## Pipeline runs
-
-```
-<project>/_output/ape/pipelines/<pipeline-name>/
-├── latest -> <run-id>       ← symlink to the most recent run (see below)
-└── <run-id>/
-    ├── manifest.yaml        ← PLAN-3 per-step metrics, cost, commit shas
-    ├── report.md            ← human-readable run report
-    ├── hook-events.jsonl    ← one JSON per Claude Code hook (PLAN-5 / C4)
-    ├── bridge-calls.jsonl   ← one JSON per MCP tool call seen by the bridge
-    ├── checkpoints.jsonl    ← stage events + skill `reply()` + commit-made + contract
-    ├── pty-tail-<stage>.bin ← ONLY when a stage's claude never became ready: its last raw PTY bytes
-    ├── stages/
-    │   └── <NN>-<stage>/
-    │       └── step-<NN>-<skill>.ndjson  ← the per-step event stream
-    └── transcripts/
-        ├── step-01-<skill>.jsonl  ← symlink into ~/.claude/projects/<hash>/<sid>.jsonl
-        ├── step-02-<skill>.jsonl  ← …
-        └── …
-```
-
-- `<run-id>` is `YYYYMMDD-HHMMSS-<7-char hash>` (PLAN-3 shape, unchanged).
-- Collisions **fail loud**. ape refuses to start a run if
-  `<run-id>` already exists. No auto-disambiguate, no overwrite.
-- Transcripts are **symlinks**, not copies. The canonical Claude Code
-  session JSONL stays under `~/.claude/projects/` and ape's run-dir
-  references it. Deleting the source breaks the symlink — that's the
-  trade for not double-storing transcripts.
-- **`latest` sits one level above the run dir**, beside its siblings — not
-  inside one. It is the path to reach for interactively, and the one most
-  docs quote:
-
-  ```bash
-  cat _output/ape/pipelines/design/latest/report.md
-  ```
-
-  Tasks have one too (`tasks/<skill>/latest`). Prompts and chats do not:
-  their roots are flat, so there is no group to hang a pointer off.
-- **`stages/` is where per-step detail lives.** `manifest.yaml` is the
-  summary; `stages/<NN>-<stage>/step-<NN>-<skill>.ndjson` is the event
-  stream that produced it. When a step fails, this is the file to open.
-  Its `step-start` event carries `effort_source` and, when ape knows it at
-  launch, `effort`. With no `--model` under the effort table, claude has not
-  picked its model yet, so `step-start` has no `effort`. `step-end` then adds
-  `model_observed` and that model's `effort`, from the step's own telemetry.
-- **`pty-tail-<stage>.bin` exists only when claude never became ready** — a
-  pre-REPL screen ape could not get past, or a timeout. It holds the last
-  64 KiB of raw terminal output the session produced, escape sequences
-  included: the bytes the pane in the error was drawn from. The pane can be
-  wrong where the bytes cannot — the claude 2.1.269 trust-dialog failure was
-  a pane that showed a dialog "rendered twice" that claude never drew. Keep
-  the file with the bug report; `cat -v` shows the sequences.
+`ape project init` also manages one block of the root `.gitignore`: it keeps
+`.claude/settings.json` and `.claude/skills/` tracked (the team's) and ignores
+the rest of `.claude/` and `CLAUDE.local.md` (personal). See
+`ape project init --help`.
 
 ## Task runs
 
-`ape task <skill>` runs a single framework skill — the single-skill analogue
-of a pipeline run, grouped by skill name rather than pipeline name:
-
 ```text
-<project>/_output/ape/tasks/<skill>/
+_apex/state/runs/tasks/<skill>/
 ├── latest -> <run-id>
 └── <run-id>/
-    ├── manifest.yaml        ← same schema as a pipeline manifest, one step
+    ├── manifest.yaml           ← the run: launch, totals, commits, termination
+    ├── pipeline-report.md      ← the manifest rendered for a person
+    ├── harness.yaml            ← the Claude Code version that produced the run
     ├── hook-events.jsonl
     ├── bridge-calls.jsonl
     ├── checkpoints.jsonl
-    ├── pty-tail-<stage>.bin ← only when claude never became ready (see Pipeline runs)
+    ├── pty-tail-<skill>.bin    ← only when claude never became ready
+    ├── stages/01-<skill>/
+    │   ├── step-01-<skill>.ndjson   ← the event stream
+    │   └── step-01-<skill>.args.md  ← only when the arguments were not typed
     └── transcripts/
 ```
 
-No `stages/`: a task is one step, so there is no stage tree to build. Override
-the base directory with `--manifest-dir`.
+- `<run-id>` is `YYYYMMDD-HHMMSS-<7-char hash>`. ape refuses to start a run
+  whose directory already exists.
+- **`manifest.yaml` is the summary**, and `stages/…/step-01-<skill>.ndjson` is
+  the event stream that produced it. When a run fails, the stream is the file
+  to open. See [the manifest reference](../reference/pipeline-run-manifest.md).
+- **`step-01-<skill>.args.md`** holds the `--args` text when it was too long to
+  type or would not have arrived as written. See
+  [How to run a single skill](run-a-single-skill.md#long-or-multi-line-arguments).
+- **`pty-tail-<skill>.bin` exists only when claude never became ready**: a
+  pre-REPL screen ape could not get past, or a timeout. It holds the last
+  64 KiB of raw terminal output, escape sequences included: the bytes the
+  pane in the error was drawn from. Keep it with the bug report; `cat -v`
+  shows the sequences.
 
-`ape script` writes here too — a script's spawned steps are tasks.
+Override the base directory with `--manifest-dir`. `ape script` writes here
+too: a script's sessions are tasks.
 
-## Prompt runs
-
-`ape prompt` drives an unattended session. Its root is flat — the prompt id is
-unique on its own, so there is nothing to group by:
+## Prompt sessions
 
 ```text
-<project>/_output/ape/prompts/<prompt-id>/
-├── prompt.yaml          ← the session record: status, model, cost, tokens
+_apex/state/runs/prompts/<prompt-id>/
+├── prompt.yaml          ← the session record: status, model, cost, tokens, stop_gate
+├── prompt.md            ← only when the prompt was not typed
+├── harness.yaml
 ├── hook-events.jsonl
 ├── bridge-calls.jsonl
 ├── checkpoints.jsonl
-├── pty-tail.bin         ← only when claude never became ready (see Pipeline runs)
+├── pty-tail.bin         ← only when claude never became ready
 └── transcripts/
 ```
 
 `prompt.yaml` carries the full per-model token breakdown, which is why
 `ape costs reprice` can recompute a prompt's cost after a price-table
-correction. Read one with `ape costs prompt <id>`. Its `effort` and
-`effort_source` say what the session ran at and which rule set it. With no
-`--model` under the effort table, `effort` is the row of the model the main
-session actually ran on, not the table's fallback.
+correction. Read one with `ape costs prompt <prompt-id>`. Its `stop_gate`
+records the stop hook's verdicts; see
+[How to run an unattended session](run-a-prompt-session.md#the-stop-hook-decides-when-the-session-ends).
 
 ## Chat sessions
 
-`ape chat` runs claude as a direct child of ape with stdio inherited
-(claude shares ape's controlling terminal); the bridge is wired for
-hook observability over a separate TCP port. Artefacts:
-
-```
-<project>/_output/ape/chats/<chat-id>/
-├── hook-events.jsonl    ← same schema as pipeline runs
-├── bridge-calls.jsonl   ← same schema (mostly `initialize` calls in chat)
-└── checkpoints.jsonl    ← reserved; chat doesn't write anything here today
-```
-
-- `<chat-id>` is `YYYYMMDDTHHMMSSZ` (UTC ISO-8601-style).
-- No `session.yaml` and no `transcript.jsonl` symlink today — the
-  chat surface is a thin direct-exec with stdio inheritance (PLAN-8
-  PTY migration, 2026-05-22; before that, a tmux spawn-and-attach
-  under PLAN-6, 2026-05-20). claude's own transcript still lives at
-  `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl`.
-- **A chat therefore contributes no cost.** `ape costs chat <id>` and the
-  chat rows of the cost rollup both read `session.yaml`, so with nothing
-  writing it they find nothing. Use `ape costs` for the project total from
-  pipeline and task manifests, which are written.
-
-## Service job logs
-
-`ape service` runs a NATS job daemon. Unlike every other kind, this root holds
-plain files rather than run directories — one log per accepted job:
+`ape chat` runs claude as a direct child of ape with stdio inherited; the
+bridge is wired for hook observability.
 
 ```text
-<project>/_output/ape/service/
-└── <job-id>.log
+_apex/state/runs/chats/<chat-id>/
+├── harness.yaml
+├── hook-events.jsonl
+├── bridge-calls.jsonl
+└── checkpoints.jsonl
 ```
 
-The jobs themselves are pipelines or tasks, so their artefacts land under
-`pipelines/` or `tasks/` as usual. This directory is just the daemon's own
-stdout/stderr capture, and it is transient — nothing reads it back.
+- `<chat-id>` is `YYYYMMDDTHHMMSSZ` (UTC).
+- claude's own transcript stays at
+  `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl`; the chat directory
+  holds no copy.
+
+## Outside a v1 project: `{output_folder}/ape/`
+
+In a project without `_apex/state/`, ape writes the same run trees under
+`{output_folder}/ape/`, a subtree of the framework's output folder. The
+folder's path comes from `output_folder` in `_apex/config.yaml`: `_output` by
+default, and `_output` too when the config is absent or does not parse.
+
+```text
+<project>/_output/
+└── ape/
+    ├── tasks/<skill>/<run-id>/
+    ├── prompts/<prompt-id>/
+    ├── chats/<chat-id>/
+    ├── detached/
+    ├── service/
+    └── cost-rollup.json
+```
+
+ape writes nothing in the output folder outside `ape/`, and does not manage
+its `.gitignore`: whether run artefacts are committed is the project's call.
+Ignore `_output/` (or whatever `output_folder` names) as a whole, or just
+`_output/ape/`.
+
+APEX v0 projects run the v0 ape their `.bingo` pins; its docs are at
+https://github.com/exoport/apex_process_ape/tree/v0.10.0/docs.
 
 ## Cross-project state
 
-```
+```text
 ~/.ape/
-├── registry.json        ← live ape sessions across all projects
-└── (other state)
+└── registry.json        ← live ape sessions across all projects
 ```
 
-Run `ape sessions` to list, `ape sessions prune` to drop dead PIDs,
-`ape sessions open <pfx>` to xdg-open the URL of a live session.
+`ape sessions` lists them, `ape sessions prune` drops dead pids. The nesting
+rule reads the same registry; see
+[When ape runs inside a session ape started](../explanation/nested-ape-runs.md).
 
 In the user cache directory (`~/.cache/ape/` on Linux,
 `~/Library/Caches/ape/` on macOS, `%LocalAppData%\ape\` on Windows):
@@ -221,85 +182,33 @@ In the user cache directory (`~/.cache/ape/` on Linux,
 ape/
 ├── version-check.json          ← the background update check
 ├── claude-contract.json        ← claude versions this ape has verified it can drive
-└── claude-probe-<version>.bin  ← ONLY when a claude failed that check: its raw PTY bytes
+└── claude-probe-<version>.bin  ← only when a claude failed that check: its raw PTY bytes
 ```
 
-**The claude startup check.** The first `ape task`, `ape pipeline` or
-`ape prompt` on a Claude Code version this ape has not seen spawns it once in
-a fresh, untrusted scratch directory — through the trust dialog to a ready
-REPL, spending no tokens, a few seconds — and records the pair in
-`claude-contract.json`. A claude that fails stops the run with the reason, the
-screen and the saved bytes (exit 3 from `ape task` and `ape prompt`), because
-every run on it would meet the same screen. One the check cannot judge —
-claude draws nothing before the deadline, as when offline or logged out — is
-reported as a warning and the run continues; nothing is recorded, so it is
-checked again next time. A new ape re-checks too.
-`APE_CLAUDE_PROBE=off` skips the check and says so on every run. Deleting
-`claude-contract.json` forces a re-check.
-
-## Cost rollup
-
-```
-<project>/_output/ape/cost-rollup.json
-```
-
-Aggregates every pipeline run's manifest totals + every chat
-session.yaml totals into per-name / per-day buckets. Read with
-`ape costs`. Rebuilt on every successful `ape pipeline` / `ape chat`
-exit (best-effort — failure prints a warning, does not block exit).
-
-## .gitignore policy
-
-**ape does not manage this.** Whether run artefacts are committed is the
-project's decision, and the output folder is the framework's directory
-rather than ape's, so ape neither adds an entry nor prompts for one.
-
-The framework's own preflight already prescribes ignoring the **whole**
-output folder, so on an APEX project this is normally already done for you:
-
-```gitignore
-_output/          # or whatever output_folder names
-```
-
-A directory match covers `{output_folder}/ape/` along with the framework's
-own subdirectories. If you want the framework's artefacts tracked but not
-ape's run history, ignore just ape's subtree instead:
-
-```gitignore
-_output/ape/
-```
-
-> The one `.gitignore` entry ape *does* manage is unrelated to this: `ape
-> framework setup|update` adds the tracker lock sidecar
-> (`sprint-status.yaml.lock`), because that file is a side effect of `ape
-> sprint reconcile` taking an advisory lock and is never meaningful to
-> commit.
+**The claude startup check.** The first `ape task` or `ape prompt` on a
+Claude Code version this ape has not seen spawns it once in a fresh, untrusted
+scratch directory, through the trust dialog to a ready REPL, spending no
+tokens, and records the pair in `claude-contract.json`. A claude that fails
+stops the run with the reason, the screen and the saved bytes (exit 3),
+because every run on it would meet the same screen. One the check cannot
+judge (claude draws nothing before the deadline, as when offline or logged
+out) is reported as a warning and the run continues; nothing is recorded, so
+it is checked again next time. A new ape re-checks too. `APE_CLAUDE_PROBE=off`
+skips the check and says so on every run. Deleting `claude-contract.json`
+forces a re-check.
 
 ## File schemas
 
-- `hook-events.jsonl`: one JSON per line —
-  `{"ts","event","step","session_id","agent_id","payload"}`.
-  `step` is `null` for events whose session id has not yet been
-  bound by a `step-bind` IPC frame.
-- `bridge-calls.jsonl`: one JSON per line —
-  `{"ts","method","tool","params","result","session_id","id"}`.
-  Captures every MCP tool call seen by the bridge, including
-  `tools/list`, `ping`, and `initialize`. `await_message` produces
-  two paired lines (deferred-entry + flush) with the same `id`.
-- `checkpoints.jsonl`: one JSON per line —
-  `{"ts","kind","step","payload"}`. Kinds:
-  `stage-start | stage-end | commit-made | contract | pipeline-end | reply | stopped | chat-start | chat-end`.
-
-  A `contract` row (ape v0.0.60+) carries `{"skill","status","diagnostic"}`
-  — the terminal-contract verdict for the step named in `step`. The same
-  verdict is on the step's manifest record; the row is where the human-
-  readable diagnostic lives. It is written only for a skill the framework
-  enrolled in `_apex/terminal-contracts.csv`. See
-  [the manifest reference](../reference/pipeline-run-manifest.md#reading-the-contract-field)
-  for what the verdict does and does not mean.
+- `hook-events.jsonl`: one JSON per line,
+  `{"ts","event","step","session_id","agent_id","payload"}`. `step` is `null`
+  for events whose session id has not yet been bound to a step.
+- `bridge-calls.jsonl`: one JSON per line,
+  `{"ts","method","tool","params","result","session_id","id"}`. Every MCP
+  tool call the bridge sees, including `tools/list`, `ping` and `initialize`.
+- `checkpoints.jsonl`: one JSON per line, `{"ts","kind","step","payload"}`.
 
 ## Reading further
 
-- `docs/reference/pipeline-run-manifest.md` — PLAN-3 manifest details.
-- `docs/reference/bridge-ipc.md` — IPC wire that feeds the JSONLs.
-- `docs/reference/bridge-security.md` — bind / auth model.
+- [Run manifest reference](../reference/pipeline-run-manifest.md)
+- [Bridge IPC](../reference/bridge-ipc.md): the wire that feeds the JSONL files.
+- [Bridge security](../reference/bridge-security.md): bind and auth model.
