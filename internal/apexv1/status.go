@@ -20,6 +20,9 @@ type MilestoneStatus struct {
 	Gate       string   `json:"gate"`
 	Budget     *float64 `json:"budget,omitempty"`
 	GateLast   *GateRun `json:"gate_last,omitempty"`
+	// ApprovalSelfCheck is the gate's run at its approval (D70 B), shown
+	// while no gate run of the milestone's own has happened since.
+	ApprovalSelfCheck *GateSummary `json:"approval_self_check,omitempty"`
 	// BaseSHA is the milestone's start (D130 Q60): HEAD at its first
 	// approval, what $APE_MILESTONE_BASE holds in a gate ape runs; absent
 	// before it is approved.
@@ -272,6 +275,10 @@ type MilestoneLine struct {
 	// its exit, when and its log — the record a skill reads instead of
 	// ape's state files. Absent before the gate ever ran.
 	LastGate *GateSummary `json:"last_gate,omitempty"`
+	// ApprovalSelfCheck is the gate's run at its approval (D70 B), red as
+	// approval requires: what a just-approved milestone's gate last did
+	// before any gate run of its own. Absent before approval.
+	ApprovalSelfCheck *GateSummary `json:"approval_self_check,omitempty"`
 }
 
 // GateSummary is a gate run in short (LastGateRun).
@@ -393,6 +400,7 @@ func (p *Project) Status() *StatusReport {
 			if run := p.LastGateRun(line.ID); run != nil {
 				line.LastGate = &GateSummary{SHA: run.SHA, Exit: run.Exit, At: run.At, Log: run.Log}
 			}
+			line.ApprovalSelfCheck = approvalSelfCheck(recs[line.ID])
 			r.Milestones = append(r.Milestones, line)
 		}
 		if m := rm.Current(); m != nil {
@@ -400,6 +408,7 @@ func (p *Project) Status() *StatusReport {
 			if rec := recs[m.ID]; rec != nil {
 				r.Milestone.BaseSHA = rec.Approval.Base()
 			}
+			r.Milestone.ApprovalSelfCheck = approvalSelfCheck(recs[m.ID])
 		}
 	}
 
@@ -933,6 +942,12 @@ func (r *StatusReport) preExistingRedLine() string {
 func (m *MilestoneStatus) briefLines() []string {
 	gate := "  gate `" + m.Gate + "`"
 	switch {
+	case m.GateLast == nil && m.ApprovalSelfCheck != nil:
+		// The rehearsals (2026-10-20): "not run yet" right after approve,
+		// whose self-check had just run it.
+		sc := m.ApprovalSelfCheck
+		gate += fmt.Sprintf(" — not run since approval; the approval's self-check was red (exit %d, as required) at %s (%s), log %s",
+			sc.Exit, sc.At, short(sc.SHA), sc.Log)
 	case m.GateLast == nil:
 		gate += " — not run yet"
 	case m.GateLast.Green():
@@ -987,4 +1002,15 @@ func baseName(p string) string {
 		return p[i+1:]
 	}
 	return p
+}
+
+// approvalSelfCheck is a milestone's approval self-check (D70 B) as a
+// gate summary, nil when it has none (not approved, or approved before
+// rc.3 recorded it).
+func approvalSelfCheck(rec *MilestoneRecord) *GateSummary {
+	if rec == nil || rec.Approval == nil || rec.Approval.SelfCheck == nil {
+		return nil
+	}
+	sc := rec.Approval.SelfCheck
+	return &GateSummary{SHA: sc.SHA, Exit: sc.Exit, At: sc.At, Log: sc.Log}
 }
