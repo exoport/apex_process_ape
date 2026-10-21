@@ -7244,8 +7244,12 @@ one line, no control characters, no trailing backslash.
 --handoff <file> is a shorthand for --prompt: it checks the file
 exists and derives the prompt "Read <abs-path> and follow the Resume
 Protocol inside it." (the same continuation prompt the /handoff skill
-suggests). It still requires --prompt-flag to actually reach the
-skill, and is mutually exclusive with --prompt.
+suggests), and is mutually exclusive with --prompt.
+
+--prompt, --prompt-file and --handoff each need --prompt-flag, the skill
+flag the text is typed after: without it ape refuses (exit 2) instead of
+starting the skill without the text. No APEX skill takes one: resume a
+handoff by pasting its continuation line after /clear.
 
 A line longer than 700 characters is not typed. Claude Code turns a
 typed burst past 800 characters into a "[Pasted text #N]" placeholder

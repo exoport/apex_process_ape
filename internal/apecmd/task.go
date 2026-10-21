@@ -163,8 +163,12 @@ one line, no control characters, no trailing backslash.
 --handoff <file> is a shorthand for --prompt: it checks the file
 exists and derives the prompt "Read <abs-path> and follow the Resume
 Protocol inside it." (the same continuation prompt the /handoff skill
-suggests). It still requires --prompt-flag to actually reach the
-skill, and is mutually exclusive with --prompt.
+suggests), and is mutually exclusive with --prompt.
+
+--prompt, --prompt-file and --handoff each need --prompt-flag, the skill
+flag the text is typed after: without it ape refuses (exit 2) instead of
+starting the skill without the text. No APEX skill takes one: resume a
+handoff by pasting its continuation line after /clear.
 
 A line longer than 700 characters is not typed. Claude Code turns a
 typed burst past 800 characters into a "[Pasted text #N]" placeholder
@@ -337,6 +341,11 @@ func newTaskCmd() *cobra.Command {
 					return fmt.Errorf("cannot determine working directory: %w", err)
 				}
 				projectRoot = wd
+			}
+			// DR-11 (D277): a prompt with nowhere to go is a usage error,
+			// before anything is read or started.
+			if err := checkPromptFlag(cmd.Flags().Changed, promptFlagName); err != nil {
+				return usageErr(err)
 			}
 			// Q95: apex-orchestrator is the operator's now, never a task;
 			// said with the run's own args, before the nesting rule.
@@ -1193,4 +1202,22 @@ func gitHeadFull(ctx context.Context, projectRoot string) string {
 		return ""
 	}
 	return strings.TrimSpace(stdout.String())
+}
+
+// checkPromptFlag is DR-11 (D277): --prompt, --prompt-file and --handoff
+// reach the skill only through --prompt-flag, and without it ape used to
+// start the skill and drop the text without a word — a person resuming a
+// handoff that way got a session that never read it. changed reports
+// whether a flag was given.
+func checkPromptFlag(changed func(string) bool, promptFlagName string) error {
+	if promptFlagName != "" {
+		return nil
+	}
+	for _, f := range []string{"prompt", "prompt-file", "handoff"} {
+		if changed(f) {
+			return fmt.Errorf("--%s needs --prompt-flag <the skill's flag>: without it the text is dropped "+
+				"(no APEX skill takes one — resume a handoff by pasting its continuation line after /clear)", f)
+		}
+	}
+	return nil
 }

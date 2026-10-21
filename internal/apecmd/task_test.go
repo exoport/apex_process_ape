@@ -355,3 +355,16 @@ func TestOrchestratorResumeHint(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, taskExitCode(idle), taskExitCode(err))
 }
+
+// DR-11 (D277): each prompt flag without --prompt-flag is a usage error
+// naming the flag and the fix; with it, or with none of them, it passes.
+func TestCheckPromptFlag(t *testing.T) {
+	for _, f := range []string{"prompt", "prompt-file", "handoff"} {
+		err := checkPromptFlag(func(n string) bool { return n == f }, "")
+		require.Error(t, err, f)
+		require.Contains(t, err.Error(), "--"+f+" needs --prompt-flag <the skill's flag>")
+		require.Contains(t, err.Error(), "pasting its continuation line after /clear")
+		require.NoError(t, checkPromptFlag(func(n string) bool { return n == f }, "--prompt"), f)
+	}
+	require.NoError(t, checkPromptFlag(func(string) bool { return false }, ""))
+}
