@@ -96,9 +96,13 @@ const v1MigrationFloor = "1.0.0"
 
 // v1Install reports whether the framework the plan is for is APEX v1: the
 // incoming release when repo is set, else the project's installed copy.
+// With a repo set it also asks the project (RG-3b, D277): an apex-v1
+// project never takes an apex-v0 release (RG-3), so `--plan` against one
+// — the default repo whose newest final is still v0.31.0 — must not list
+// that release's v0 migrations as runnable on it.
 func v1Install(projectRoot, repo string) bool {
 	if repo != "" {
-		return framework.IsV1Release(repo)
+		return framework.IsV1Release(repo) || apexV1Project(projectRoot)
 	}
 	return framework.IsV1Release(projectRoot)
 }
@@ -262,9 +266,12 @@ func emitApplyResult(w io.Writer, res *migration.ApplyResult) {
 }
 
 // emitMigrationPlan is `--plan`: it prints and does nothing. repo, when
-// set, is where incoming entries were read from, and adds a SOURCE column
-// saying which rows the update brings.
-func emitMigrationPlan(w io.Writer, plan *migration.Plan, repo string) {
+// set, names where incoming entries come from and adds a SOURCE column
+// saying which rows the update brings; src is the directory they were read
+// from — the release's export, or the repo itself for a worktree — which
+// is what a row's path is under (RG-3b: compared with the clone path, a
+// tag's every row said `installed`).
+func emitMigrationPlan(w io.Writer, plan *migration.Plan, repo, src string) {
 	if !plan.Present {
 		fmt.Fprintln(w, "migrations: no _apex/migrations/ folder — this framework ships no migration list")
 		return
@@ -288,7 +295,7 @@ func emitMigrationPlan(w io.Writer, plan *migration.Plan, repo string) {
 		r := &plan.Rows[i]
 		source := ""
 		if repo != "" {
-			source = migrationSource(r, repo, plan.Dir) + "\t"
+			source = migrationSource(r, src, plan.Dir) + "\t"
 		}
 		fmt.Fprintf(tw, "%s\t%s%s\t%s\t%s\t%t\t%s\n",
 			r.Label(), source, migrationKind(r), r.State, r.Check, r.Blocking, migrationAction(r))

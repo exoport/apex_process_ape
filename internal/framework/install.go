@@ -1518,6 +1518,10 @@ type StatusOptions struct {
 	// before ape v0.4.0. Otherwise the comparison is against the newest
 	// release tag, which is what `update` would install.
 	FromWorktree bool
+	// Version, when set, is the tag compared against instead of the newest
+	// release — a candidate included — as `update --version` would install
+	// it (RH-1: `update --dry-run --version` used to ignore it).
+	Version string
 }
 
 // StatusResult is the payload `ape framework status` returns.
@@ -1567,7 +1571,7 @@ func Status(ctx context.Context, opts StatusOptions) (*StatusResult, error) {
 	if opts.FromWorktree {
 		return worktreeStatus(ctx, opts, meta, res)
 	}
-	rel, err := ResolveRelease(ctx, opts.FrameworkRepo, ReleaseSelector{Fetch: !opts.NoFetch})
+	rel, err := ResolveRelease(ctx, opts.FrameworkRepo, ReleaseSelector{Version: opts.Version, Fetch: !opts.NoFetch})
 	if err != nil {
 		return nil, err
 	}
@@ -1580,12 +1584,18 @@ func Status(ctx context.Context, opts StatusOptions) (*StatusResult, error) {
 	if rel.FetchWarning != "" {
 		drift.Notes = append(drift.Notes, rel.FetchWarning)
 	}
-	if InstalledIsAhead(meta.Framework.VersionTag, rel.Tag) {
+	if opts.Version != "" {
+		// A tag named by --version is installed as named: no keep rule.
+		if drift.TagDrift {
+			drift.Notes = append(drift.Notes, fmt.Sprintf("installed %s, %s named by --version — run \"ape framework update --version %s\"",
+				defaultTag(meta.Framework.VersionTag), rel.Tag, rel.Tag))
+		}
+	} else if InstalledIsAhead(meta.Framework.VersionTag, rel.Tag) {
 		drift.TagDrift, drift.Ahead = false, true
 		drift.Notes = append(drift.Notes, fmt.Sprintf("installed %s is newer than the newest release %s (a candidate, "+
 			"installed by name); \"ape framework update\" keeps it — pass --version to change it", meta.Framework.VersionTag, rel.Tag))
 	}
-	if drift.TagDrift {
+	if drift.TagDrift && opts.Version == "" {
 		drift.Notes = append(drift.Notes, fmt.Sprintf("installed %s, newest release %s — run \"ape framework update\"",
 			defaultTag(meta.Framework.VersionTag), rel.Tag))
 	}

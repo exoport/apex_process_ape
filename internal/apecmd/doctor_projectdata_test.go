@@ -374,10 +374,26 @@ func TestEmitFrameworkDryRun_ReportsPendingMigrations(t *testing.T) {
 	// No framework repo configured: the framework half is reported as
 	// uncomparable and stepped over, because the migration half is often
 	// the reason someone ran --dry-run at all.
-	require.NoError(t, emitFrameworkDryRun(context.Background(), &buf, "", root, false, true))
+	require.NoError(t, emitFrameworkDryRun(context.Background(), &buf, "", root, "", false, true))
 	out := buf.String()
 	require.Contains(t, out, "framework: cannot compare")
 	require.Contains(t, out, "migration deferred: PENDING")
+	require.Contains(t, out, "nothing written, nothing committed")
+}
+
+// RH-1 (D277): an apex-v1 install has no apex-v0 project-data migration
+// (deferred records, the run layout), so --dry-run lists none — the same
+// legacy ledger on an apex-v1 layout prints neither line.
+func TestEmitFrameworkDryRun_NoApexV0LinesOnAnApexV1Install(t *testing.T) {
+	root := projectFor(t, realProjectConfig)
+	writeLegacyLedger(t, root)
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "_apex", "state"), 0o755))
+	require.True(t, apexV1Project(root), "premise: the apex-v1 layout")
+	var buf bytes.Buffer
+	require.NoError(t, emitFrameworkDryRun(context.Background(), &buf, "", root, "", false, true))
+	out := buf.String()
+	require.NotContains(t, out, "migration deferred")
+	require.NotContains(t, out, "run layout")
 	require.Contains(t, out, "nothing written, nothing committed")
 }
 

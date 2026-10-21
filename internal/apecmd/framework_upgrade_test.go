@@ -64,7 +64,7 @@ func TestMigrationPlan_AbsentFolderIsNormal(t *testing.T) {
 	require.False(t, p.Present)
 
 	var b strings.Builder
-	emitMigrationPlan(&b, p, "")
+	emitMigrationPlan(&b, p, "", "")
 	require.Contains(t, b.String(), "ships no migration list")
 }
 
@@ -79,7 +79,7 @@ func TestMigrationPlan_DerivableAndJudged(t *testing.T) {
 	require.Len(t, p.Rows, 2)
 
 	var b strings.Builder
-	emitMigrationPlan(&b, p, "")
+	emitMigrationPlan(&b, p, "", "")
 	out := b.String()
 	require.Contains(t, out, "run: true", "the derivable entry names the command ape would run")
 	require.Contains(t, out, "dispatch apex-upgrade-project",
@@ -368,7 +368,7 @@ func TestMigrationPlan_PreviewsIncomingEntries(t *testing.T) {
 	require.Len(t, p.Rows, 2, "one entry per file name: the incoming copy replaces the installed one")
 
 	var b strings.Builder
-	emitMigrationPlan(&b, p, repo)
+	emitMigrationPlan(&b, p, repo, repo)
 	out := b.String()
 	require.Contains(t, out, "SOURCE")
 	require.Contains(t, out, "incoming (new)", "the entry the update brings is visible before it runs")

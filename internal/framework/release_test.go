@@ -251,3 +251,23 @@ func TestRelease_ExportsTheReleasesOwnBytes(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "line one\nline two\n", installedFoo(t, proj))
 }
+
+// RH-1 (D277): `update --dry-run --version <tag>` compared against the
+// newest final release whatever the tag named. With Version set, Status
+// compares against that tag — a candidate included — and says how to
+// install it; with none, it compares against the newest final as before.
+func TestStatus_ComparesAgainstTheNamedVersion(t *testing.T) {
+	fw := releaseRepo(t, "v1.0.0", "v1.1.0-rc.1", "v1.1.0-rc.2")
+	_, proj, err := setupRelease(t, fw, framework.ReleaseSelector{Version: "v1.1.0-rc.1"})
+	require.NoError(t, err)
+	st, err := framework.Status(context.Background(), framework.StatusOptions{ProjectRoot: proj, FrameworkRepo: fw, NoFetch: true, Version: "v1.1.0-rc.2"})
+	require.NoError(t, err)
+	require.Equal(t, "v1.1.0-rc.2", st.Current.VersionTag, "the named candidate, not the newest final")
+	require.True(t, st.Drift.TagDrift)
+	require.False(t, st.Drift.Ahead, "a named tag has no keep rule")
+	require.Contains(t, strings.Join(st.Drift.Notes, "\n"), `installed v1.1.0-rc.1, v1.1.0-rc.2 named by --version — run "ape framework update --version v1.1.0-rc.2"`)
+	st, err = framework.Status(context.Background(), framework.StatusOptions{ProjectRoot: proj, FrameworkRepo: fw, NoFetch: true})
+	require.NoError(t, err)
+	require.Equal(t, "v1.0.0", st.Current.VersionTag, "without --version: the newest final, as before")
+	require.True(t, st.Drift.Ahead)
+}

@@ -382,7 +382,10 @@ put right is a warning with the command to run, not a failed update.
                 cannot-tell rather than collapsing them, because a runner
                 that reads cannot-tell as pending re-applies things
   --dry-run     show the framework drift AND the pending migrations,
-                writing nothing
+                writing nothing. The drift is against the release the update
+                would install: --version's tag when given (a candidate too),
+                else the newest final release. An apex-v1 install has no
+                apex-v0 project-data migration, so none is listed
   --no-migrate  install framework files only; migrations stay pending, and
                 'ape doctor' reports them so the state is visible
   --repair      also run the judgment phase over free-form deferred
@@ -439,10 +442,10 @@ and unrelated work-in-progress elsewhere does not block anything.`,
 				}
 			}
 			if plan {
-				return runFrameworkUpdatePlan(cmd, repo, projectRoot, sel, noCheck)
+				return runFrameworkUpdatePlan(cmd, repo, projectRoot, sel, noCheck, rf.version != "")
 			}
 			if dryRun {
-				return emitFrameworkDryRun(cmd.Context(), cmd.OutOrStdout(), repo, projectRoot, rf.fromWorktree, noFetch)
+				return emitFrameworkDryRun(cmd.Context(), cmd.OutOrStdout(), repo, projectRoot, rf.version, rf.fromWorktree, noFetch)
 			}
 			format := output.Format(outputFormat)
 			var untracked map[string]bool
@@ -663,8 +666,14 @@ func governanceLabel(g *framework.GovernanceInfo) string {
 
 // runFrameworkUpdatePlan is `update --plan`: the upgrade-migration plan the
 // project will hold after this update, and nothing else.
-func runFrameworkUpdatePlan(cmd *cobra.Command, repo, projectRoot string, sel *framework.ReleaseSelector, noCheck bool) error {
-	src, _, cleanup, err := readableSource(cmd.Context(), repo, sel)
+//
+// RG-3b (D277): like the install (prepareInstall, RG-3), an apex-v1
+// project never takes an apex-v0 release. A --version naming one is
+// refused (exit 1); the newest final being one (the default repo before
+// the first apex-v1 final) keeps the installed framework, so the plan is
+// the installed list alone.
+func runFrameworkUpdatePlan(cmd *cobra.Command, repo, projectRoot string, sel *framework.ReleaseSelector, noCheck, named bool) error {
+	src, tag, cleanup, err := readableSource(cmd.Context(), repo, sel)
 	if err != nil {
 		return handleUpdateError(err)
 	}
@@ -676,11 +685,29 @@ func runFrameworkUpdatePlan(cmd *cobra.Command, repo, projectRoot string, sel *f
 	if notice != "" {
 		fmt.Fprintf(cmd.OutOrStdout(), "migrations: %s\n", notice)
 	}
+	if apexV1Project(projectRoot) && !framework.IsV1Release(src) {
+		label := tag
+		if label == "" {
+			label = "the framework's working tree"
+		}
+		if named {
+			return usageErrExit(ExitRunFailed, fmt.Errorf("%s is an apex-v0 release and this is an apex-v1 project: "+
+				"an apex-v1 project never goes back to apex-v0, so there is nothing to plan — pass --version <an apex-v1 release>", label))
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "framework: %s is an apex-v0 release; an apex-v1 project never goes back to apex-v0, "+
+			"so `ape framework update` keeps what is installed. The plan below is the installed list; pass --version <the apex-v1 release> to plan an update.\n", label)
+		p, err := loadMigrationPlan(cmd.Context(), projectRoot, runner, !noCheck)
+		if err != nil {
+			return err
+		}
+		emitMigrationPlan(cmd.OutOrStdout(), p, "", "")
+		return nil
+	}
 	p, err := loadIncomingMigrationPlan(cmd.Context(), projectRoot, src, runner, !noCheck)
 	if err != nil {
 		return err
 	}
-	emitMigrationPlan(cmd.OutOrStdout(), p, repo)
+	emitMigrationPlan(cmd.OutOrStdout(), p, repo, src)
 	return nil
 }
 

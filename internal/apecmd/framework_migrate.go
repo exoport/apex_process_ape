@@ -125,17 +125,27 @@ func runProjectMigrations(ctx context.Context, w io.Writer, projectRoot string) 
 // A framework side that cannot be read (no metadata, no repo configured)
 // is reported and stepped over rather than fatal: the migration half is
 // often the reason someone ran --dry-run, and it is knowable either way.
-func emitFrameworkDryRun(ctx context.Context, w io.Writer, repo, projectRoot string, fromWorktree, noFetch bool) error {
+// emitFrameworkDryRun is `update --dry-run`: the install compared with the
+// release the update would take — the one --version names (version), else
+// the newest final (RH-1) — then the project-data migrations an apex-v0
+// install still has pending. An apex-v1 install has none of those (RH-1):
+// it gets no deferred or run-layout lines.
+func emitFrameworkDryRun(ctx context.Context, w io.Writer, repo, projectRoot, version string, fromWorktree, noFetch bool) error {
 	res, err := framework.Status(ctx, framework.StatusOptions{
 		ProjectRoot:   projectRoot,
 		FrameworkRepo: repo,
 		FromWorktree:  fromWorktree,
 		NoFetch:       noFetch,
+		Version:       version,
 	})
 	if err != nil {
 		fmt.Fprintf(w, "framework: cannot compare — %v\n", err)
 	} else {
 		emitFrameworkDrift(w, res)
+	}
+	if apexV1Project(projectRoot) {
+		fmt.Fprintln(w, "\n--dry-run: nothing written, nothing committed.")
+		return nil
 	}
 	for _, st := range pendingMigrations(projectRoot) {
 		state := "nothing pending"
