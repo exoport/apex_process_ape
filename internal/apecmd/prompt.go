@@ -108,7 +108,7 @@ Exactly one of the positional <text> or --handoff <file> must be given.
 
   ape prompt "add a CHANGELOG entry for the latest release"
   ape prompt --handoff development/handoffs/2026-07-13-resume.md
-  ape prompt "refactor the parser" --agent apex-agent-dev --workflow
+  ape prompt "refactor the parser" --workflow
   ape prompt "big refactor" --ultracode --model "opus[1m]"
 
 Prompt assembly:
@@ -236,7 +236,7 @@ failed, or the typed line never submitted · 2 usage or preflight error (no _ape
 	cmd.Flags().StringVar(&effortFlag, "effort", "", "Explicit reasoning effort for the session and its sub-agents (low|medium|high|xhigh|max). Unset: the project's _apex/effort-defaults.yaml per model, or xhigh without one (see ape config effort).")
 	cmd.Flags().BoolVar(&workflowFlag, "workflow", false, "Append a directive to run the task through a Claude Code workflow")
 	cmd.Flags().BoolVar(&ultracodeFlag, "ultracode", false, "Prepend the ultracode keyword (session runs workflows by default)")
-	cmd.Flags().DurationVar(&idleTimeoutFlag, "idle-timeout", 0, "Idle backstop: end the session only after this long with no progress across hooks, transcript growth, or PTY output (e.g. 15m); default matches the pipeline (60m)")
+	cmd.Flags().DurationVar(&idleTimeoutFlag, "idle-timeout", 0, "Idle backstop: end the session only after this long with no progress across hooks, transcript growth, or PTY output (e.g. 15m); default 60m")
 	cmd.Flags().DurationVar(&maxDurationFlag, "max-duration", sessiondriver.DefaultMaxDuration, "Wall-clock ceiling regardless of progress (e.g. 8h); off by default (D159: a run showing progress stops only on the idle timeout, ape's limits or a person). The clock resets on each sub-agent boundary, so a sequential batch skill is bounded per item.")
 	cmd.Flags().StringVar(&cwdFlag, "cwd", "", "Project root directory (default: current working dir)")
 	cmd.Flags().BoolVar(&quietFlag, "quiet", false, "Suppress the progress stream on stderr")

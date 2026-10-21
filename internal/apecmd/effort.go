@@ -105,7 +105,8 @@ func newConfigEffortCmd() *cobra.Command {
 		Use:   "effort",
 		Short: "Show the per-model effort defaults a spawn in this project gets",
 		Long: `Read _apex/effort-defaults.yaml and report what ape gives a spawned claude
-session when no step, stage, pipeline or --effort value is declared.
+session when no --effort value is given, outside an APEX v1 project (for
+one, see "In an APEX v1 project" below).
 
 With the file, every spawn carries the table in its --settings: each model,
 sub-agents included, runs at its family's row, and any other model at the

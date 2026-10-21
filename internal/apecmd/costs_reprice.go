@@ -36,9 +36,10 @@ internal/cost/prices.yaml, or an override persisted via
 ` + "`ape costs update --from`" + `) to fix runs that were recorded while the
 table was stale.
 
-Artefacts covered:
-  _output/{pipelines,tasks}/<name>/<run-id>/manifest.yaml
-  _output/ape/prompts/<prompt-id>/prompt.yaml
+Artefacts covered, under ape's run root (_apex/state/runs/ in an APEX v1
+project, _output/ape/ elsewhere):
+  tasks/<skill>/<run-id>/manifest.yaml (and pipelines/…, from an older ape)
+  prompts/<prompt-id>/prompt.yaml
 
 Chat session.yaml has no per-model breakdown, so there is nothing to
 reprice from — those are skipped.

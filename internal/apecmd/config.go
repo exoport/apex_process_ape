@@ -52,7 +52,7 @@ An absent config.local.yaml is a normal outcome (local_overlay_applied:
 false). A config.local.yaml that exists but does not parse is a hard
 failure, not a fall-back to base values: this resolution is the first act
 of every skill, so one typo'd override would otherwise run a whole
-pipeline against folders nobody chose.
+session against folders nobody chose.
 
 governance_repository_path names the CANONICAL governance repository that
 apex-adr-reconciliation / apex-pattern-reconciliation import from. It is

@@ -301,9 +301,13 @@ func newRunCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "run",
 		Short: "Wait for, or inspect, a run started with --detach",
-		Long: `A run started with --detach (ape task|change --detach) returns an id at
-once and continues in the background, orphaned from the shell that started
-it, so a tool's time limit on that shell does not reach it.
+		Long: `A run started with ape task --detach returns an id at once and
+continues in the background, orphaned from the shell that started it, so
+a tool's time limit on that shell does not reach it.
+
+The ape change and ape milestone verbs that take --wait detach on their
+own and have no id here: run the same command again to attach (see their
+--help, "Detached runs").
 
   ape run wait <id>     wait for it; exit with the run's own exit code
                         (75: --wait/--timeout expired, wait again; 76:

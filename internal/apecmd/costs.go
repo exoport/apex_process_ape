@@ -22,9 +22,9 @@ func newCostsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "costs",
 		Short: "Show this project's Claude cost rollup",
-		Long: `Reads <project>/_output/ape/cost-rollup.json and prints
-totals — today, this week, all-time — broken down per task, chat and (from
-an older ape) pipeline. In an APEX v1 project the loop's task runs are one
+		Long: `Reads the project's cost-rollup.json (_apex/state/runs/ in an APEX v1
+project, _output/ape/ elsewhere) and prints totals — today, this week,
+all-time — broken down per task, prompt, chat and (from an older ape) pipeline. In an APEX v1 project the loop's task runs are one
 row, "task:apex-loop (+apex-orchestrator)" when an ape before rc.7 recorded
 some of them under the loop's older name (Q95); JSON keeps both buckets as
 recorded.
@@ -110,14 +110,14 @@ func newCostsRunCmd() *cobra.Command {
 	var outputFormat string
 	cmd := &cobra.Command{
 		Use:     "run <run-id>",
-		Short:   "Show cost for a single pipeline or task run (reads its manifest.yaml)",
+		Short:   "Show cost for a single task run, or a pipeline run an older ape recorded (reads its manifest.yaml)",
 		Example: "  ape costs run 20260703-120102-a1b2c3",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			cwd, _ := os.Getwd()
 			m, ok := cost.FindRunManifest(cwd, args[0])
 			if !ok {
-				return fmt.Errorf("no run manifest found for run-id %q under _output/{pipelines,tasks}", args[0])
+				return fmt.Errorf("no run manifest found for run-id %q under the project's task or pipeline runs", args[0])
 			}
 			defer warnPricingGaps(m.PerModel)
 			if output.Format(outputFormat) == output.FormatJSON {
@@ -231,7 +231,7 @@ func newCostsRollCmd() *cobra.Command {
 		// Takes none: without this, a stray argument is silently ignored
 		// and the command answers 0 to an invocation nobody meant.
 		Args:  cobra.NoArgs,
-		Short: "Rebuild <project>/_output/ape/cost-rollup.json from on-disk run / chat artefacts",
+		Short: "Rebuild the project's cost-rollup.json from on-disk run / chat artefacts",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			cwd, err := os.Getwd()
 			if err != nil {

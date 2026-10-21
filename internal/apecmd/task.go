@@ -75,10 +75,9 @@ func hangingWrap(prefix, indent, text string, width int) string {
 	return b.String()
 }
 
-const taskLongHelpText = `Run one framework skill as a single-step interactive run — everything a
-pipeline step gets (agent prefix, preflight, bridge hooks, manifest,
-telemetry) with all parameters passed as flags instead of a pipeline
-YAML file. Execution is PTY-interactive only: claude runs as a REPL,
+const taskLongHelpText = `Run one framework skill in one interactive Claude Code session, with
+ape's agent prefix, preflight, bridge hooks, run manifest and telemetry,
+every parameter passed as a flag. Execution is PTY-interactive only: claude runs as a REPL,
 the prompt is typed as keystrokes, and completion is detected via the
 bridge Stop hook.
 
@@ -197,7 +196,9 @@ and "git stash" both leave HEAD alone, so HEAD by itself is not the
 check. A skill PRESENT in it must produce at least one commit, every one
 matching a message format the file declares for it.
 
-A project with NO commit-owners.csv is not asserted at all: with nothing
+No APEX v1 release ships _apex/commit-owners.csv, so a v1 project is not
+asserted unless it adds one. A project with NO commit-owners.csv is not
+asserted at all: with nothing
 declaring which skills commit, neither assertion has a basis, and the
 verdict is reported as skipped rather than guessed in either direction.
 Rows naming a skill ape never dispatches (the conducting session's own)
@@ -327,11 +328,10 @@ func newTaskCmd() *cobra.Command {
 		Use:   "task <skill>",
 		Short: "Run a single framework skill through the interactive PTY runner",
 		Long:  taskLongHelp,
-		Example: `  ape task apex-shard-doc --args "--doc prd"
-  ape task apex-create-prd --agent apex-agent-pm --model "opus[1m]" --prompt "a greeter CLI" --prompt-flag --prompt
-  ape task apex-create-prd --agent apex-agent-pm --handoff _output/handoffs/2026-07-05-x.md --prompt-flag --prompt
-  ape task apex-shard-doc --task-commit "chore: shard prd"
-  ape task apex-create-prd --agent apex-agent-pm --output-format json`,
+		Example: `  ape task apex-plan --args development/briefs/greeter.md
+  ape task apex-loop --args M1 --detach --output-format json
+  ape task apex-apply --args <change-id> --model sonnet
+  ape task apex-plan --args "add a --name flag to greet" --output-format json`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			projectRoot := cwdFlag
@@ -438,7 +438,7 @@ func newTaskCmd() *cobra.Command {
 	cmd.Flags().StringVar(&modelFlag, "model", "", modelFlagUsage("Claude model (APEX v1 unset: models.<skill> in _apex/config.yaml, else the parent session's, else claude's default)."))
 	cmd.Flags().StringVar(&effortFlag, "effort", "", "Explicit reasoning effort for the session and its sub-agents (low|medium|high|xhigh|max). Unset: the project's _apex/effort-defaults.yaml per model, or xhigh without one (see ape config effort). In an APEX v1 project: the session's effort only, passed as claude --effort; unset, models.<skill>, the parent session or _apex/config.yaml effort: decide, else none is passed")
 	cmd.Flags().StringVar(&argsFlag, "args", "", "Verbatim skill args appended to the invocation (whitespace-separated)")
-	cmd.Flags().StringVar(&promptFlag, "prompt", "", "Run prompt forwarded via --prompt-flag (same semantics as pipeline --prompt)")
+	cmd.Flags().StringVar(&promptFlag, "prompt", "", "Run prompt forwarded via --prompt-flag (no APEX v1 skill takes one)")
 	cmd.Flags().StringVar(&promptFileFlag, "prompt-file", "",
 		`File holding the --prompt text; "-" reads stdin. Mutually exclusive with --prompt and --handoff`)
 	cmd.Flags().StringVar(&promptFlagName, "prompt-flag", "", "Skill flag name the --prompt value is forwarded through (spec prompt_flag equivalent)")
@@ -447,7 +447,7 @@ func newTaskCmd() *cobra.Command {
 	cmd.Flags().StringVar(&taskCommitFlag, "task-commit", "", "Task layer: commit the complete task at the end; bare flag derives \"ape:task/<skill>\"")
 	cmd.Flags().Lookup("task-commit").NoOptDefVal = taskCommitDerivedSentinel
 	cmd.Flags().BoolVar(&allowDirtyFlag, "commit-allow-dirty", false, "Bypass the dirty-tree gate (relevant only with --task-commit)")
-	cmd.Flags().DurationVar(&idleTimeoutFlag, "idle-timeout", 0, "Idle backstop: cancel only after this long with no progress across hook events or transcript growth (e.g. 15m); default matches pipeline (60m). PTY output is NOT an anchor here — see `ape prompt`")
+	cmd.Flags().DurationVar(&idleTimeoutFlag, "idle-timeout", 0, "Idle backstop: cancel only after this long with no progress across hook events or transcript growth (e.g. 15m); default 60m. PTY output is NOT an anchor here — see `ape prompt`")
 	cmd.Flags().DurationVar(&maxDurationFlag, "max-duration", sessiondriver.DefaultMaxDuration, "Wall-clock ceiling regardless of progress (e.g. 8h); off by default (D159: a run showing progress stops only on the idle timeout, ape's limits or a person). The clock resets on each sub-agent boundary, so a sequential batch skill is bounded per item.")
 	cmd.Flags().StringVar(&outputFormat, "output-format", "human", "Output format: human|json (json = result envelope on stdout, progress on stderr)")
 	cmd.Flags().BoolVar(&jsonAlias, "json", false, "Alias for --output-format json")

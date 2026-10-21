@@ -131,9 +131,12 @@ Hooks merged into .claude/settings.json (existing keys and hooks are kept):
                                                 the edit guard, and the Bash guards:
                                                 git tag writes, git push, pkill/killall,
                                                 rebase/merge on a change branch)
+  UserPromptSubmit      ape hook user-prompt   (records the person's own prompts, for
+                                                person acts typed in Claude Code (E2))
 A hook that was altered (another matcher, async, a shorter stop timeout) is replaced
 by the one above; running init again changes nothing. ape task passes the same
-hooks inline as well, so its sessions have them even when settings.json does not.
+hooks inline as well, except UserPromptSubmit, so its sessions have them even when
+settings.json does not.
 
 Git's pre-commit hook (Q89): in a git work tree, init installs <hooks dir>/pre-commit
 (` + "`git rev-parse --git-path hooks`" + `: core.hooksPath when set, else .git/hooks) when no

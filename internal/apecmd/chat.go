@@ -53,8 +53,9 @@ func newChatCmd() *cobra.Command {
 		Short: "Bridged claude REPL with hooks captured to a runlog",
 		Long: `Spawn claude as a child of ape with the ape bridge attached.
 Bridge hooks (PreToolUse, PostToolUse, UserPromptSubmit, Stop, and
-friends) are captured to <project>/_output/ape/chats/<id>/ alongside
-pipeline runs.
+friends) are captured to <project>/_apex/state/runs/chats/<id>/ in an APEX
+v1 project (<project>/_output/ape/chats/<id>/ elsewhere), beside ape's
+other run records.
 
 ape chat must be run from a project root (a directory containing
 _apex/config.yaml).
