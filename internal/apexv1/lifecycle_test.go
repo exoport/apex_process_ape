@@ -44,6 +44,7 @@ func TestNewChange(t *testing.T) {
 	clean(t, p, "change new")
 	doc := read(t, p, res.Path)
 	require.Contains(t, doc, "- farewells", "the milestone's out of scope is inherited")
+	require.Contains(t, doc, "— check (live): <command>", "W2: the skeleton names the live kind")
 	c := ParseChange("", doc)
 	require.Equal(t, "add-wave", c.Meta.ID)
 	require.Equal(t, []string{"internal/**"}, c.Meta.Paths)
