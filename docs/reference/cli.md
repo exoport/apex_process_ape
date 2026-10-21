@@ -1422,7 +1422,7 @@ Flags:
 | `--reason` | string | `—` | --verdict: why |
 | `--task` | string | `—` | task id, e.g. T2 (or the second argument) |
 | `--verdict` | string | `—` | pass or fail: the delegate session's verdict (only inside that session) |
-| `--wait` | duration | `9m0s` | --delegate: how long this call waits for the session (exit 75 when it is still running) |
+| `--wait` | duration | `9m0s` | --delegate: how long this call waits for the session (at most 9m30s; 0 returns at once); exit 75 when it is still running |
 
 ## ape change answer
 
@@ -2136,8 +2136,9 @@ check: …`), given with --task; a review tool, for a change whose review_tools:
   - the session writes what its skill writes (a mock-up, a report under assets/): no
     read-only rule and no verdict; its exit is the result (non-zero or lost:
     tool.failed, action retry)
-  - --wait (default 9m) bounds one call; exit 75 means still running: call it again —
-    it attaches to the running session for that change and tool
+  - --wait (default 9m, at most 9m30s, usage.wait) bounds one call; exit 75 means
+    still running: call it again — it attaches to the running session for that
+    change and tool
   - JSON: {id, tool, slot, skill, task, args, running, detached_id, log, stdout,
     task_exit, launch}; stdout holds the session's `ape task --output-format json`
     envelope
@@ -2159,7 +2160,7 @@ Flags:
 | `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
 | `--json` | bool | `false` | machine output (JSON on stdout) |
 | `--task` | string | `—` | the task the tool runs for, e.g. T3 (a design tool's) |
-| `--wait` | duration | `9m0s` | how long this call waits for the session (exit 75 when it is still running) |
+| `--wait` | duration | `9m0s` | how long this call waits for the session (at most 9m30s; 0 returns at once); exit 75 when it is still running |
 
 ## ape change verify
 
@@ -2775,6 +2776,11 @@ _apex/state/decisions.json; both are committed as "apex: ADR-NNNN accepted". Fro
 then on `ape project check` fails if the ADR's text (everything but its Status line)
 changes: supersede it instead.
 
+An ADR that still holds a placeholder comment of the skeleton `ape decision new` wrote
+(<!-- the forces at play --> and the other two) records no decision yet, and is refused
+(decision.placeholder): write its sections first. One accepted with them before this
+refusal is a `project check` notice (decision.placeholder-accepted).
+
 An ADR whose Status says accepted with no record in decisions.json — accepted by hand, or
 before ape recorded acceptances — is reported by `ape project check`
 (decision.accepted-unrecorded) and held to the text git first committed it accepted with.
@@ -2791,8 +2797,8 @@ another --by is session.by-mismatch, exit 1).
 A person's acceptance is recorded on the base branch (D11, D38): refused on a change's
 branch, change/<id> (code branch.change-branch; `git switch <base>` first).
 
-Exit codes: 0 accepted · 1 no such ADR, not proposed, malformed, HEAD on a change
-branch, or session.by-mismatch · 2 usage, or a model session with no grant.
+Exit codes: 0 accepted · 1 no such ADR, not proposed, malformed, still the skeleton,
+HEAD on a change branch, or session.by-mismatch · 2 usage, or a model session with no grant.
 
 Examples:
 
@@ -5714,7 +5720,7 @@ Flags:
 | ---- | ---- | ------- | ----------- |
 | `--agent` | string | `—` | Framework agent fronting the session: /<agent> --autonomous -- <prompt> |
 | `--cwd` | string | `—` | Project root directory (default: current working dir) |
-| `--effort` | string | `—` | Explicit reasoning effort for the session and its sub-agents (low\|medium\|high\|xhigh\|max). Unset: the project's _apex/effort-defaults.yaml per model, or xhigh without one (see ape config effort). |
+| `--effort` | string | `—` | Explicit reasoning effort for the session and its sub-agents (low\|medium\|high\|xhigh\|max). Unset: the project's _apex/effort-defaults.yaml per model, or xhigh without one (see ape config effort). In an APEX v1 project, as ape task: --effort, else _apex/config.yaml effort:, else Claude Code's own default, passed as claude --effort |
 | `--handoff` | string | `—` | Handoff document to seed the session with (mutually exclusive with the positional prompt) |
 | `--idle-timeout` | duration | `0s` | Idle backstop: end the session only after this long with no progress across hooks, transcript growth, or PTY output (e.g. 15m); default 60m |
 | `--ignore-project-settings` | bool | `false` | Tell the spawned claude to skip project + local .claude/settings*.json |
