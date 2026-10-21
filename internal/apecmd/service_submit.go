@@ -137,7 +137,7 @@ failed · 2 usage, a malformed request, or a refusal (skill.renamed, session.dep
 session.not-allowed, VALIDATION, PROJECT_NOT_ALLOWED) · 3 busy
 (session.child-running, session.orchestrator-running, BUSY_EXCLUSIVE,
 BUSY_KEY): retry later. A refusal prints the daemon's message with its code.`,
-		Example: `  ape service submit task '{"skill":"apex-plan","args":"M2"}'
+		Example: `  ape service submit task '{"skill":"apex-plan","args":"add a --name flag to greet"}'
   ape service submit task '{"project_root":"/abs/repo","skill":"apex-loop","args":"M1"}' --name ci`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {

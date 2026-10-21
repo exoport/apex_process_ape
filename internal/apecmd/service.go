@@ -97,7 +97,7 @@ config error (bad --name, missing/invalid service.yaml, no NATS URL).`,
   ape service --name ci --drain-timeout 5m
   # discovery + a task submission (stamped with this caller's depth):
   nats req '$SRV.PING.ape' ''
-  ape service submit task '{"project_root":"/abs/path/myproject","skill":"apex-plan","args":"M1"}'`,
+  ape service submit task '{"project_root":"/abs/path/myproject","skill":"apex-plan","args":"development/briefs/greeter.md"}'`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			projectRoot := cwdFlag
