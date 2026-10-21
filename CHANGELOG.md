@@ -130,6 +130,35 @@ eval's E-R7-1 and E2 residual (D219).
   pointer, and `project check` lists the `roadmap.next-inline` notice. A project an rc.7b move
   left that way is repaired by running `ape next move` again.
 
+### rc.7j: the v1.0.1 list, folded into v1.0.0 (D277, D281, D282, D284)
+
+- **`ape task` refuses a prompt with nowhere to go** (DR-11): `--prompt`, `--prompt-file` or
+  `--handoff` without `--prompt-flag` exits 2 naming the fix, instead of starting the skill and
+  dropping the text. No APEX skill takes a prompt flag: resume a handoff by pasting its
+  continuation line after `/clear`.
+- **`ape framework update --dry-run --version <tag>` compares with that tag** (RH-1), a candidate
+  included, and an apex-v1 install's dry run prints no apex-v0 project-data lines.
+- **`--plan` lists no apex-v0 migration on an apex-v1 install** (RG-3b): with an apex-v0 newest
+  release it plans the installed list and says the update keeps it; `--version` naming an apex-v0
+  release is refused (exit 1); the SOURCE column says `incoming` for a tag's rows.
+- **A lift-caused red is run once more** (RG-1): a `red-after-lift` or `red-at-tag-new-failures`
+  command that passes (as at the tag) on the second run is the new verdict **`flaky`** — record it,
+  plan no fix; red again keeps the verdict and says so. `exit_rerun`/`log_rerun` in the JSON, the
+  re-run on the disposition's command line and on the update's stderr.
+- **The lift warns about a parent folder's apex-v0 CLAUDE.md block** (RG-2,
+  `lift.parent-v0-claude`, a warning, never a refusal or an edit): named relative to the project
+  (`../CLAUDE.md`) in the committed disposition, absolute in the output and `warnings[]`.
+- **A candidate right under a document's title has the title as its section** (E-R7f-1).
+- **team-memory is read whole, like CLAUDE.md** (D267): every paragraph, table body row and
+  code-block note of three words or more is a candidate; a ```` ```markdown ```` fence's headings
+  are not notes.
+- **`ape framework update` shows which ape ran the lift and where the pin goes** (FR-2): the
+  lines go to stderr with the verdict, where the update shows them.
+- **`ape status` shows a just-approved milestone's approval self-check** instead of "not run
+  yet"; `status --json` carries `approval_self_check`.
+- Tests: `make test` (and test-portable, test-cover) run with a 20-minute timeout
+  (`TEST_TIMEOUT`); `check-task-subagents` logs each sub-agent's start and end.
+
 ### rc.7i: every binding-rule candidate stays in the committed disposition (D274, D276)
 
 - **The lift never cuts a binding-rule candidate from `development/lift-disposition.md`**: past

@@ -3438,7 +3438,10 @@ put right is a warning with the command to run, not a failed update.
                 cannot-tell rather than collapsing them, because a runner
                 that reads cannot-tell as pending re-applies things
   --dry-run     show the framework drift AND the pending migrations,
-                writing nothing
+                writing nothing. The drift is against the release the update
+                would install: --version's tag when given (a candidate too),
+                else the newest final release. An apex-v1 install has no
+                apex-v0 project-data migration, so none is listed
   --no-migrate  install framework files only; migrations stay pending, and
                 'ape doctor' reports them so the state is visible
   --repair      also run the judgment phase over free-form deferred
@@ -5363,7 +5366,11 @@ regression_new_failures) · red-after-lift (green at the tag: the LIFT broke it 
 in a commit, or reset to the tag and lift with --exclude) · cannot-run (exit 126/127, or
 an output saying a command was not found — "command not found", "No such file or
 directory" — with make's "Error 127", and no failing test named: a tool it runs is
-missing here, which is not a red; read the same at both points) · red-no-baseline. A run
+missing here, which is not a red; read the same at both points) · red-no-baseline ·
+flaky (RG-1: a red-after-lift or red-at-tag-new-failures command is run once more at the
+lift commit, and passed — as at the tag — that time: a flake, not the lift's; record it,
+plan no fix; red again keeps its verdict, its note saying so; regression_commands[] /
+regression.commands[] carry the re-run's exit_rerun and log_rerun). A run
 that exits 0 but whose output names failing tests (as below) is red for the verdict, by
 those names, and its note says "exit 0, but the output names N failing tests": green at
 the tag, it is red-after-lift with the names in regression_new_failures (a ( … ) block
