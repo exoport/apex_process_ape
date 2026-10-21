@@ -51,6 +51,17 @@ type MilestoneApproval struct {
 	// approval, before ape's approval commit; a re-approval keeps it.
 	// Absent on approvals before rc.5 (Base falls back to SelfCheck.SHA).
 	BaseSHA string `json:"base_sha,omitempty"`
+	// AcceptGreen is a person's re-approval of a gate already green, the
+	// milestone's work done and the gate fixed after it (RK-5, Q145).
+	AcceptGreen *AcceptGreen `json:"accept_green,omitempty"`
+}
+
+// AcceptGreen is why a person re-approved a green gate (Q145): the reason
+// they gave, who and when — the approval's own by and at.
+type AcceptGreen struct {
+	Reason string `json:"reason"`
+	By     string `json:"by"`
+	At     string `json:"at"`
 }
 
 // Base is the milestone's start: BaseSHA, else the self-check's sha (the

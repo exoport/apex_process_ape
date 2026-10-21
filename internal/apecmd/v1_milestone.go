@@ -90,9 +90,9 @@ Exit codes: 0 ok (prints the id) · 1 no roadmap.md, or HEAD on a change branch 
 
 func newMilestoneApproveCmd() *cobra.Command {
 	var f v1Flags
-	var by string
+	var by, acceptGreen string
 	cmd := &cobra.Command{
-		Use:   "approve <M> --by <who>",
+		Use:   `approve <M> --by <who> [--accept-green "<reason>"]`,
 		Short: "Write Status: approved (by <who> <ts>)",
 		Long: `Approve a proposed milestone: its Status: line becomes "approved (by <who> <ts>)", and
 milestones.json records the approval (H2): {by, at, gate_cmd, gate_files, gate_files_sha256,
@@ -135,6 +135,16 @@ whose script the milestone's work would write cannot be approved: the script exi
 approval and fails until the work is done (test -x ./bin/app || exit 1, not a bare
 ./bin/app, which exits 127). A re-approval runs the same check.
 
+--accept-green "<reason>" (RK-5, Q145): a re-approval of an approved milestone whose work is
+done and whose gate a person or apex-plan fixed after it — the fixed gate is green, which
+the check above refuses, and gate and close refuse the changed gate until it is approved
+again. With the flag a person states that case: the green run is recorded as self_check
+(exit 0) beside accept_green {reason, by, at}, committed as "apex: <M> re-approved (gate
+green: <reason>)"; then ` + "`ape milestone close <M>`" + ` closes it. A gate fixed before the work is done
+and already green proves nothing: re-plan it instead. On a proposed milestone (a first
+approval) the flag is a usage error (exit 2); on a re-approval whose gate is red it is not
+needed, and the approval is recorded as without it. A person's act, as approve is.
+
 Approving an approved milestone records the approval again — "apex: <M> re-approved", the
 Status line kept as it was (the milestone's spend counts from it) — when ape holds no
 record of it, its gate changed since, it runs a gate file the record does not hold (created
@@ -169,7 +179,13 @@ with no grant.`,
 			id := args[0]
 			f.person = personCallOf(cmd, args)
 			return runLong(cmd, &f, p, id, func(ctx context.Context, opt apexv1.RunOptions) renderFn {
-				m, err := p.ApproveMilestone(ctx, id, personBy(ctx, by), opt.Progress)
+				approve := p.ApproveMilestone
+				if cmd.Flags().Changed("accept-green") {
+					approve = func(ctx context.Context, id, by string, progress io.Writer) (*apexv1.Milestone, error) {
+						return p.ApproveMilestoneAcceptGreen(ctx, id, by, acceptGreen, progress)
+					}
+				}
+				m, err := approve(ctx, id, personBy(ctx, by), opt.Progress)
 				return func(cmd *cobra.Command, f *v1Flags) error {
 					if err != nil {
 						return v1Fail(cmd, f, err, nil)
@@ -184,6 +200,7 @@ with no grant.`,
 	addV1Flags(cmd, &f)
 	addV1WaitFlags(cmd, &f)
 	cmd.Flags().StringVar(&by, "by", "", "who approves (required from a terminal; in a Claude Code session, git config user.name)")
+	cmd.Flags().StringVar(&acceptGreen, "accept-green", "", "re-approval only: the gate is green because the milestone's work is done and the gate was fixed after it — why (Q145)")
 	return cmd
 }
 

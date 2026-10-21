@@ -245,6 +245,24 @@ func (p *Project) NewMilestone(ctx context.Context, title, gate string, budget *
 // green or broken gate is refused, a red one's run is recorded with the
 // approval.
 func (p *Project) ApproveMilestone(ctx context.Context, id, by string, progress io.Writer) (*Milestone, error) {
+	return p.approveMilestone(ctx, id, by, "", progress)
+}
+
+// ApproveMilestoneAcceptGreen is a re-approval by a person who states
+// that the milestone's work is done and its gate was fixed after it
+// (RK-5, Q145): a green self-check is then recorded, with the reason
+// (approval.accept_green), not refused. On a first approval it is a usage
+// error — a new gate must be red — and on a red re-approval the reason is
+// not needed and not recorded.
+func (p *Project) ApproveMilestoneAcceptGreen(ctx context.Context, id, by, reason string, progress io.Writer) (*Milestone, error) {
+	reason = strings.TrimSpace(reason)
+	if reason == "" || strings.Contains(reason, "\n") {
+		return nil, &UsageError{Code: "usage.reason", Msg: "--accept-green needs a one-line reason: why the gate is green before this re-approval (the milestone's work is done and the gate was fixed after it)"}
+	}
+	return p.approveMilestone(ctx, id, by, reason, progress)
+}
+
+func (p *Project) approveMilestone(ctx context.Context, id, by, acceptGreen string, progress io.Writer) (*Milestone, error) {
 	// A model never approves its own milestone (D47 Q6).
 	if err := requirePerson(ctx, ActMilestoneApprove, "ape milestone approve"); err != nil {
 		return nil, err
@@ -291,7 +309,11 @@ func (p *Project) ApproveMilestone(ctx context.Context, id, by string, progress 
 	if rec != nil && rec.Approval.Base() != "" {
 		base = rec.Approval.Base()
 	}
-	selfCheck, err := p.gateSelfCheck(ctx, m, base, progress)
+	reapproval := m.Status == MilestoneApproved
+	if acceptGreen != "" && !reapproval {
+		return nil, &UsageError{Code: "usage.accept-green", Msg: "--accept-green is for a re-approval of an approved milestone: " + id + " is " + m.StatusText + ", and a new gate must be red until the milestone's work is done"}
+	}
+	selfCheck, err := p.gateSelfCheck(ctx, m, base, reapproval, acceptGreen != "", progress)
 	if err != nil {
 		return nil, err
 	}
@@ -318,6 +340,11 @@ func (p *Project) ApproveMilestone(ctx context.Context, id, by string, progress 
 	rec.Approval = p.newApproval(m.Gate, strings.TrimSpace(by))
 	rec.Approval.SelfCheck = selfCheck
 	rec.Approval.BaseSHA = base
+	if selfCheck.Exit == 0 {
+		// Q145: only a re-approval with --accept-green gets here green.
+		rec.Approval.AcceptGreen = &AcceptGreen{Reason: acceptGreen, By: rec.Approval.By, At: rec.Approval.At}
+		what = "re-approved (gate green: " + acceptGreen + ")"
+	}
 	// A person's approval resets the run of blocked changes (H19).
 	rec.ConsecutiveBlocks = 0
 	if err := p.saveMilestoneRecords(recs); err != nil {

@@ -47,7 +47,9 @@ var gateSelfCheckProgress = time.Minute
 // gateSelfCheck runs m's gate once and classifies it (see above), with
 // base as its $APE_MILESTONE_BASE (gateEnv). progress gets a line before,
 // while and after the run (nil: none).
-func (p *Project) gateSelfCheck(ctx context.Context, m *Milestone, base string, progress io.Writer) (*GateSelfCheck, error) {
+// reapproval is an approval of an approved milestone, acceptGreen a
+// person's --accept-green on it (Q145): a green run is then recorded.
+func (p *Project) gateSelfCheck(ctx context.Context, m *Milestone, base string, reapproval, acceptGreen bool, progress io.Writer) (*GateSelfCheck, error) {
 	if progress == nil {
 		progress = io.Discard
 	}
@@ -101,9 +103,18 @@ func (p *Project) gateSelfCheck(ctx context.Context, m *Milestone, base string, 
 	}
 	switch r.Exit {
 	case 0:
+		if reapproval && acceptGreen {
+			fmt.Fprintf(progress, "%s: the gate is GREEN (exit 0 in %.1fs) — re-approving, as accepted (--accept-green)\n", m.ID, r.Secs)
+			return sc, nil
+		}
 		fmt.Fprintf(progress, "%s: the gate is GREEN (exit 0 in %.1fs) — refused\n", m.ID, r.Secs)
-		return nil, &FailError{Code: CodeGateGreen, Msg: fmt.Sprintf("%s's gate is already green on the current tree (exit 0 in %.1fs at %.7s)", m.ID, r.Secs, sha) +
-			" — a green gate proves nothing the milestone adds: re-plan the gate (apex-plan) so it is red until the milestone's work is done, then approve again" + last}
+		msg := fmt.Sprintf("%s's gate is already green on the current tree (exit 0 in %.1fs at %.7s)", m.ID, r.Secs, sha) +
+			" — a green gate proves nothing the milestone adds: re-plan the gate (apex-plan) so it is red until the milestone's work is done, then approve again"
+		if reapproval {
+			// RK-5 (Q145): a gate fixed after the work is done is green.
+			msg += "; if the milestone's work is already done and the gate was fixed after it, a person re-approves with `ape milestone approve " + m.ID + " --by <who> --accept-green \"<reason>\"`"
+		}
+		return nil, &FailError{Code: CodeGateGreen, Msg: msg + last}
 	case ExitTimeout:
 		why := "it reached its ceiling of " + lim.Max.String() + " (timeouts.gate max)"
 		if r.Reason == ReasonIdle {
