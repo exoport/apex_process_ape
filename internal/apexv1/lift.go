@@ -281,8 +281,10 @@ const (
 	LiftRegressionNoBaseline = "red-no-baseline"
 	// LiftRegressionFlaky: a lift-caused red (red-after-lift,
 	// red-at-tag-new-failures) that ape ran once more at the lift commit,
-	// and that passed (as at the tag) that time — a flake, not the lift's
-	// (RG-1, D248, D277). Recorded for the disposition; no fix is planned.
+	// and that passed that time — a flake, not the lift's (RG-1, D248,
+	// D277). Recorded for the disposition; no fix is planned. A
+	// red-at-tag-new-failures re-run that fails only as at the tag is
+	// red-at-tag instead (RV-1).
 	LiftRegressionFlaky = "flaky"
 )
 
@@ -1481,10 +1483,13 @@ func (lf *lifter) liftRegression(p *Project) {
 
 // rerunVerdict is RG-1's judgement of a lift-caused red that ape ran once
 // more at the lift commit: rerun is that second run's verdict against the
-// same run at the tag. Green — or, for red-at-tag-new-failures, red only
-// as at the tag — is a flake: the tenax rehearsal's timing test failed
-// once after the lift and passed 5 of 5 on re-runs (D248), and the lift
-// called it the lift's. Red again keeps the first verdict, saying so.
+// same run at the tag. Green is a flake: the tenax rehearsal's timing test
+// failed once after the lift and passed 5 of 5 on re-runs (D248), and the
+// lift called it the lift's. A red-at-tag-new-failures command whose
+// re-run fails only as at the tag is red-at-tag (RV-1, D308): its new
+// failures were a flake, the tag's are still pre-existing and still go to
+// apex-plan's roadmap, which flaky's "plan no fix" would have dropped. Red
+// again keeps the first verdict, saying so.
 func rerunVerdict(c *LiftRegressionCommand, rerun string) (verdict, note string, fresh []string) {
 	re := c.RegressionRerun
 	logs := fmt.Sprintf("Logs: %s, %s", c.Regression.Log, re.Log)
@@ -1492,9 +1497,12 @@ func rerunVerdict(c *LiftRegressionCommand, rerun string) (verdict, note string,
 	case c.Verdict == LiftRegressionRedAfterLift && rerun == LiftRegressionGreen:
 		return LiftRegressionFlaky, fmt.Sprintf("FLAKY: red at the lift commit (exit %d), green when ape ran it again (exit %d), green at %s — not a lift failure: record it in the disposition as flaky and plan no fix for it. %s",
 			c.Regression.Exit, re.Exit, LiftTag, logs), nil
-	case c.Verdict == LiftRegressionRedAtTagNewFailures && (rerun == LiftRegressionGreen || rerun == LiftRegressionRedAtTag):
-		return LiftRegressionFlaky, fmt.Sprintf("FLAKY: red at %s with new failures at the lift commit (%s), the same failures as at the tag when ape ran it again — not a lift failure: record it in the disposition as flaky and plan no fix for it. %s",
-			LiftTag, failureList(c.NewFailures), logs), nil
+	case c.Verdict == LiftRegressionRedAtTagNewFailures && rerun == LiftRegressionGreen:
+		return LiftRegressionFlaky, fmt.Sprintf("FLAKY: red at the lift commit with failures the run at %s did not have (%s), green when ape ran it again (exit %d; red at %s, exit %d) — not a lift failure: record it in the disposition as flaky and plan no fix for it. %s",
+			LiftTag, failureList(c.NewFailures), re.Exit, LiftTag, c.RegressionAtTag.Exit, logs), nil
+	case c.Verdict == LiftRegressionRedAtTagNewFailures && rerun == LiftRegressionRedAtTag:
+		return LiftRegressionRedAtTag, fmt.Sprintf("red at the lift commit (exit %d) and at %s (exit %d), failing as it did there: the first run at the lift commit had %d failing test(s) the run at %s did not (%s), and they did not come back when ape ran it again (exit %d) — a pre-existing failure for apex-plan to roadmap, not a lift failure. %s, %s",
+			c.Regression.Exit, LiftTag, c.RegressionAtTag.Exit, len(c.NewFailures), LiftTag, failureList(c.NewFailures), re.Exit, logs, c.RegressionAtTag.Log), nil
 	}
 	return c.Verdict, fmt.Sprintf("%s Red again when ape ran it again (exit %d, %s).", c.Note, re.Exit, re.Log), c.NewFailures
 }

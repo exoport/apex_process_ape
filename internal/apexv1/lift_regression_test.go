@@ -666,6 +666,67 @@ func TestLift_RegressionRerunsALiftCausedRed(t *testing.T) {
 	}
 }
 
+// RV-1 (D308): a command red at the tag whose first run after the lift
+// fails a test the tag's did not is run once more. Failing only as at the
+// tag that time is red-at-tag, which sends the tag's failures to
+// apex-plan's roadmap (bin-rc7m called it flaky, "plan no fix", and they
+// went nowhere); green that time is flaky. The counter makes run 1 the
+// tag's, run 2 the lift commit's (TestNew fails once), run 3 the re-run.
+func TestLift_RegressionRerunsANewFailureRedAtTag(t *testing.T) {
+	for _, tc := range []struct {
+		name, rerun, verdict, note string
+		rerunExit                  int
+	}{
+		{
+			"failing as at the tag on the re-run is red-at-tag", `[ "$n" -eq 3 ] && { echo "--- FAIL: TestOld (0.00s)"; exit 1; }`, LiftRegressionRedAtTag,
+			"red at the lift commit (exit 1) and at apex-v0-final (exit 1), failing as it did there: the first run at the lift commit had 1 failing test(s) the run at apex-v0-final did not (TestNew), and they did not come back when ape ran it again (exit 1) — a pre-existing failure for apex-plan to roadmap, not a lift failure. Logs: ", 1,
+		},
+		{
+			"green on the re-run is flaky", `[ "$n" -eq 3 ] && exit 0`, LiftRegressionFlaky,
+			"FLAKY: red at the lift commit with failures the run at apex-v0-final did not have (TestNew), green when ape ran it again (exit 0; red at apex-v0-final, exit 1) — not a lift failure: record it in the disposition as flaky and plan no fix for it. Logs: ", 0,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			script := filepath.Join(dir, "suite.sh")
+			body := "#!/bin/sh\nc=" + filepath.Join(dir, "count") + "\nn=$(cat \"$c\" 2>/dev/null || echo 0)\nn=$((n+1))\necho \"$n\" > \"$c\"\n" + tc.rerun +
+				"\necho \"--- FAIL: TestOld (0.00s)\"\n[ \"$n\" -eq 2 ] && echo \"--- FAIL: TestNew (0.00s)\"\nexit 1\n"
+			require.NoError(t, os.WriteFile(script, []byte(body), 0o755))
+			root := liftWithGates(t, "sh "+script)
+			res, err := Lift(ctx(), root, LiftOptions{})
+			require.NoError(t, err)
+			require.Equal(t, 1, res.RegressionAtTag.Exit, "red at the tag")
+			require.Equal(t, 1, res.Regression.Exit, "red after the lift")
+			require.NotNil(t, res.RegressionRerun)
+			require.Equal(t, tc.rerunExit, res.RegressionRerun.Exit)
+			require.Equal(t, tc.verdict, res.RegressionVerdict)
+			require.Contains(t, res.RegressionNote, tc.note)
+			require.Empty(t, res.RegressionNewFailures, "neither verdict names the lift's failures")
+			if tc.verdict == LiftRegressionRedAtTag {
+				require.Contains(t, res.RegressionNote, "failing as it did there", "seq-05 item 2 routes red-at-tag on this phrase (D309a)")
+			}
+
+			var rep struct {
+				Regression LiftRegressionRecord `json:"regression"`
+			}
+			data, err := os.ReadFile(filepath.Join(root, "_apex", "state", LiftReport))
+			require.NoError(t, err)
+			require.NoError(t, json.Unmarshal(data, &rep))
+			require.Equal(t, tc.verdict, rep.Regression.Verdict)
+			require.Equal(t, []string{}, rep.Regression.NewFailures)
+			require.Len(t, rep.Regression.Commands, 1)
+			c := rep.Regression.Commands[0]
+			require.NotNil(t, c.ExitRerun)
+			require.Equal(t, tc.rerunExit, *c.ExitRerun)
+			require.FileExists(t, filepath.Join(root, filepath.FromSlash(c.LogRerun)))
+			disp, err := os.ReadFile(filepath.Join(root, "development", LiftDisposition))
+			require.NoError(t, err)
+			require.Contains(t, string(disp), "`"+tc.verdict+"`: exit 1 at apex-v0-final, exit 1 after the lift, exit "+strconv.Itoa(tc.rerunExit)+" on a re-run.")
+			require.NotContains(t, string(disp), "regression_new_failures: `TestNew`")
+		})
+	}
+}
+
 // RG-1: flaky ranks just above green — below cannot-run and every red —
 // so a lift whose only lift-caused red was a flake reports flaky.
 func TestLiftVerdictRank_Flaky(t *testing.T) {
