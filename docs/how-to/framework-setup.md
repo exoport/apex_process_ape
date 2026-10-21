@@ -71,7 +71,7 @@ A line that ignores the whole `.claude` folder is rewritten in place to this sha
 
 ## Headless and scripted runs
 
-A v1 install asks nothing, so it runs the same with or without a terminal. `--project-name` and `--extensions` are not needed; passed, they are ignored, and `setup` says so. Use `--output-format json` or `yaml` for a structured result: `summary` counts what was installed, `next` carries the next command, and `gitignore` says what happened to `.gitignore`.
+A v1 install asks nothing, so it runs the same with or without a terminal. `--project-name` and `--extensions` are not needed; passed, they are ignored, and `setup` says so. Use `--output-format json` or `yaml` for a structured result: `summary` counts what was installed, `next` carries the next command, and `gitignore` says what happened to `.gitignore`. Stdout then holds the report alone: the `commit:` line goes to stderr.
 
 ## Re-installing with `--force`
 

@@ -227,7 +227,7 @@ Compares the installed release (from `_apex/framework.yaml`) with the newest rel
 
 ## Output formats
 
-Every form takes `--output-format human|json|yaml`. The structured forms carry the full metadata block and an install summary.
+Every form takes `--output-format human|json|yaml`. The structured forms carry the full metadata block and an install summary, and print only that on stdout; the migration, plugin and `commit:` lines go to stderr.
 
 ## Troubleshooting
 

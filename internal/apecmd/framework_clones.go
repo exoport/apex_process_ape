@@ -18,6 +18,7 @@ import (
 	"github.com/exoport/apex_process_ape/internal/framework"
 	"github.com/exoport/apex_process_ape/internal/output"
 	"github.com/exoport/apex_process_ape/internal/repocache"
+	"github.com/spf13/cobra"
 )
 
 // resolveFrameworkClone resolves the framework clone: --repo, then
@@ -215,6 +216,17 @@ func cloneNoteWriter(cmd interface{ OutOrStdout() io.Writer }, format output.For
 		return cmd.OutOrStdout()
 	}
 	return os.Stderr
+}
+
+// installNoteWriter is where setup and update print their progress lines —
+// the migrations run, the plugins synced, the `commit:` line (Q151). A
+// person reads them on stdout; with --output-format json|yaml, stdout is
+// the report alone, so a `| jq` parses it, and the lines go to stderr.
+func installNoteWriter(cmd *cobra.Command, format output.Format) io.Writer {
+	if format == output.FormatHuman {
+		return cmd.OutOrStdout()
+	}
+	return cmd.ErrOrStderr()
 }
 
 // printCloneLocations says where each clone is and where its path came

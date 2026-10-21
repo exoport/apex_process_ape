@@ -245,3 +245,39 @@ func TestFrameworkUpdate_GovernanceDirThatIsNotAGitCloneIsReadAsIs(t *testing.T)
 	require.NoError(t, err, out)
 	require.Contains(t, out, "commit: nothing changed, nothing committed")
 }
+
+// Q151: with --output-format json, stdout is the report alone — the
+// `commit:` line and the other progress lines go to stderr, so a
+// `| jq` parses what setup and update print.
+func TestFrameworkInstall_StructuredOutputKeepsProgressLinesOffStdout(t *testing.T) {
+	withApeVersion(t, "0.4.0")
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	fw := releasedFramework(t, "v1.0.0")
+	root := committedProject(t)
+	run := func(sub string, args ...string) (stdout, stderr string) {
+		t.Helper()
+		r, cwd := fw, root
+		cmd := newFrameworkUpdateCmd(&r, &cwd)
+		if sub == "setup" {
+			cmd = newFrameworkSetupCmd(&r, &cwd)
+		}
+		cmd.SetArgs(args)
+		var out, errb strings.Builder
+		cmd.SetOut(&out)
+		cmd.SetErr(&errb)
+		cmd.SilenceUsage, cmd.SilenceErrors = true, true
+		require.NoError(t, cmd.Execute(), errb.String())
+		return out.String(), errb.String()
+	}
+
+	out, errOut := run("setup", "--no-fetch", "--no-bootstrap", "--output-format", "json")
+	require.NotContains(t, out, "commit:")
+	require.Contains(t, errOut, "commit: chore(framework): install APEX framework")
+
+	out, errOut = run("update", "--no-fetch", "--output-format", "yaml")
+	require.NotContains(t, out, "commit:")
+	require.Contains(t, errOut, "commit: nothing changed, nothing committed")
+
+	out, _ = run("update", "--no-fetch")
+	require.Contains(t, out, "commit: nothing changed, nothing committed")
+}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -260,7 +261,7 @@ failed (the changes are left staged).`,
 				return err
 			}
 			if !rf.noCommit {
-				if err := commitInstall(cmd.Context(), cmd.OutOrStdout(), projectRoot, untracked,
+				if err := commitInstall(cmd.Context(), installNoteWriter(cmd, format), projectRoot, untracked,
 					"chore(framework): install APEX framework "+installLabel(res.Metadata), res.Metadata, nil, generatorSetup); err != nil {
 					return err
 				}
@@ -548,7 +549,7 @@ func finishFrameworkUpdate(cmd *cobra.Command, format output.Format, projectRoot
 	if err := printFrameworkUpdate(out, format); err != nil {
 		return err
 	}
-	if err := migrateAndCommitUpdate(cmd, projectRoot, prior, res, untracked, noMigrate, commit); err != nil {
+	if err := migrateAndCommitUpdate(cmd, installNoteWriter(cmd, format), projectRoot, prior, res, untracked, noMigrate, commit); err != nil {
 		return err
 	}
 	if repair {
@@ -561,17 +562,19 @@ func finishFrameworkUpdate(cmd *cobra.Command, format output.Format, projectRoot
 // project-data and upgrade migrations (unless --no-migrate), then the one
 // commit recording the install and the migrations it ran. A blocking
 // migration left unapplied commits nothing (D162-4): see refuseBlockedUpdate.
-func migrateAndCommitUpdate(cmd *cobra.Command, projectRoot string, prior *framework.Metadata, res *framework.UpdateResult,
+// w takes the progress lines: stdout for a person, stderr beside a
+// structured report (see installNoteWriter).
+func migrateAndCommitUpdate(cmd *cobra.Command, w io.Writer, projectRoot string, prior *framework.Metadata, res *framework.UpdateResult,
 	untracked map[string]bool, noMigrate, commit bool,
 ) error {
 	installed := res.Metadata
 	var applied []string
 	if noMigrate {
-		fmt.Fprintln(cmd.OutOrStdout(),
+		fmt.Fprintln(w,
 			"migration: skipped (--no-migrate) — `ape doctor` will report it as pending")
 	} else {
 		var err error
-		if applied, err = runUpdateMigrations(cmd, projectRoot, res, untracked, commit); err != nil {
+		if applied, err = runUpdateMigrations(cmd, w, projectRoot, res, untracked, commit); err != nil {
 			return err
 		}
 	}
@@ -579,7 +582,7 @@ func migrateAndCommitUpdate(cmd *cobra.Command, projectRoot string, prior *frame
 	// and written into settings.json, which this update's commit carries.
 	// A failure is reported, never fatal: the framework install stands.
 	if p, ok := v1ProjectAt(projectRoot); ok {
-		if _, err := syncPluginsReport(cmd.Context(), cmd.OutOrStdout(), p, false); err != nil {
+		if _, err := syncPluginsReport(cmd.Context(), w, p, false); err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "WARNING: plugins: %v\n", err)
 		}
 	}
@@ -591,19 +594,19 @@ func migrateAndCommitUpdate(cmd *cobra.Command, projectRoot string, prior *frame
 	if m, err := framework.ReadMetadata(projectRoot); err == nil {
 		meta = *m
 	}
-	return commitInstall(cmd.Context(), cmd.OutOrStdout(), projectRoot, untracked,
+	return commitInstall(cmd.Context(), w, projectRoot, untracked,
 		updateSubject(prior, &meta, applied), meta, applied, generatorTrailer)
 }
 
 // runUpdateMigrations runs an update's project-data and upgrade migrations
 // and returns the upgrade ids applied; a blocking one left unapplied ends
 // the update through refuseBlockedUpdate.
-func runUpdateMigrations(cmd *cobra.Command, projectRoot string, res *framework.UpdateResult, untracked map[string]bool, commit bool) ([]string, error) {
-	if err := runProjectMigrations(cmd.Context(), cmd.OutOrStdout(), projectRoot); err != nil {
+func runUpdateMigrations(cmd *cobra.Command, w io.Writer, projectRoot string, res *framework.UpdateResult, untracked map[string]bool, commit bool) ([]string, error) {
+	if err := runProjectMigrations(cmd.Context(), w, projectRoot); err != nil {
 		return nil, err
 	}
 	start, _ := gitOut(cmd.Context(), projectRoot, "rev-parse", "-q", "--verify", "HEAD")
-	applied, err := runUpgradeMigrationsApplied(cmd.Context(), cmd.OutOrStdout(), projectRoot)
+	applied, err := runUpgradeMigrationsApplied(cmd.Context(), w, projectRoot)
 	if err != nil {
 		if be, ok := errors.AsType[*blockingMigrationError](err); ok {
 			return nil, refuseBlockedUpdate(cmd, projectRoot, untracked, res.Summary.AboardCreated, strings.TrimSpace(start), be, commit)
