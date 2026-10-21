@@ -738,7 +738,7 @@ func (lf *lifter) dispositionWith(lim dispLimits) string {
 	}
 
 	p("## Binding-rule candidates\n\n")
-	p("Disposition is one of: `kept in AGENTS.md` · `gated by <cmd>` · `ADR-NNNN` · `docs/<page>` · `dropped: <reason>`.\n\n")
+	p("Disposition is one of: `kept in AGENTS.md` · `kept in CLAUDE.md` · `development/project.md` · `gated by <cmd>` · `ADR-NNNN` · `docs/<page>` · `dropped: <reason>`.\n\n")
 	writeCandidates(&b, r.Candidates, lim.sizeKB)
 
 	p("## Gate commands\n\n")
