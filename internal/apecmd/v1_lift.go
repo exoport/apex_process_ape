@@ -161,18 +161,19 @@ The commit:
                  more; they are never cut, whatever its size): the binding-rule
                  candidates, EVERY one, under a line giving their count and the
                  file's size ("N rows, numbered 1–N … read on with offset/limit
-                 until row N"): from
-                 project-context.md and team-memory, every section, an overview
-                 too — its list items of three words or more (not one that is
-                 only links) and its rule-shaped paragraphs (must, never,
-                 always, do not, avoid, only, required, prefer, shall, forbidden),
-                 whole; a team-memory entry with neither is listed by its
-                 paragraphs, else by its title; the notes in ## Code
-                 Validation's code blocks (a command's # comment, with its
-                 command, or a run of comment lines), whose commands go to
-                 AGENTS.md ## Commands. CLAUDE.md, outside the apex-v0 managed
-                 block, is read whole: every list item, paragraph and table
-                 body row of three words or more, and every code-block note. Grouped by source and section (JSON
+                 until row N"): from project-context.md, every section, an
+                 overview too — its list items of three words or more (not one
+                 that is only links) and its rule-shaped paragraphs (must,
+                 never, always, do not, avoid, only, required, prefer, shall,
+                 forbidden), whole, and the notes in ## Code Validation's code
+                 blocks (a command's # comment, with its command, or a run of
+                 comment lines), whose commands go to AGENTS.md ## Commands.
+                 CLAUDE.md (outside the apex-v0 managed block) and team-memory
+                 are read whole: every list item, paragraph and table body row
+                 of three words or more, whatever its wording, and every
+                 code-block note (a fenced markdown example's lines are not); a
+                 team-memory entry that gives nothing else is listed by its
+                 title. Grouped by source and section (JSON
                  rule_candidates[].section, the heading path); text found twice is
                  listed once with both sources (also_in). An empty Disposition
                  column for apex-plan, then a fresh read-only review, then the
