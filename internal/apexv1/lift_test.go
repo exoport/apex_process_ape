@@ -746,7 +746,7 @@ func TestLift_DroppedImportsAreCandidates(t *testing.T) {
 		}
 	}
 	require.Equal(t, []row{
-		{"`@_apex/apex-operating-rules.md`: the apex-v0 framework's operating rules (3 lines, 1 KB), imported by CLAUDE.md's apex:managed block; the lift removes the import and the file. Read it at the tag: `git show apex-v0-final:_apex/apex-operating-rules.md`. apex-v1 replaces them; keep any rule that still applies to this project.", "CLAUDE.md:4", "Greeter"},
+		{"`@_apex/apex-operating-rules.md`: the apex-v0 framework's operating rules (3 lines, 1 KB), imported by CLAUDE.md's apex:managed block; the lift removes the import and the file. Read it at the tag: `git show apex-v0-final:_apex/apex-operating-rules.md`. apex-v1 replaces them; keep any rule that still applies to this project. Two are carried already: tag and push authorisation is enforced by `ape hook pre-tool` (tag writes and every push are denied unless the person launches the session with APE_ALLOW_TAG=1 / APE_ALLOW_PUSH=1), and the zsh quoting rule is added to every session on a zsh host by `ape hook session-start`.", "CLAUDE.md:4", "Greeter"},
 		{"`@_apex/commit-owners.csv`: a file (1 line, 1 KB), imported by CLAUDE.md; the lift removes the import and the file. Read it at the tag: `git show apex-v0-final:_apex/commit-owners.csv`.", "CLAUDE.md:9", "Notes"},
 	}, got, "the kept @AGENTS.md import has no row")
 }

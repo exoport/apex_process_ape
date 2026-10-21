@@ -553,7 +553,12 @@ func (lf *lifter) importCandidates(doc string) []LiftCandidate {
 			text += " (not in the tree at " + LiftTag + ")"
 		}
 		if rel == v0OperatingRules {
-			text += " apex-v1 replaces them; keep any rule that still applies to this project."
+			// RK-3b (D297): the two rules a review recovered from them are
+			// carried already; a `dropped:` can name its carrier.
+			text += " apex-v1 replaces them; keep any rule that still applies to this project. Two are carried already: " +
+				"tag and push authorisation is enforced by `ape hook pre-tool` (tag writes and every push are denied unless " +
+				"the person launches the session with APE_ALLOW_TAG=1 / APE_ALLOW_PUSH=1), and the zsh quoting rule is added " +
+				"to every session on a zsh host by `ape hook session-start`."
 		}
 		out = append(out, LiftCandidate{Text: text, Source: itoaLine(i + 1), Section: paths[i+1], line: i + 1})
 	}

@@ -182,7 +182,9 @@ The commit:
                  is a paragraph. Each CLAUDE.md import the lift drops — the
                  managed block's @_apex/apex-operating-rules.md, an @ import of
                  any other file it deletes — is one row naming the file, its
-                 size, and git show apex-v0-final:<path>. Grouped by source and section (JSON
+                 size, and git show apex-v0-final:<path>; the operating rules' row
+                 also names the two carried already: tags and pushes by ape hook
+                 pre-tool, zsh quoting by ape hook session-start. Grouped by source and section (JSON
                  rule_candidates[].section, the heading path); text found twice is
                  listed once with both sources (also_in). An empty Disposition
                  column for apex-plan, then a fresh read-only review, then the
