@@ -1,45 +1,60 @@
 # Why PTY-only execution
 
-Up to and including ape `v0.0.35`, `ape pipeline` had two ways to drive `claude`: a **programmatic** path (one `claude -p "<prompt>"` subprocess per step, selected with `-P` / `--programmatic`, `-I` / `--interactive`, or the locked `--eval`) and an **interactive** path (one long-lived `claude` REPL per stage inside an in-process PTY). v0.0.36 (PLAN-9 F2) removes the programmatic axis. Every run now executes `claude` as an interactive REPL inside a per-stage in-process PTY (`internal/repl/`, backed by `github.com/aymanbagabas/go-pty`). The invocation axes collapsed from (UI × Exec) to just **UI**: `--tui` (default), `--web`, `--no-tui`. This page explains why.
+ape drives `claude` one way: as an interactive REPL inside an in-process PTY, with each prompt typed as keystrokes. It never runs `claude -p`. This page explains why that is the only mode worth keeping, how the PTY is held, and what the hooks give ape that claude's output stream cannot.
 
 ## What was removed
 
-The flags `-P` / `--programmatic`, `-I` / `--interactive`, and `--eval` are gone. They remain registered (hidden) for one release so an old invocation gets an actionable message instead of cobra's terse "unknown flag":
+An older ape also had a **programmatic** path: one `claude -p "<prompt>"` subprocess per step, chosen with `-P` / `--programmatic`, `-I` / `--interactive`, or `--eval`. That path and its flags are gone. Passing one now gets cobra's own error and exit 2:
 
 ```
-programmatic mode was removed in v0.0.36; interactive PTY is the only exec mode.
-Drop -P/--programmatic, -I/--interactive, and --eval — the run is interactive by
-default. See docs/explanation/why-pty-only.md.
+$ ape task <skill> --programmatic
+Error: unknown flag: --programmatic
 ```
 
-Passing any of them exits `2` (usage error). Exit codes are centralized (`internal/apecmd/exitcodes.go`): `0` ok, `1` run failed / idle-timeout, `2` usage or preflight error, `3` the REPL never became ready inside the PTY.
+## How the PTY is held
+
+ape allocates the PTY in its own process (`internal/repl/`, backed by `github.com/aymanbagabas/go-pty`), which uses Unix PTYs on Linux and macOS and ConPTY on Windows, so no `tmux` binary is needed on `PATH`. It writes keystrokes to the PTY master: the line, then Enter once claude has drawn it. It reads the pane back through a terminal emulator, which is how it knows the REPL is ready and when a line was drawn. `ape chat` is the one exception: it hands claude your terminal, and you type.
+
+A session lives and dies with the ape process that holds it; there is no external attach to a running one. To follow a run, read its step event log or its hook events; to run one in the background, use `ape task --detach` ([detach-a-run.md](../how-to/detach-a-run.md)).
 
 ## Why PTY is the only mode worth keeping
 
-### 1. Real REPL parity with how users run claude
+### 1. Real REPL parity with how people run claude
 
-Under the PTY path, ape types each step into the same `claude` REPL a human would use — the slash command is written to the PTY master end, settles briefly, then Enter is pressed. claude's CLI parses the slash command the normal way, the skill loads, the model executes. There is no second, `-p`-shaped execution path whose behavior can silently diverge from the interactive one users actually see. One code path, one behavior to reason about.
+ape types each line into the same `claude` REPL a person would use. claude's CLI parses the slash command the normal way, the skill loads, the model executes. There is no second, `-p`-shaped execution path whose behaviour can silently diverge from the interactive one people actually see. One code path, one behaviour to reason about.
 
-### 2. The hooks/bridge step contract can verify each step
+### 2. The hooks let ape check each step
 
-The bridge observes `UserPromptSubmit` and `Stop` hooks emitted by the live REPL. The `ContractVerifier` matches each step's typed prompt against the agent-prefixed skill shape the runner registered, and hard-fails on mismatch (see [step-contract.md](../reference/step-contract.md)). This observability only exists because the prompt is typed into a real session — `claude -p` gives a fresh process per step with no in-session state to verify, so a misbehaving skill leaking agent identity across a boundary went undetected. The `Stop` hook also serves as the "this step finished, safe to send the next prompt" signal, since an interactive REPL stays alive between turns rather than exiting per step.
+The bridge observes the `UserPromptSubmit` and `Stop` hooks the live REPL emits. ape matches the submitted line against the skill shape it typed, and hard-fails on a mismatch ([step-contract.md](../reference/step-contract.md)). That check exists only because the prompt is typed into a real session.
 
-### 3. Prompt-cache behavior across steps
+### 3. Transcript scanning is the single cost source
 
-One REPL per stage means the steps in a stage's chain share a single claude session. Multi-step skills that use an elicit/respond pattern (e.g. `apex-create-prd`) inherit the prior step's context naturally (set `no-clear: true` to skip the `/clear` the runner otherwise types between steps). Per-stage spawning also pays the process-fork / MCP-handshake / prompt-cache cold-start cost once per stage instead of once per step, and stops fighting Anthropic's prompt-cache TTL that the per-step `claude -p` shape hit on every chain step.
+Cost and token figures come from scanning the session transcripts (`internal/cost/`), not from a `result` event. With one execution path, the transcript scan is the one source for a run manifest's totals, its per-step figures and its per-model breakdown, sub-agent sessions included ([the run manifest](../reference/pipeline-run-manifest.md)).
 
-### 4. Transcript scanning is the single cost source
+A caller that wants a structured result, the eval included, uses `ape task --output-format json`: a result envelope on stdout, progress on stderr. It drives the same PTY session as a human-format run; there is no captured-for-replay path to keep in sync.
 
-Cost and token metrics are derived by scanning the session transcript (`internal/cost/`), not by parsing a per-step `result` event. With one execution path, the transcript scan is the single source of truth for the manifest's `totals`, per-step metrics, and the per-model breakdown — including sub-agent sessions. See [pipeline-run-manifest.md](../reference/pipeline-run-manifest.md).
+## What hooks add over claude's output stream
 
-## Where the eval went
+ape injects Claude Code hooks (`PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `SubagentStart`, `SubagentStop`, `SessionStart`, `PreCompact`, `Stop`) through the `--settings` it passes, and each one reaches ape through `ape notify` and the bridge. A fair question: what do hooks give that an output stream would not?
 
-The old eval-harness path was `ape pipeline <name> --eval`, a byte-equivalence-locked programmatic run. That flag is gone. The eval now drives the interactive surfaces directly: `ape task --output-format json` for single-skill runs (a structured result envelope on stdout, progress on stderr) and `ape pipeline <name> --no-tui` for whole-pipeline runs (plain stdout progress lines). Both execute the same interactive PTY the default `--tui` run uses; there is no separate captured-for-replay code path to keep in sync.
+### 1. `UserPromptSubmit`: what was actually submitted
+
+An output stream shows the model's **output**: text, tool calls, tool results. It does not show what was typed at the prompt. Two of ape's checks need exactly that:
+
+- the step contract, which matches the submitted line against the skill shape ape typed;
+- the submit confirmation: ape presses Enter, then waits for `UserPromptSubmit`, pressing Enter up to twice more, and ends the run as `prompt_not_submitted` if the line never arrives.
+
+### 2. `Stop`: the turn ended
+
+The REPL **stays alive** between turns, waiting for the next keystroke, so the process exiting tells ape nothing. The `Stop` hook is synchronous and fires once per ended turn, so it is the signal that the session finished responding. Pane output alone cannot say when. A `Stop` is still not proof the work is done; [step-completion-gates.md](step-completion-gates.md) explains what ape checks before it takes one, and how an APEX v1 project's stop hook can keep the session going.
+
+### 3. `PreToolUse`: interception before a tool runs
+
+A hook fires **before** a tool runs and can deny the call, which no after-the-fact stream event can. ape's own bridge hooks only observe. In an APEX v1 project, the project's `ape hook pre-tool` does intercept: it denies some edits (under `development/specs/`, `development/archive/` and `_apex/state/`, a change's `state.json`, an existing brief) and some Bash commands (a tag write, a push, a rebase or merge on a change branch, `pkill`). See [hooks.md](../reference/hooks.md).
 
 ## Related
 
-- invocation-matrix.md — the UI axis: `--tui` (default), `--web`, `--no-tui`.
-- [claude-spawn-modes.md](../reference/claude-spawn-modes.md) — how ape delivers prompts to the PTY-hosted REPL.
-- [step-contract.md](../reference/step-contract.md) — what the runner types into the REPL between steps.
-- [exec-modes.md](exec-modes.md) — the per-stage interactive runtime in depth.
-- bridge-architecture.md — the MCP bridge and hook observability.
+- [claude-spawn-modes.md](../reference/claude-spawn-modes.md): every command that starts a session, and how the prompt reaches it.
+- [step-contract.md](../reference/step-contract.md): what `ape task` types into the REPL, and what it checks.
+- [step-completion-gates.md](step-completion-gates.md): when a `Stop` completes a step.
+- [hooks.md](../reference/hooks.md): the hooks of an APEX v1 project.

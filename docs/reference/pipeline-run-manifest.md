@@ -1,245 +1,330 @@
 # Run manifest
 
-Every `ape task <skill>` run writes a structured on-disk record of the run: a one-stage, one-step run in the shape below. (`ape pipeline <name>`, an APEX v0 command retired in ape v1, wrote the same record with one stage per pipeline stage; its runs stay readable.) The record lives under the project root and gives downstream tooling (notably the [apex_process_framework_eval](https://github.com/diegosz/apex_process_framework_eval) consumer) a stable contract.
+Every `ape task <skill>` run writes `manifest.yaml`, the on-disk record of the run: what ran, on which model and effort, what it cost, how it ended, and, in an APEX v1 project, where it sits in the session tree. The sessions the `ape change` verbs and an `apex-loop` run start are `ape task` runs, so each has one too. Downstream tooling, notably the [apex_process_framework_eval](https://github.com/diegosz/apex_process_framework_eval) consumer, reads it as a stable contract. This page is that contract. (`ape prompt` and `ape chat` keep their own records, `prompt.yaml` and `session.yaml`.)
 
 ## Layout
 
-In an APEX v1 project the runs live under `_apex/state/runs/` (git-ignored, out of a model's reach): `_apex/state/runs/tasks/<skill>/<run_id>/`. Elsewhere, under the output folder:
+In an APEX v1 project (`_apex/state/` exists) runs live under `_apex/state/runs/`, which git ignores and a model's edits cannot reach. Elsewhere they live under the output folder (`output_folder`, default `_output`):
 
 ```
-<project_root>/_output/ape/tasks/<skill>/<run_id>/     (an older ape's pipelines: _output/ape/pipelines/<pipeline_name>/<run_id>/)
-  manifest.yaml             # canonical schema (this document)
-  pipeline-report.md        # human-readable summary rendered from the manifest
+_apex/state/runs/tasks/<skill>/<run_id>/       (APEX v1 project)
+<output_folder>/ape/tasks/<skill>/<run_id>/    (anywhere else)
+  manifest.yaml                    # this document
+  pipeline-report.md               # human-readable summary rendered from the manifest
   stages/
-    01-<stage_name>/
-      step-01-<skill>.ndjson  # raw claude stream-json events for the step
-      step-02-<skill>.ndjson
-      ...
-    02-<stage_name>/...
+    01-<skill>/
+      step-01-<skill>.ndjson       # the step's event log
+      step-01-<skill>.args.md      # only when the arguments went to a file (step-contract.md)
 ```
 
-A symlink at `<skill>/latest` (`<pipeline_name>/latest`) points at the most recent `<run_id>`. On filesystems that don't support symlinks the symlink is best-effort.
+plus the run's runlog streams. A symlink at `<skill>/latest` points at the most recent `<run_id>`; on filesystems without symlinks it is best-effort.
 
-`<run_id>` is `YYYYMMDD-HHMMSS-<7-char-hash>` (UTC). The hash mixes the run start time, the pipeline name, and the project root, so concurrent invocations against the same project do not collide.
+`<run_id>` is `YYYYMMDD-HHMMSS-<7-char-hash>` (UTC). The hash mixes the start time in nanoseconds, the skill and the project root, so concurrent runs against the same project do not collide.
 
-## Manifest schema (v2)
+`ape task --manifest-dir <path>` moves the base directory; ape writes `<path>/<skill>/<run_id>/` underneath. The eval uses it to put manifests in its own results tree.
 
-Schema history:
+## Schema
 
-- **v1** (ape v0.0.9) — initial PLAN-3 manifest with per-step metrics.
-- **v2** (ape v0.0.10+) — PLAN-4 commit fields on `StepRecord` (`commit_sha`, `commit_message`, `commit_status`, `commit_error`) plus `totals.commits_made`.
+`schema_version` is `2`. Every field added since is **additive**: optional, omitted when empty, and ignored by a reader that does not know it. Consumers should treat unknown fields as opaque and reject only a manifest whose `schema_version` is higher than the one they understand.
 
-Since v2, additional fields have been added **without bumping the schema version** — they are optional (`omitempty`) and v2 readers ignore them:
+A manifest an older ape wrote for an `ape pipeline` run (APEX v0) has the same schema, with one stage per pipeline stage and a few pipeline-only fields; the v0 docs are at https://github.com/exoport/apex_process_ape/tree/v0.10.0/docs.
 
-- `totals.num_turns` and per-step `num_turns` — turn counts derived from the transcript scan.
-- `totals.model_usage` and per-step `model_usage` — per-model cost/token breakdown (PLAN-10 D5, ape v0.0.36+), keyed by model id.
-- `tokens_cache_creation_5m` / `tokens_cache_creation_1h` on `totals`, each step, and every `model_usage` entry — the ephemeral cache-write split (PLAN-10 D1, ape v0.0.37+). `tokens_cache_creation` is unchanged and stays the **sum** of the two tiers, which price differently (5m ≈ 1.25× base input, 1h ≈ 2.00×); the split fields simply expose that breakdown. Consumers that only track total cache creation keep reading `tokens_cache_creation` and ignore the split.
-- per-step `sessions[]` — per-claude-session usage: the step's main REPL session plus any sub-agent (Agent tool) sessions observed via `SubagentStart` / `SubagentStop`.
-- `claude_version` — the resolved `claude --version` at run start (best-effort).
-- `file_read_max_output_tokens` (ape v0.5.0+) — the per-Read token cap ape pinned on the session (`CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS`, 30000), so a run's evidence says how much of a file one Read could show. Set in the spawn environment and in ape's `--settings` `env`, which outranks project, local and user settings; only an enterprise-managed setting could still move it. `prompt.yaml` records the same field.
-- per-step `telemetry_note` — a diagnosability breadcrumb explaining why a numeric field is zero or approximate. Two causes: the transcript was unavailable / had no complete assistant turn (everything zero), or a model had no price in the table (tokens and turns correct, `cost_usd` a lower bound). More than one cause is joined with `; `.
-- per-step `model_declared` (ape v0.0.68+) — present **only** when the spec's resolved `model:` for that step is not the one the step ran on. A stage is one `claude` process launched with its first step's model and ape sends no `/model`, so a later step's `model:` cannot take effect. `model` now records what ran; `model_declared` records what was asked for. Absent on every step where the two agree, so its presence is itself the signal. Older manifests carry the *declared* value in `model` with no way to tell whether it was applied — see pipeline-yaml-schema.md.
-- per-step `effort`, `effort_declared` and `effort_source` (ape v0.2.0+). `effort` is what the step's launch model actually ran at, resolved. It used to be the step's own `effort:` field, so a step inheriting from its stage, the pipeline, `--effort` or the default recorded nothing, and a later step's declaration read as though it had applied. `effort_declared` appears only when the step asked for a different effort, which a running session cannot switch to. `effort_source` names the rule: `step`, `stage`, `pipeline`, `flag` (`--effort`), `table` (`_apex/effort-defaults.yaml`) or `legacy-default` (no table, so `xhigh` process-wide). An eval report reads it to tell a run that got the framework's table from one that did not. Under `table`, a sub-agent on another model family runs at its own family's row, and the transcript records the effort of each request. With no `--model`, `effort` is the row of the model the step's main session actually ran on, taken from the step's own telemetry.
-- per-step `context_window` and per-`model_usage`-entry `context_window` (ape v0.0.60+) — the model's usable context in tokens, from ape's maintained table. **Omitted when unknown**, never defaulted. See [reading the `context_window` fields](#reading-the-context_window-fields) — there are two of them and they can legitimately disagree.
-- per-step `contract` (ape v0.0.60+) — the terminal-contract verdict: `present`, `missing`, or `no-transcript`. **Omitted** when the step's skill declares no contract in the framework's `_apex/terminal-contracts.csv`, so the field is present exactly when the skill was enrolled. See [reading the `contract` field](#reading-the-contract-field) before using it as a quality metric — it measures TEXT, not work.
-
-Forward-compatible: v2 readers should accept v1 manifests (the new fields are optional `omitempty`) and treat unrecognized additive fields as opaque.
+An `ape task` run in an APEX v1 project, here an `apex-apply` session that an `apex-loop` run started:
 
 ```yaml
 schema_version: 2
-ape_version: 0.1.0
+ape_version: 1.0.0
+claude_version: 2.1.302 (Claude Code)
+file_read_max_output_tokens: 30000
 pipeline:
-  name: design
-  source: /home/foo/myproject/_apex/pipelines/design.yaml
-  digest: sha256:5a4f...        # sha256 of the source file at run start
+  name: apex-apply              # the run's name: the skill
+  source: /home/foo/myproject/_apex/pipelines/apex-apply.yaml   # see "pipeline" below
+  digest: ""
 project_root: /home/foo/myproject
-run_id: 20260511-094530-a0d06c8
-started_at: 2026-05-11T09:45:30Z
-timestamp: "20260511094530"   # the framework's `timestamp` for this run (additive)
-ended_at: 2026-05-11T10:38:12Z
-duration_seconds: 3162.4
-status: completed             # running | completed | failed | cancelled
+run_id: 20261021-094530-a0d06c8
+started_at: 2026-10-21T09:45:30Z
+timestamp: "20261021114530"     # the framework's `timestamp` for this run
+ended_at: 2026-10-21T10:21:02Z
+duration_seconds: 2132.4
+status: completed               # running | completed | failed | cancelled
 totals:
-  cost_usd: 4.83
-  tokens_input: 412334
-  tokens_output: 28910
-  tokens_cache_read: 187420
-  tokens_cache_creation: 9211       # sum of the two tiers below
-  tokens_cache_creation_5m: 3111    # additive split (PLAN-10 D1); 5m + 1h == tokens_cache_creation
-  tokens_cache_creation_1h: 6100
-  num_turns: 214
-  steps_run: 13
+  cost_usd: 3.12
+  tokens_input: 212334
+  tokens_output: 18910
+  tokens_cache_read: 1874200
+  tokens_cache_creation: 92110      # sum of the two tiers below
+  tokens_cache_creation_5m: 31110
+  tokens_cache_creation_1h: 61000
+  num_turns: 96
+  steps_run: 1
   steps_failed: 0
-  commits_made: 13
-  model_usage:                 # per-model breakdown, summed across steps (additive)
-    claude-opus-4-8:
-      cost_usd: 4.11
-      tokens_input: 380012
-      tokens_output: 24110
-      tokens_cache_read: 170220
-      tokens_cache_creation: 8100
-      tokens_cache_creation_5m: 2500
-      tokens_cache_creation_1h: 5600
-      num_turns: 180
-    claude-sonnet-4-6:
-      cost_usd: 0.72
-      tokens_input: 32322
-      tokens_output: 4800
-      tokens_cache_read: 17200
-      tokens_cache_creation: 1111
-      num_turns: 34
+  commits_made: 0               # ape's own commits only: see "Commits"
+  model_usage:
+    claude-sonnet-5-5:
+      cost_usd: 3.12
+      tokens_input: 212334
+      tokens_output: 18910
+      tokens_cache_read: 1874200
+      tokens_cache_creation: 92110
+      tokens_cache_creation_5m: 31110
+      tokens_cache_creation_1h: 61000
+      num_turns: 96
 stages:
   - index: 1
-    name: prd
-    started_at: 2026-05-11T09:45:30Z
-    ended_at: 2026-05-11T09:58:11Z
-    duration_seconds: 760.5
+    name: apex-apply
+    started_at: 2026-10-21T09:45:30Z
+    ended_at: 2026-10-21T10:21:02Z
+    duration_seconds: 2132.4
     status: completed
     steps:
       - index: 1
-        skill: apex-create-prd
-        agent: apex-agent-pm     # omitted when the step has no agent
-        args: ""
-        prompt: ""
-        model: ""                # what the step RAN on: its stage's launch model
-        model_declared: ""       # only when the spec asked for a different one (see below)
-        effort: medium           # what the step RAN at, resolved — see below
-        effort_declared: ""      # only when the step asked for a different effort
-        effort_source: table     # step | stage | pipeline | flag | table | legacy-default
-        started_at: 2026-05-11T09:45:30Z
-        ended_at: 2026-05-11T09:58:11Z
-        duration_seconds: 760.5
+        skill: apex-apply
+        args: add-tenant-delete
+        model: sonnet
+        effort: high
+        effort_source: config
+        started_at: 2026-10-21T09:45:30Z
+        ended_at: 2026-10-21T10:21:02Z
+        duration_seconds: 2132.4
         status: completed
         exit_code: 0
-        cost_usd: 1.42
-        tokens_input: 84012
-        tokens_output: 8910
-        tokens_cache_read: 41208
-        tokens_cache_creation: 2811
-        tokens_cache_creation_5m: 811
-        tokens_cache_creation_1h: 2000
-        num_turns: 47
-        events_path: stages/01-prd/step-01-apex-create-prd.ndjson
-        commit_sha: a0d06c8
-        commit_message: "ape:design/prd/apex-create-prd"
-        commit_status: committed
-        commit_error: ""
-        contract: present            # omitted when the skill is not enrolled
-        context_window: 1000000      # the window of the model THIS STEP was spawned with
-        model_usage:                 # this step's per-model breakdown (additive)
-          claude-opus-4-8:
-            cost_usd: 1.42
-            tokens_input: 84012
-            tokens_output: 8910
-            tokens_cache_read: 41208
-            tokens_cache_creation: 2811
-            tokens_cache_creation_5m: 811
-            tokens_cache_creation_1h: 2000
-            num_turns: 47
-        sessions:                    # per-claude-session usage (main + sub-agents)
+        cost_usd: 3.12
+        tokens_input: 212334
+        tokens_output: 18910
+        tokens_cache_read: 1874200
+        tokens_cache_creation: 92110
+        tokens_cache_creation_5m: 31110
+        tokens_cache_creation_1h: 61000
+        num_turns: 96
+        events_path: stages/01-apex-apply/step-01-apex-apply.ndjson
+        context_window: 1000000
+        model_usage: {}           # this step's per-model breakdown, same shape as totals.model_usage
+        sessions:                 # per-claude-session usage: the main session, then sub-agents
           - session_id: 0a675bc4
-            cost_usd: 1.20
-            tokens_input: 72000
-            tokens_output: 7600
-            num_turns: 40
-          - session_id: 9f31ab02     # sub-agent (Agent tool) session
+            cost_usd: 2.80
+            tokens_input: 190000
+            tokens_output: 16600
+            num_turns: 80
+          - session_id: 9f31ab02
             parent_session_id: 0a675bc4
-            cost_usd: 0.22
-            tokens_input: 12012
-            tokens_output: 1310
-            num_turns: 7
+            cost_usd: 0.32
+            tokens_input: 22334
+            tokens_output: 2310
+            num_turns: 16
+commit_contract:
+  skill: apex-apply
+  declared: false
+  asserted: false
+  skip_reason: <why no assertion ran>
+  ok: false
+launch:
+  model: sonnet
+  model_source: config
+  effort: high
+  effort_source: config
+  parent: <the APE_SESSION of the loop session>
+depth: 2
+parent_run: 20261021-090012-5be21f0
 ```
+
+### Run fields
+
+| Field | Meaning |
+| --- | --- |
+| `schema_version`, `ape_version` | The schema (2) and the ape that wrote the run. |
+| `claude_version` | `claude --version` at run start; empty when it could not be read. |
+| `file_read_max_output_tokens` | The per-Read token cap ape pinned on the session (`CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS`, 30000), set in the spawn environment and in ape's `--settings` `env`. |
+| `pipeline` | `name` is the run's name, the skill for a task run. `source` names `_apex/pipelines/<skill>.yaml`, a file a task run does not have, so `digest` is empty. Both are filled for a pipeline run an older ape wrote. |
+| `project_root`, `run_id` | The project and the run's id (see Layout). |
+| `started_at`, `ended_at`, `duration_seconds` | Wall-clock instants (RFC 3339, UTC) and the run's length. |
+| `timestamp` | The framework's `timestamp` for this run; see [below](#timestamp-is-not-a-second-started_at). |
+| `status` | See [Status values](#status-values). |
+| `totals` | Sums over completed steps: cost, tokens, turns, `steps_run`, `steps_failed`, `commits_made`, and `model_usage` keyed by model id. |
+| `stages` | One stage with one step for a task run. Step fields are below. |
+| `commit_contract` | The commit-ownership verdict; see [Commits](#commits). |
+| `commits_shared` | Commits in this run's range that another ape session's run in the same checkout may have made; see [Commits](#commits). |
+| `termination` | Why a run ended other than by finishing; see [below](#termination--why-a-run-ended). |
+| `stop_gate` | APEX v1: the project's stop hook's verdicts on this run's Stops; see [below](#stop_gate--the-v1-stop-hooks-verdicts). |
+| `launch` | APEX v1: the model and effort the session started with, and what decided each; see [below](#launch--the-v1-model-and-effort-decision). |
+| `review_launch` | Only on a review session `ape change review --run` started: the review's own launch decision, in the same shape as `launch`. |
+| `depth`, `parent_run` | APEX v1 nesting rule: `depth` is 1 for a run a terminal, a script or the service daemon started, 2 for one an `apex-loop` run started. `parent_run` is that loop run's id. |
+| `relay_of`, `relay` | Only on a loop session ape relayed: the loop run it relays, and how many relays that loop run has had with this one (1 for the first). |
+| `children`, `tree_cost_usd` | Only on an `apex-loop` run, written when it ends; see [below](#children-and-tree_cost_usd). |
+| `transcript_blobs`, `upload_status` | Present only with `--upload-transcripts`: each uploaded transcript's content-addressed reference, and `ok`, `partial` or `failed`. |
+
+### Step fields
+
+| Field | Meaning |
+| --- | --- |
+| `index`, `skill`, `agent`, `args`, `prompt` | What was typed: the skill, the `--agent` fronting it (omitted when none), the `--args` and the prompt text. |
+| `model` | The model the session was launched with; empty when ape passed none and claude chose. |
+| `effort`, `effort_source` | The effort the session ran at, and the rule that produced it. In an APEX v1 project the source is the launch decision's (`flag`, `config`, `parent-session`, `config-default`, `default`). Elsewhere it is `flag` (`--effort`), `table` (`_apex/effort-defaults.yaml`) or `legacy-default` (no table, so `xhigh` process-wide). See [claude-code-env-vars.md](claude-code-env-vars.md#reasoning-effort-claude_code_effort_level). |
+| `started_at`, `ended_at`, `duration_seconds`, `status`, `exit_code` | The step's lifecycle. |
+| `cost_usd`, `tokens_*`, `num_turns` | The step's usage, from the transcript scan. `tokens_cache_creation` is the sum of `tokens_cache_creation_5m` and `tokens_cache_creation_1h`, which price differently. |
+| `model_usage` | The step's usage per model, keyed by model id. |
+| `sessions[]` | Usage per claude session: the step's main session, and every Agent-tool sub-agent session (`parent_session_id` set). |
+| `events_path` | The step's event log, relative to the run directory. |
+| `commit_sha`, `commit_message`, `commit_status`, `commit_error` | Only with `--task-commit`; see [Commits](#commits). |
+| `telemetry_note` | Why a numeric field is zero or approximate: no transcript or no complete assistant turn (everything zero), or a model with no price (tokens and turns exact, `cost_usd` a lower bound). Several causes are joined with `; `. |
+| `context_window` | The usable context of the model the step was launched with; see [below](#reading-the-context_window-fields). |
+| `contract` | The terminal-contract verdict; see [below](#reading-the-contract-field). |
 
 ### Status values
 
 - `running` — written at run start; should not appear in a finalized manifest. If you see it, the run was abandoned without finalization (process crash, hard kill).
-- `completed` — every step exited 0 and the terminal `result` event reported `subtype: success`.
-- `failed` — at least one step exited non-zero or its terminal `result` event reported a non-success subtype.
-- `cancelled` — the run's context was cancelled (e.g. user pressed `q` then `y` in the TUI).
+- `completed` — the step finished.
+- `failed` — the step failed, or a backstop or limit ended the run; `termination` says which.
+- `cancelled` — the run's context was cancelled (Ctrl-C, or a parent's deadline).
 
 ### `termination` — why a run ended
 
 Present only when a run ended for a reason other than finishing; absent on a
-completed run, where `status` already says everything. Additive under
-`schema_version: 2`.
+completed run, where `status` already says everything.
 
 ```yaml
 termination:
-  kind: idle_timeout          # idle_timeout | max_duration | api_error | prompt_not_submitted | repl_not_ready | budget | usage_limit | cancelled | error
+  kind: idle_timeout          # see the table below
   message: "interactive step idle for 1h0m0s without progress (window 1h0m0s): …"
   diagnostic: "last progress hook 1h0m0s ago (hook 1h0m0s ago; transcript none for 3h44m; pty n/a); child pid 4242 alive"
-  last_source: hook           # idle only: hook | transcript | pty | none
-  idle_seconds: 3600.0        # idle only
-  window_seconds: 3600.0      # idle only
+  last_source: hook           # idle_timeout only: hook | transcript | pty | none
+  idle_seconds: 3600.0        # idle_timeout only
+  window_seconds: 3600.0      # idle_timeout only
   elapsed_seconds: 14400.0    # max_duration; prompt_not_submitted: how long ape pressed Enter
   max_seconds: 10800.0        # max_duration only
   quiet_seconds: 90.0         # api_error only
+  spent_usd: 41.20            # budget only: the milestone's spend
+  budget_usd: 40.00           # budget only: the milestone's Budget: line
+  session_cost_usd: 6.10      # budget only: this session's live cost
   resets: "11pm (Europe/Madrid)"          # usage_limit only: the reset as Claude Code printed it
   resets_at: 2026-10-16T23:00:00+02:00    # usage_limit only: parsed; absent when it does not parse
 ```
 
-`usage_limit` means a claude.ai plan's usage limit stopped the session: ape
-read Claude Code's limit line in the PTY pane ("You've hit your usage limit ·
-resets 11pm (Europe/Madrid)", or "Usage limit reached · limit resets …") on two
-reads 15 s apart with no hook between them, and ended the run. `ape task` exits
-14, and `ape status` shows the run as "stopped: usage-limit, resets <ts>". The
-patterns are Claude Code 2.1.302's text, unmeasured live. Before this kind
-existed, such a run sat until `idle_timeout`.
+| `kind` | Meaning | `ape task` exit |
+| --- | --- | --- |
+| `idle_timeout` | No progress on any watched signal for a full `--idle-timeout` window. | 1 |
+| `max_duration` | The `--max-duration` ceiling, progress or not. | 1 |
+| `api_error` | claude's own upstream-failure text: a failure of the harness, not of the step. | 5 |
+| `prompt_not_submitted` | ape typed the line and claude never submitted it: no `UserPromptSubmit` through the Enter press and the two retries. `message` says whether the line was drawn and quotes the input row. | 1 |
+| `repl_not_ready` | claude never came up inside the PTY within the 30-second window: an unknown blocking modal, a trust dialog ape could not get past, or a claude that drew nothing. `message` carries the last pane; the raw PTY bytes are saved beside the run. `status` is `failed`. A `--max-duration` shorter than the window records `max_duration` instead, and a run you cancel while claude is still starting stays `cancelled`. | 3 |
+| `budget` | APEX v1, `limits.budget: enforce`: the milestone's spend reached its budget, and ape stopped the session. | 1 |
+| `usage_limit` | A claude.ai plan's usage limit stopped the session: the same limit line on two pane reads 15 s apart with no hook between them. `ape status` shows "stopped: usage-limit, resets <ts>". Matched against Claude Code 2.1.302's text. | 14 |
+| `parent_gone` | APEX v1: the `apex-loop` run that started this session ended first (its ape process is gone), and ape stopped the session. | 1 |
+| `relays` | APEX v1: a loop session's context reached `limits.context_relay` again after `limits.relays` relays, and ape stopped the loop run instead of relaying it once more. A person's call. | 1 |
+| `cancelled` | The context was cancelled. | 1 |
+| `error` | Any other run error. | 1 |
 
-`prompt_not_submitted` means ape typed a step's line and claude never
-submitted it: no `UserPromptSubmit` hook followed, through the Enter press and
-the two retries ape makes about 20 s apart. The `message` says whether the line
-was ever drawn in the input box and quotes the input row. Before this kind
-existed, such a step sat with its line in the input box until `idle_timeout`.
-
-`repl_not_ready` means claude never came up inside the PTY within the
-30-second readiness window: an unknown blocking modal, a trust dialog ape could
-not get past, or a claude that drew nothing. The `message` carries the last
-pane, and the raw PTY bytes are saved beside the run. The command exits 3.
-The run's `status` is `failed`. Before this kind existed, the expired window
-was recorded as `cancelled` in both fields. A
-`--max-duration` shorter than the window records `max_duration` instead, and a
-run you cancel while claude is still starting stays `cancelled`.
+The exit codes are `ape task`'s (`taskExitCode`, `internal/apecmd/task.go`; `ape task --help`).
 
 **Read it together with the zeros.** `totals` counts *completed* steps, and a
-step cancelled mid-flight records none — so a terminated run shows
+step stopped mid-flight records none, so a terminated run can show
 `steps: []`, `cost_usd: 0` and `num_turns: 0` while its work is real, committed
-and visible in `git log` and in `commit_contract`. Before this field existed,
-such a run was indistinguishable on disk from one that did nothing: a framework
-eval capture ended after 3h44m with exactly those zeros, the backstop having
-fired correctly 60 minutes after the parent's last hook, and the reason existed
-only in stderr.
+and visible in `git log` and in `commit_contract`. `termination` is what tells
+that run apart from one that did nothing. For a `budget` stop,
+`session_cost_usd` is the session's cost as ape measured it live, which the
+totals do not hold.
 
 Two things in `diagnostic` are worth knowing how to read:
 
-- **`pty n/a`** means ape was not *watching* PTY output on this path — `ape task`
-  and pipeline stages deliberately do not, only `ape prompt` does — **not** that
-  claude stopped drawing. It is the difference between *ape stopped watching*
-  and *claude stopped working*.
+- **`pty n/a`** means ape was not *watching* PTY output on this path. `ape task`
+  deliberately does not, only `ape prompt` does. It does **not** mean claude
+  stopped drawing: it is the difference between *ape stopped watching* and
+  *claude stopped working*.
 - **`transcript touched N time(s) without growing`** is the signature of a hung
   session: Claude Code touches a wedged session's transcript about hourly
   without writing a byte.
 
+### `launch` — the v1 model and effort decision
+
+Present on every `ape task` session of an APEX v1 project, absent elsewhere.
+
+| Field | Meaning |
+| --- | --- |
+| `model`, `model_source` | The model passed as `--model`, and what decided it: `flag` (`--model`), `config` (`_apex/config.yaml` `models.<skill>`), `parent-session` (the ape session that started this one), or `default` (nothing passed; claude's own default, and `model` is omitted). |
+| `effort`, `effort_source` | The level passed as `claude --effort`, and what decided it: `flag`, `config` (`models.<skill>.effort`), `parent-session`, `config-default` (the top-level `effort:`), or `default` (nothing passed). |
+| `parent` | The `APE_SESSION` of the session that started this one; for a review, the session that asked for it. |
+
+The resolution order is in `ape task --help` and [claude-code-env-vars.md](claude-code-env-vars.md#reasoning-effort-claude_code_effort_level). An `ape change` verb that starts a session decides its model and effort first and passes what it decided as `--model` and `--effort`, so that session's `launch` sources read `flag`; a review session's `review_launch` keeps the verb's own decision and sources.
+
+### `stop_gate` — the v1 stop hook's verdicts
+
+In an APEX v1 project whose settings register `ape hook stop` (and in every `ape task` session, which passes the project's hooks inline), ape waits for that hook's verdict on each of the main session's Stops. A Stop the hook blocks continues the turn instead of ending the run. Absent when no verdict was consulted.
+
+```yaml
+stop_gate:
+  deferrals: 2        # Stops the hook blocked: turns the session continued
+  allowed: 1
+  events:
+    - at: 2026-10-21T10:02:11Z
+      verdict: block
+      change: add-tenant-delete
+      reason: "<the hook's reason>"
+    - at: 2026-10-21T10:20:58Z
+      verdict: allow
+```
+
+`ape prompt` records the same verdicts under `stop_gate` in `prompt.yaml`. Why the hook blocks is in [step-completion-gates.md](../explanation/step-completion-gates.md#v1-the-stop-hook).
+
+### `children` and `tree_cost_usd`
+
+Written when an `apex-loop` run ends, children or not:
+
+```yaml
+children:
+  - run: 20261021-094530-a0d06c8
+    skill: apex-apply
+    cost_usd: 3.12
+    status: completed
+tree_cost_usd: 7.94     # this run's totals.cost_usd plus its children's
+```
+
+`children` are the runs whose manifests name this run as `parent_run`. `totals` stay the loop session's own, so a reader that sums every manifest counts each child once. `tree_cost_usd` is written for every loop run, $0 and childless included, so its absence only ever means "not computed" (any other run, or one still running), never zero. Each relayed session of a loop run has its own manifest, cost and children.
+
+### Commits
+
+APEX v1 skills commit their own work. ape commits only when you pass `--task-commit`: one commit of the whole task at the end, with the message you give, or `ape:task/<skill>` for a bare flag.
+
+- **`totals.commits_made` counts ape's own commits only**, so `commits_made: 0` on a run whose skill committed six times is correct. The skill's commits are in `git log`.
+- **`commit_contract`** is the commit-ownership verdict, written when the project has `_apex/commit-owners.csv`. A skill absent from that file must leave HEAD, the index and the stash alone; a skill present must commit at least once, each subject matching a format the file declares. Without the file nothing is asserted: `asserted: false` with a `skip_reason`, never a pass. No APEX v1 release ships the file, so a v1 project is not asserted. A violation exits 6, and the run itself may have succeeded.
+
+  | Field | Meaning |
+  | --- | --- |
+  | `skill` | The dispatched skill. |
+  | `declared` | Whether the file lists the skill, so which assertion ran. |
+  | `asserted`, `skip_reason` | Whether an assertion ran, and why not. |
+  | `ok`, `violations` | The verdict, and each failed check as `<check>: <message>`. |
+  | `subjects` | The commit subjects observed across the dispatch. |
+
+- **`commits_shared`** lists the subjects of commits in this run's range made while another ape session's run in the same checkout was going (not this run's parent loop run, not its own children). git cannot say which run made them, so neither claims them: both list them here, and they are left out of the commit check.
+
+With `--task-commit`, ape refuses to start on a dirty tree unless you pass `--commit-allow-dirty`, and records on the step:
+
+| Field | When set |
+| --- | --- |
+| `commit_sha` | only when `commit_status` is `committed` |
+| `commit_message` | the message used |
+| `commit_status` | `committed`; `no-op` (the tree was clean); `failed` (`git commit` failed); `skipped-step-failed`; `skipped-cancelled` |
+| `commit_error` | only when `commit_status` is `failed`: the captured stderr |
+
 ### Metric provenance
 
-Since v0.0.36 every run drives an interactive `claude` REPL inside a PTY (see [why-pty-only.md](../explanation/why-pty-only.md)), so there is no per-step terminal `result` event to read. Per-step `cost_usd`, `tokens_*`, `num_turns`, `model_usage`, and `sessions[]` are derived by scanning the session transcript (`internal/cost/`). Transcript scanning is the single cost source, and it attributes usage per model and per claude session (including sub-agent sessions spawned via the Agent tool). If the transcript is unavailable at scan time, the numeric fields are zero, `telemetry_note` explains why, and the step still appears with the correct duration and status.
+Every run drives an interactive `claude` REPL inside a PTY (see [why-pty-only.md](../explanation/why-pty-only.md)), so there is no terminal `result` event to read. `cost_usd`, `tokens_*`, `num_turns`, `model_usage` and `sessions[]` come from scanning the session transcripts (`internal/cost/`), which attributes usage per model and per claude session, sub-agents included. If a transcript is unavailable at scan time, the numeric fields are zero, `telemetry_note` says why, and the step still has its duration and status.
 
-Cost and tokens can also disagree in the other direction. Pricing uses a table compiled into `ape` (`internal/cost/prices.yaml`), and Claude Code can introduce a model id that table does not carry. When that happens the token counts stay exact while `cost_usd` is either **estimated** from the model's family tier or **zero** — and the step's `telemetry_note` says which, naming the model and the turn count. A zero `cost_usd` beside non-zero `tokens_*` therefore means *unpriced*, not free. `ape costs reprice` recomputes those figures from the stored per-model tokens once the table is corrected; see [how to keep cost pricing current](../how-to/keep-cost-pricing-current.md).
+Cost and tokens can also disagree the other way. Pricing uses a table compiled into ape (`internal/cost/prices.yaml`), and Claude Code can introduce a model id the table does not carry. Then the token counts stay exact while `cost_usd` is either **estimated** from the model's family tier or **zero**, and `telemetry_note` says which. A zero `cost_usd` beside non-zero `tokens_*` means *unpriced*, not free. `ape costs reprice` recomputes the figures from the stored per-model tokens once the table is corrected; see [how to keep cost pricing current](../how-to/keep-cost-pricing-current.md).
 
 ### Per-model breakdown and `ape costs`
 
-`totals.model_usage` and per-step `model_usage` feed the project-wide cost rollup (`<project>/_output/ape/cost-rollup.json`). `ape costs` reads that rollup: its human output adds a **by model** table, and `ape costs --output-format json` includes a `per_model` map on the top-level rollup and on each pipeline / task / chat bucket. Two readers inspect a single record directly rather than the aggregate:
+`totals.model_usage` and per-step `model_usage` feed the project's cost rollup, `cost-rollup.json` under ape's root (`_apex/state/runs/` in an APEX v1 project, `<output_folder>/ape/` elsewhere). `ape costs` reads the rollup; its human output adds a **by model** table, and `--output-format json` includes a `per_model` map. Two readers inspect one record directly:
 
-- `ape costs run <run-id>` — reads that run's `manifest.yaml` and prints its totals plus per-model breakdown.
-- `ape costs chat <chat-id>` — reads a chat's `session.yaml`.
+- `ape costs run <run-id>` reads that run's `manifest.yaml` and prints its totals and per-model breakdown.
+- `ape costs chat <chat-id>` reads a chat's `session.yaml`, and `ape costs prompt <prompt-id>` a prompt's `prompt.yaml`.
 
 ### Reading the `context_window` fields
 
 `peak_tokens / context_window` is only as good as the divisor, so both the number and its absence are contracts.
 
-**This is a maintained table, not a measurement of a run.** Claude Code reports the real per-model window on the stream-json result event's `modelUsage[].contextWindow`. ape is [PTY-only by design](../explanation/why-pty-only.md) and does not use that surface, so the reported window cannot reach ape on any path ape drives — not as a deferred feature, but as a consequence of the PTY invariant. Do not label these fields as reported. What they give you is a single, correctable source for the divisor instead of a second hand-maintained copy per consumer.
+**This is a maintained table, not a measurement of a run.** Claude Code reports the real per-model window on the stream-json result event's `modelUsage[].contextWindow`. ape is [PTY-only by design](../explanation/why-pty-only.md) and does not use that surface, so the reported window cannot reach ape on any path ape drives. Do not label these fields as reported. What they give you is one correctable source for the divisor instead of a hand-maintained copy per consumer.
 
-The values come from the Models API — `GET /v1/models/{id}` returns `max_input_tokens`, which *is* the context window (the object has no `context_window` field) — but they are curated by hand from it, the same standing as ape's rates. Everything from Opus 4.6 and Sonnet 4.6 onward is 1M at standard pricing; 200000 is the pre-4.6 window. Treat a window as correct-as-of-the-release, not as live truth: if a model shipped after your `ape` build, its window may be absent (reported as absent, never defaulted) or stale.
+The values come from the Models API (`GET /v1/models/{id}` returns `max_input_tokens`, which *is* the context window), curated by hand, with the same standing as ape's prices. Treat a window as correct as of the release: a model that shipped after your ape build may have no window (reported as absent, never defaulted) or a stale one.
 
 **There are two fields, and both honour a `[1m]` suffix:**
 
@@ -248,17 +333,15 @@ The values come from the Models API — `GET /v1/models/{id}` returns `max_input
 | `steps[].context_window`               | the step's effective `--model` string                |
 | `steps[].model_usage[].context_window` | the raw model spelling in the transcript, per bucket  |
 
-A suffixed and unsuffixed model are the same model at the same price, so ape folds them into one `model_usage` bucket keyed by the base id — correct for cost, and it would be wrong for context. Since v0.0.60 the bucket's window is read from the raw spelling *before* that fold, so a `claude-sonnet-4-5[1m]` step reports 1000000 in both fields rather than 200000 in one of them.
+A suffixed and an unsuffixed model are the same model at the same price, so ape folds them into one `model_usage` bucket keyed by the base id. That is right for cost and would be wrong for context, so the bucket's window is read from the raw spelling *before* the fold.
 
-**Which to divide by** is now a question about scope, not accuracy. `steps[].context_window` is the step's own window and the right denominator for a step-level ratio — a step whose sub-agents ran other models has several per-model entries and no one of them speaks for the step. Use a per-model entry when you want that model's share.
+**Which to divide by** is a question of scope. `steps[].context_window` is the step's own window and the right denominator for a step-level ratio: a step whose sub-agents ran other models has several per-model entries, and no one of them speaks for the step. Use a per-model entry for that model's share.
 
-One case records **no** per-model window: a single bucket holding turns of two different sizes, which happens when a step's sub-agents run a different context variant than the step was spawned with. No single number is right for it, and the nearest wrong one is off by 5×, so it is omitted like any other unknown.
+One case records **no** per-model window: a bucket holding turns of two different sizes, which happens when a step's sub-agents run a different context variant than the step was launched with. No single number is right for it, so it is omitted like any other unknown.
 
-The gap has narrowed on current models without going away. `opus[1m]` was the motivating case back when the Opus base window was 200K; from Opus 4.6 / Sonnet 4.6 onward 1M is the base and the two agree. The models that kept a 200K default with a 1M opt-in are where it still matters.
+**Absent means unknown.** A model ape has no window for gets no field at all, not a zero. Render "could not look", never a plausible ratio. There is **no family fallback**: a family window that is off produces a precise-looking ratio wrong by the ratio of the two windows.
 
-**Absent means unknown.** A model ape has no window for gets no field at all — not a zero. Render "could not look", never a plausible ratio. Defaulting to 200k is the specific failure these fields exist to retire: a stale 200k entry that outlived a 1M window inflated every affected step's occupancy fivefold, and the metric built on it had to be retracted. For the same reason there is **no family fallback**: a family price that is off lands in the right order of magnitude and is flagged as an estimate, while a family window that is off produces a precise-looking ratio wrong by the ratio of the two windows — and the guess would fail toward the smaller one.
-
-`ape doctor`'s `cost.price_table_coverage` row names any model it saw in recent transcripts that has no known window. A window can be corrected without a new ape binary, the same way a price can:
+`ape doctor`'s `cost.price_table_coverage` row names any model seen in recent transcripts that has no known window. A window can be corrected without a new ape binary, the same way a price can:
 
 ```bash
 ape costs update --from corrected.yaml   # rows accept `context_window:` beside base_input / output
@@ -266,116 +349,48 @@ ape costs update --from corrected.yaml   # rows accept `context_window:` beside 
 
 ### Reading the `contract` field
 
-Some APEX skills end a run with a machine-readable return block — a story-batch skill's `run_status:`, an epic-batch review's `epics:`. The framework declares which skills promise one, and the pattern that recognises it, in `_apex/terminal-contracts.csv`. After each step ape matches the closing assistant message against that skill's pattern and records the verdict.
+Some skills end a run with a machine-readable return block. A framework that declares which skills promise one, and the pattern that recognises it, does so in `_apex/terminal-contracts.csv`; after the step ape matches the closing assistant message against that skill's pattern and records the verdict. The APEX v1 framework ships no such file, so in a v1 project the field is absent.
 
 | value           | meaning                                                            |
 | --------------- | ------------------------------------------------------------------ |
 | `present`       | the closing message matched the skill's pattern                     |
 | `missing`       | a closing message was read and it did not match                     |
 | `no-transcript` | the skill is enrolled but no closing message could be read at all   |
-| *(omitted)*     | the skill declares no terminal contract — there was nothing to check |
+| *(omitted)*     | the skill declares no terminal contract: there was nothing to check |
 
-`no-transcript` is deliberately distinct from `missing`: "looked and it was not there" and "could not look" are different facts, and only the first is evidence about the run.
-
-**This is telemetry about text, not about work.** The check reads the closing message of the step's **main** claude session, and that message is a *relay* whenever anything below it did the work — which, for the batch skills this table enrols, is usually:
-
-- under `--agent`, the runner types `/<agent> --autonomous -- <skill> …`, so the agent skill closes the session and the sub-skill's block appears only if the agent relayed it verbatim;
-- with no agent at all, a batch skill that fans out to Agent-tool sub-agents has the same shape — the subs' own transcripts are separate files (see `sessions[]`) and the main session's closing message summarises them.
-
-So `missing` means *the closing text did not match*, **not** *the skill failed to emit its contract*. Conflating the two would blame a framework-side quality problem for what may be a relay artifact. Any decision to make this fail a run has to separate them first; it is warn-only today for exactly that reason.
-
-Two limits on the denominator:
-
-- **Only completed steps have a record.** A step whose wait failed — idle timeout, detached agent, dead session — gets no `StepRecord` at all, so it carries no verdict either way. A rate computed from this field is a rate over completed steps.
-- **`no_clear: true` steps share the previous step's transcript.** If such a step added no assistant turn of its own, the message read is its predecessor's, which can record a `present` that belongs to the previous step.
-
-The same verdict is also written to the run's `checkpoints.jsonl` as a `contract` row carrying the skill, the status and the diagnostic text.
+**This is telemetry about text, not about work.** The check reads the closing message of the step's **main** session, which is a relay whenever something below it did the work: an `--agent` that fronted the skill, or Agent-tool sub-agents whose own transcripts are separate files (see `sessions[]`). So `missing` means *the closing text did not match*, **not** *the skill failed to emit its contract*. It is warn-only for that reason. Only completed steps have a record, so a rate computed from this field is a rate over completed steps.
 
 ### `timestamp` is not a second `started_at`
 
-`started_at` is an RFC-3339 UTC instant for telemetry, read straight from
-the wall clock. `timestamp` is the framework's own variable — local
-wall-clock `YYYYMMDDHHMMSS` — and it is **issued monotonically**: every
+`started_at` is an RFC 3339 UTC instant for telemetry, read straight from
+the wall clock. `timestamp` is the framework's own variable, local
+wall-clock `YYYYMMDDHHMMSS`, and it is **issued monotonically**: every
 issue returns the later of the wall clock and the project's persisted
-floor, so a machine whose clock is behind cannot stamp a record backwards.
-The two can therefore disagree, and when they do the disagreement is the
-point. Empty when the run had no project to issue against.
-
-See work with project data for the
-floor's persistence and its fresh-clone seed.
-
-### Forward compatibility
-
-Future ape releases may add fields. Consumers should treat unknown fields as opaque and reject only manifests whose `schema_version` is higher than the version they recognize. `timestamp` was added this way — additive under `schema_version: 2`, absent from older manifests.
-
-## Commits during a run
-
-**ape commits per step by default** (PLAN-4, v0.0.10+). Every successful step that produced a diff lands as its own git commit, with the message `ape:<pipeline>/<stage>/<skill>` unless the pipeline YAML's `commit:` field overrides it. Each commit's SHA is recorded on the corresponding `StepRecord`.
-
-Opt out with `--no-commit`:
-
-```bash
-ape pipeline design --no-commit
-```
-
-That preserves the pre-PLAN-4 shape: zero commits during the run, dirty working tree at completion, the manifest is the durable record.
-
-### Per-step commit fields
-
-| Field            | When set                                                        |
-| ---------------- | --------------------------------------------------------------- |
-| `commit_sha`     | non-empty only when `commit_status == committed`                |
-| `commit_message` | the message used (derived or YAML-explicit)                     |
-| `commit_status`  | enum, see below                                                 |
-| `commit_error`   | non-empty only when `commit_status == failed` (captured stderr) |
-
-### `commit_status` values
-
-- `committed` — git commit succeeded; `commit_sha` is set.
-- `no-op` — would have committed but the working tree was clean (step produced no diff).
-- `skipped-by-flag` — pipeline-level `--no-commit` was passed.
-- `skipped-by-spec` — pipeline YAML had `commit: false` for this step.
-- `skipped-step-failed` — the underlying step exited non-zero; no commit attempted.
-- `skipped-cancelled` — the run's context was cancelled before this step's commit boundary.
-- `failed` — `git commit` invocation returned non-zero; `commit_error` carries the stderr; pipeline was aborted.
-- `deferred-to-stage` — step ran inside a stage-boundary stage (PLAN-6 / C2 stage-level `commit:`). The chain's accumulated diff is folded into the stage-end commit, which is attributed to the last step in the chain. Earlier steps in such a stage all carry this status.
-
-### Inspecting a run's commits
-
-```bash
-git log --oneline --grep '^ape:design/'      # all commits from the latest `design` run (or any pipeline named `design`)
-git show <sha>                                # full diff of one step
-cat _output/ape/pipelines/design/latest/pipeline-report.md
-```
-
-Tip: ape's per-step commit messages are designed for `git log --grep '^ape:<pipeline>/'` to retrieve them. If a project also commits with `ape:` prefixes outside of pipeline runs, narrow the grep to `^ape:<pipeline>/<stage>/`.
-
-### Dirty-tree gate
-
-When commits are enabled, ape refuses to start if `git status --porcelain` is non-empty at runner-start. Bypass with `--commit-allow-dirty` (commits proceed; first committing step's diff includes the prior WIP) or with `--no-commit` (no commits at all; gate is moot).
-
-The resolved `{output_folder}/ape/` should be in your `.gitignore` so the manifest tree itself never trips the gate. `ape doctor --only output.ape_ignored` reports whether it is — including the worse case where the tree is already **committed**, which an ignore line alone does not fix (git keeps tracking what is in the index; it needs `git rm -r --cached` too). ape reports and never edits `.gitignore` itself.
+floor (`timestamp.state` under ape's root), so a machine whose clock is
+behind cannot stamp a record backwards. The two can therefore disagree,
+and when they do the disagreement is the point. Empty when the run had no
+project to issue against.
 
 ## Reading a manifest from code
 
-The manifest is plain YAML; any YAML library will parse it. The reference Go types live in [`internal/pipeline/manifest.go`](../../internal/pipeline/manifest.go) (unexported package, but the YAML is the canonical contract — re-deriving types from the schema is fine).
+The manifest is plain YAML; any YAML library parses it. The reference Go types live in [`internal/pipeline/manifest.go`](../../internal/pipeline/manifest.go). The package is internal, but the YAML is the contract, so re-deriving types from this page is fine.
 
-## Choosing a different location
-
-`ape pipeline --manifest-dir <path>` overrides the manifest root. Pass an absolute path or one relative to the project root; ape writes `<path>/<pipeline_name>/<run_id>/` underneath. The eval harness uses this flag to redirect manifests into the eval's own results tree.
-
-## Disabling the manifest
-
-There is no end-user flag to disable the manifest. The library-level `RunOptions.DisableManifest` exists for tests and embedded usage but is not exposed via the CLI; the cost of always writing is small (a few KB plus the raw NDJSON sizes already paid in compute).
+There is no flag to disable the manifest.
 
 ## Cleanup
 
-ape never deletes old runs. Reclaim disk with:
+ape never deletes old runs. Reclaim disk by removing run directories:
 
 ```bash
-rm -rf _output/ape/pipelines/<pipeline_name>/<old_run_id>
-# or wipe a whole pipeline's history:
-rm -rf _output/ape/pipelines/<pipeline_name>
+rm -rf _apex/state/runs/tasks/<skill>/<old_run_id>     # APEX v1 project
+rm -rf _output/ape/tasks/<skill>/<old_run_id>          # elsewhere, with the default output folder
 ```
 
-Most projects gitignore `_output/`; the runs accumulate there until explicitly removed.
+`_apex/state/.gitignore` keeps runs out of git in a v1 project; `ape doctor` checks it (`state.gitignore`).
+
+## Related
+
+- [step-contract.md](step-contract.md): what a run types and checks.
+- [status-json.md](status-json.md): `ape status --json`, which shows a run that stopped on a limit.
+- [../how-to/run-a-single-skill.md](../how-to/run-a-single-skill.md): running `ape task`.
+- [../explanation/nested-ape-runs.md](../explanation/nested-ape-runs.md): depth, parents and children.

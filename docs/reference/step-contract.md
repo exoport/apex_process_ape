@@ -1,68 +1,58 @@
 # Reference — step contract
 
-PLAN-6 / C4 defines the per-step interaction between the runner and `claude`. The runner spawns `claude` inside an in-process PTY (PLAN-8: `internal/repl/`) and delivers each step's prompt as real REPL keystrokes by writing bytes to the PTY master end. The bridge observes the resulting `UserPromptSubmit` and `Stop` hooks; the `ContractVerifier` checks each step's prompt shape and fires a hard-fail on mismatch.
+An `ape task <skill>` run is one step in one Claude Code session. This page is what ape types into that session's REPL, what it checks about the line the session received, and when it counts the step as done. The same contract holds for every session the `ape change` verbs and an `apex-loop` run start, because those are `ape task` runs too ([claude-spawn-modes.md](claude-spawn-modes.md)).
 
-Since v0.0.36 the PTY-hosted REPL is the only exec mode (the programmatic `claude -p` path was removed — see [why-pty-only.md](../explanation/why-pty-only.md)), so the contract applies to every run.
+ape spawns `claude` inside an in-process PTY (`internal/repl/`) and delivers the step as keystrokes written to the PTY master. The bridge reports the session's `UserPromptSubmit` and `Stop` hooks back to ape; a `ContractVerifier` (`internal/bridge/orchestrator/contract.go`) checks the submitted line.
 
-## What the runner does
+## What `ape task` does
 
-For every step within a stage, the interactive runner produces this sequence:
+1. **Spawns `claude` and waits for the REPL.** The session is launched with its model (`--model`) and, in an APEX v1 project, its effort (`--effort`), and ape waits up to 30 seconds for the REPL to be ready. A REPL that never comes up ends the run with termination `repl_not_ready` and exit 3. ape sends no `/model` later: the session runs on the model it was launched with.
 
-1. **`/clear`** before the next step's prompt — **default-on for every step after the first**.
-   - Opt out with `no-clear: true` at the step level when the step depends on the previous step's context (rare).
-   - The first step of a stage skips `/clear` because the PTY and `claude` process are fresh by construction.
-   - The slash command is typed into the PTY (Write to master + Enter); claude's REPL parses it and resets context.
+2. **Types the skill line** (`assembleInteractivePromptLine`, `internal/pipeline/interactive.go`):
+   - without `--agent`: `/<skill> --autonomous`, then the `--args` words;
+   - with `--agent`: `/<agent> --autonomous -- <skill> --autonomous`, then the `--args` words;
+   - with `--prompt-flag` and a prompt (`--prompt`, `--prompt-file` or `--handoff`): the flag and the text at the end.
 
-2. **Agent-prefixed skill prompt** typed via PTY Write + Enter:
-   - With agent: `/<step.agent> --autonomous -- <step.skill> --autonomous` (then args, then optional `--prompt <user prompt>`)
-   - Without agent: `/<step.skill> --autonomous --no-commit` (then args, then optional `--prompt <user prompt>`)
+   `--no-commit` is typed only when you pass `--no-commit`, in front of the args. APEX v1 skills commit their own work, so nothing tells them not to by default.
 
-`/model <X>` switches are **not** sent today; the resolved per-step model is recorded in the manifest but the per-step session keeps whatever model `claude` was launched with. Steps that need a different model run in a different stage.
+3. **Moves the arguments to a file when typing would change them.** When the line is longer than 700 characters, or the `--args` or prompt text holds two or more spaces in a row, a tab, a line break or any other control character, ape writes that text verbatim to `stages/01-<skill>/step-01-<skill>.args.md` in the run directory. It then types the skill part of the line (with `--no-commit`, when given) followed by "The arguments for this run are in `<absolute path>`: read that file and treat its contents as if they were written here." The step's `step-start` event records the file as `args_file`. The reason: Claude Code turns a typed burst past 800 characters into a `[Pasted text #N]` placeholder that never runs as a skill, and the typed line splits `--args` on whitespace, so a line break would submit early.
+
+4. **Submits the line.** ape presses Enter once claude has drawn the line, then waits for the `UserPromptSubmit` hook, pressing Enter up to twice more. A line still not submitted ends the run with termination `prompt_not_submitted` and exit 1.
 
 ## What the verifier checks
 
-The `ContractVerifier` subscribes to `UserPromptSubmit` hook events via the bridge and matches each one against the active step's expected agent + skill prefix:
-
-- The runner calls `BeginStep(StepContract{...})` right before typing the skill prompt.
-- The first `UserPromptSubmit` after `BeginStep` must match the agent-prefixed shape above. Mismatch fires `OnViolation`.
-- Once matched, the contract is satisfied; further `UserPromptSubmit` events for the same step (e.g., a skill that re-prompts itself internally) are silently accepted.
-- `EndStep` is called after `WaitStepDone` returns, clearing the active contract so a stray late hook from the previous step doesn't match against a fresh one.
-
-`/clear` between steps fires its own `UserPromptSubmit` hook, but the runner sends it **outside** any active-step window (between the previous step's `EndStep` and the next step's `BeginStep`). The verifier sees `active == nil` and silently ignores it.
-
-## When a step is considered done
-
-`WaitStepDone` returns on the bridge's `Stop` hook — but since v0.0.52 a `Stop` completes the step only when the payload reports no blocking work still outstanding, and an Agent-tool spawn that detached into a teammate fails the step outright. See [step-completion-gates.md](../explanation/step-completion-gates.md) for the verdict table, the terminal-contract check, and how all of it degrades on an older Claude Code.
+- ape calls `BeginStep` right before typing the line.
+- The first `UserPromptSubmit` after it whose prompt starts with `/` must have the shape above:
+  - without `--agent` and without `--no-commit`: exactly `/<skill> --autonomous`, or that followed by a space, so `/apex-plan` never matches `/apex-planner`;
+  - with `--agent`: it starts with `/<agent> --autonomous -- <skill> --autonomous`.
+- A prompt that does not start with `/` is ignored: a key press that dismissed a modal before the line, for example the trust dialog's accept, can reach the hook inside the window.
+- Once the line matched, later `UserPromptSubmit` events of the same step are accepted (a skill may prompt itself).
+- `EndStep` clears the contract after the step's wait returns, so a late hook cannot match a new one.
 
 ## Failure mode
 
-On the first violation, the verifier:
+On the first mismatch the verifier:
 
-1. Emits a `step-contract-violation` line to stderr with a self-describing reason (expected agent + skill, got prompt).
-2. Invokes the registered `OnViolation` callback. In production, the callback cancels the run context.
-3. Disables further checks on the current step (one violation per step is enough).
+1. prints `❌ assertion:step-contract — stage="<skill>" step=<n>: expected skill prompt for "<skill>" (agent="<agent>"), got "<prompt>"` to stderr (the prompt cut at 80 characters);
+2. cancels the run;
+3. checks nothing further for that step.
 
-The orchestrator returns a non-zero exit code; the manifest records `status: failed`.
+The command exits non-zero, and the run manifest records the run as not completed.
 
-## How `no-clear: true` is used
+## When the step is done
 
-`no-clear: true` is **step-level only** (not stage- or pipeline-level). Use it on the second-and-later steps of a multi-step chain where context sharing is the point:
+The step ends on the session's `Stop` hook, but a `Stop` is not taken on trust:
 
-```yaml
-name: design
-stages:
-  create-prd:
-    chain:
-      - skill: apex-create-prd
-        agent: apex-agent-pm
-      - skill: apex-create-prd-respond
-        agent: apex-agent-pm
-        no-clear: true # shares context with apex-create-prd
-```
+- the background-task gates decide whether that `Stop` completes the step, defers it, or fails it;
+- in an APEX v1 project, `ape hook stop` may block the same `Stop`, and then the session continues instead of the run ending.
+
+Both are in [step-completion-gates.md](../explanation/step-completion-gates.md). The idle timeout (`--idle-timeout`, default 60m) and `--max-duration` are the backstops; see [tune-long-running-steps.md](../how-to/tune-long-running-steps.md).
+
+APEX v0 projects run the v0 ape their `.bingo` pins, whose pipelines chained several steps in one session with `/clear` between them; its docs are at https://github.com/exoport/apex_process_ape/tree/v0.10.0/docs.
 
 ## Related
 
-- invocation-matrix.md
-- pipeline-yaml-schema.md
-- [bridge-ipc.md](bridge-ipc.md)
-- [../explanation/exec-modes.md](../explanation/exec-modes.md)
+- [claude-spawn-modes.md](claude-spawn-modes.md): every command that starts a session.
+- [pipeline-run-manifest.md](pipeline-run-manifest.md): the run manifest, including `termination`.
+- [bridge-ipc.md](bridge-ipc.md): wire schema for the MCP bridge.
+- [../explanation/why-pty-only.md](../explanation/why-pty-only.md): why the REPL is typed into rather than called with `-p`.

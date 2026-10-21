@@ -76,7 +76,7 @@ processes.
 | --- | --- |
 | `CLAUDE_CODE_SUBAGENT_MODEL` | Overrides the model identifier used exclusively by worker/sub-agents or background processing loops, allowing heavier tasks to route to Sonnet/Opus and smaller tasks to Haiku. |
 | `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` | When enabled, actively scrubs sensitive tokens and credentials from the environment before spawning child shell processes/sub-commands, so executed tools don't leak tokens into logs. |
-| `CLAUDE_CODE_EFFORT_LEVEL` | Controls the reasoning/thinking budget sent to the API (`low`, `medium`, `high`, `xhigh`, `max`). Set globally, any sub-session or command follows the same constraint. **ape sets this itself**, but only for an explicit `--effort` / pipeline `effort:` value, or `xhigh` on a project with no effort table. Otherwise the table rides in `--settings`, per model. See below. |
+| `CLAUDE_CODE_EFFORT_LEVEL` | Controls the reasoning/thinking budget sent to the API (`low`, `medium`, `high`, `xhigh`, `max`). Set globally, any sub-session or command follows the same constraint. **ape always removes an inherited value.** In an APEX v1 project `ape task` never sets it and passes `claude --effort` instead; `ape prompt`, `ape chat` and `ape task` outside a v1 project may set it. See [Reasoning effort](#reasoning-effort-claude_code_effort_level). |
 
 ### Context and token limits
 
@@ -96,17 +96,16 @@ processes.
 ## How ape handles these
 
 ape spawns `claude` in an interactive PTY for every run
-(`internal/repl/repl.go`). When ape itself is launched from inside a Claude
-Code session — ubiquitous during development — the child claude would
-inherit the parent's nesting markers and treat itself as a nested/child
-session. Beyond the hard abort described above, the subtler failure is that
-a marker in the `CLAUDE_CODE_*` family **suppresses session-transcript
-persistence**: `~/.claude/projects/<cwd>/<sid>.jsonl` is never written,
-zeroing every transcript-derived telemetry value. This was the root cause
-of the v0.0.28–v0.0.32 zero-telemetry saga.
+(`internal/repl/repl.go`); `ape chat` is the exception and hands claude your
+terminal. When ape itself is launched from inside a Claude Code session, the
+child claude would inherit the parent's nesting markers and treat itself as
+a nested/child session. Beyond the hard abort described above, the subtler
+failure is that a marker in the `CLAUDE_CODE_*` family **suppresses
+session-transcript persistence**: `~/.claude/projects/<cwd>/<sid>.jsonl` is
+never written, which zeroes every transcript-derived cost and token figure.
 
-Since v0.0.32, `repl.ScrubClaudeCodeEnv` strips the following from the
-spawned claude's environment so it registers as its own top-level session:
+So `repl.ScrubClaudeCodeEnv` strips the following from the spawned claude's
+environment, so it registers as its own top-level session:
 
 - `CLAUDECODE` — the top-level "running inside Claude Code" flag;
 - `CLAUDE_CODE_*` — the whole parent-injected family
@@ -124,23 +123,55 @@ The same scrub applies to the inherited-stdio spawn in `ape chat`.
 ### Reasoning effort (`CLAUDE_CODE_EFFORT_LEVEL`)
 
 The inherited `CLAUDE_CODE_EFFORT_LEVEL` is always stripped first. What ape
-puts back depends on where the effort comes from (see
-Pipeline spec § Reasoning effort):
+does next depends on the command and the project.
 
-- **An explicit effort** (`step.effort ?? stage.effort ?? pipeline.effort ?? --effort`
-  on `ape pipeline` / `ape task` / `ape change`, or `--effort` on `ape prompt`)
-  is re-injected as this variable. It is **process-wide**: it reaches every
-  sub-agent the session spawns and outranks any per-model setting.
+**`ape task` in an APEX v1 project** (`development/project.md` exists).
+The effort goes on claude's command line as `claude --effort <level>`, which
+sets the session's own effort only. `CLAUDE_CODE_EFFORT_LEVEL` is never set,
+because it would outrank the effort every skill, agent and sub-agent
+declares for itself, and `_apex/effort-defaults.yaml` is not read. The level
+resolves, first match wins (`ape task --help`):
+
+1. `--effort`;
+2. `_apex/config.yaml` `models.<skill>.effort`;
+3. the effort of the ape session that started this one
+   (`APE_SESSION_EFFORT`), skipped when `models.<skill>` names a model
+   without an effort;
+4. `_apex/config.yaml` `effort:`;
+5. nothing: no `--effort` is passed, and Claude Code's own setting decides.
+
+The run manifest records the decision as `launch.effort` and
+`launch.effort_source` (`flag`, `config`, `parent-session`,
+`config-default`, `default`); see [the run manifest](pipeline-run-manifest.md#launch--the-v1-model-and-effort-decision).
+The sessions that `ape change review --run`, `ape change tool` and
+`ape change accept --delegate` start are `ape task` runs, so the same rule
+applies to them. Each of those verbs decides the level first, from its own
+order in its `--help`, and passes it to the child `ape task` as `--effort`.
+Only `ape change review` has an `--effort` flag, and only with `--run`.
+
+**`ape task` outside a v1 project, and `ape prompt`.** The table rule:
+
+- **An explicit `--effort`** is re-injected as this variable. It is
+  **process-wide**: it reaches every sub-agent the session spawns and
+  outranks any per-model setting.
 - **No explicit effort, with `_apex/effort-defaults.yaml`**: ape sets **no**
   variable. The table rides in the spawn's `--settings` as
   `modelSettings.<model>.effortLevel` plus a top-level `effortLevel`, so each
   model, sub-agents included, runs at its family's row. The variable would
   flatten them all to one level, which is exactly what the table exists to avoid.
-- **Neither**: `xhigh`, process-wide, which is what ape did before the table
-  existed.
-- **`ape chat`** is interactive: it injects the variable **only when
-  `--effort` is given**, and takes no table, leaving claude's native effort
-  untouched.
+- **Neither**: `xhigh`, process-wide.
+
+`ape prompt` follows the table rule in a v1 project too
+(`promptEffortPlan`, `internal/apecmd/prompt.go`). The APEX v1 framework
+ships no `effort-defaults.yaml`, so in a v1 project without one, an
+`ape prompt` with no `--effort` runs at `xhigh`, process-wide.
+
+**`ape chat`** is interactive: it injects the variable **only when
+`--effort` is given**, and takes no table, leaving claude's native effort
+untouched.
+
+`ape config effort` reports what the table rule gives each model, and in a
+v1 project the config's part of the v1 rule.
 
 Consequence: if you *want* to set one of the `CLAUDE_CODE_*` variables
 above for an ape-spawned claude (e.g. `CLAUDE_CODE_MAX_OUTPUT_TOKENS`), the
@@ -180,10 +211,10 @@ together.
 
 ### Foreground sub-agents stay foreground (`CLAUDE_CODE_FORK_SUBAGENT`)
 
-The third variable ape injects, set to `0` on every unattended spawn: `ape
-pipeline`, `ape task`, `ape change`, `ape script` and `ape prompt`. Not on
-`ape chat`, where a person drives the session and gets Claude Code's own
-default.
+The third variable ape injects, set to `0` on every PTY spawn: `ape task`
+(and so the sessions the `ape change` verbs start), `ape prompt`, and the
+runs an `ape script` starts. Not on `ape chat`, where a person drives the
+session and gets Claude Code's own default.
 
 In an interactive session, which every ape spawn is, Claude Code's
 fork-subagent gate is on by default, and while it is on the Agent tool
@@ -210,6 +241,18 @@ ape, because the scrub removes it. `make check-claude`'s
 `foreground_agent_sync` subtest spends one Sonnet turn with a Haiku sub-agent
 to assert that a `run_in_background: false` call comes back `completed` in a
 session ape spawned.
+
+### The per-Read token cap (`CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS`)
+
+The fourth variable ape injects, set to `30000` on every spawn, `ape chat`
+included. It is Claude Code's cap on how many tokens one Read returns before
+it pages. The framework sizes its documents against what one Read shows, and
+the cap is a Claude Code default ape does not control, so a release that
+moved it would silently change how much of every large file a skill sees.
+
+ape sets it in the spawn environment and in the `env` of its `--settings`,
+because a project or user settings `env` overrides the environment. The run
+manifest and `prompt.yaml` record it as `file_read_max_output_tokens`.
 
 ### `PATH`: `ape` inside a session is *this* ape
 
