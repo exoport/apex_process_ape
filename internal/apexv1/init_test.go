@@ -556,3 +556,49 @@ func TestInit_AppendsModelDefaultsOutsideGit(t *testing.T) {
 func TestModelDefaultSkills(t *testing.T) {
 	require.Equal(t, []string{"apex-apply", "apex-loop", "apex-review", "apex-plan", "apex-change", "apex-accept", "apex-release"}, modelDefaultSkills())
 }
+
+// Q156 (D331): re-running init in a model session must not commit a new
+// `apex: project init` epoch, which would hide every finding before it —
+// the bypass this reproduces: a guarded config change, a broken hook, init
+// from a session, and config.changed gone. The first init of a project
+// still commits from a session (apex-plan's step 1), and a person's init
+// commits as before.
+func TestInit_ModelSessionNeverCommitsOnceV1(t *testing.T) {
+	needSh(t)
+	root := t.TempDir()
+	gitEnv(t)
+	run(t, root, "init", "-q")
+	t.Setenv("CLAUDECODE", "1")
+	res, err := Init(ctx(), root, false)
+	require.NoError(t, err)
+	require.NotEmpty(t, res.Commit, "a new project's first init commits from a session")
+	p, err := Open(root)
+	require.NoError(t, err)
+
+	cfg := filepath.Join(root, "_apex", "config.yaml")
+	b, err := os.ReadFile(cfg)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(cfg, append(b, []byte("retries: 3\n")...), 0o644))
+	run(t, root, "commit", "-q", "-am", "chore: retry more")
+	changed := func() bool { // config.changed: its findings, coded by findingRules
+		return len(p.configFindings(ctx(), p.v1Epoch(ctx(), "HEAD"))) > 0
+	}
+	require.True(t, changed())
+
+	require.NoError(t, os.WriteFile(filepath.Join(root, ".claude", "settings.json"), []byte("{}\n"), 0o644))
+	run(t, root, "commit", "-q", "-am", "chore: drop the hooks")
+	before := subjects(t, p)[0]
+	res, err = Init(ctx(), root, false)
+	require.NoError(t, err)
+	require.Empty(t, res.Commit)
+	require.Contains(t, res.CommitWithheld, ".claude/settings.json")
+	require.Contains(t, strings.Join(res.Warnings, "\n"), "a model session never commits `apex: project init` once the project is v1")
+	require.Equal(t, before, subjects(t, p)[0], "no new epoch")
+	require.True(t, changed(), "the guarded change is still a finding")
+
+	t.Setenv("CLAUDECODE", "")
+	run(t, root, "checkout", "--", ".")
+	res, err = Init(ctx(), root, false)
+	require.NoError(t, err)
+	require.NotEmpty(t, res.Commit, "a person's init commits the repair")
+}

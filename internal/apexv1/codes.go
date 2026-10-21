@@ -315,6 +315,7 @@ var DiagnosticCodes = []CodeDoc{
 	{"change.frontmatter", 1, "replan", "change.md frontmatter is missing, unparseable, or its id/milestone/touches are wrong, or docs: is not true or false (D152)"},
 	{"change.unknown-key", 1, "replan", "change.md frontmatter has a key v1 does not define (own keys: prefix x-)"},
 	{"change.spec-too-big", 1, "replan", "change check / start: merging the delta would take a spec over its caps.spec cap — split the capability first (H18)"},
+	{"change.subject-reserved", 1, "replan", "change check, start, archive and project check: the change's archive squash subject (its title under the subject template) would start `apex:`, the mark of ape's own records, which the provenance checks exempt and which set the v1 epoch and config acceptances (Q156, D331) — retitle the change"},
 	{"change.no-type", 1, "replan", "change.md has no type: and the archive subject template uses {type} — as the default \"{type}: {title}\" does (D193), or a configured commit.subject (D47); under the default only, archive takes a change in flight with no type: with its title alone and says so (subject_fallback, Q111); project check passes a started one"},
 	{"change.bad-type", 1, "replan", "change.md type: is not one of the project's commit types — _apex/config.yaml commit.types, default feat, fix, perf, refactor, docs, test, build, ci, chore (D47, D120)"},
 	{"change.bad-id", 1, "replan", "the change folder name is not a valid id"},

@@ -160,6 +160,23 @@ func typeFindings(file string, c *Change, cc CommitConfig) []Finding {
 	return nil
 }
 
+// reservedSubjectFindings refuses a change whose archive squash would
+// carry an `apex:` subject (Q156, D331): that prefix marks ape's own
+// records, which the provenance checks exempt and which set the epoch
+// and config acceptances, and the session writes change.md's title.
+func reservedSubjectFindings(file string, c *Change, id string, cc CommitConfig) []Finding {
+	tmpl := cc.SubjectTemplate()
+	if subjectFallback(c, cc) {
+		tmpl = FallbackSubject
+	}
+	if s := archiveSubject(tmpl, c, id); ReservedSubject(s) {
+		return []Finding{{File: file, Line: 1, Message: fmt.Sprintf("the archive subject would be %q, which starts `apex:` — "+
+			"the mark of ape's own records (exempt from the provenance checks, and the epoch and config acceptances) — "+
+			"give the change a title that does not start with `apex:`", s)}}
+	}
+	return nil
+}
+
 // subjectFallback reports whether the archive of c takes FallbackSubject
 // (Q111): only under the default template (commit.subject unset), and
 // only for a change with no type:.

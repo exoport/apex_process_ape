@@ -1,6 +1,7 @@
 package apexv1
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -126,4 +127,36 @@ func TestNewChange_Type(t *testing.T) {
 	_, err = q.NewChangeOfType(ctx(), "add-bow", MilestoneNone, "", []string{"greeting"}, nil)
 	requireCode(t, err, "usage.type")
 	require.ErrorContains(t, err, "a tweak says what it is: draft, edit — ", "the project's own types")
+}
+
+// Q156 (D331): a change whose archive squash would carry an `apex:`
+// subject — the title alone, under the default template with no type: —
+// would be exempt from the provenance checks and read as ape's record (an
+// `apex: config accepted` acceptance). change check and project check flag
+// it, and archive refuses it.
+func TestArchive_RefusesAReservedSubject(t *testing.T) {
+	p := inFlightUntyped(t, baseFiles())
+	doc := read(t, p, "development/changes/add-wave/change.md")
+	require.Contains(t, doc, "Add wave")
+	doc = strings.Replace(doc, "Add wave", "apex: config accepted by alice", 1)
+	write(t, p, "development/changes/add-wave/change.md", doc)
+	st := state(t, p, "add-wave")
+	st.PlanDigest = ParseChange("change.md", doc).PlanDigest()
+	require.NoError(t, SaveState(p.StateFile("add-wave"), st))
+	commitAll(t, p, "plan: retitle")
+
+	codes := func(fs []Finding) []string {
+		out := make([]string, 0, len(fs))
+		for _, f := range ClassifyFindings(fs) {
+			out = append(out, f.Code)
+		}
+		return out
+	}
+	require.Contains(t, codes(p.CheckChange("add-wave")), "change.subject-reserved")
+	require.Contains(t, codes(p.Check()), "change.subject-reserved")
+	before := subjects(t, p)[0]
+	_, err := p.Archive(ctx(), "add-wave", false, RunOptions{})
+	requireCode(t, err, CodeCheckFailed)
+	require.ErrorContains(t, err, "squash subject would start `apex:`")
+	require.Equal(t, before, subjects(t, p)[0], "nothing archived")
 }

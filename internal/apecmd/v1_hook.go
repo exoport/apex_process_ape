@@ -33,7 +33,8 @@ the hook payload (JSON) on stdin.
                   development/specs/**, changes/*/state.json, archive/**, _apex/state/**,
                   an existing development/briefs/** file, and Bash commands that create,
                   delete or push a git tag, push at all, stop processes by name (pkill,
-                  killall), or rebase, merge or cherry-pick on a change branch; while ape runs a
+                  killall), commit with an apex: subject, or rebase, merge or cherry-pick
+                  on a change branch; while ape runs a
                   check in the checkout, denies an edit outside development/ that its
                   cleanup would undo; grants a person act on the person's own words
                   (E2), and denies one without them
@@ -225,7 +226,7 @@ func newHookPreToolCmd() *cobra.Command {
 	var inline bool
 	cmd := &cobra.Command{
 		Use:   "pre-tool",
-		Short: "PreToolUse hook: deny edits to specs, state.json, the archive, _apex/state and briefs, git tag writes, git push, pkill/killall, and rebase/merge/cherry-pick on a change branch",
+		Short: "PreToolUse hook: deny edits to specs, state.json, the archive, _apex/state and briefs, git tag writes, git push, pkill/killall, apex: commit subjects, and rebase/merge/cherry-pick on a change branch",
 		Long: `PreToolUse hook for Edit|Write|MultiEdit|NotebookEdit|Bash. Denies, with
 {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny",
 "permissionDecisionReason":"… specs change only through ape change archive"}}, an edit
@@ -287,6 +288,20 @@ another branch. Parsed like the tag rule, with the same limits.
 Bash, too (E2, T6): denies a command that names _apex/state/prompts or
 _apex/state/grants, or runs ` + "`ape hook user-prompt`" + `, ` + "`ape hook pre-tool`" + ` or ` + "`ape __run`" + `:
 they write or act on the records a person act rests on.
+
+Bash, too (Q156): denies a commit whose subject would start apex: — the mark of
+ape's own records, which the provenance checks (config.changed, spec.edited,
+state.forged) exempt, and which set the v1 epoch (apex: project init, apex: lift) and
+a config acceptance (apex: config accepted). ape writes them itself, never through a
+session's Bash call, so there is no override. Denied: git commit with such a subject
+from -m/--message (all of them, -am and other clusters too), -F/--file (ape reads the
+file; -F - is stdin and is denied), -C/-c/--reuse-message/--reedit-message, --amend
+keeping HEAD's subject, -t/--template; git merge -m/-F; git cherry-pick of a commit
+with such a subject (-n allowed); git commit-tree -m/-F; git am of such a patch (stdin
+denied). A "$(cat <<'EOF' … EOF)" message is read from its here-doc; any other command
+substitution is denied when apex: appears in it. Parsed like the tag rule, with its
+limits, and a rebase --exec string or history plumbing (fast-import, filter-branch,
+replace) is not seen.
 
 Person acts (E2; D178, D179): eight commands are a person's — from a terminal outside
 Claude Code as always, or in the person's own Claude Code session on the person's own

@@ -64,7 +64,19 @@ type InitResult struct {
 	// (D205 Q118): created, kept, or differs (another ADR-0001, left
 	// alone).
 	StandardADR *StandardADRResult `json:"standard_adr,omitempty"`
+	// CommitWithheld are the files init wrote but did not commit because
+	// it ran in a model session on a project that is already v1 (Q156,
+	// D331): an `apex: project init` commit starts the v1 epoch, which
+	// would hide every finding before it, so only a person makes one
+	// after the first. The session's own commit may take them.
+	CommitWithheld []string `json:"commit_withheld,omitempty"`
 }
+
+// initCommitWithheld is the warning init prints when it withholds its
+// commit in a model session (Q156).
+const initCommitWithheld = "not committed: a model session never commits `apex: project init` once the project is v1 " +
+	"(that commit restarts the v1 epoch and would hide every finding before it) — the files stay uncommitted, " +
+	"for the session's own commit with its own subject (apex-plan's `plan:` commit takes them)"
 
 // hasAgentsImport reports whether a CLAUDE.md imports the map.
 func hasAgentsImport(doc string) bool {
@@ -295,6 +307,11 @@ func Init(ctx context.Context, root string, brownfield bool) (*InitResult, error
 		return res, err
 	}
 	if paths := p.initCommitPaths(ctx, res); len(paths) > 0 {
+		if ModelSession() != "" && p.v1Epoch(ctx, "HEAD") != "" {
+			res.CommitWithheld = paths
+			res.Warnings = append(res.Warnings, initCommitWithheld)
+			return res, nil
+		}
 		sha, err := p.commitRecord(ctx, "apex: project init", "", paths...)
 		if err != nil {
 			return res, commitFailed(err, "skeleton written but its commit failed: "+err.Error())

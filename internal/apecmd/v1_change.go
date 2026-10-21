@@ -259,7 +259,9 @@ func newChangeCheckCmd() *cobra.Command {
     the project's commit types — _apex/config.yaml commit.types (D120), default feat,
     fix, perf, refactor, docs, test, build, ci, chore — required when the subject
     template uses {type}, as the default "{type}: {title}" does (D193; change.no-type;
-    change.bad-type; ape change new writes one);
+    change.bad-type; ape change new writes one); the archive subject it would make
+    (the title under the subject template) must not start apex:, the mark of ape's own
+    records (change.subject-reserved, Q156);
     review_tools: [<name>, …] names tools.review entries of _apex/config.yaml whose
     when: the change matches (the loop runs each before the review; else
     tools.unknown, D74); docs: true marks the milestone's docs change (D130, D152: its
@@ -1309,8 +1311,9 @@ func newChangeArchiveCmd() *cobra.Command {
      unset), a change with no type: — one in flight when the default changed — archives
      with "{title}" alone, and says so ("subject: … the title alone"; JSON
      "subject_fallback": true, Q111); a configured template that uses {type} refuses a
-     change with no type: (change.check-failed, change.no-type). ape's own "apex: …"
-     commits are unchanged (Q112). The project's git hooks run on this
+     change with no type: (change.check-failed, change.no-type). A subject that would
+     start "apex:" is refused (change.subject-reserved, Q156): only ape's own records
+     carry it. ape's own "apex: …" commits are unchanged (Q112). The project's git hooks run on this
      commit (commit.hooks: run, the default; skip opts out) — ape's status commits keep
      skipping them. A hook that refuses rolls archive back: exit 1, archive.hook-failed,
      the hook output's tail in the message. Then keeps change/<id>'s tip as

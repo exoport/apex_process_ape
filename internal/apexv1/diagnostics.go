@@ -165,6 +165,7 @@ var findingRules = []findingRule{
 	rule("", `^(task \S+'s tool: |review_tools: ).* is not declared in tools\.(design|review)`, "tools.unknown"),
 	rule("", `^frontmatter key .* is not one of`, "change.unknown-key"),
 	rule("", "^frontmatter has no `type:`", "change.no-type"),
+	rule("", "^the archive subject would be .* which starts `apex:`", "change.subject-reserved"),
 	rule("", `^frontmatter type .* is not one of`, "change.bad-type"),
 	rule("", `^(no YAML frontmatter|frontmatter)`, "change.frontmatter"),
 	rule("", `^change id must match`, "change.bad-id"),

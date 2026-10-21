@@ -177,6 +177,7 @@ func (p *Project) checkChange(id string, withCaps bool) []Finding {
 	if cc := p.commitConfig(); withCaps || st == nil || st.Status == StatusDraft || !subjectFallback(c, cc) {
 		out = append(out, typeFindings(file, c, cc)...)
 	}
+	out = append(out, reservedSubjectFindings(file, c, id, p.commitConfig())...)
 	if c.Meta.ID != id {
 		add(1, fmt.Sprintf("frontmatter id %q does not match the folder name %q", c.Meta.ID, id))
 	}

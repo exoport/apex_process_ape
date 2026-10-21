@@ -351,6 +351,9 @@ func (p *Project) planArchive(ci ChangeInfo) (updates []SpecUpdate, dest string,
 	if fs := typeFindings(p.Rel(p.ChangeMD(id)), ci.Doc, p.commitConfig()); len(fs) > 0 && !subjectFallback(ci.Doc, p.commitConfig()) {
 		return nil, "", &FailError{Code: CodeCheckFailed, Msg: "change " + id + " cannot be archived with the configured commit subject — fix change.md's type: (a plan change: re-start), then archive", Findings: fs}
 	}
+	if fs := reservedSubjectFindings(p.Rel(p.ChangeMD(id)), ci.Doc, id, p.commitConfig()); len(fs) > 0 {
+		return nil, "", &FailError{Code: CodeCheckFailed, Msg: "change " + id + " cannot be archived: its squash subject would start `apex:` — retitle the change (a plan change: re-start), then archive", Findings: fs}
+	}
 	updates, conflicts := p.MergeDelta(ci.Doc)
 	if len(conflicts) > 0 {
 		return nil, "", &ConflictError{Code: CodeDeltaConflict, Msg: "the delta no longer applies to specs/ — nothing was written; re-plan the change against the current specs", Conflicts: conflicts}

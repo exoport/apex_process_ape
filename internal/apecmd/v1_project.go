@@ -25,13 +25,8 @@ func newProjectCmd() *cobra.Command {
 	return cmd
 }
 
-func newProjectInitCmd() *cobra.Command {
-	var f v1Flags
-	var brownfield bool
-	cmd := &cobra.Command{
-		Use:   "init",
-		Short: "Create the development/ skeleton and merge ape's hooks (never overwrites)",
-		Long: `Create the APEX v1 skeleton where it is absent. Nothing that exists is overwritten
+// projectInitLongHelp is `ape project init --help`'s text.
+const projectInitLongHelp = `Create the APEX v1 skeleton where it is absent. Nothing that exists is overwritten
 (the exceptions: the @AGENTS.md line appended to a CLAUDE.md that lacks it, the
 project-context line added to an AGENTS.md that lacks it, and the models: defaults
 appended to an _apex/config.yaml that has no models: block).
@@ -176,6 +171,13 @@ clean; other files that existed before are not touched and
 not committed. JSON: "amended" lists the files init changed, "amended_uncommitted"
 those it left out of the commit.
 
+In a model session (APE_SESSION or CLAUDECODE set) on a project that is already v1,
+init writes and repairs as above but commits nothing (Q156): an "apex: project init"
+commit restarts the v1 epoch and would hide every finding before it, so only a
+person's init makes one after the first. The files stay for the session's own commit
+(apex-plan's plan: commit takes them); JSON "commit_withheld" lists them, with a
+warning. A project's first init commits from a session as from a terminal.
+
 Plugins: when _apex/config.yaml lists marketplaces/plugins, init installs each
 plugin at project scope through the claude plugin CLI (marketplace add, install,
 or marketplace update + update when it is off its ref), writes
@@ -259,7 +261,15 @@ upstream (base.behind-upstream).
 --brownfield adds nothing; it records in _apex/state/project.json (ignored) that the
 project existed before APEX.
 
-Exit codes: 0 ok · 1 failed (e.g. settings.json is not valid JSON) · 2 usage.`,
+Exit codes: 0 ok · 1 failed (e.g. settings.json is not valid JSON) · 2 usage.`
+
+func newProjectInitCmd() *cobra.Command {
+	var f v1Flags
+	var brownfield bool
+	cmd := &cobra.Command{
+		Use:     "init",
+		Short:   "Create the development/ skeleton and merge ape's hooks (never overwrites)",
+		Long:    projectInitLongHelp,
 		Example: "  ape project init\n  ape project init --brownfield --json",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
