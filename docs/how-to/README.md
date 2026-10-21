@@ -11,8 +11,11 @@ How-to guides are **recipes** — they answer "how do I X?" for a reader who alr
 - [How to verify a release artifact](verify.md)
 - [How to pin ape in a project](pin-ape-in-a-project.md)
 - [How to install the APEX framework into a project](framework-setup.md)
+- [How to start an APEX v1 project](start-a-v1-project.md)
 - [How to refresh the framework in a project](framework-update.md)
 - [How to lift an APEX v0 project to v1](lift-a-v0-project.md)
+- [How to move archived changes to the current archive layout](move-to-the-archive-layout.md)
+- [How to pin a config key the framework falls back on](pin-a-config-key.md)
 
 **Run APEX v1 work**
 
@@ -24,6 +27,7 @@ How-to guides are **recipes** — they answer "how do I X?" for a reader who alr
 - [How to tune long-running sessions](tune-long-running-steps.md)
 - [How to write and run an `ape script`](write-ape-scripts.md)
 - [How to find and read run artefacts](run-artefacts.md)
+- [How to use plugins and tool skills](use-plugins-and-tools.md)
 
 **Integrate**
 

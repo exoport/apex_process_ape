@@ -97,8 +97,9 @@ ape bounds the loop from outside:
 - **Attempts and re-plans** per change (`limits.attempts`, `limits.attempts_total`,
   `limits.replans`) block the change itself.
 
-All of these are in the guarded `limits:` block ([`_apex/config.yaml`](../reference/config-yaml.md#limits)),
-so the loop cannot edit its way past them.
+All of these are in the guarded `limits:` block ([`_apex/config.yaml`](../reference/config-yaml.md#limits)):
+an edit to them that no person accepted stops the loop at its next start, verify or archive
+([what the guard reads](person-acts.md#what-the-guard-reads)).
 
 ## Nesting, as it applies to the loop
 

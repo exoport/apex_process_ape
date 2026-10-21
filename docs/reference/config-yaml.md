@@ -36,7 +36,7 @@ leaves an existing `models:` alone, warning for each default skill it lacks.
   setting.
 - **Two blocks report instead of failing.** `tools:` never makes the config unparseable: a
   problem in it is the finding `tools.invalid`, and only its valid entries are used. A wrong
-  `marketplaces:` or `plugins:` entry (a bad source, a duplicate, an unknown `allow:` value) is the
+  `marketplaces:` or `plugins:` entry (a bad source, a `ref:` on a directory marketplace, a duplicate, an unknown `allow:` value) is the
   finding `plugins.config`.
 - **Unknown top-level keys are ignored.**
 - **Guarded** blocks can loosen what ape enforces. Since the project's v1 epoch, a commit that
@@ -127,7 +127,8 @@ Claude Code's own setting applies. A value outside the list fails the session's 
 
 ## `limits`
 
-The loop's limits, enforced by ape. Guarded, so the loop cannot edit its way past them.
+The loop's limits, enforced by ape. Guarded: a change to them that no person accepted stops the
+loop's next start, verify or archive ([what the guard reads](../explanation/person-acts.md#what-the-guard-reads)).
 
 ```yaml
 limits:
@@ -416,8 +417,9 @@ with `ape change tool <id> <name>`.
 | [`ape plugins status`](cli.md#ape-plugins-status) | Reports each listed plugin's install, version against `ref`, enablement and `allow:`, and each `tools:` entry's state |
 | [`ape plugins sync`](cli.md#ape-plugins-sync) | Makes the installs and `.claude/settings.json` what the config says, committing a changed `settings.json` as `apex: plugins` |
 | [`ape doctor --fix`](cli.md#ape-doctor) | Does what `plugins sync` does before the checks run (row `plugins.project`). It fixes nothing else |
+| [`ape framework update`](cli.md#ape-framework-update) | Syncs the listed plugins after the install, as `plugins sync` does |
 | [`ape config effort`](cli.md#ape-config-effort) | In a v1 project, reports the top-level `effort:` and each `models.<skill>` entry. Its table, `_apex/effort-defaults.yaml`, does not apply there |
 | [`ape status --json`](cli.md#ape-status) | Carries `docs`, and `config` with the commit types and subject, and the release scheme and docs |
 
-`ape task` also installs a missing plugin before it spawns. `ape config pin` pins
+`ape task` also installs a missing plugin before it spawns. [`ape config pin`](../how-to/pin-a-config-key.md) pins
 `evidence_folder`, a key of the APEX v0 config that the v1 reader does not use.

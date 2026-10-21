@@ -30,8 +30,11 @@ New to APEX v1? Start with [What APEX v1.0 promises](explanation/apex-v1-scope.m
 - [How to verify a release artifact](how-to/verify.md)
 - [How to pin ape in a project](how-to/pin-ape-in-a-project.md) — a bare `ape` honours `.bingo/ape.mod`
 - [How to install the APEX framework into a project](how-to/framework-setup.md)
+- [How to start an APEX v1 project](how-to/start-a-v1-project.md) — `project init`, new or existing (`--brownfield`)
 - [How to refresh the framework in a project](how-to/framework-update.md)
 - [How to lift an APEX v0 project to v1](how-to/lift-a-v0-project.md)
+- [How to move archived changes to the current archive layout](how-to/move-to-the-archive-layout.md)
+- [How to pin a config key the framework falls back on](how-to/pin-a-config-key.md) — `ape config pin`
 
 **Run APEX v1 work**
 
@@ -43,6 +46,7 @@ New to APEX v1? Start with [What APEX v1.0 promises](explanation/apex-v1-scope.m
 - [How to tune long-running sessions](how-to/tune-long-running-steps.md)
 - [How to write and run an `ape script`](how-to/write-ape-scripts.md)
 - [How to find and read run artefacts](how-to/run-artefacts.md)
+- [How to use plugins and tool skills](how-to/use-plugins-and-tools.md) — `plugins:`, `tools:`, `ape plugins status|sync`
 
 **Integrate**
 

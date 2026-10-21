@@ -184,6 +184,17 @@ A person clears the finding in one of two ways:
   clean. A later change is judged again. It is refused on a change branch and with staged changes.
 - **Revert it.** `git revert <sha>` of the change clears it too.
 
+### What the guard reads
+
+The guard reads git history: who made a commit is told by its subject, and the project's v1
+epoch is the newest `apex: project init` or `apex: lift` commit. A commit whose subject starts
+`apex:` counts as ape's own, and an `apex: config accepted` commit counts as a person's
+acceptance. So the guard catches an edit that went through the normal flow, but not a session
+that writes such a subject itself (`git commit -m "apex: …"`), and a session that runs
+`ape project init` again, which commits a new epoch, clears the findings from before it. The
+loop's own skills never do either. What remains is the change's review, which reads the
+diff of a change, and a person reading the project's history.
+
 Two blocks depend on that acceptance directly:
 
 - **`secrets.allow`.** An entry lets a value through the commit secret scan only once a person

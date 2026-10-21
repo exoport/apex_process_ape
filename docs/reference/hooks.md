@@ -56,7 +56,8 @@ set, else `.git/hooks`. The script is a POSIX sh script marked by the line
 
 - it exits 0 at once when `APE_SCANNED=1`;
 - it refuses the commit when `ape` is not on `PATH`;
-- otherwise it runs `ape hook pre-commit`.
+- otherwise it runs `ape hook pre-commit` with the `ape` on `PATH`. An ape older than v1.0 there has
+  no `ape hook`, so every commit is refused ("unknown command") until a v1 ape comes first on `PATH`.
 
 A pre-commit hook that is not ape's is never edited. `ape project check` then lists the notice
 `hooks.pre-commit-absent`, naming the line to add to it: `ape hook pre-commit || exit 1`. git
