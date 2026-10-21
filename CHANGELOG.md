@@ -2,6 +2,29 @@
 
 ## v1.0.0-rc.7 (draft)
 
+### rc.7q: three defects measured on the rc.7p candidate (D340, D281)
+
+- **F-1, a person act typed as a slash command was refused (class B).** On Claude Code 2.1.305
+  a typed `/apex-orchestrator approve M2` got `session.person-only` ("the session's transcript does
+  not show the person typing it"): UserPromptSubmit records the typed line, but the transcript
+  writes the message as `<command-name>`/`<command-args>` tags, so the words never matched. ape
+  now rebuilds the typed line from those tags; `by:` quotes it (`"/apex-orchestrator approve M2"`).
+  A plain typed `approve M2` was never affected. **`make check-hooks` gains
+  `TestLive_E2GrantInteractive`:** a person's Claude Code PTY session (no `APE_SESSION`) in a
+  project `ape project init` set up — a typed `approve M1` and a typed `/approve-it approve M2`
+  each approve with `by:` quoting the words, and a turn a task-notification opened that runs
+  `ape milestone approve M3` is refused. Three short Haiku turns; green on 2.1.305 and 2.1.304.
+- **F-2, `ape hook pre-tool` failed open when it could not run (class B, safety).** Measured on
+  2.1.304 and 2.1.305: a PreToolUse hook whose `ape` is not on `PATH` let the Bash call through;
+  with `"onFailure": "block"` it was blocked, and an exit 1 blocks too. init now registers
+  pre-tool with `"onFailure": "block"` and `ape task` passes it inline the same way. A
+  registration from an earlier init stays intact (never `hooks.altered`), is the `project check`
+  notice `hooks.fail-open`, and gains the key in place on the next `ape project init`. Another
+  `onFailure` value is `hooks.altered`, restored by init.
+- **F-3, Sonnet 5.5 cache reads at 0.05x ($0.10/MTok),** as the pricing page states (footnote 2,
+  read 2026-10-21) and as Opus 5.5's do. ape priced them at 0.10x, so every Sonnet 5.5 cache read
+  was costed 2x high; `ape costs reprice` corrects recorded runs.
+
 On top of rc.6e: the orchestrator split (D171, D178–D182) — the loop is `apex-loop`,
 and `/apex-orchestrator` is the operator's own Claude Code session — with person acts
 attested by the person's own words (E2, D179, OI-12), the loop's context relay (D174,

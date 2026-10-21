@@ -95,7 +95,10 @@ What happens:
 2. When the model runs one of the eight commands, the `PreToolUse` hook, `ape hook pre-tool`,
    looks for the phrase in the prompt that opened the turn. The prompt must also be your typed
    message in the session's transcript. When both match, the hook writes a grant under
-   `_apex/state/grants/`. A grant is used once and expires after 120 seconds.
+   `_apex/state/grants/`. A grant is used once and expires after 120 seconds. The phrase may be
+   its own message (`approve M2`) or a slash command's arguments (`/apex-orchestrator approve
+   M2`): Claude Code writes a typed slash command into the transcript as its command name and
+   arguments, and ape reads the typed line back from them.
 3. The command consumes the grant and records `by: <git config user.name> (prompt <ts>: "<your
    sentence>")`. The quote is at most 160 characters, with secrets redacted.
 
