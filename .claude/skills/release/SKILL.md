@@ -1,7 +1,7 @@
 ---
 name: release
-description: 'Full release workflow for ape, in three modes: rc (vX.Y.Z-rc.N → a signed prerelease the eval pins), promote (vX.Y.Z on the evaluated rc commit, no new commit) and direct (class-D changes). Pre-flight → make ci-local → make check-harness → make check-framework → push main → poll push CI → tag → poll release (prerelease flag and releases/latest checked) → cosign verification. Use when the user says "/release", "cut a release", "cut an rc", "promote", "tag a release", or "ship vX.Y.Z".'
-argument-hint: "vX.Y.Z-rc.N to publish a release candidate (a signed prerelease for the eval); vX.Y.Z to promote the last rc of that version once the eval passed, or to release directly when no rc exists (class D changes only). Add the word \"autonomous\" to skip confirmation gates — never the promote eval gate."
+description: 'Full release workflow for ape, in four modes: rc (vX.Y.Z-rc.N → a signed prerelease the eval pins), promote (vX.Y.Z on the evaluated rc commit, no new commit), promote-commit (vX.Y.Z on a named evaluated commit that has no published rc, such as a trial build) and direct (class-D changes). Pre-flight → make ci-local → make check-harness → make check-framework → push main → poll push CI → tag → poll release (prerelease flag and releases/latest checked) → cosign verification. Use when the user says "/release", "cut a release", "cut an rc", "promote", "tag a release", or "ship vX.Y.Z".'
+argument-hint: "vX.Y.Z-rc.N to publish a release candidate (a signed prerelease for the eval); vX.Y.Z to promote the last rc of that version once the eval passed, or to release directly when no rc exists (class D changes only); vX.Y.Z --commit <sha> to promote a named evaluated commit with no published rc. Add the word \"autonomous\" to skip confirmation gates — never the eval gate, and never the operator's push gate in promote-commit mode."
 ---
 
 # Release
@@ -10,12 +10,13 @@ argument-hint: "vX.Y.Z-rc.N to publish a release candidate (a signed prerelease 
 
 Walk through the complete release flow: pre-flight → local gate → push main → wait for remote CI on the tagged SHA → tag → wait for the GitHub Release to publish → verify cosign signature.
 
-Three modes, chosen in Phase 0 from the argument and the tags that exist. They exist because framework, ape and eval agreed to EVALUATE BEFORE RELEASING (the workflow in AGENTS.md → "Releases"):
+Four modes, chosen in Phase 0 from the argument and the tags that exist. They exist because framework, ape and eval agreed to EVALUATE BEFORE RELEASING (the workflow in AGENTS.md → "Releases"):
 
 | mode | argument | what it publishes |
 | --- | --- | --- |
 | **rc** | `vX.Y.Z-rc.N` | a signed GitHub **prerelease**, which every "latest" resolver skips (`ape update`, the install docs, `releases/latest/download`). The eval pins it by tag and commit. The dated `## vX.Y.Z` CHANGELOG section is already IN the rc commit, so promotion adds nothing. |
 | **promote** | `vX.Y.Z` when `vX.Y.Z-rc.*` tags exist | the final release, tagged on the EXACT commit of the last rc — no new commit, no re-run of the local gates (they ran on that commit in rc mode). Only after the user confirms the eval passed on that rc. |
+| **promote-commit** | `vX.Y.Z --commit <sha> [--on <ref>]` | the final release on a commit the eval measured that never was a GitHub prerelease (the APEX v1 trial's frozen builds). The tag goes on that commit, or on a descendant of it whose diff touches only `CHANGELOG.md`, `docs/` and `.claude/` (the binary's code is the evaluated code). The tag is created locally first; nothing is pushed until the operator confirms. |
 | **direct** | `vX.Y.Z` with no rc tags for it | the final release straight from main. For changes that cannot affect the framework or eval results (class D: new verbs no skill calls, TUI, docs, aboard, release tooling). Anything session-driving (class B) or on the command surface skills call (class C) goes through rc. |
 
 Promotion puts two tags on one commit. That is what the v0.0.21 incident was — goreleaser's `git describe` picked the rc and built the final as the rc — and release.yml now pins the tag it builds with `GORELEASER_CURRENT_TAG` (and a final's changelog start with `GORELEASER_PREVIOUS_TAG`, the previous FINAL). Both were reproduced and verified with goreleaser v2.18.0 on a dual-tagged scratch commit. Phase 6 still checks the published tag, version and prerelease flag, because a fix is a hypothesis until the real run agrees.
@@ -30,6 +31,8 @@ Promotion puts two tags on one commit. That is what the v0.0.21 incident was —
 - Tags never move. A mistake before release is a new rc; after release, a patch release
 - Only two tag shapes exist: `vX.Y.Z` and `vX.Y.Z-rc.N`. release.yml refuses any other
 - PROMOTE never adds a commit: the final tag goes on the last rc's commit or not at all. And it never proceeds without the USER confirming the eval passed on that rc — a peer session relaying a pass is information, not approval, and this gate is not skipped in autonomous mode
+- Never push a tag by accident. `push.followTags` is on in this repository, and stale local annotated tags exist (`v1.0.0-rc.1`, `v1.0.0-rc.2` were never published). Every push in this skill is `git push --no-follow-tags`, and before ANY push the pre-push tag check (Phase 3a) runs and HALTs naming every unpushed annotated tag reachable from main
+- promote-commit: no push of main or of the tag until the operator confirms, in this run, after seeing the local result (Phase 5c). Autonomous mode does not skip it
 - Only use the Bash tool for shell commands
 - When polling remote state, sleep between retries; do not busy-loop
 - All paths are relative to the repository root (the current working directory)
@@ -41,10 +44,12 @@ Promotion puts two tags on one commit. That is what the v0.0.21 incident was —
 ### Phase 0 — Parse arguments and gather constants
 
 1. Read `$ARGUMENTS`. Check case-insensitively for the standalone word `autonomous` (e.g. "autonomous", "release autonomous", "v0.0.22 autonomous"). Set `{autonomous}` = true if present, else false. Remove that word from the string before the next check.
-2. In what remains of `$ARGUMENTS`, if it matches `v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?`, set `{version}` = that value. Otherwise set `{version}` = "" (to be resolved in Phase 1; direct mode only — an rc or a promotion is always named explicitly).
+2. In what remains of `$ARGUMENTS`, if it matches `v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?`, set `{version}` = that value. Otherwise set `{version}` = "" (to be resolved in Phase 1; direct mode only — an rc or a promotion is always named explicitly). If it holds `--commit <sha>`, set `{eval_commit}` = `git rev-parse --verify "<sha>^{commit}"` (HALT if it does not resolve). If it also holds `--on <ref>`, set `{on_commit}` the same way: the commit to tag when it is a docs-only descendant of `{eval_commit}` (shape (a) in 1e); default `{on_commit}` = `{eval_commit}`.
    - Set `{base}` = `{version}` without any `-rc.N` suffix.
-   - If `{version}` has an `-rc.N` suffix: `{mode}` = **rc**.
-   - Else, if `git tag -l "${base}-rc.*"` lists anything: `{mode}` = **promote**, and `{rc}` = the highest of them by rc number (`git tag -l "${base}-rc.*" | sort -t. -k4 -n | tail -1`).
+   - If `{version}` has an `-rc.N` suffix: `{mode}` = **rc** (HALT if `--commit` was given).
+   - Else, if `{eval_commit}` is set: `{mode}` = **promote-commit**.
+   - Else, if `git ls-remote --tags origin "refs/tags/${base}-rc.*"` lists anything: `{mode}` = **promote**, and `{rc}` = the highest PUSHED one by rc number. Only tags on origin count: a local-only rc tag was never a prerelease the eval could pin.
+   - Else, if `git tag -l "${base}-rc.*"` lists local-only tags: HALT. Message: "Local rc tags <list> were never pushed (stale). Promote an evaluated commit with `/release {base} --commit <sha>`, or delete the stale tags (`git tag -d <tag>`, a person's call)."
    - Else: `{mode}` = **direct**.
    Announce the mode before Phase 1.
 3. If `{autonomous}` is true, tell the user up front: "Running in autonomous mode — no confirmation gates, will push main, tag, and publish the release without stopping." This is not a confirmation ask, just a heads-up before Phase 1 starts.
@@ -75,7 +80,7 @@ HALT if output is non-empty. Message: "Working tree is not clean. Commit or stas
 git rev-parse --abbrev-ref HEAD
 ```
 
-HALT if not `main`. Message: "Must be on the main branch to release."
+HALT if not `main`. Message: "Must be on the main branch to release." In promote-commit mode main may still be behind or beside `{eval_commit}`; 1g settles that.
 
 #### 1c — main is up to date with remote
 
@@ -99,7 +104,7 @@ If `{version}` is still "":
 ```bash
 grep -m1 '^## v[0-9]' CHANGELOG.md
 ```
-Extract the version token (`v0.0.X`) from the first matching line. Set `{version}` = that value.
+Extract the version token (`vX.Y.Z`) from the first matching line. Set `{version}` = that value.
 
 If no match is found: HALT. Message: "Cannot detect version from CHANGELOG.md. Add a `## vX.Y.Z` entry or pass the version as an argument."
 
@@ -109,7 +114,7 @@ If no match is found: HALT. Message: "Cannot detect version from CHANGELOG.md. A
 grep -m1 "^## ${base} " CHANGELOG.md
 ```
 
-HALT if not found. Message: "No CHANGELOG.md entry for `{base}`. Add one before releasing." — in rc mode too: the section is written, headed `## {base} (<date>)`, BEFORE the rc is cut, because the rc commit is the commit that gets promoted.
+HALT if not found (promote-commit: the rule below replaces this check and the next). Message: "No CHANGELOG.md entry for `{base}`. Add one before releasing." — in rc mode too: the section is written, headed `## {base} (<date>)`, BEFORE the rc is cut, because the rc commit is the commit that gets promoted.
 
 Check the line does not contain "unreleased" (case-insensitive):
 ```bash
@@ -117,6 +122,13 @@ grep -im1 "^## ${base} " CHANGELOG.md | grep -i unreleased
 ```
 
 If it matches: HALT. Message: "CHANGELOG.md entry for `{base}` is marked unreleased. Date it (in its own commit) before releasing." In direct and rc mode, that dating commit is `chore(release): {base}`; a later rc that changes the CHANGELOG commits the change with its fix.
+
+**promote-commit mode** reads the CHANGELOG of the commit it tags, not the working tree (`git show {on_commit}:CHANGELOG.md`; main may not hold it yet). It has two accepted shapes — the operator chooses; never pick for them:
+
+- **(a) a dated section:** `## {base} (<date>)` exists at `{on_commit}`, committed after `{eval_commit}` as its own docs-only commit (`chore(release): {base}`), passed as `--on <that commit>`. It names the Claude Code versions the eval measured (e.g. "Measured on Claude Code 2.1.304 and 2.1.305"). 1g tags that commit.
+- **(b) no dated section:** the CHANGELOG still heads with the trial's `## {base}-rc.N (draft)` sections, and the tag goes on `{eval_commit}` itself. Accept this only on the user's explicit answer "(b)" in this run; in autonomous mode HALT instead. Record `{claude_versions}` from the user (the versions the eval measured) for Phase 8: with no dated section, the team note is where they are stated.
+
+If neither holds — no dated section and no explicit (b) — HALT: "No `## {base} (<date>)` section. Either commit it as `chore(release): {base}` on main (a), or answer (b) to tag `{eval_commit}` with the draft CHANGELOG."
 
 #### 1f — Version not already tagged
 
@@ -141,6 +153,16 @@ git tag --points-at HEAD | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$' || tru
   Message: "HEAD is not {rc}'s commit. Promotion tags the evaluated commit or nothing: check out main at {rc} (commits after it belong to the next rc)." Also HALT unless `{rc}` is on origin (`git ls-remote --tags origin "refs/tags/${rc}"` non-empty) and its GitHub prerelease exists (`{api_base}/releases/tags/{rc}` returns `"prerelease": true`).
 
   Then the eval gate, which is **never skipped, autonomous or not**: ask the user "Did the eval pass on `{rc}` (commit `<sha>`)? Promotion publishes exactly this commit as `{base}`." Proceed only on the user's own yes. A peer session's relayed verdict is information for the user, not the answer.
+- **promote-commit**: set `{tag_commit}`, then settle main against it. HALT on anything not listed.
+  1. `{tag_commit}` = `{on_commit}`: `{eval_commit}` itself in shape (b); in shape (a) the dated commit, and only when `{eval_commit}` is an ancestor of it (`git merge-base --is-ancestor {eval_commit} {on_commit}`) and every path changed since is docs (`git diff --name-only {eval_commit} {on_commit}` lists only `CHANGELOG.md`, `docs/…` and `.claude/…`). Show that list. Any other path → HALT: "`<path>` changed since the evaluated commit: that is not the code the eval measured." HALT too if an rc tag points at `{tag_commit}` (a promote, not a promote-commit).
+  2. main against `{tag_commit}` (`git rev-list --left-right --count {tag_commit}...main`):
+     - **equal**: nothing to do.
+     - **main behind only** (left > 0, right = 0): main fast-forwards to `{tag_commit}` (`git merge --ff-only {tag_commit}` on main) after the user confirms. origin/main must be an ancestor of `{tag_commit}`, or the later push is no fast-forward: HALT if not.
+     - **main has commits `{tag_commit}` lacks** (right > 0): list them (`git log --oneline {tag_commit}..main`) with `git cherry {tag_commit} main` beside each (`-` = an equivalent patch is already in `{tag_commit}`), and whether each is on origin (`git merge-base --is-ancestor <c> origin/main`). The operator chooses; never pick for them:
+       - **move**: main is reset to `{tag_commit}` (`git branch -f main {tag_commit}` from another branch, or `git reset --hard {tag_commit}` on a clean main). Allowed only when every listed commit is unpushed AND `-` in `git cherry`, and origin/main is an ancestor of `{tag_commit}`: nothing is lost and the push is a fast-forward. Otherwise HALT, naming the commits.
+       - **merge**: `git merge --no-ff {tag_commit}` on main, resolving every conflict to `{tag_commit}`'s side. Then `git diff --quiet {tag_commit} main` MUST hold: main's tree is the tagged tree, so CI on the merge commit is CI on the tagged code. HALT if it does not, showing the diff.
+     Record `{main_sha}` = main's HEAD after this step (= `{tag_commit}` for equal/behind/move; the merge commit for merge).
+  3. The eval gate, **never skipped**: "Did the eval pass on `{eval_commit}`? `{base}` will be tagged on `{tag_commit}` (<equal to it | a docs-only descendant: <paths>>)." Proceed only on the user's own yes.
 
 #### 1h — Price table covers the locally-running Claude Code
 
@@ -151,6 +173,8 @@ This check reads the transcripts the Claude Code on THIS machine is writing righ
 ```bash
 make check-prices
 ```
+
+On a host that also runs the eval, its stub-API dry runs write transcripts whose model is `stub`. When they are among the newest scanned, the check fails on them. Judge it with those transcripts left out (a temporary `HOME` whose `.claude/projects` links every project dir except the eval's scratch ones, as the v1 trial chains did), and say so in the summary.
 
 HALT if the exit code is non-zero. Message: "The price table does not cover the models the local Claude Code is emitting. Run `ape costs coverage` for the gap, confirm each rate at https://platform.claude.com/docs/en/about-claude/pricing, add the rows to `internal/cost/prices.yaml`, and commit before releasing."
 
@@ -176,6 +200,8 @@ Pre-flight checks passed:
 
 **promote mode skips Phases 2, 2b, 2c and 3.** They ran on this exact commit when `{rc}` was cut, and the eval has run it since; the commit is unchanged, and HEAD is already on origin. Go to Phase 4, which only confirms CI passed for this SHA. Say so in the summary rather than listing the skipped gates as passed.
 
+**promote-commit mode skips Phases 2, 2b and 2c** for the evaluated code: they ran on `{eval_commit}` in the build's own chain, and the eval measured it since. Ask the user for that evidence (the READY post: ci-local, check-harness on each measured Claude Code version, check-framework against the payload) and quote it in the summary. When `{tag_commit}` is a docs-only descendant, run `make docs-check docs-cli-check lint` on it instead (fast): the docs gates are the ones its diff can break. Then go to Phase 5 (create the tag locally), and do Phase 3 and Phase 4 only after the operator gate in 5c.
+
 If `{autonomous}` is false: ask "Proceed with `make ci-local`? (this takes ~30–60 s)" — wait for confirmation.
 
 If `{autonomous}` is true: skip the ask, state "Autonomous mode — proceeding with `make ci-local`." and continue immediately.
@@ -190,7 +216,7 @@ Run the full local gate:
 make ci-local
 ```
 
-This is a long-running command (30–60 s). Stream output. HALT if the exit code is non-zero. Message: "`make ci-local` failed. Fix the issues and re-run `/release`."
+This is a long-running command (≈ 12–15 min: `internal/e2e` alone takes ~9 min, under a 20 min `TEST_TIMEOUT`). Run it in the background and wait for it. HALT if the exit code is non-zero. Message: "`make ci-local` failed. Fix the issues and re-run `/release`."
 
 On success inform the user: "Local CI gate passed."
 
@@ -206,11 +232,13 @@ Run the whole sweep as one named gate:
 make check-harness
 ```
 
-That is `check-prices` + `check-output-styles` + `check-hooks` + `check-claude` + `check-task-subagents` + `check-agents-md` + `check-claude-surface` (last, so its unread-CHANGELOG stop never hides another gate). ~3–4 min total. Spends a few cents (two short sessions — the PTY gate's Haiku turn, and the seeded run `check-hooks` judges); everything else reads local artifacts or the rendered pane for free.
+That is `check-prices` + `check-output-styles` + `check-hooks` + `check-claude` + `check-task-subagents` + `check-agents-md` + `check-claude-surface` (last, so its unread-CHANGELOG stop never hides another gate). ~3–5 min total.
+
+It measures the `claude` first on PATH. To measure another version too (the v1 trial measured 2.1.304 installed and 2.1.305 from a PATH shim), run the same targets with `DISABLE_AUTOUPDATER=1 PATH=<dir holding that claude>:$PATH`. Run `check-claude-surface` only against the version the baseline's `reviewed_through` names. The versions measured are the ones the release states. Spends a few cents (two short sessions — the PTY gate's Haiku turn, and the seeded run `check-hooks` judges); everything else reads local artifacts or the rendered pane for free.
 
 > `check-prices` already ran in Phase 1h as a fast pre-flight. Re-running it here is deliberate and cheap: Phase 2b is the single gate that defines "the harness contract holds", and it must not be able to drift out of sync with what that phrase covers.
 
-If `{autonomous}` is false: ask "Run `make check-harness`? It sweeps the price table, the hook contract, and spawns the local Claude Code for the PTY/model contract (~40 s, one Haiku turn)." — wait for confirmation.
+If `{autonomous}` is false: ask "Run `make check-harness`? It sweeps the price table, the hook contract, and spawns the local Claude Code for the PTY/model contract (~3–5 min, a few cents)." — wait for confirmation.
 
 If `{autonomous}` is true: skip the ask and run it.
 
@@ -251,7 +279,7 @@ make check-framework \
   APEX_PROJECT=/path/to/a/project/using/that/framework
 ```
 
-Four gates:
+Three gates:
 
 | Gate | Asks |
 | --- | --- |
@@ -270,7 +298,7 @@ Reading the output:
 - **`APEX_FRAMEWORK_REPO` unset** → prints "framework contract NOT verified — this is a skip, not a pass" and exits 0. Report it as unverified; do not call it passed.
 - **A path that is not a framework checkout** → hard error, exit 1. Deliberate: setting the variable says you want the gate to run, so a path resolving to nothing is a typo, not a skip.
 - **`TestCommandSurface_AgainstRealManifest` SKIP** → the framework predates the manifest (pre-v0.11.0). Not a failure.
-- **`installed command surface NOT verified`** → `APEX_PROJECT` has no `_apex/`. The checkout gates still ran; only the installed-project half did not. It defaults to this repo, which does have one, so this normally means it was pointed elsewhere.
+- **`installed command surface NOT verified`** → `APEX_PROJECT` is not an install (no `_apex/ape-commands.yaml`). The checkout gates still ran; only the installed-project half did not. It defaults to `testdata/apexv1project`, which is not an install either: point it at a real install of the framework version being released for. For a v1 framework, `APEX_FRAMEWORK_REPO` may be the frozen payload tree the eval measured.
 
 Both framework layouts resolve — released (`_apex/` at the repo root) and build (nested under `framework/`).
 
@@ -278,17 +306,31 @@ Both framework layouts resolve — released (`_apex/` at the repo root) and buil
 
 ### Phase 3 — Push main
 
-If `{autonomous}` is false: ask "Local gate passed. Push main?" — wait for confirmation.
+#### 3a — Pre-push tag check (every mode, before every push)
+
+`push.followTags` is on here, so a plain push also sends every annotated tag reachable from what it pushes. List the annotated tags reachable from main that origin lacks:
+
+```bash
+git ls-remote --tags origin | sed -n 's|.*refs/tags/\([^^]*\)$|\1|p' | LC_ALL=C sort -u > "{scratchpad}/remote-tags"
+git for-each-ref --merged main --format='%(objecttype) %(refname:short)' refs/tags \
+  | awk '$1 == "tag" {print $2}' | LC_ALL=C sort -u | LC_ALL=C comm -23 - "{scratchpad}/remote-tags"
+```
+
+Leave out `{version}` itself in promote-commit mode once 5b created it (its push is 5d's). HALT if anything else is listed. Message: "Unpushed annotated tags reachable from main: <list>. A push would publish them under push.followTags. Delete the stale ones (`git tag -d <tag>`, a person's call) or say which to keep, then re-run." Every push below uses `--no-follow-tags` as well.
+
+#### 3b — Push main
+
+If `{autonomous}` is false: ask "Local gate passed. Push main?" — wait for confirmation. (promote-commit: the operator already confirmed in 5c.)
 
 If `{autonomous}` is true: skip the ask, state "Autonomous mode — pushing main." and continue immediately.
 
 ```bash
-git push origin main
+git push --no-follow-tags origin main
 ```
 
 HALT on non-zero exit.
 
-Capture the HEAD SHA that will be tagged:
+Capture the HEAD SHA that will be tagged (promote-commit: CI runs on `{main_sha}`, the merge commit after a merge, whose tree 1g proved is `{tag_commit}`'s):
 ```bash
 git rev-parse HEAD
 ```
@@ -326,7 +368,7 @@ else:
 States:
 - `not_found` → not yet registered; continue polling
 - `queued` or `in_progress` → still running; continue polling
-- `completed success` → proceed to Phase 5
+- `completed success` → proceed to Phase 5 (promote-commit: to 5d)
 - `completed failure` or `completed cancelled` → HALT. Message: "CI failed on main at `{head_sha}`. Fix the issue (push more commits to main), then re-run `/release`."
 
 If the ceiling is hit without completion: HALT. Message: "CI poll timed out after 20 minutes. Check https://github.com/{repo_slug}/actions manually and re-run once it finishes."
@@ -336,6 +378,8 @@ On CI success inform the user: "Remote CI passed for `{head_sha}` on main."
 ---
 
 ### Phase 5 — Tag
+
+**promote-commit** comes here straight from Phase 1: 5a and 5b create the tag locally, 5c is the operator's gate, then Phases 3 and 4 push main and wait for its CI, then 5d pushes the tag. It asks nothing here; 5c is its ask.
 
 If `{autonomous}` is false: ask "CI is green. Create and push the tag `{version}`?" (rc mode: "…the release-candidate tag `{version}`, published as a prerelease?"; promote mode: "…the final tag `{version}` on `{rc}`'s commit?") — wait for confirmation.
 
@@ -347,15 +391,34 @@ If `{autonomous}` is true: skip the ask, state "Autonomous mode — creating and
 grep -A2 "^## ${base} " CHANGELOG.md | head -3
 ```
 
-Use the first non-empty line after the heading as the tag message suffix (keep it to one line, ≤80 chars). If nothing found, use `{version}`. In rc mode, prefix the headline with `release candidate: `.
+(promote-commit: `git show {tag_commit}:CHANGELOG.md | grep -A2 "^## ${base} "`.) Use the first non-empty line after the heading as the tag message suffix (keep it to one line, ≤80 chars). If nothing found, use `{version}`. In rc mode, prefix the headline with `release candidate: `.
 
 Set `{tag_message}` = `"{version} — {headline}"`.
 
-#### 5b — Create and push the tag
+In promote-commit shape (b) the CHANGELOG has no `## {base}` section: use the headline the user gives, or `APEX v1 — promoted from the evaluated build <short {eval_commit}>`.
+
+#### 5b — Create the tag
 
 ```bash
-git tag -a "{version}" -m "{tag_message}"
-git push origin "{version}"
+git tag -a "{version}" -m "{tag_message}" "{tag_commit:-HEAD}"
+git rev-parse "{version}^{commit}"   # must be {tag_commit} (promote-commit) or HEAD
+```
+
+HALT on non-zero exit, or if the tag does not point where it must.
+
+#### 5c — The operator's push gate (promote-commit only; never skipped)
+
+Nothing has left this machine yet. Show the operator:
+- `{version}` → `{tag_commit}` (and `{eval_commit}` with the docs-only path list, when they differ);
+- main → `{main_sha}` (equal / fast-forwarded / moved / merged), with `git log --oneline origin/main..main | head -20`;
+- the 3a tag check's result.
+
+Ask: "Push main and then `{version}` now?" Proceed only on the operator's own yes, in this run. If they want to hold, stop here: the local tag and main stay as they are, and a later run resumes at 3a. Then do Phases 3 and 4 against `{main_sha}`, and come back to 5d.
+
+#### 5d — Push the tag
+
+```bash
+git push --no-follow-tags origin "refs/tags/{version}"
 ```
 
 HALT on non-zero exit.
@@ -386,7 +449,7 @@ print('published', r.get('tag_name',''), r.get('html_url',''))
   curl -sf "{api_base}/releases/latest" | jq -r '.tag_name'
   ```
   - **rc mode**: HALT unless `prerelease` is `true` AND `latest` is NOT `{version}`. Message: "`{version}` is visible as the latest release — every `ape update` and install would pick a candidate. Mark it prerelease on GitHub now, then find out why `prerelease: auto` did not."
-  - **direct / promote**: HALT unless `prerelease` is `false` AND `latest` is `{version}`.
+  - **direct / promote / promote-commit**: HALT unless `prerelease` is `false` AND `latest` is `{version}`.
   - The asset names carry no version, so also confirm the binary's own: download the linux/amd64 archive and check `ape version` prints `{version}` without the `v` — for a promotion, `{base}`, never `{rc}`'s version. That is the v0.0.21 failure in one line.
 
 If ceiling hit: HALT. Message: "Release poll timed out. Check https://github.com/{repo_slug}/releases manually. Run Phase 7 manually once the release is published."
@@ -448,7 +511,7 @@ Display a final summary:
 
 ```
 Release complete:
-  mode:          rc / promote (of {rc}) / direct
+  mode:          rc / promote (of {rc}) / promote-commit (of {eval_commit}) / direct
   version:       {version}
   tag:           {version} (commit {head_sha})
   release URL:   https://github.com/{repo_slug}/releases/tag/{version}
@@ -456,6 +519,8 @@ Release complete:
   harness:       verified against Claude Code {claude_version} / NOT verified (reason)
   framework:     verified against {APEX_FRAMEWORK_REPO} / NOT verified (no checkout)
 ```
+
+In **promote-commit mode**, also give the operator the line for the team note: `{version}` at `{tag_commit}`, promoted from the evaluated `{eval_commit}`, measured on Claude Code `{claude_versions}`. With shape (b) the GitHub release body is empty and the CHANGELOG has no `{base}` section, so that note is where the versions are stated.
 
 In **rc mode**, the next step belongs to the eval: send it `{version}` and the full commit sha (SendMessage to the eval session, when one is working with this repo), and say the release is a prerelease. In **promote mode**, tell the eval the final is out so it runs its post-promotion smoke check on the released binary (cosign, `ape version` = `{base}` at the rc commit, its free tier, one live stage).
 
