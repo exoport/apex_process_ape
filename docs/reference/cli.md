@@ -5399,9 +5399,11 @@ an output saying a command was not found — "command not found", "No such file 
 directory" — with make's "Error 127", and no failing test named: a tool it runs is
 missing here, which is not a red; read the same at both points) · red-no-baseline ·
 flaky (RG-1: a red-after-lift or red-at-tag-new-failures command is run once more at the
-lift commit, and passed — as at the tag — that time: a flake, not the lift's; record it,
-plan no fix; red again keeps its verdict, its note saying so; regression_commands[] /
-regression.commands[] carry the re-run's exit_rerun and log_rerun). A run
+lift commit, and passed that time: a flake, not the lift's; record it, plan no fix; a
+red-at-tag-new-failures command whose re-run fails only as at the tag is red-at-tag, its
+note naming the new failures that did not reproduce (RV-1); red again keeps its verdict,
+its note saying so; regression_commands[] / regression.commands[] carry the re-run's
+exit_rerun and log_rerun). A run
 that exits 0 but whose output names failing tests (as below) is red for the verdict, by
 those names, and its note says "exit 0, but the output names N failing tests": green at
 the tag, it is red-after-lift with the names in regression_new_failures (a ( … ) block

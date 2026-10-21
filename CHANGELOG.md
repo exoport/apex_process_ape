@@ -130,6 +130,15 @@ eval's E-R7-1 and E2 residual (D219).
   pointer, and `project check` lists the `roadmap.next-inline` notice. A project an rc.7b move
   left that way is repaired by running `ape next move` again.
 
+### rc.7n: a pre-existing red is never called flaky (RV-1; D308, D309)
+
+- **A lift regression command red at `apex-v0-final` whose first run after the lift fails a
+  test the tag's did not, and whose re-run fails only as at the tag, is now `red-at-tag`**, not
+  `flaky`. Its note names the new failures that did not reproduce. rc.7m called it `flaky`,
+  whose apex-plan rule plans nothing, so the tag's failures never reached `Next`; `red-at-tag`
+  sends them there. `flaky` keeps one meaning: red after the lift, green when ape ran it
+  again. That case's note no longer says "the same failures as at the tag".
+
 ### rc.7m: a check's cleanup never loses an edit (RK-4b, Q144; D300, D301)
 
 After each check ape undoes what changed in the tree outside the development folder while it
