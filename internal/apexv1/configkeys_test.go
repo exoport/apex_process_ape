@@ -19,14 +19,22 @@ func TestProjectCheck_ConfigKeys(t *testing.T) {
 	}{
 		"known keys pass": {config: "project_name: x\neffort: high\nlimits: {attempts: 3, relays: 2}\nmodels:\n  apex-apply: {model: sonnet, effort: low}\n" +
 			"output_folder: _output\ngovernance_repository_url: https://example.invalid/g.git\n"},
-		"a limits typo": {config: "limits:\n  attempt: 3\n", finds: []want{{CodeConfigUnknownKey,
-			"limits.attempt is not a key of limits:, so it limits nothing — the keys are budget, attempts, attempts_total, replans, consecutive_blocks, context_relay, relays: fix the name, or drop it"}}},
-		"a top-level effort that is not a level": {config: "effort: extreme\n", finds: []want{{CodeConfigInvalid,
-			`effort: "extreme" is not a level, and every session ape launches would refuse it — use one of low, medium, high, xhigh, max, or drop it for Claude Code's own default`}}},
-		"a models entry effort that is not a level": {config: "models:\n  apex-apply: {model: sonnet, effort: huge}\n", finds: []want{{CodeConfigInvalid,
-			`models.apex-apply.effort: "huge" is not a level, and apex-apply's session would refuse to launch`}}},
-		"an unknown top-level key": {config: "project_name: x\nlimit:\n  attempts: 3\n", notices: []want{{CodeConfigUnknownTopKey,
-			"limit is not a key ape reads in _apex/config.yaml, so it does nothing"}}},
+		"a limits typo": {config: "limits:\n  attempt: 3\n", finds: []want{{
+			CodeConfigUnknownKey,
+			"limits.attempt is not a key of limits:, so it limits nothing — the keys are budget, attempts, attempts_total, replans, consecutive_blocks, context_relay, relays: fix the name, or drop it",
+		}}},
+		"a top-level effort that is not a level": {config: "effort: extreme\n", finds: []want{{
+			CodeConfigInvalid,
+			`effort: "extreme" is not a level, and every session ape launches would refuse it — use one of low, medium, high, xhigh, max, or drop it for Claude Code's own default`,
+		}}},
+		"a models entry effort that is not a level": {config: "models:\n  apex-apply: {model: sonnet, effort: huge}\n", finds: []want{{
+			CodeConfigInvalid,
+			`models.apex-apply.effort: "huge" is not a level, and apex-apply's session would refuse to launch`,
+		}}},
+		"an unknown top-level key": {config: "project_name: x\nlimit:\n  attempts: 3\n", notices: []want{{
+			CodeConfigUnknownTopKey,
+			"limit is not a key ape reads in _apex/config.yaml, so it does nothing",
+		}}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			files := baseFiles()
