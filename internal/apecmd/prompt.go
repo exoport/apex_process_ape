@@ -166,7 +166,7 @@ apex-loop run, which starts only allow-listed skills with ape task).
 Exit codes: 0 session completed (Stop hook) · 1 idle-timeout, session
 failed, or the typed line never submitted · 2 usage or preflight error (no _apex/config.yaml, unresolved
 --agent, missing --handoff file, the nesting rule) · 3 the claude REPL never became ready
-· 4 claude exited before the Stop hook.`,
+· 4 claude exited before the Stop hook · 5 an upstream API failure ended the session.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// The nesting rule (D62): a prompt session runs no skill an

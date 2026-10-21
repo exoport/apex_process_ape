@@ -168,7 +168,14 @@ you must supply --project-name and --extensions, OR pass --no-bootstrap.
 Otherwise 'setup' refuses to seed silently (exit 5).
 
 For subsequent refreshes against a framework version bump, use
-'ape framework update'.`,
+'ape framework update'.
+
+Exit codes: 2 usage; 3 the framework source (no release, missing tag, not a
+release layout); 4 the project tree (not a git repository, a detached HEAD,
+modified or staged tracked files); 5 an APEX v0 release with no terminal and
+no --project-name/--extensions or --no-bootstrap; 6 already installed
+(_apex/framework.yaml exists); 11 ape below min_ape_version; 12 a commit
+failed (the changes are left staged).`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			clone, err := resolveFrameworkClone(*repoFlag)
 			if err != nil {
@@ -373,11 +380,12 @@ update commit carries (see ape project init --help); a plugin that cannot be
 put right is a warning with the command to run, not a failed update.
 
   --plan        print the upgrade-migration plan and do NOTHING ELSE — no
-                install, no fetch, no migration. The plan is the list the
+                install, no migration (it fetches the clone's tags unless
+                --no-fetch). The plan is the list the
                 project will hold AFTER this update: the installed entries
                 overlaid by the repo's, with a SOURCE column marking the
                 ones the update brings, so a migration can be read before
-                it runs. The repo is read as it stands, unfetched. It
+                it runs. The repo is read at the release it selects. It
                 distinguishes pending / applied / half-applied /
                 cannot-tell rather than collapsing them, because a runner
                 that reads cannot-tell as pending re-applies things
@@ -406,7 +414,8 @@ Refuses to run when:
     release, or diverged from it, is left where it is and reported. ape's
     own clones under the user cache are always overwritten
 
-Exit codes: 1 a blocking migration was not applied (nothing committed);
+Exit codes: 1 a blocking migration was not applied (nothing committed), or
+--version names an APEX v0 release in an APEX v1 project (nothing installed);
 2 usage; 3 the framework source (no release, missing tag, not a release
 layout); 4 the project tree; 7 not installed; 11 ape below
 min_ape_version; 12 a commit failed (the changes are left staged).

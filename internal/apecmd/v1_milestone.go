@@ -126,7 +126,7 @@ approved milestone; gate and close refuse a gate that differs from the approved 
 Committed together as "apex: <M> approved".
 
 Before it records anything, approve runs the gate once against the current tree (D70 B),
-under timeouts.gate (default 30m), in a detached run (OI-12; below), with progress lines
+under timeouts.gate (default 30m without progress, 4h at most), in a detached run (OI-12; below), with progress lines
 in its log. A new
 gate must run and be red — it is red until the milestone's work is done:
   exit 0                                  refused, milestone.gate-green (action replan):

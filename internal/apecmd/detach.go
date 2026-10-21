@@ -180,7 +180,7 @@ func writeHandle(path string, h *detachedHandle) error {
 
 func addDetachFlag(cmd *cobra.Command, detach *bool) {
 	cmd.Flags().BoolVar(detach, "detach", false,
-		"Start the run in the background, detached from this shell, print its id (with --output-format json: {id, wait, log, stdout}), and return at once; `ape run wait <id> --wait 9m` waits for it")
+		"Start the run in the background, detached from this shell, print its id (with --output-format json: {id, wait, log, stdout}), and return at once; then ape run wait <id> --wait 9m waits for it")
 }
 
 // withoutDetach is this process's arguments minus --detach: what the

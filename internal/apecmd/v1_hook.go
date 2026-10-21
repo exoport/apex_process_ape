@@ -230,7 +230,9 @@ func newHookPreToolCmd() *cobra.Command {
 {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny",
 "permissionDecisionReason":"… specs change only through ape change archive"}}, an edit
 whose target is under development/specs/, is development/changes/*/state.json, is under
-development/archive/, or is under _apex/state/.
+development/archive/, or is under _apex/state/, and an edit to .claude/settings.json or
+.claude/settings.local.json (ape's hooks and the session's environment are a person's;
+ape project init restores the hooks).
 
 A running check (RK-4b, Q144): while ape runs a check in this checkout (a verify, a gate,
 a baseline, a Stop hook's re-run), denies an edit outside development/ and _apex/state/,

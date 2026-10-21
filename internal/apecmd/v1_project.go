@@ -947,7 +947,7 @@ func newStatusCmd() *cobra.Command {
     human_review.docs not person); a task whose
     delegate failed (not returned) or was voided is a person's and not listed. next names the delegate
     for the first (` + "`ape change accept <id> <T> --delegate --wait 9m`" + `) before a person
-  - spend so far: the sum of finished ape task/pipeline run manifests
+  - spend so far: the sum of finished ape task run manifests (and pipeline runs an older ape recorded)
   - red at baseline, not any change's own (JSON "pre_existing_red": [{change, kind, ref,
     cmd, exit, sha}]): the regression command, and scenario checks of the spec a change
     leaves untouched, that were red when a change was baselined — for the planner to
@@ -1055,8 +1055,7 @@ Exit codes: 0 ok · 2 usage. --board exits 0 whatever the board did.`,
 	addV1Flags(cmd, &f)
 	cmd.Flags().BoolVar(&brief, "brief", false, "at most 25 lines")
 	cmd.Flags().BoolVar(&board, "board", false, "refresh the project's aboard status tab now and say where it wrote (JSON \"board\"); "+
-		"the tab is a view, never a record; until ape pins the aboard release that honours its quiet flag, "+
-		"a changed view posted to a running board raises the tab's unread dot")
+		"the tab is a view, never a record, and quiet: a refresh raises no notification or unread dot")
 	return cmd
 }
 
