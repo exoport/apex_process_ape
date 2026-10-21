@@ -161,3 +161,15 @@ func TestJudgeLiftRegression_MakeNotFound(t *testing.T) {
 		require.Equal(t, LiftRegressionRedAtTag, v, out)
 	}
 }
+
+// Q142 (RJ-5, D291): a block command's bullet says what it holds; one that
+// held nothing but a code block read as a broken list item (cortex).
+func TestWithCommands_BlockHasALabel(t *testing.T) {
+	g := LiftGates{Source: "development/project-context.md:9", Commands: []string{"make vet", "( set -e\nmake test\nfor g in a; do true; done\n)"}}
+	require.Equal(t, "# A\n\n## Commands\n<!-- build / test / e2e, one line each -->\n"+
+		"<!-- lifted from development/project-context.md:9 (## Code Validation) at apex-v0-final -->\n"+
+		"- `make vet`\n"+
+		"- The Code Validation block, as one command:\n\n  ```\n  ( set -e\n  make test\n  for g in a; do true; done\n  )\n  ```\n"+
+		"\n## NEVER\n",
+		withCommands("# A\n\n## Commands\n<!-- build / test / e2e, one line each -->\n\n## NEVER\n", g))
+}

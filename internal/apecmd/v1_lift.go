@@ -142,7 +142,8 @@ The commit:
                  placeholder. A trailing " # …" shell comment is dropped first.
                  A code block whose lines hold a construct (for … done) is one
                  command, ( set -e ⏎ its lines ⏎ ), so it fails on its first
-                 red line wherever it runs as written
+                 red line wherever it runs as written; its AGENTS.md bullet
+                 reads "The Code Validation block, as one command:"
   lays down      the v1 skeleton, as ` + "`ape project init --brownfield`" + ` (CLAUDE.md keeps its
                  content, loses the v0 apex:managed block and gains @AGENTS.md;
                  AGENTS.md gains "Talk to APEX: type ` + "`/apex-orchestrator`" + ` in Claude

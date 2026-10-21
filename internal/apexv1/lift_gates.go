@@ -282,7 +282,9 @@ func withCommands(doc string, g LiftGates) string {
 	var items []string
 	for _, c := range g.Commands {
 		if strings.Contains(c, "\n") {
-			items = append(items, "- ```\n"+indent(c, "  ")+"\n  ```")
+			// Q142 (RJ-5, D291): the bullet says what its block is; a
+			// bullet holding nothing but a code block read as broken.
+			items = append(items, "- The Code Validation block, as one command:\n\n  ```\n"+indent(c, "  ")+"\n  ```")
 			continue
 		}
 		items = append(items, "- `"+c+"`")
