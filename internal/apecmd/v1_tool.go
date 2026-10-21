@@ -64,8 +64,9 @@ Code session: ape starts `+"`ape task <skill> --args \"<args filled>\"`"+` detac
   - the session writes what its skill writes (a mock-up, a report under assets/): no
     read-only rule and no verdict; its exit is the result (non-zero or lost:
     tool.failed, action retry)
-  - --wait (default 9m) bounds one call; exit 75 means still running: call it again —
-    it attaches to the running session for that change and tool
+  - --wait (default 9m, at most 9m30s, usage.wait) bounds one call; exit 75 means
+    still running: call it again — it attaches to the running session for that
+    change and tool
   - JSON: {id, tool, slot, skill, task, args, running, detached_id, log, stdout,
     task_exit, launch}; stdout holds the session's `+"`ape task --output-format json`"+`
     envelope
@@ -83,12 +84,15 @@ found · 2 usage (no such task, {task} without --task) · 75 still running, call
 		return nil
 	}
 	cmd.Flags().StringVar(&task, "task", "", "the task the tool runs for, e.g. T3 (a design tool's)")
-	cmd.Flags().DurationVar(&wait, "wait", defaultReviewWait, "how long this call waits for the session (exit 75 when it is still running)")
+	cmd.Flags().DurationVar(&wait, "wait", defaultReviewWait, "how long this call waits for the session (at most 9m30s; 0 returns at once); exit 75 when it is still running")
 	return cmd
 }
 
 func runToolSession(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, id, name, task string, wait time.Duration) error {
 	ctx := cmd.Context()
+	if err := validateWait(wait); err != nil { // AE-9
+		return v1Fail(cmd, f, err, nil)
+	}
 	run := p.LoadToolRun(id, name)
 	var h *detachedHandle
 	if run != nil {

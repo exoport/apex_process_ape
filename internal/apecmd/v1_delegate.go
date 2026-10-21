@@ -102,6 +102,9 @@ func runDelegateSession(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, id, t
 		return v1Fail(cmd, f, &apexv1.UsageError{Code: "delegate.nested", Msg: "this is a delegate session (" + apexv1.EnvDelegate + "=" + v +
 			"): a delegate cannot start another delegate"}, nil)
 	}
+	if err := validateWait(wait); err != nil { // AE-9
+		return v1Fail(cmd, f, err, nil)
+	}
 	run := p.LoadDelegateRun(id, task)
 	var h *detachedHandle
 	if run != nil {

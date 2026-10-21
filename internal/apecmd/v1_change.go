@@ -1082,7 +1082,7 @@ outside its session) · 75 --delegate: still running, call again.`,
 	cmd.Flags().StringVar(&by, "by", "", "who accepts (required for a person's acceptance)")
 	cmd.Flags().StringArrayVar(&evidence, "evidence", nil, "a file in the repository or a URL the acceptance (or --verdict) rests on (repeatable)")
 	cmd.Flags().BoolVar(&delegate, "delegate", false, "accept through _apex/config.yaml human_review.delegate (or, for a docs change, the docs default, D152), in its own detached session (D75)")
-	cmd.Flags().DurationVar(&wait, "wait", defaultReviewWait, "--delegate: how long this call waits for the session (exit 75 when it is still running)")
+	cmd.Flags().DurationVar(&wait, "wait", defaultReviewWait, "--delegate: how long this call waits for the session (at most 9m30s; 0 returns at once); exit 75 when it is still running")
 	cmd.Flags().StringVar(&verdict, "verdict", "", "pass or fail: the delegate session's verdict (only inside that session)")
 	cmd.Flags().StringVar(&reason, "reason", "", "--verdict: why")
 	cmd.Flags().StringArrayVar(&defects, "defect", nil, "--verdict fail: a file of the change's own diff the fail found defective (repeatable; D188: a fail naming one goes back to the change once)")
