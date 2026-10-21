@@ -43,11 +43,27 @@ func (s *e2Session) notify(t *testing.T, promptID, prompt string) {
 	s.turn(t, promptID, prompt, map[string]any{"kind": "task-notification", "producer": "session-task", "runId": "0mvgkz93n-db92659b"})
 }
 
+// slash is the person typing a slash command, as Claude Code 2.1.305
+// records it (measured, F-1): UserPromptSubmit carries the typed line, and
+// the transcript's message is the command's tags, origin.kind "human".
+func (s *e2Session) slash(t *testing.T, promptID, name, args string) {
+	t.Helper()
+	tags := "<command-message>" + name + "</command-message>\n<command-name>/" + name + "</command-name>\n<command-args>" + args + "</command-args>"
+	s.turnAs(t, promptID, "/"+name+" "+args, tags, map[string]any{"kind": "human"})
+}
+
 func (s *e2Session) turn(t *testing.T, promptID, prompt string, origin map[string]any) {
+	t.Helper()
+	s.turnAs(t, promptID, prompt, prompt, origin)
+}
+
+// turnAs writes the transcript message content and runs the prompt hook
+// on prompt.
+func (s *e2Session) turnAs(t *testing.T, promptID, prompt, content string, origin map[string]any) {
 	t.Helper()
 	line, err := json.Marshal(map[string]any{
 		"type": "user", "isSidechain": false, "userType": "external", "promptId": promptID, "sessionId": s.session,
-		"origin": origin, "message": map[string]any{"role": "user", "content": prompt},
+		"origin": origin, "message": map[string]any{"role": "user", "content": content},
 	})
 	require.NoError(t, err)
 	f, err := os.OpenFile(s.transcript, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
@@ -152,6 +168,28 @@ func TestPersonCall_SameCommandLineBothSides(t *testing.T) {
 		require.Len(t, calls, 1, line)
 		require.Equal(t, phrase, calls[0].Phrase(), line)
 	}
+}
+
+// F-1 (D340): a typed slash command grants on the person's words too. Claude Code
+// writes its transcript message as the command's tags, so ape rebuilds the
+// typed line from them; another milestone, or a slash command whose
+// arguments do not ask for it, is still refused.
+func TestE2_SlashCommandGrantsOnTheTypedLine(t *testing.T) {
+	root := e2Repo(t, "exit 1")
+	s := newE2Session(t, root, "5a5h0001")
+	cmdline := "ape milestone approve M2"
+
+	s.slash(t, "p1", "apex-orchestrator", "where are we?")
+	require.Contains(t, s.preTool(t, "p1", cmdline), "does not ask for it")
+
+	s.slash(t, "p2", "apex-orchestrator", "approve M1")
+	require.Contains(t, s.preTool(t, "p2", cmdline), "does not ask for it", "the words name another milestone")
+
+	s.slash(t, "p3", "apex-orchestrator", "approve M2")
+	require.Empty(t, s.preTool(t, "p3", cmdline), "the typed line /apex-orchestrator approve M2 grants it")
+	stdout, _, err := v1Exec(t, newMilestoneCmd, "approve", "M2", "--cwd", root)
+	require.NoError(t, err, stdout)
+	require.Contains(t, stdout, `: "/apex-orchestrator approve M2")`)
 }
 
 // The person types "approve M2"; the model's `ape milestone approve M2` is

@@ -50,7 +50,13 @@ func TestLive_E2GrantInteractive(t *testing.T) {
 	project := e2Project(t, apeBin)
 	home, err := os.UserHomeDir()
 	require.NoError(t, err)
-	t.Cleanup(func() { removeProjectTranscripts(t, home, project) })
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Logf("transcripts kept for diagnosis: %v", projectTranscriptDirs(home, project))
+			return
+		}
+		removeProjectTranscripts(t, home, project)
+	})
 
 	// The session is the person's: no APE_SESSION, no inline hooks, and this
 	// tree's ape first on PATH as `ape` (repl pins its own executable, which
@@ -70,8 +76,7 @@ func TestLive_E2GrantInteractive(t *testing.T) {
 			"approve M1. Run exactly this with the Bash tool: ape milestone approve M1 --json — then reply FINISHED."))
 		require.Truef(t, waitFor(ctx, 4*time.Minute, func() bool { return milestoneApproved(project, "M1") }),
 			"M1 was not approved from the person's typed words.\npane:\n%s\nlog:\n%s", pane(), gitLog(t, project))
-		require.Regexp(t, regexp.MustCompile(`(?m)M1 approved.*\(prompt .*approve M1`), gitLog(t, project),
-			"the approval's by: must quote the person's words")
+		require.Truef(t, approvedBy(project, "approve M1"), "the approval's by: must quote the person's words")
 		waitIdle(ctx, project)
 	})
 
@@ -100,7 +105,7 @@ func TestLive_E2GrantInteractive(t *testing.T) {
 		require.False(t, milestoneApproved(project, "M3"),
 			"DRIFT: a turn a task-notification opened approved M3, which the person never typed — "+
 				"E2 grants a person act on a generated prompt")
-		require.True(t, transcriptHas(home, project, "is a person's act (E2)"),
+		require.True(t, transcriptHas(home, project, "`ape milestone approve M3` is a person's act (E2)"),
 			"the refusal should be pre-tool's deny, naming E2")
 	})
 }
@@ -124,11 +129,14 @@ func e2Project(t *testing.T, apeBin string) string {
 	roadmap := filepath.Join(dir, "development", "roadmap.md")
 	data, err := os.ReadFile(roadmap)
 	require.NoError(t, err)
-	extra := ""
+	// Each gate is red until its milestone's work is done, as approve's
+	// self-check requires (a green gate proves nothing).
+	doc := strings.Replace(string(data), "Gate: true", "Gate: test -f m1-done", 1)
+	require.Contains(t, doc, "Gate: test -f m1-done")
 	for _, m := range []string{"M2", "M3"} {
-		extra += "\n## " + m + " — More\nStatus: proposed\nGate: true\nGoal: the fixture stays a valid v1 project\nOut of scope:\n"
+		doc += "\n## " + m + " — More\nStatus: proposed\nGate: test -f " + strings.ToLower(m) + "-done\nGoal: the fixture stays a valid v1 project\nOut of scope:\n"
 	}
-	require.NoError(t, os.WriteFile(roadmap, append(data, []byte(extra)...), 0o644))
+	require.NoError(t, os.WriteFile(roadmap, []byte(doc), 0o644))
 	skill := filepath.Join(dir, ".claude", "skills", "approve-it", "SKILL.md")
 	require.NoError(t, os.MkdirAll(filepath.Dir(skill), 0o755))
 	require.NoError(t, os.WriteFile(skill, []byte("---\nname: approve-it\ndescription: approve a milestone the person named\n"+
@@ -177,6 +185,13 @@ func waitIdle(ctx context.Context, _ string) {
 	case <-ctx.Done():
 	case <-time.After(15 * time.Second):
 	}
+}
+
+// approvedBy reports whether the roadmap records an approval by the
+// project's git user with a prompt quoting words.
+func approvedBy(project, words string) bool {
+	data, err := os.ReadFile(filepath.Join(project, "development", "roadmap.md"))
+	return err == nil && regexp.MustCompile(`E2 Person \(prompt [^)]*`+regexp.QuoteMeta(words)).Match(data)
 }
 
 var statusLineRe = regexp.MustCompile(`(?m)^Status:\s*(\S+)`)

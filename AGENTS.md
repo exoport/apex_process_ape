@@ -112,6 +112,8 @@ make check-claude  # LOCAL ONLY: spawn the installed Claude Code and verify ape'
 make check-hooks   # LOCAL ONLY: verify Claude Code still sends the hook fields the completion gates read.
                    #   Seeds its own corpus (one `ape prompt` session in a temp copy of
                    #   testdata/apexv1project), so it needs no pre-existing project.
+                   #   Then the E2 grant gate: a person's PTY session approves on typed words
+                   #   (plain and as a slash command) and refuses a notification turn's act.
 make check-claude-surface # LOCAL ONLY: diff the installed claude's tool list, env vars and model ids against
                    #   the reviewed baseline, and list unread CHANGELOG entries about agents, background
                    #   work, hooks, tools and settings; fails until reviewed

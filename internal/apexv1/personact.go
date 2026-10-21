@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -1000,13 +1001,47 @@ func transcriptHolds(path, promptID, clause string) bool {
 	want := strings.ToLower(normSpace(clause))
 	found := false
 	scanTranscript(path, []string{promptID}, func(m TranscriptPrompt) bool {
-		if m.PromptID == promptID && m.Origin == originHuman && strings.Contains(strings.ToLower(normSpace(m.Text)), want) {
+		if m.PromptID == promptID && m.Origin == originHuman && holdsClause(m.Text, want) {
 			found = true
 			return false
 		}
 		return true
 	})
 	return found
+}
+
+// holdsClause reports whether a person's transcript message holds want
+// (lower case, spaces collapsed). A typed slash command is recorded as
+// <command-name>/x</command-name> and <command-args>…</command-args>
+// tags, not as the line the person typed, so that line is rebuilt from
+// them as well — measured on Claude Code 2.1.305, whose UserPromptSubmit
+// (since 2.1.299, before the expansion) records the typed line itself:
+// without this, "/apex-orchestrator approve M2" granted nothing (F-1, D340).
+func holdsClause(text, want string) bool {
+	if strings.Contains(strings.ToLower(normSpace(text)), want) {
+		return true
+	}
+	line, ok := slashCommandLine(text)
+	return ok && strings.Contains(strings.ToLower(normSpace(line)), want)
+}
+
+var (
+	commandNameRe = regexp.MustCompile(`<command-name>\s*(/[^<\s]+)\s*</command-name>`)
+	commandArgsRe = regexp.MustCompile(`(?s)<command-args>(.*?)</command-args>`)
+)
+
+// slashCommandLine is the line a person typed for a slash-command
+// message, "/<name> <args>", from its tags.
+func slashCommandLine(text string) (string, bool) {
+	name := commandNameRe.FindStringSubmatch(text)
+	if name == nil {
+		return "", false
+	}
+	line := name[1]
+	if args := commandArgsRe.FindStringSubmatch(text); args != nil && strings.TrimSpace(args[1]) != "" {
+		line += " " + strings.TrimSpace(args[1])
+	}
+	return line, true
 }
 
 // transcriptOrigins maps each of ids that has a user message in the

@@ -238,9 +238,15 @@ check-hooks:  ## Seed a throwaway project with one real Claude session, then jud
 	@# The test therefore fails a Seen == 0 field as a BROKEN SEED, separately
 	@# from the drift verdict.
 	@#
-	@# Costs one short Haiku session. Never in `make test` or GitHub CI.
+	@# Then TestLive_E2GrantInteractive drives E2 as a person meets it: a
+	@# Claude Code PTY session without APE_SESSION, hooks as init writes them;
+	@# a typed `approve M1` and a typed `/approve-it approve M2` approve, a
+	@# task-notification turn's `approve M3` is refused.
+	@#
+	@# Costs one short Haiku session plus three short Haiku turns. Never in
+	@# `make test` or GitHub CI.
 	APE_CLAUDE_LIVE=1 go test ./internal/hookdrift/ \
-	  -run TestLive_HookContract -v -count=1 -timeout 20m
+	  -run 'TestLive_HookContract|TestLive_E2GrantInteractive' -v -count=1 -timeout 30m
 
 # The two inputs to check-framework, and they are different things:
 #
