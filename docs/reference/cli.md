@@ -1609,7 +1609,7 @@ exits 1, archive.interrupted (retry), saying what was rolled back; archive again
 `ape status` reports the journal (JSON "archive_journal") and changes nothing.
 
 Exit codes: 0 archived (prints the commit) · 1 not reviewed, re-verify red, stale review, a
-git hook refused the squash,
+gate edit (change.touches-gate, as by verify), a git hook refused the squash,
 pending human-review, change.md over its cap or the file ceiling, dirty tree, no change
 branch, the base behind its upstream
 (base.behind-upstream), the base branch checked out in another
@@ -2273,9 +2273,15 @@ on the base branch as "apex: <M> consecutive blocks <n> (<id>)" (see `ape change
 Refused while change.md differs from the plan frozen at start outside ## Why and ## Notes
 (re-start first). human-review tasks are never run; those not yet accepted are listed
 as pending.
+Refused, before any check runs, when the change's commits since its base_sha edit a gate a
+person approved (RK-6 R2): a recorded gate file of its milestone — a script the Gate:
+command runs, or one of the gate's own files (`ape milestone approve --help`: gate_own_files);
+for a tweak, of any approved milestone. Exit 1, code change.touches-gate, action replan:
+only a person or apex-plan changes a gate; restore the files on the change branch, or reply
+"gate defect: <evidence>". archive refuses it the same way before it rebases.
 
 Exit codes: 0 all command checks green · 1 a check is red (the attempts cap reached
-included), uncommitted work, an unresolved conflict, or wrong status · 2 usage · 3 the change
+included), uncommitted work, an unresolved conflict, a gate edit, or wrong status · 2 usage · 3 the change
 does not rebase onto its moved base (the conflict is left on its branch).
 
 Detached runs (D58 2.3): the command takes the run lock of its change (or milestone),
@@ -3958,12 +3964,12 @@ Subcommands:
 Write Status: approved (by <who> <ts>)
 
 ```
-ape milestone approve <M> --by <who> [flags]
+ape milestone approve <M> --by <who> [--accept-green "<reason>"] [flags]
 ```
 
 Approve a proposed milestone: its Status: line becomes "approved (by <who> <ts>)", and
 milestones.json records the approval (H2): {by, at, gate_cmd, gate_files, gate_files_sha256,
-base_sha} — base_sha the milestone's start (D130): HEAD at its first approval, kept by a
+gate_own_files, base_sha} — base_sha the milestone's start (D130): HEAD at its first approval, kept by a
 re-approval, passed to every gate run as APE_MILESTONE_BASE (see `ape milestone gate --help`)
 — the Gate: command, exactly as written, and the SHA-256 of each gate file: a script the
 command runs that is a regular file under the project root at approval. Of each simple
@@ -3976,10 +3982,19 @@ node -e and friends name no script). No other word is hashed: arguments and data
 (grep -q x CHANGELOG.md), commands inside $(…) or backquotes (test "$(python3 greet.py)"
 = Hello hashes nothing), bare command names (looked up on PATH), absolute paths, paths
 leaving the root and words with $ or a glob; what a script runs in turn is not covered.
-gate_files_sha256 digests the gate files. The gate differs from the approved one when its
-command changed, or a recorded gate file it still runs is gone or changed (compared file
-by file); a gate file created since the approval, and a file an older approval recorded
-that the gate does not run as a script, are not drift. Changes can start only under an
+gate_files_sha256 digests the gate files. gate_own_files (RK-6, rc.7o) records the gate's own
+files beside its scripts, each with its SHA-256: every file under the milestone's gate
+folders (development/gates/<M>-*/) and development/gates/lib/; every file a recorded script
+sources (". <path>", "source <path>", literal or "$(dirname "$0")/<path>"); and every
+literal relative path a recorded script names under its own folder, when that folder is
+not the project root or the development folder (scripts/checks/m4.checks beside
+scripts/m4.sh) — never the files a gate checks elsewhere (README.md, docs/), which are the
+milestone's work. One level: a file found is not read in turn. The gate differs from the
+approved one when its command changed, or a recorded gate file it still runs, or a recorded
+own file, is gone or changed (compared file by file); a gate file or own file created since
+the approval, and a file an older approval recorded that the gate does not run as a
+script, are not drift (the next re-approval records it). A change's commits that edit a
+recorded gate file are refused by verify and archive (change.touches-gate). Changes can start only under an
 approved milestone; gate and close refuse a gate that differs from the approved one.
 Committed together as "apex: <M> approved".
 
@@ -4001,6 +4016,16 @@ A refusal writes nothing and its message ends with the gate's last output lines.
 whose script the milestone's work would write cannot be approved: the script exists at
 approval and fails until the work is done (test -x ./bin/app || exit 1, not a bare
 ./bin/app, which exits 127). A re-approval runs the same check.
+
+--accept-green "<reason>" (RK-5, Q145): a re-approval of an approved milestone whose work is
+done and whose gate a person or apex-plan fixed after it — the fixed gate is green, which
+the check above refuses, and gate and close refuse the changed gate until it is approved
+again. With the flag a person states that case: the green run is recorded as self_check
+(exit 0) beside accept_green {reason, by, at}, committed as "apex: <M> re-approved (gate
+green: <reason>)"; then `ape milestone close <M>` closes it. A gate fixed before the work is done
+and already green proves nothing: re-plan it instead. On a proposed milestone (a first
+approval) the flag is a usage error (exit 2); on a re-approval whose gate is red it is not
+needed, and the approval is recorded as without it. A person's act, as approve is.
 
 Approving an approved milestone records the approval again — "apex: <M> re-approved", the
 Status line kept as it was (the milestone's spend counts from it) — when ape holds no
@@ -4054,6 +4079,7 @@ Flags:
 
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
+| `--accept-green` | string | `—` | re-approval only: the gate is green because the milestone's work is done and the gate was fixed after it — why (Q145) |
 | `--by` | string | `—` | who approves (required from a terminal; in a Claude Code session, git config user.name) |
 | `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
 | `--json` | bool | `false` | machine output (JSON on stdout) |
@@ -5296,7 +5322,10 @@ The commit:
                  A code block whose lines hold a construct (for … done) is one
                  command, ( set -e ⏎ its lines ⏎ ), so it fails on its first
                  red line wherever it runs as written; its AGENTS.md bullet
-                 reads "The Code Validation block, as one command:"
+                 reads "The Code Validation block, as one command:". A block
+                 line that is exactly "source <file>" is written ". <file>"
+                 (RN-1: ape runs checks with sh, which has no source where it
+                 is dash), each listed in gates.rewrites, the .md and the output
   lays down      the v1 skeleton, as `ape project init --brownfield` (CLAUDE.md keeps its
                  content, loses the v0 apex:managed block and gains @AGENTS.md;
                  AGENTS.md gains "Talk to APEX: type `/apex-orchestrator` in Claude
@@ -5397,7 +5426,9 @@ regression_new_failures) · red-after-lift (green at the tag: the LIFT broke it 
 in a commit, or reset to the tag and lift with --exclude) · cannot-run (exit 126/127, or
 an output saying a command was not found — "command not found", "No such file or
 directory" — with make's "Error 127", and no failing test named: a tool it runs is
-missing here, which is not a red; read the same at both points) · red-no-baseline ·
+missing here, which is not a red; read the same at both points; when the output says a
+bash/zsh builtin was not found — "sh: 2: source: not found" — the note names it instead:
+/bin/sh here has no such builtin, so write it in POSIX sh, "." for source, RN-1) · red-no-baseline ·
 flaky (RG-1: a red-after-lift or red-at-tag-new-failures command is run once more at the
 lift commit, and passed that time: a flake, not the lift's; record it, plan no fix; a
 red-at-tag-new-failures command whose re-run fails only as at the tag is red-at-tag, its

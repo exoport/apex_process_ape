@@ -130,6 +130,30 @@ eval's E-R7-1 and E2 residual (D219).
   pointer, and `project check` lists the `roadmap.next-inline` notice. A project an rc.7b move
   left that way is repaired by running `ape next move` again.
 
+### rc.7o: a gate fixed after the work, a gate's own files, and bash in a sh check (Q145, RK-6, RN-1; D310–D313)
+
+- **`ape milestone approve <M> --accept-green "<reason>"` re-approves a gate fixed after the
+  milestone's work was done.** The fixed gate is green, so a re-approval refused it
+  (`milestone.gate-green`), and gate and close refused the changed gate, with no way to
+  close the milestone. With the flag a person states that case: the green run is
+  recorded with `accept_green {reason, by, at}`, and close closes it. The refusal names the
+  flag. On a first approval it is a usage error: a new gate must still be red.
+- **An approval also records the gate's own files** (`gate_own_files`): its gate folders
+  (`development/gates/<M>-*/`, `development/gates/lib/`), what its scripts source, and the
+  files a script names under its own folder (`scripts/checks/m4.checks` beside
+  `scripts/m4.sh`). Editing one after the approval is gate drift, so gate and close stop for
+  a person. The files a gate checks (`README.md`, `docs/`) are still not recorded: they are
+  the milestone's work. An approval made before rc.7o records them at its next re-approval.
+- **`ape change verify` and `archive` refuse a change that edits its milestone's approved
+  gate** (`change.touches-gate`, action replan): only a person or apex-plan changes a gate.
+- **The lift writes a check block's `source <file>` line as `. <file>`**, and says so.
+  ape runs checks with `sh`, which has no `source` where it is dash (Debian, Ubuntu), so such
+  a block exited 127 at the tag and after the lift and was reported `cannot-run`, hiding a
+  failure the lift caused (radix).
+- **A check that exits 127 because `sh` lacks a bash/zsh builtin says so** (`shell_note`, in
+  verify and gate output and in the lift's note), instead of "a command is missing on this
+  machine".
+
 ### rc.7n: a pre-existing red is never called flaky (RV-1; D308, D309)
 
 - **A lift regression command red at `apex-v0-final` whose first run after the lift fails a
