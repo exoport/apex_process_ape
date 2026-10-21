@@ -1,6 +1,7 @@
 package apecmd
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -217,4 +218,29 @@ func TestProjectLift_FromUpdatePrintsTheVerdictOnStderr(t *testing.T) {
 		require.Contains(t, shown, apexv1.LiftRegressionSubject+") and _apex/state/lift-disposition.json (regression)")
 		require.NotContains(t, other, "[red-after-lift]", "not twice")
 	}
+}
+
+// FR-2 (D277): under `ape framework update` (--from-update) only the
+// lift's stderr is shown, so the lines saying which ape ran it and where
+// the pin goes are printed there, once, and not in its stdout; run by
+// hand, and in a dry run, they stay in the plain output.
+func TestPrintLift_ApeLinesGoWhereTheUpdateShowsThem(t *testing.T) {
+	r := &apexv1.LiftResult{Ape: &apexv1.LiftApe{
+		Version: "1.0.0", Path: "/bin/ape", PinFile: ".bingo/ape.mod", Pinned: "v0.31.0",
+		PinNote: "the lift moves the pin from v0.31.0 to v1.0.0",
+	}}
+	const apeLine = "ape       1.0.0 (/bin/ape) runs this lift — exempt from the project's ape pin\n"
+	const pinLine = "pin       .bingo/ape.mod pins v0.31.0: the lift moves the pin from v0.31.0 to v1.0.0\n"
+	var byHand, fromUpdate, stderr bytes.Buffer
+	printLift(&byHand, r, true)
+	require.Contains(t, byHand.String(), apeLine+pinLine)
+	printLift(&fromUpdate, r, false)
+	require.NotContains(t, fromUpdate.String(), "runs this lift", "not on the update's swallowed stdout")
+	printLiftApe(&stderr, r)
+	require.Equal(t, apeLine+pinLine, stderr.String())
+	dry := *r
+	dry.DryRun = true
+	fromUpdate.Reset()
+	printLift(&fromUpdate, &dry, false)
+	require.Contains(t, fromUpdate.String(), apeLine, "a dry run prints them where it prints everything")
 }

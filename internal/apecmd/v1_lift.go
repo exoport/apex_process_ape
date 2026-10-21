@@ -312,8 +312,11 @@ Exit codes: 0 lifted (or planned) · 1 refused or failed (code in --json) · 2 u
 				return v1Fail(cmd, &f, err, partial)
 			}
 			// RG-6: inside `ape framework update` only a command's stderr
-			// is shown, so the verdict goes there (and not twice).
+			// is shown, so the verdict goes there (and not twice); FR-2
+			// (D277): so do the lines saying which ape ran and where the
+			// pin moved, which the update swallowed.
 			if opt.FromUpdate && !res.DryRun {
+				printLiftApe(cmd.ErrOrStderr(), res)
 				printLiftRegression(cmd.ErrOrStderr(), res)
 			}
 			return v1Emit(cmd.OutOrStdout(), &f, res, func(w io.Writer) { printLift(w, res, !opt.FromUpdate) })
@@ -367,7 +370,8 @@ func liftApe(root, running, self string, dryRun bool, haveBingo func() bool) *ap
 }
 
 // printLift prints the lift; regression says whether its regression
-// verdict lines are among them (under --from-update they go to stderr).
+// verdict lines, and its ape and pin lines, are among them (under
+// --from-update they go to stderr: printLiftApe, printLiftRegression).
 func printLift(w io.Writer, r *apexv1.LiftResult, regression bool) {
 	verb := func(done, plan string) string {
 		if r.DryRun {
@@ -375,11 +379,8 @@ func printLift(w io.Writer, r *apexv1.LiftResult, regression bool) {
 		}
 		return done
 	}
-	if a := r.Ape; a != nil {
-		fmt.Fprintf(w, "ape       %s (%s) runs this lift — exempt from the project's ape pin\n", a.Version, a.Path)
-		if a.PinFile != "" {
-			fmt.Fprintf(w, "pin       %s pins %s: %s\n", a.PinFile, a.Pinned, a.PinNote)
-		}
+	if regression || r.DryRun {
+		printLiftApe(w, r)
 	}
 	fmt.Fprintf(w, "APEX v0 %s (%s); skills from %s\n", r.Version, r.VersionSource, r.SkillsSource)
 	for _, p := range r.Preflight {
@@ -459,6 +460,17 @@ func printLift(w io.Writer, r *apexv1.LiftResult, regression bool) {
 // printLiftRegression is the lift's regression verdict: the runs at the
 // tag and at the lift commit, each command of a split chain, and where the
 // verdict is recorded (RG-6).
+// printLiftApe prints which ape runs the lift and where the project's ape
+// pin goes (L1, R5).
+func printLiftApe(w io.Writer, r *apexv1.LiftResult) {
+	if a := r.Ape; a != nil {
+		fmt.Fprintf(w, "ape       %s (%s) runs this lift — exempt from the project's ape pin\n", a.Version, a.Path)
+		if a.PinFile != "" {
+			fmt.Fprintf(w, "pin       %s pins %s: %s\n", a.PinFile, a.Pinned, a.PinNote)
+		}
+	}
+}
+
 func printLiftRegression(w io.Writer, r *apexv1.LiftResult) {
 	if t := r.RegressionAtTag; t != nil {
 		fmt.Fprintf(w, "regression at %s exit %d (%.1fs)\n", apexv1.LiftTag, t.Exit, t.Secs)
