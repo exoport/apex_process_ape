@@ -1,6 +1,7 @@
 package apexv1
 
 import (
+	"context"
 	"io/fs"
 	"os"
 	"path"
@@ -131,4 +132,62 @@ func (p *Project) gateOwnUnrecorded(m *Milestone, a *MilestoneApproval) bool {
 		}
 	}
 	return false
+}
+
+// CodeTouchesGate: a change's own commits edit a recorded gate file of its
+// milestone (RK-6 R2) — verify and archive refuse it, action replan.
+const CodeTouchesGate = "change.touches-gate"
+
+// refuseGateTouch is RK-6 R2: a change whose diff from its base_sha to
+// HEAD edits a recorded gate file — a script gate_files holds, or an own
+// file gate_own_files holds — of the milestone it belongs to (a tweak:
+// of every approved milestone) is refused. Only a person or apex-plan
+// changes a gate, on the base branch, and a person approves it again; a
+// builder that edits the gate weakens what judges its own work.
+func (p *Project) refuseGateTouch(ctx context.Context, ci ChangeInfo) error {
+	if ci.State == nil || ci.Doc == nil || ci.State.BaseSHA == "" {
+		return nil
+	}
+	rm := p.roadmap()
+	if rm == nil {
+		return nil
+	}
+	recs, err := p.LoadMilestoneRecords()
+	if err != nil {
+		return err
+	}
+	owner := map[string]string{}
+	for i := range rm.Milestones {
+		m := &rm.Milestones[i]
+		if m.Status != MilestoneApproved || ci.Doc.Meta.Milestone != m.ID && ci.Doc.Meta.Milestone != MilestoneNone {
+			continue
+		}
+		if rec := recs[m.ID]; rec != nil && rec.Approval != nil {
+			for _, files := range []map[string]string{rec.Approval.GateFiles, rec.Approval.GateOwnFiles} {
+				for f := range files {
+					owner[f] = m.ID
+				}
+			}
+		}
+	}
+	if len(owner) == 0 {
+		return nil
+	}
+	out, err := git(ctx, p.Root, "diff", "--name-only", "--no-renames", ci.State.BaseSHA, "HEAD")
+	if err != nil {
+		return &FailError{Code: CodeGitStatusFailed, Msg: "cannot read the change's diff from its base_sha: " + err.Error()}
+	}
+	var touched, files []string
+	for f := range strings.SplitSeq(out, "\n") {
+		if m, ok := owner[f]; ok {
+			touched = append(touched, f+" ("+m+"'s gate)")
+			files = append(files, f)
+		}
+	}
+	if len(touched) == 0 {
+		return nil
+	}
+	return &FailError{Code: CodeTouchesGate, Msg: "change " + ci.ID + " edits a gate a person approved: " + strings.Join(limit(touched, 8), ", ") +
+		" — only a person or apex-plan changes a gate, and a person approves it again: restore them on " + ChangeBranch(ci.ID) +
+		" (`git checkout " + ci.State.BaseSHA + " -- " + strings.Join(limit(files, 8), " ") + "`, committed with trailer `Change: " + ci.ID + "`); if the gate itself is wrong, say so (`gate defect: <evidence>`)"}
 }

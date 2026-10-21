@@ -186,6 +186,7 @@ var DiagnosticCodes = []CodeDoc{
 	{CodeVacuousCheck, 1, "replan", "start: the change ADDs or MODIFIES behaviour and a task check already passes before any of its code (backlog 43); rewrite it to fail until the change is done, or mark a check meant to stay green `— regression: <command>`; nothing written"},
 	{"change.nothing-to-rebaseline", 1, "stop", "start on a started change whose plan, modified spec and regression command did not change"},
 	{"change.plan-drift", 1, "apply", "## Tasks or ## Delta changed since start: re-start to re-baseline, or restore"},
+	{CodeTouchesGate, 1, "replan", "verify / archive: the change's commits since base_sha edit a recorded gate file (gate_files or gate_own_files) of its milestone — a tweak's: of any approved milestone (RK-6 R2); only a person or apex-plan changes a gate: restore the files on the change branch, or reply gate defect"},
 	{CodeStateUnreadable, 1, "person", "state.json does not parse"},
 	{CodeWrongStatus, 1, "stop", "the command does not apply to the change's status (answer: only a blocked change)"},
 	{"decision.slug-taken", 1, "replan", "decision new: an ADR already uses the slug"},

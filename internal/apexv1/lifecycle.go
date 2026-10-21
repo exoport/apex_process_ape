@@ -529,6 +529,10 @@ func (p *Project) verify(ctx context.Context, ci ChangeInfo, opt RunOptions, kee
 		return nil, &FailError{Code: "tree.dirty", Msg: "uncommitted changes outside " + p.DevRel + "/: " + strings.Join(limit(dirty, 8), ", ") +
 			" — commit them (trailer `Change: " + id + "`) and run verify again; verify records a sha"}
 	}
+	// RK-6 R2: a change never edits the gate a person approved.
+	if err := p.refuseGateTouch(ctx, ci); err != nil {
+		return nil, err
+	}
 	sha := HeadSHA(ctx, p.Root)
 	checks := p.ChangeChecks(ci.Doc)
 	regressionCmd := p.regressionCmd()

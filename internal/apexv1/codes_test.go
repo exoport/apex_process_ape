@@ -63,7 +63,9 @@ func TestDiagnosticCodes_PublishedListMatchesTheCode(t *testing.T) {
 		"CodeUnsupportedLayout": CodeUnsupportedLayout, "CodeTagNotPushed": CodeTagNotPushed, "CodeLiftWriteFailed": CodeLiftWriteFailed, "CodeClaudeIgnored": CodeClaudeIgnored,
 		// rc.7j (RG-2).
 		"CodeLiftParentClaude": CodeLiftParentClaude,
-		"CodeCapsOverCeiling":  CodeCapsOverCeiling, "CodeGateGreen": CodeGateGreen, "CodeGateBroken": CodeGateBroken,
+		// rc.7o (RK-6 R2).
+		"CodeTouchesGate":     CodeTouchesGate,
+		"CodeCapsOverCeiling": CodeCapsOverCeiling, "CodeGateGreen": CodeGateGreen, "CodeGateBroken": CodeGateBroken,
 		"CodeNoSuchTask": CodeNoSuchTask, "CodeNoChangeMD": CodeNoChangeMD, "CodeDelegateInvalidConfig": CodeDelegateInvalidConfig,
 		// D89 (rc.4).
 		"CodeChangeOverCeiling": CodeChangeOverCeiling,

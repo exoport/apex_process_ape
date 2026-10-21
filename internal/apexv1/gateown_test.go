@@ -66,3 +66,40 @@ func TestGateOwnFiles_DriftOnTheGatesOwnFilesOnly(t *testing.T) {
 		require.True(t, p.gateScriptUnrecorded(m, a), "the next re-approval records it")
 	})
 }
+
+// RK-6 R2: a change whose own commits edit its milestone's approved gate —
+// a script gate_files holds, or an own file gate_own_files holds — is
+// refused by verify (and archive, which checks it the same way before
+// it rebases; action replan); other code is not.
+func TestVerify_RefusesAChangeThatEditsItsGate(t *testing.T) {
+	files := baseFiles()
+	files["development/gates/lib/common.sh"] = "x=1\n"
+	files["gate.sh"] = "#!/bin/sh\ntest -f done.flag\n"
+	p := fixture(t, files)
+	recs, err := p.LoadMilestoneRecords()
+	require.NoError(t, err)
+	require.Contains(t, recs["M1"].Approval.GateOwnFiles, "development/gates/lib/common.sh")
+	addChange(t, p, "add-wave", waveChange("add-wave"))
+	commitAll(t, p, "plan: add-wave")
+	_, err = p.Start(ctx(), "add-wave", RunOptions{})
+	require.NoError(t, err)
+
+	write(t, p, "wave.sh", "#!/bin/sh\necho wave\n")
+	commitAll(t, p, "feat: wave")
+	_, err = p.Verify(ctx(), "add-wave", RunOptions{})
+	require.NoError(t, err, "code that is not the gate")
+
+	for _, f := range []string{"gate.sh", "development/gates/lib/common.sh"} {
+		before := read(t, p, f)
+		write(t, p, f, before+"# weakened\n")
+		commitAll(t, p, "feat: touch "+f)
+		_, err = p.Verify(ctx(), "add-wave", RunOptions{})
+		require.Equal(t, CodeTouchesGate, failCode(t, err), f)
+		require.ErrorContains(t, err, "change add-wave edits a gate a person approved: "+f+" (M1's gate)")
+		require.Equal(t, ActionReplan, Diagnostics(err)[0].Action)
+		write(t, p, f, before)
+		commitAll(t, p, "fix: restore "+f)
+	}
+	_, err = p.Verify(ctx(), "add-wave", RunOptions{})
+	require.NoError(t, err, "restored: the diff from base no longer touches the gate")
+}

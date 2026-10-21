@@ -642,9 +642,15 @@ on the base branch as "apex: <M> consecutive blocks <n> (<id>)" (see `+"`ape cha
 Refused while change.md differs from the plan frozen at start outside ## Why and ## Notes
 (re-start first). human-review tasks are never run; those not yet accepted are listed
 as pending.
+Refused, before any check runs, when the change's commits since its base_sha edit a gate a
+person approved (RK-6 R2): a recorded gate file of its milestone — a script the Gate:
+command runs, or one of the gate's own files (`+"`ape milestone approve --help`"+`: gate_own_files);
+for a tweak, of any approved milestone. Exit 1, code change.touches-gate, action replan:
+only a person or apex-plan changes a gate; restore the files on the change branch, or reply
+"gate defect: <evidence>". archive refuses it the same way before it rebases.
 
 Exit codes: 0 all command checks green · 1 a check is red (the attempts cap reached
-included), uncommitted work, an unresolved conflict, or wrong status · 2 usage · 3 the change
+included), uncommitted work, an unresolved conflict, a gate edit, or wrong status · 2 usage · 3 the change
 does not rebase onto its moved base (the conflict is left on its branch).`,
 		"  ape change verify add-tenant-delete",
 		&f,
@@ -1327,7 +1333,7 @@ exits 1, archive.interrupted (retry), saying what was rolled back; archive again
 `+"`ape status`"+` reports the journal (JSON "archive_journal") and changes nothing.
 
 Exit codes: 0 archived (prints the commit) · 1 not reviewed, re-verify red, stale review, a
-git hook refused the squash,
+gate edit (change.touches-gate, as by verify), a git hook refused the squash,
 pending human-review, change.md over its cap or the file ceiling, dirty tree, no change
 branch, the base behind its upstream
 (base.behind-upstream), the base branch checked out in another

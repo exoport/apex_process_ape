@@ -229,6 +229,10 @@ func (p *Project) Archive(ctx context.Context, id string, allowPendingHuman bool
 	if ci, err = p.enterChangeBranch(ctx, ci); err != nil {
 		return nil, err
 	}
+	// RK-6 R2: refused before any rebase, as verify refuses it.
+	if err := p.refuseGateTouch(ctx, ci); err != nil {
+		return nil, err
+	}
 	base := ci.State.BaseBranch
 	res := &ArchiveResult{ID: id, BaseBranch: base}
 	// The journal (H28): what a crash from here on is rolled back to. Any
