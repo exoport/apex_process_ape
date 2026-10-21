@@ -3,7 +3,7 @@
 `ape script` runs a plain Go file inside ape's own process under the
 [yaegi](https://github.com/traefik/yaegi) interpreter, with the public
 [`apescript`](../reference/apescript.md) library injected. A script drives
-the same primitives the CLI does — run a pipeline, task, or prompt (all
+the same primitives the CLI does — run a task or a prompt (both
 PTY-backed), read manifests, scan transcripts, log, publish events, upload
 blobs — so multi-run workflows (loops, conditionals, fan-out across
 component repos) become one version-controlled `.go` file instead of a
@@ -59,7 +59,10 @@ Read the script from stdin with `-`:
 cat ops/nightly.go | ape script -
 ```
 
-## A real workflow: task → inspect → conditional task
+## A real workflow: task → inspect → next task
+
+This script runs `apex-loop` on each milestone id passed after `--`, in order,
+and stops at the first run that does not complete:
 
 ```go
 package main
@@ -72,31 +75,35 @@ import (
 )
 
 func Main(ctx context.Context) error {
-	res, err := apescript.RunTask(ctx, apescript.TaskOpts{
-		Skill: "apex-create-prd",
-		Agent: "apex-agent-pm",
-	})
-	if err != nil {
-		return err
+	for _, m := range apescript.Args() {
+		res, err := apescript.RunTask(ctx, apescript.TaskOpts{Skill: "apex-loop", Args: m})
+		if err != nil {
+			return err
+		}
+		apescript.Log("%s: run %s finished: %s ($%.2f, %s)", m, res.RunID, res.Status, res.CostUSD, res.Duration)
+		if res.Status != "completed" {
+			return fmt.Errorf("%s did not complete: %s", m, res.Status)
+		}
 	}
-	apescript.Log("PRD run %s finished: %s ($%.2f)", res.RunID, res.Status, res.CostUSD)
-
-	if res.Status != "completed" {
-		return fmt.Errorf("PRD run did not complete: %s", res.Status)
-	}
-
-	// Only shard the doc if the PRD run succeeded.
-	shard, err := apescript.RunTask(ctx, apescript.TaskOpts{Skill: "apex-shard-doc", Args: "--doc prd"})
-	if err != nil {
-		return err
-	}
-	apescript.Log("sharded in %s", shard.Duration)
 	return nil
 }
 ```
 
-Runs a script launches use the same `RunOptions` plumbing as CLI-launched
-runs, so their events, manifests, telemetry, and commits behave identically.
+```bash
+ape script ops/milestones.go -- M1 M2
+```
+
+Each milestone must already be approved by a person: `apex-loop` stops at once
+on one that is not, without running it. Runs a script launches use the same `RunOptions` plumbing as
+CLI-launched runs, so their events, manifests, telemetry, and commits behave
+identically. A script is a conductor: run it from a terminal, outside every ape
+session (inside one it is refused, exit 2, `session.depth`), and an `apex-loop`
+it starts holds the project's one loop lock.
+
+`apescript.RunPipeline` still exists so an old script compiles, but it always
+returns an error: `ape pipeline` was retired with APEX v0. Run each skill with
+`RunTask` instead. APEX v0 projects run the v0 ape their `.bingo` pins; its docs
+are at https://github.com/exoport/apex_process_ape/tree/v0.10.0/docs.
 
 ## `--sandbox`: restrict what the script itself can touch
 
@@ -134,7 +141,7 @@ ape script --output-format json ops/nightly.go
 ## Publishing progress and uploading blobs
 
 With the NATS flags configured (`--nats-url` / `--nats-creds`, same as
-`ape pipeline`), a script can publish its own events and upload blobs:
+`ape task`), a script can publish its own events and upload blobs:
 
 ```go
 _ = apescript.PublishEvent("target-done", map[string]any{"target": "component-a"})
@@ -153,7 +160,7 @@ events stay attributable. Without NATS configured both return a clear
 | ---- | ------------------------------------------------------------- |
 | 0    | `Main` returned nil                                           |
 | 1    | `Main` returned an error, panicked, or a launched run failed  |
-| 2    | usage or read error (no file, bad flags)                      |
+| 2    | usage or read error (no file, bad flags), or the nesting rule |
 
 ## See also
 

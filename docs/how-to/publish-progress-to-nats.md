@@ -1,7 +1,7 @@
 # How to publish run progress to NATS
 
-`ape pipeline` and `ape task` can stream structured JSON progress events to a
-NATS cluster so a remote consumer follows a run live. It is **opt-in per
+`ape task` (and `ape script`, with the tasks it runs) can stream structured JSON
+progress events to a NATS cluster so a remote consumer follows a run live. It is **opt-in per
 invocation**, **fire-and-forget** (an unreachable cluster never blocks or fails a
 run — it degrades to local-only with one stderr warning), and **off by default**
 (no URL configured → nothing is published).
@@ -11,12 +11,14 @@ run — it degrades to local-only with one stderr warning), and **off by default
 Point ape at a NATS server. Either flags or env vars work (flags win):
 
 ```bash
-ape pipeline design --nats-url nats://nats.example:4222 --nats-creds ~/.config/ape/user.creds
+ape task apex-plan --nats-url nats://nats.example:4222 --nats-creds ~/.config/ape/user.creds
 # or, for any run in this shell / CI job:
 export APE_NATS_URL=nats://nats.example:4222
 export APE_NATS_CREDS=~/.config/ape/user.creds
-ape task apex-create-prd --agent apex-agent-pm
+ape task apex-loop --args M1
 ```
+
+`ape prompt` publishes no progress events.
 
 There is **no project-config layer** — NATS settings never live in
 `_apex/config.yaml`, so a repo can't turn publishing on for whoever runs in it,
@@ -31,10 +33,12 @@ nats sub 'ape.evt.>'
 ```
 
 Subjects are `ape.evt.<user>.<project>.<kind>.<id>.<event>` — see
-[events.md](../reference/events.md) for the full taxonomy and payload fields. A
-run emits `run-start` → per-stage `stage-start`/`stage-end` → per-step
-`step-start`/`step-end` (with cost/token telemetry) → `hook` events (live
-tool-use) → `commit` → `run-end` (manifest totals + transcript-blob digests).
+[events.md](../reference/events.md) for the full taxonomy and payload fields. An
+`ape task` run is one stage holding one step, both named after the skill. It
+emits `run-start`, one `stage-start`/`stage-end` pair, one `step-start`/`step-end`
+pair (`step-end` carries cost/token telemetry), `hook` events (live tool-use), a
+`commit` event when the run commits (`--task-commit`), and `run-end` (manifest
+totals + transcript-blob digests).
 
 Filter by subtree — the subject *is* the routing key:
 

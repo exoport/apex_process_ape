@@ -126,8 +126,8 @@ rate it does not have.
 ## Model names you can write
 
 Anywhere `ape` takes a model — `--model` on `ape task` / `ape prompt` /
-`ape chat`, or `model:` at the step, stage, or pipeline level of a spec — these
-all work:
+`ape chat`, or a skill's `model:` under `models:` in an APEX v1 project's
+`_apex/config.yaml` — these all work:
 
 | You write | Resolves to |
 |---|---|
@@ -149,11 +149,10 @@ A name `ape` does not recognize is passed to Claude Code unchanged with a
 warning — a model newer than your `ape` must not be blocked by `ape`'s table,
 so Claude Code gives the final verdict.
 
-That warning covers specs too, not just flags. `ape pipeline` and the apescript
-pipeline runner report any unrecognized `model:` before anything spawns, naming
-the exact location (`stage "review" step 2 (apex-review-code)`), and `ape doctor`
-validates every installed spec without running one. A typo like
-`claude-sonet-5` used to stay hidden until claude rejected it mid-run.
+That warning covers `_apex/config.yaml` too, not just flags: `ape task` resolves
+a skill's `models.<skill>.model` through the same table when it starts the
+session, and warns the same way about a name it does not recognize. See
+[config.yaml reference](../reference/config-yaml.md).
 
 ### Alias drift
 

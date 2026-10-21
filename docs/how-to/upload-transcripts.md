@@ -19,9 +19,9 @@ NATS](publish-progress-to-nats.md)):
 export APE_NATS_URL=nats://nats.example:4222
 export APE_NATS_CREDS=~/.config/ape/user.creds
 
-ape pipeline design --upload-transcripts
+ape task apex-loop --args M1 --upload-transcripts
 # or:
-APE_UPLOAD_TRANSCRIPTS=1 ape task apex-create-prd --agent apex-agent-pm
+APE_UPLOAD_TRANSCRIPTS=1 ape task apex-plan
 ```
 
 ## Content addressing & dedup
@@ -44,7 +44,7 @@ Choose with `--transcript-store` / `APE_TRANSCRIPT_STORE`:
 | URI-request offload | `uri-offload` | Sends a NATS request to `ape.blob.uri-request`; a user-operated service replies with an upload URI (or "already have it"); ape does the HTTPS PUT. Lets large fleets land blobs in real object storage (S3/GCS/Azure) while the wire stays NATS + HTTPS. |
 
 ```bash
-ape pipeline design --upload-transcripts --transcript-store uri-offload
+ape task apex-loop --args M1 --upload-transcripts --transcript-store uri-offload
 ```
 
 The offload service itself is **out of ape's tree** — ape ships the client half

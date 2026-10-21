@@ -632,10 +632,11 @@ is always read-only and always present when the node serves a framework — a pr
 cannot redirect, remove, or make it writable. See
 [.apesandbox.yaml](../reference/apesandbox-yaml.md).
 
-The governance repo (the canon `apex-adr-reconciliation` and
-`apex-pattern-reconciliation` read) is delivered the same way, at
-`/opt/apex-governance`, with `APEX_GOVERNANCE_REPO` set in the workspace only when
-it is mounted:
+The governance repo is delivered the same way, at `/opt/apex-governance`, with
+`APEX_GOVERNANCE_REPO` set in the workspace only when it is mounted. No APEX v1
+skill reads it: in v1 its one reader is `ape project lift`, which copies the
+canon ADRs a v0 project cites but has no record of, so a workspace that lifts no
+v0 project needs no governance mount:
 
 ```bash
 ape sandbox governance materialize v0.1.2

@@ -24,26 +24,17 @@ The pure introspection helpers — `ReadManifest`, `ScanTranscript`,
 
 ## Orchestration
 
-All three run through the same PTY-backed runners the CLI uses, and return
-a [`RunResult`](#runresult) derived from the run's manifest (or prompt
-record).
+`RunTask` and `RunPrompt` run through the same PTY-backed runners the CLI
+uses, and return a [`RunResult`](#runresult) derived from the run's manifest
+(or prompt record).
 
 | Function | CLI equivalent | Notes |
 | -------- | -------------- | ----- |
-| `RunPipeline(ctx, PipelineOpts) (RunResult, error)` | `ape pipeline` | multi-stage |
-| `RunTask(ctx, TaskOpts) (RunResult, error)` | `ape task` (PLAN-11) | single skill; asserted against `commit-owners.csv` and run under the skill's declared output style, as `ape task` is. A violation is an error naming each check, with the result still filled in |
+| `RunTask(ctx, TaskOpts) (RunResult, error)` | `ape task` (PLAN-11) | single skill, through the same dispatch as `ape task`: the nesting rule (an `apex-loop` it starts holds the project's one loop lock; `apex-orchestrator` is refused, `skill.renamed`), and the commit-ownership assertions when the project has an `_apex/commit-owners.csv` (no APEX v1 release ships one). A violation is an error naming each check, with the result still filled in |
 | `RunPrompt(ctx, PromptOpts) (RunResult, error)` | `ape prompt` (PLAN-12) | unattended session |
+| `RunPipeline(ctx, PipelineOpts) (RunResult, error)` | none (`ape pipeline` was retired with APEX v0) | **always returns an error**, and runs nothing. It and `PipelineOpts` remain so an old script still compiles; use `RunTask` |
 
 ```go
-// PipelineOpts mirrors `ape pipeline`.
-type PipelineOpts struct {
-	Name     string // pipeline to run
-	Prompt   string // forwarded to the prompt_flag step, if any
-	From     string // resume at this stage
-	NoCommit bool
-	Cwd      string // overrides the script's project root when set
-}
-
 // TaskOpts mirrors `ape task`.
 type TaskOpts struct {
 	Skill       string        // required
@@ -56,6 +47,7 @@ type TaskOpts struct {
 	TaskCommit  string        // non-empty commits the whole task with this message
 	AllowDirty  bool
 	IdleTimeout time.Duration
+	MaxDuration time.Duration // wall-clock ceiling; zero: none
 	Cwd         string
 }
 
@@ -68,6 +60,7 @@ type PromptOpts struct {
 	Workflow    bool          // append a "run via a workflow" directive
 	Ultracode   bool          // prepend the ultracode keyword
 	IdleTimeout time.Duration
+	MaxDuration time.Duration // wall-clock ceiling; zero: none
 	Cwd         string
 }
 ```
@@ -150,7 +143,7 @@ symbols the script may call, not what the ape process can do.
 | `os.Exit` and process-exit helpers | ✅ | ❌ blocked |
 | `syscall` | ✅ | ❌ blocked |
 | `unsafe` | ✅ | ❌ blocked |
-| **`apescript` orchestration** (`RunTask`/`RunPipeline`/`RunPrompt`, `PublishEvent`, `PutBlob`, …) | ✅ | ✅ available |
+| **`apescript` orchestration** (`RunTask`/`RunPrompt`, `PublishEvent`, `PutBlob`, …) | ✅ | ✅ available |
 
 The apescript surface stays available in both modes: it is the intended,
 guard-railed side-effect channel (each function has its own preflight,

@@ -94,7 +94,7 @@ make check-harness
 >
 > The seed deliberately spawns a subagent, because `tool_response` is only counted on Agent-tool `PostToolUse` and `agent_id` only on `SubagentStop`. A seed that merely answered a question would check one field of three and still go green — so a field observed **zero** times fails as a broken seed, separately from an actual drift verdict.
 >
-> To judge a project you have really run pipelines in, use the observational read instead: `ape doctor --only hooks.contract_drift --strict --cwd <project>`.
+> To judge a project you have really run sessions in, use the observational read instead: `ape doctor --only hooks.contract_drift --strict --cwd <project>`.
 
 `make check-claude` on its own spawns the locally-installed Claude Code through ape's own PTY path and verifies the couplings that would otherwise fail *silently*:
 
@@ -131,34 +131,41 @@ through. This asks the other question: does ape still satisfy what the local
 ```bash
 make check-framework \
   APEX_FRAMEWORK_REPO=/path/to/apex_process_framework \
-  APEX_PROJECT=/path/to/a/project/using/that/framework
+  APEX_PROJECT=/path/to/an/apex-v1/project/installed/from/that/framework
 ```
 
 **Both variables, or half the gate skips.** `APEX_FRAMEWORK_REPO` checks
 ape against the framework *checkout*. `APEX_PROJECT` checks it against a
-framework *install* — the manifest as a skill actually meets it at run
-time — and without it that half reports **NOT verified** rather than
-passing. The default is this repo, which is not a framework install.
+framework *install* — the payload as a skill actually meets it at run time —
+and without one that half reports **NOT verified** rather than passing. The
+default is `testdata/apexv1project`, the layout `ape project init` makes, which
+is not an install (it has no `_apex/ape-commands.yaml`).
 
 The install is **versioned**: a project last updated against an older
 framework verifies the *older* contract, and reports green while doing it.
 Point it at a project that has run `ape framework update` against the
-framework version you are releasing for. (v0.15.0 declares 82 required
-commands; v0.16.0 declares 84.)
+framework version you are releasing for.
 
-Framework v0.11.0 moved deterministic project-data work into ape subcommands
-and deleted every fallback branch — 74 of 90 skills shell out. An ape missing
-one does not degrade: it fails a skill deep inside a multi-hour stage. Four
-gates close that:
+An APEX v1 framework's manifest, `_apex/ape-commands.yaml`, declares only
+`min_ape_version`: there is no command list to check. Its contract is what its
+skills and migration entries run. A skill that calls an ape command this binary
+lacks does not degrade: it fails mid-run. Three gates close that, run against
+the checkout and again against the install:
 
 | Gate | Asks |
 | --- | --- |
-| `TestCommandSurface_AgainstRealManifest` | does this binary provide every command the framework's shipped `_apex/ape-commands.yaml` requires? |
-| `TestContract_LiveConfigTemplate` | do the config variables ape resolves match the framework's **live** template, not a copied fixture? |
-| `ape doctor --only framework.command_surface,framework.terminal_contracts` | the same surface as a project actually **received** it — what a skill meets at run time |
+| `TestFrameworkV1_SkillCommandsResolve` | does every `ape …` command the skills and `_apex/migrations/` entries invoke resolve against this binary? |
+| `TestFrameworkV1_Floor` | does the manifest declare a `min_ape_version`, and does this ape meet it? A dev build or pseudo-version is logged as not compared |
+| `TestFrameworkV1_StandardADR` | does the payload's standard ADR-0001 (`_apex/standards/adr-0001.md`) equal ape's embedded copy? NOT verified while the payload has no such file |
 
-Both framework layouts resolve: released (`_apex/` at the repo root) and build
-(nested under `framework/`).
+A tree counts as APEX v1 when it holds `framework-v1/` (the build repo), or has
+`_apex/ape-commands.yaml` and skills but no v0 `_apex/config.yaml`.
+`APE_BIN=<binary>` judges a built binary instead of this source tree.
+
+For an APEX v0 framework checkout the gate runs v0's contract instead:
+`TestCommandSurface_AgainstRealManifest` and the `TestContract_Live*` tests
+against the checkout, and `ape doctor --strict --only
+framework.command_surface,framework.output_styles` against the install.
 
 Reading the result:
 

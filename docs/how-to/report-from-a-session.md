@@ -12,9 +12,9 @@ ape transcript upload                                        # blob-upload this 
 
 Every message carries the **user identity decoded from your NATS credential**
 (baked into the subject, server-enforceable) and the **Claude Code session id**
-(auto-resolved or passed explicitly). This is the same machinery the `ape
-pipeline` / `ape task` runners use at finalize, so a supervised run and a
-self-reporting agent are indistinguishable to a consumer.
+(auto-resolved or passed explicitly). This is the same machinery the `ape task`
+runner uses at finalize, so a supervised run and a self-reporting agent are
+indistinguishable to a consumer.
 
 Unlike the fire-and-forget runner taps, these commands are *for* reporting, so
 **failure is visible**: exit `0` published/uploaded · `1` NATS publish/upload

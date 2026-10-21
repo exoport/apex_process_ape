@@ -2,13 +2,14 @@
 
 `ape service` turns a machine into a remotely drivable ape worker (PLAN-14). It
 registers a [NATS micro](https://docs.nats.io/using-nats/developer/services)
-service and accepts JSON request/reply jobs: submit a pipeline or task, watch its
-progress on the PLAN-13 event subjects, query status, and stop jobs — all over
+service and accepts JSON request/reply jobs: submit a task, prompt or script
+job, watch its progress on the PLAN-13 event subjects, query status, and stop jobs — all over
 NATS. Job execution is identical to running the CLI locally, because the daemon
 literally spawns `ape` as a child process.
 
 > **Trust boundary — read this first.** Anyone who can publish on the service
-> subjects can run pipelines (and, later, arbitrary scripts) on this machine.
+> subjects can run skills (and, when you enable it, arbitrary scripts) on this
+> machine.
 > The daemon's only guards are (1) the project allowlist and (2) the NATS
 > credential's subject permissions. Scope creds on the server; see
 > [Lock it down](#lock-it-down-server-enforced) below.
@@ -64,31 +65,29 @@ it). Submit a job with `ape service submit`, which adds the caller stamp every
 `*.run` request needs (D83) — where the caller runs in ape's nesting rule:
 
 ```bash
-ape service submit task '{"project_root":"/abs/path/main-project","skill":"apex-plan","args":"M1"}' \
+ape service submit task '{"project_root":"/abs/path/main-project","skill":"apex-plan","args":"development/briefs/greeter.md"}' \
   --nats-url nats://127.0.0.1:4222
 # → {"v":2,"job_id":"20260709-083015-a1b2c3d","accepted":true}
 ```
 
 A request without `caller` is refused `session.depth`; so is one from a session
-an orchestrator started (depth 2). From inside an apex-orchestrator run (depth 1)
-the job runs as that orchestrator's one child, for an allow-listed skill only.
-A raw `nats req` from a terminal states depth 0 itself — the stamp is the
-client's word, and the NATS credentials ("Lock it down" below) remain the boundary:
+an apex-loop run started (depth 2). From inside an apex-loop run (depth 1) the
+job runs as that loop run's one child, for a task of an allow-listed skill only;
+a script job is refused there. A raw `nats req` from a terminal states depth 0
+itself — the stamp is the client's word, and the NATS credentials ("Lock it
+down" below) remain the boundary:
 
 ```bash
-# pipeline.run and task.run dispatch a headless `ape` child.
+# task.run dispatches a headless `ape task` child.
 nats req ape.svc.ape.main-project.task.run \
-  '{"project_root":"/abs/path/main-project","skill":"apex-shard-doc","args":"--doc prd","caller":{"depth":0}}'
+  '{"project_root":"/abs/path/main-project","skill":"apex-plan","args":"development/briefs/greeter.md","caller":{"depth":0}}'
 # → {"v":2,"job_id":"20260709-083015-a1b2c3d","accepted":true}
-
-nats req ape.svc.ape.main-project.pipeline.run \
-  '{"project_root":"/abs/path/main-project","pipeline":"design","prompt":"a greeter CLI"}'
 
 # prompt.run dispatches a headless `ape prompt` session. Provide EXACTLY ONE
 # of "prompt" (positional text) or "handoff" (a handoff document); optional
 # "agent", "model", and "workflow":true.
 nats req ape.svc.ape.main-project.prompt.run \
-  '{"project_root":"/abs/path/main-project","prompt":"add a CHANGELOG entry","agent":"apex-agent-dev","workflow":true,"caller":{"depth":0}}'
+  '{"project_root":"/abs/path/main-project","prompt":"add a CHANGELOG entry","workflow":true,"caller":{"depth":0}}'
 
 # script.run dispatches `ape script`. Provide EXACTLY ONE of "script_path"
 # (a file inside an allowlisted root) or "script_source" (inline Go, gated —
@@ -107,8 +106,8 @@ nats req ape.svc.ape.main-project.status     '{}'
 nats req ape.svc.ape.main-project.health     '{}'
 ```
 
-Watch progress on the PLAN-13 event subjects. The child publishes its own
-`pipeline`/`task` events under the **injected job id**, and the daemon publishes
+Watch progress on the PLAN-13 event subjects. A task or script child publishes
+its own `task`/`script` events under the **injected job id**, and the daemon publishes
 `svc`-kind lifecycle events under the same id:
 
 ```bash
@@ -116,10 +115,14 @@ nats sub 'ape.evt.*.main-project.svc.>'         # daemon: job-accepted/job-rejec
 nats sub 'ape.evt.*.main-project.*.>'           # + the child's run/stage/step progress
 ```
 
-All four `*.run` kinds — `pipeline.run`, `task.run`, `prompt.run`, `script.run` —
-spawn a real headless `ape` child. `prompt.run` requires exactly one of `prompt`
-or `handoff`; `script.run` requires exactly one of `script_path` or
-`script_source` and is subject to the script gates below.
+`task.run`, `prompt.run` and `script.run` each spawn a real headless `ape`
+child. `prompt.run` requires exactly one of `prompt` or `handoff`; `script.run`
+requires exactly one of `script_path` or `script_source` and is subject to the
+script gates below.
+
+`pipeline.run` is still registered, so an old client gets an answer rather than
+"no responders", but every request to it is rejected `VALIDATION`: `ape
+pipeline` was retired with APEX v0. Submit a `task.run` instead.
 
 ## Script jobs are code execution — gate them (D5)
 
@@ -148,7 +151,7 @@ force_script_sandbox: false  # force `ape script --sandbox` on every script job
 
 `ape prompt` publishes no PLAN-13 progress events of its own, so a `prompt.run`
 job is observable only through the daemon's `svc` lifecycle events and
-`job.status`; `pipeline`/`task`/`script` children publish their own progress.
+`job.status`; `task` and `script` children publish their own progress.
 
 ## Exclusivity: what runs alongside what
 
@@ -198,7 +201,10 @@ outlive the process.
 - **stdout stays clean.** All diagnostics (startup banner, drain progress, NATS
   warnings) go to stderr.
 - **Per-job logs.** Each child's combined stdout/stderr is written to
-  `<project_root>/_output/ape/service/<job_id>.log`.
+  `<project_root>/_apex/state/runs/service/<job_id>.log` in an APEX v1 project
+  (`{output_folder}/ape/service/<job_id>.log` outside one, `_output` by
+  default).
+  `job.status` reports the path as `log_path`.
 - **Exit codes:** `0` clean shutdown · `1` connect/registration failure · `2`
   usage or config error (bad `--name`, missing/invalid `service.yaml`, no NATS
   URL).

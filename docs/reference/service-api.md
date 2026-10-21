@@ -37,7 +37,7 @@ Each endpoint's subject is the group plus the endpoint token:
 
 | Endpoint      | Subject                                          | Direction      |
 | ------------- | ------------------------------------------------ | -------------- |
-| `pipeline.run`| `ape.svc.<name>.<project-slug>.pipeline.run`     | request/reply  |
+| `pipeline.run`| `ape.svc.<name>.<project-slug>.pipeline.run`     | request/reply (always rejected) |
 | `task.run`    | `ape.svc.<name>.<project-slug>.task.run`         | request/reply  |
 | `prompt.run`  | `ape.svc.<name>.<project-slug>.prompt.run`       | request/reply  |
 | `script.run`  | `ape.svc.<name>.<project-slug>.script.run`       | request/reply  |
@@ -61,60 +61,67 @@ else changed.
 - **The contract is additive-only.** New request/reply fields may be added
   without a version bump; a field is never removed, renamed, or repurposed. A
   breaking change would bump `"v"` and be documented in
-  [events.md](events.md). New fields on `JobInfo` (e.g. `last_event_at`) are
-  therefore additive and leave `"v"` at `1`.
+  [events.md](events.md). New fields on `JobInfo` (e.g. `last_event_at`,
+  `caller`) are therefore additive and did not bump `"v"`.
 - **Field names are snake_case** and are the stable wire contract.
 - **Unknown request fields are ignored**, and fields a given kind does not read
   are silently dropped (see the field reference below).
 
-## The four `*.run` endpoints
+## The `*.run` endpoints
 
-`pipeline.run`, `task.run`, `prompt.run`, and `script.run` share one request
-type (`RunRequest`) and one accept reply (`RunReply`). Each endpoint reads only
-the subset of fields its kind uses. Every accepted job is spawned as a real,
+`task.run`, `prompt.run`, and `script.run` share one request type
+(`RunRequest`) and one accept reply (`RunReply`). Each endpoint reads only the
+subset of fields its kind uses. Every accepted job is spawned as a real,
 headless `ape` child process (never a shell): request fields are mapped to
 discrete `ape` argv elements through a strict, typed field→flag mapping, so no
 field value can inject extra flags or shell metacharacters.
+
+`pipeline.run` is still registered, so a client that sends it gets an answer
+rather than NATS "no responders", but it is always rejected `VALIDATION`: `ape
+pipeline` was retired with APEX v0. The daemon checks `project_root` against the
+allowlist first, so a request naming a root outside it gets
+`PROJECT_NOT_ALLOWED` instead.
 
 ### Request — `RunRequest`
 
 ```json
 {
-  "v": 1,
+  "v": 2,
   "project_root": "/abs/path/repo",
-  "pipeline": "design",
-  "prompt": "a greeter CLI",
+  "skill": "apex-plan",
+  "args": "development/briefs/greeter.md",
   "nonexclusive": false,
   "exclusivity_key": "",
-  "submitted_by": "ci-bot"
+  "submitted_by": "ci-bot",
+  "caller": { "depth": 0 }
 }
 ```
 
-`project_root` is always required. Each kind also requires its own selector
-(`pipeline` / `skill` / one of `prompt`|`handoff` / one of
+`project_root` and `caller` are always required. Each kind also requires its own
+selector (`skill` / one of `prompt`|`handoff` / one of
 `script_path`|`script_source`). See the [RunRequest field reference](#runrequest-field-reference)
 for the complete, per-kind field list and argv mapping.
 
 ### Reply — `RunReply` (accept)
 
 ```json
-{ "v": 1, "job_id": "20260709-083015-a1b2c3d", "accepted": true }
+{ "v": 2, "job_id": "20260709-083015-a1b2c3d", "accepted": true }
 ```
 
 | Field      | Type   | Notes                                                                       |
 | ---------- | ------ | --------------------------------------------------------------------------- |
-| `v`        | int    | Wire version (always `1`).                                                  |
+| `v`        | int    | Wire version (always `2`).                                                  |
 | `job_id`   | string | Minted id, format `YYYYMMDD-HHMMSS-<7hex>`. Used on `job.status`/`job.stop` and as the `<id>` segment of the job's `ape.evt` subjects (the daemon injects it into the child as `APE_JOB_ID`). |
 | `accepted` | bool   | Always `true` on this reply. A rejection is a `req.Error`, not this shape.  |
 
 A rejected `*.run` request produces no `RunReply`; it returns one of the
 [error codes](#error-codes) below.
 
-### Errors (all four `*.run` endpoints)
+### Errors (every `*.run` endpoint)
 
 | Code                  | When                                                                                                    |
 | --------------------- | ------------------------------------------------------------------------------------------------------- |
-| `VALIDATION`          | Malformed request JSON; missing `project_root`; missing/invalid kind selector; the `prompt`/`handoff` or `script_path`/`script_source` XOR is violated; `script_source` used while disabled; `script_path` resolves outside the allowlist; or the child failed to start. |
+| `VALIDATION`          | Every `pipeline.run`; malformed request JSON; missing `project_root`; missing/invalid kind selector; the `prompt`/`handoff` or `script_path`/`script_source` XOR is violated; `script_source` used while disabled; `script_path` resolves outside the allowlist; or the child failed to start. |
 | `PROJECT_NOT_ALLOWED` | `project_root` is not an exact match in the daemon's allowlist. Checked **before** request shape or kind. |
 | `BUSY_EXCLUSIVE`      | The request's `exclusivity_key` is held by an exclusive job.                                            |
 | `BUSY_KEY`            | An exclusive slot was requested but the key is held by one or more nonexclusive jobs.                   |
@@ -123,9 +130,9 @@ A rejected `*.run` request produces no `RunReply`; it returns one of the
 
 Returns one job's public state.
 
-- **Request — `JobIDRequest`:** `{ "v": 1, "job_id": "20260709-083015-a1b2c3d" }`
+- **Request — `JobIDRequest`:** `{ "v": 2, "job_id": "20260709-083015-a1b2c3d" }`
   (`job_id` required; `v` optional).
-- **Reply — `JobStatusReply`:** `{"v":1, …JobInfo}` — a `JobInfo` object (see the
+- **Reply — `JobStatusReply`:** `{"v":2, …JobInfo}` — a `JobInfo` object (see the
   [JobInfo field reference](#jobinfo-field-reference)) with `v` alongside its fields.
 - **Errors:** `VALIDATION` (malformed JSON) · `NOT_FOUND` (no job with that id).
 
@@ -136,7 +143,7 @@ terminal), sorted by `job_id` (chronological, since the id embeds a timestamp
 prefix).
 
 - **Request:** `{}` — the body is ignored.
-- **Reply — `JobListReply`:** `{ "v": 1, "jobs": [ …JobInfo ] }`.
+- **Reply — `JobListReply`:** `{ "v": 2, "jobs": [ …JobInfo ] }`.
 - **Errors:** none.
 
 ## `job.stop`
@@ -145,8 +152,8 @@ Requests an operator stop of a running job. It SIGTERMs the child's whole
 process group; the child's exit is then recorded with the terminal `state`
 `stopped`.
 
-- **Request — `JobIDRequest`:** `{ "v": 1, "job_id": "…" }` (`job_id` required).
-- **Reply — `JobStopReply`:** `{ "v": 1, "stopped": true|false }`. `stopped` is
+- **Request — `JobIDRequest`:** `{ "v": 2, "job_id": "…" }` (`job_id` required).
+- **Reply — `JobStopReply`:** `{ "v": 2, "stopped": true|false }`. `stopped` is
   `false` when the job exists but is already terminal (nothing to signal).
 - **Errors:** `VALIDATION` (malformed JSON) · `NOT_FOUND` (no job with that id).
 
@@ -163,12 +170,12 @@ Reports the daemon's own state.
 
 ```json
 {
-  "v": 1,
+  "v": 2,
   "running_jobs": 2,
   "held_keys": { "": { "exclusive": true, "count": 1 },
                  "reports": { "exclusive": false, "count": 3 } },
   "uptime_seconds": 1837.42,
-  "versions": { "ape": "v0.0.45", "claude": "1.2.3 (Claude Code)" },
+  "versions": { "ape": "1.0.0", "claude": "1.2.3 (Claude Code)" },
   "project_root": "/abs/path/main-project",
   "allowlist": [ "/abs/path/main-project", "/abs/path/component-a" ],
   "name": "ape",
@@ -198,7 +205,7 @@ A cheap `ape doctor` subset — a boolean rollup plus the individual probes.
 - **Reply — `HealthReply`:**
 
 ```json
-{ "v": 1, "ok": true,
+{ "v": 2, "ok": true,
   "checks": { "nats": true, "claude_bin": true, "project_root": true } }
 ```
 
@@ -216,13 +223,12 @@ A cheap `ape doctor` subset — a boolean rollup plus the individual probes.
 
 All fields are optional on the wire except `project_root` and each kind's
 selector. Fields a given kind does not consume are ignored (e.g. `agent`/`model`
-are read by `task.run`/`prompt.run` but not `pipeline.run`). The "→ argv" column
+are read by `task.run`/`prompt.run` but not `script.run`). The "→ argv" column
 is the `ape` child flag the field maps to.
 
-### Shared across all four kinds
+### Shared across every kind
 
-Every `*.run` job is spawned headless: pipeline adds `--no-tui --quiet`, the
-others `--quiet`, and all four `--cwd <project_root>`.
+Every `*.run` job is spawned headless, with `--quiet --cwd <project_root>`.
 
 | Field             | Type   | Required | → argv               | Notes                                                                 |
 | ----------------- | ------ | -------- | -------------------- | --------------------------------------------------------------------- |
@@ -246,7 +252,7 @@ the session a request comes from, so the request says it:
 | --- | --- |
 | absent (no `caller`) | refuses `session.depth` (fail closed) |
 | `0` | runs the job as before |
-| `1` | runs a `task.run` only when `run_id` is a running `apex-orchestrator` manifest in `project_root`, the skill is on that project's allow-list (`session.not-allowed` otherwise; a prompt job always is), and its one child slot is free (`session.child-running`). The job's `ape task` runs under that orchestrator's session marker, as its child: depth 2, `parent_run`, listed in its `children`, stopped when it ends. A `script.run` is refused `session.depth` |
+| `1` | runs a `task.run` only when `run_id` is a running `apex-loop` manifest in `project_root`, the skill is on that project's allow-list (`session.not-allowed` otherwise; a prompt job always is), and its one child slot is free (`session.child-running`). The job's `ape task` runs under that loop run's session marker, as its child: depth 2, `parent_run`, listed in its `children`, stopped when it ends. A `script.run` is refused `session.depth` |
 | `2` or more | refuses `session.depth` and spawns nothing |
 
 A refusal is a micro error whose code is the nesting code and whose body is
@@ -258,14 +264,8 @@ remain the boundary.
 
 ### `pipeline.run`
 
-| Field                | Type   | Required | → argv                   |
-| -------------------- | ------ | -------- | ------------------------ |
-| `pipeline`           | string | **yes**  | positional (`ape pipeline <pipeline>`) |
-| `from`               | string | no       | `--from`                 |
-| `prompt`             | string | no       | `--prompt`               |
-| `no_commit`          | bool   | no       | `--no-commit`            |
-| `commit_allow_dirty` | bool   | no       | `--commit-allow-dirty`   |
-| `upload_transcripts` | bool   | no       | `--upload-transcripts`   |
+Always rejected `VALIDATION`; nothing is spawned. Its fields (`pipeline`, `from`)
+still decode, but no field makes it runnable. Use `task.run`. An APEX v0 project is served by the v0 ape its `.bingo` pins.
 
 ### `task.run`
 
@@ -276,7 +276,7 @@ remain the boundary.
 | `model`              | string        | no       | `--model`                               |                                                          |
 | `args`               | string        | no       | `--args`                                | Passed to the skill.                                     |
 | `prompt`             | string        | no       | `--prompt`                              |                                                          |
-| `prompt_flag`        | string        | no       | `--prompt-flag`                         |                                                          |
+| `prompt_flag`        | string        | no       | `--prompt-flag`                         | No APEX v1 skill takes one.                              |
 | `task_commit`        | string\|null  | no       | `--task-commit` / `--task-commit=<msg>` | Nullable. Omitted/`null` = no commit; `""` = commit with the derived message `ape:task/<skill>`; a non-empty string = that commit message. |
 | `no_commit`          | bool          | no       | `--no-commit`                           |                                                          |
 | `commit_allow_dirty` | bool          | no       | `--commit-allow-dirty`                  |                                                          |
@@ -319,7 +319,7 @@ and listed by `job.list`.
 ```json
 {
   "job_id": "20260709-083015-a1b2c3d",
-  "kind": "pipeline",
+  "kind": "task",
   "state": "running",
   "started_at": "2026-07-09T08:30:15.123456789Z",
   "last_event_at": "2026-07-09T08:30:15.123456789Z",
@@ -327,7 +327,7 @@ and listed by `job.list`.
   "exclusivity_key": "",
   "exclusive": true,
   "submitted_by": "ci-bot",
-  "log_path": "/abs/path/repo/_output/ape/service/20260709-083015-a1b2c3d.log",
+  "log_path": "/abs/path/repo/_apex/state/runs/service/20260709-083015-a1b2c3d.log",
   "exit_code": 0
 }
 ```
@@ -335,7 +335,7 @@ and listed by `job.list`.
 | Field             | Type              | Notes                                                                                                          |
 | ----------------- | ----------------- | -------------------------------------------------------------------------------------------------------------- |
 | `job_id`          | string            | The minted job id (`YYYYMMDD-HHMMSS-<7hex>`).                                                                   |
-| `kind`            | string            | `pipeline` \| `task` \| `prompt` \| `script`.                                                                  |
+| `kind`            | string            | `task` \| `prompt` \| `script` (`pipeline` is never accepted, so no job has it).                                 |
 | `state`           | string            | `running` \| `done` (child exited 0) \| `failed` (child exited non-zero) \| `stopped` (operator `job.stop`).   |
 | `started_at`      | RFC3339 timestamp | When the job was accepted (UTC).                                                                               |
 | `last_event_at`   | RFC3339 timestamp | Timestamp of the job's most recent daemon lifecycle event. Equals `started_at` for a just-accepted job (its `job-accepted` event), and advances to the `job-end` time once the job goes terminal — the same instant stamped on the corresponding `svc` event's `ts`. |
@@ -344,7 +344,7 @@ and listed by `job.list`.
 | `exclusive`       | bool              | Whether the job holds the key exclusively (`true` unless the request set `nonexclusive:true`).                 |
 | `submitted_by`    | string            | Advisory attribution echoed from the request. Omitted when empty.                                              |
 | `caller`          | object            | The request's [caller stamp](#caller-stamp-the-nesting-rule).                                                   |
-| `log_path`        | string            | The child's combined stdout/stderr log, at `<project_root>/_output/ape/service/<job_id>.log`. Omitted until the child has started. |
+| `log_path`        | string            | The child's combined stdout/stderr log: `<project_root>/_apex/state/runs/service/<job_id>.log` in an APEX v1 project, `{output_folder}/ape/service/<job_id>.log` outside one. Omitted until the child has started. |
 | `exit_code`       | int               | The child's exit code. Present only once the job is terminal; omitted while `running`. `-1` when the child was signalled or failed to run. |
 
 ## Error codes
@@ -354,14 +354,14 @@ external contract — never renamed or repurposed.
 
 | Code                  | Returned by                          | Meaning                                                                    |
 | --------------------- | ------------------------------------ | -------------------------------------------------------------------------- |
-| `VALIDATION`          | the four `*.run`, `job.status`, `job.stop` | Malformed JSON, or (on `*.run`) an invalid request shape / kind selector, a violated XOR rule, a disabled/out-of-allowlist script, or a child that failed to start. |
-| `PROJECT_NOT_ALLOWED` | the four `*.run`                     | `project_root` is not an exact allowlist match.                            |
-| `BUSY_EXCLUSIVE`      | the four `*.run`                     | The `exclusivity_key` is held by an exclusive job.                         |
-| `BUSY_KEY`            | the four `*.run`                     | An exclusive slot was requested while the key is held by nonexclusive jobs.|
+| `VALIDATION`          | every `*.run`, `job.status`, `job.stop` | Malformed JSON, or (on `*.run`) every `pipeline.run`, an invalid request shape / kind selector, a violated XOR rule, a disabled/out-of-allowlist script, or a child that failed to start. |
+| `PROJECT_NOT_ALLOWED` | every `*.run`                        | `project_root` is not an exact allowlist match.                            |
+| `BUSY_EXCLUSIVE`      | every `*.run`                        | The `exclusivity_key` is held by an exclusive job.                         |
+| `BUSY_KEY`            | every `*.run`                        | An exclusive slot was requested while the key is held by nonexclusive jobs.|
 | `NOT_FOUND`           | `job.status`, `job.stop`             | No job with the requested `job_id`.                                        |
-| `session.depth`       | the four `*.run`                     | No caller stamp, a caller at depth 2+, a depth-1 caller that is not a running apex-orchestrator run, or a script from depth 1 (action stop). |
-| `session.not-allowed` | `task.run`, `prompt.run`             | A depth-1 orchestrator's job for a skill off its allow-list, or a prompt (action stop). |
-| `session.child-running` | `task.run`                         | The orchestrator already has a child session running (action retry).       |
+| `session.depth`       | every `*.run`                        | No caller stamp, a caller at depth 2+, a depth-1 caller that is not a running apex-loop run, or a script from depth 1 (action stop). |
+| `session.not-allowed` | `task.run`, `prompt.run`             | A depth-1 apex-loop run's job for a skill off its allow-list, or a prompt (action stop). |
+| `session.child-running` | `task.run`                         | The apex-loop run already has a child session running (action retry).      |
 
 `job.list`, `status`, and `health` never return an error code.
 

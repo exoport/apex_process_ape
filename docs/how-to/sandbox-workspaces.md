@@ -3,7 +3,7 @@
 `ape sandbox` provisions a long-lived, hardware-isolated **Kata microVM
 workspace** (own guest kernel, KVM) for a project: your code is mounted inside,
 `~/.claude` is composed per workspace, and you attach across many sessions to
-run Claude Code, APEX pipelines, or Playwright. The workspace can't touch the
+run Claude Code, APEX skills, or Playwright. The workspace can't touch the
 rest of the host even when every `ape`/`claude` session inside runs with
 `--dangerously-skip-permissions`.
 
@@ -84,7 +84,7 @@ ape sandbox inspect dev
 ## 3. Work inside
 
 ```bash
-ape sandbox exec dev -- ape task apex-create-prd --args "--doc prd"
+ape sandbox exec dev -- ape task apex-plan --args "<request>"
 ape sandbox exec dev -- uname -r        # prints the GUEST kernel
 ape sandbox attach dev                  # interactive login shell (raw PTY)
 ```

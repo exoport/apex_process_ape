@@ -232,40 +232,44 @@ future updates.
 
 ## Watching a run on the board
 
-`ape sprint reconcile` refreshes a **`Sprint`** tab (key `apex-sprint`) whenever
-the project has a board. That is how a long or autonomous APEX run can be
-watched without interrupting it: reconcile already runs at every boundary that
-moves a story, so it is the thing that *observes* tracker changes rather than
-the thing that causes them, and nothing in the framework has to remember to
-update a dashboard.
+In an APEX v1 project with a board, ape keeps one tab, **`APEX status`** (key
+`ape-status`), in step with `ape status`. That is how a long or unattended run
+can be watched without interrupting it: ape refreshes the tab after every v1
+command that changes what `ape status` reports — `project init`, `lift` and
+`accept-config`; `milestone new`, `approve`, `gate` and `close`; `decision new`
+and `accept`; `next add`; every `change` verb but `check` and `diff` — so the
+tab observes the records rather than anything having to remember to update a
+dashboard. To refresh it now and see where it wrote:
 
-The tab shows story counts by status, epic counts by **derived** status, the
-stories in flight, and what is blocked — all read from `sprint-status.yaml`.
-**The tracker is authoritative and the tab is a view of it**: if the two ever
-disagree, the tab is wrong. A Freshness panel carries the time of the last
-refresh, so a run that has stopped moving stories is visible as a timestamp
-that stops advancing.
+```bash
+ape status --board
+```
 
-Two things it deliberately does not do:
+**The records are authoritative and the tab is a view of them**: nothing reads
+it back, and if the two ever disagree, the tab is wrong. The tab is rewritten on
+every refresh, so edits to it do not survive. Renaming it does: it is found by
+key.
 
-- **It never creates a board.** No `.aboard/aboard.json`, no tab. Starting one,
+Things it deliberately does not do:
+
+- **It never creates a board.** With no board, there is no tab. Starting one,
   and initialising one, are yours.
-- **It cannot affect `reconcile`.** A board that is absent, unreadable,
-  unwritable or refusing changes neither the command's exit code nor a byte of
-  its stdout; anything it has to say goes to stderr. That is not politeness —
-  reconcile sits on mutation paths where a non-zero exit is read as a content
-  verdict, so a broken board would otherwise convert a defer into a patch and
-  demote a story. `--check` skips the refresh entirely.
+- **It cannot affect the command that triggered it.** A board that is absent,
+  unreadable, unwritable or refusing changes neither the command's exit code
+  nor a byte of its stdout; anything it has to say is one line on stderr.
+  `ape status --board` exits 0 whatever the board did.
+- **It does not write an unchanged view.** A refresh that would change nothing
+  but the time writes nothing.
 
 Where the write goes depends on whether a board is answering. A running board
-is **posted to**, which is what pushes the change to a page already open and
-what gets the write a compare-and-set. With nothing listening the state file is
-written directly, so the tab is already current when you next run
-`ape aboard serve` rather than filling in at the next story boundary. A server
-that is there and *refuses* stops the refresh rather than writing around it.
+is **posted to**, which is what pushes the change to a page already open. With
+nothing listening, `.aboard/aboard.json` is rewritten in place, so the tab is
+already current when you next run `ape aboard serve`.
 
-The tab is a projection and is rewritten on every refresh, so edits to it do
-not survive. Renaming it does: it is found by key.
+The tab is quiet: ape's refreshes raise no notification, unread dot or banner.
+ape sets that once, when it creates the tab; if you turn it off from the tab's
+menu, it stays off, and ape's changed views raise the dot again. See
+`ape status --help`.
 
 ## Recipes
 
@@ -284,23 +288,25 @@ Four sources, and **the first match on a name wins**:
 
 | order | directory | who it is for |
 | --- | --- | --- |
-| 1 | `_apex/aboard/recipes/` | every project in a workspace — **where `ape framework setup` and `ape framework update` install the framework's library** |
+| 1 | `_apex/aboard/recipes/` | every project in a workspace — also where `ape framework setup` and `ape framework update` install a framework release's recipe library, when it ships one |
 | 2 | `_aboard/recipes/` | this project's team, committed |
 | 3 | `.aboard/recipes/` | this checkout only (gitignored, so it stays yours) |
 | 4 | *(built into the binary)* | everywhere ape reaches, with no file to copy |
 
 Built-ins travel inside the ape binary, so a fresh checkout has them with
 nothing installed. The three directories are how a workspace, a team or one
-person adds their own.
+person adds their own. An APEX v1 release ships no recipe library, so in a v1
+project the built-in recipes apply, plus any you add.
 
 > **Do not copy a built-in into a directory above it.** That shadows the
 > binary's own copy and freezes it at the moment you copied, so the recipe
 > silently stops tracking the renderer it describes. Copy the ones that are
 > *meant* to be copied — a curated library recipe, or one you wrote.
 
-`ape framework setup|update` refreshes the framework's own recipe files and
-leaves every other file in that directory alone, because the same directory is
-where a workspace keeps its own.
+When a release ships a recipe library, `ape framework setup|update` refreshes
+the framework's own recipe files and leaves every other file in that directory
+alone, because the same directory is where a workspace keeps its own. A release
+that ships none leaves the directory untouched.
 
 ### The format
 

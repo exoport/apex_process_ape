@@ -1,6 +1,6 @@
 # How-to — run `ape doctor` in CI
 
-Gate a CI job on local-environment prerequisites by running `ape doctor` with `--strict --output-format json` and inspecting the exit code (and optionally the JSON payload). Doctor is purely diagnostic — no side effects, no network — so it's safe to run early in a job.
+Gate a CI job on local-environment prerequisites by running `ape doctor` with `--strict --output-format json` and inspecting the exit code (and optionally the JSON payload). Without `--fix`, doctor is purely diagnostic — no side effects, no network — so it's safe to run early in a job.
 
 ## Minimal invocation
 
@@ -11,11 +11,16 @@ ape doctor --strict --output-format json
 Exit codes:
 
 - `0` — every required check passed and no warnings (under `--strict`, any WARN is treated as failure).
-- `1` — at least one required check failed, or at least one WARN was raised under `--strict`.
+- `1` — at least one required check failed, at least one WARN was raised under `--strict`, or `--only` named a check that does not exist.
 
-In an APEX v1 project doctor runs the host rows and the v1 project rows (`project.check`, `hooks.project`, `plugins.project`, `framework.ape_version`, `claude.version`, `state.gitignore`, `settings.shared`) and none of APEX v0's, so `--strict` is green on a healthy v1 project. In a v0 project the v0 rows run and `apex.v0` warns that the project needs its pinned v0 ape. `ape doctor --help` lists every row.
+Which project rows run depends on the project at `--cwd`:
 
-Drop `--strict` if you want WARN-level findings (e.g. "node not on PATH" for a pipeline you don't run) to remain advisory rather than fail the job.
+- **APEX v1 project** (`_apex/state/` or `development/project.md`): the host rows, the framework rows that apply to any install (`skills.*`, `framework.output_styles`, `framework.command_surface`, `framework.ape_version`, `framework.tag_moved`, `migrations.pending`), and the v1 rows: `project.check`, `hooks.project`, `hooks.prompt`, `hooks.pre-commit`, `plugins.project`, `claude.version`, `state.gitignore` and `settings.shared`. None of APEX v0's rows run, so `--strict` is green on a healthy v1 project.
+- **Anywhere else**: the host and framework rows, the v0 rows, and `apex.v0`, which WARNs in an APEX v0 project that this ape retired the v0 commands its skills call: use the project's pinned v0 ape (`.bingo`), or lift it ([How to lift a v0 project](lift-a-v0-project.md)).
+
+`--only` runs exactly the checks it names, whatever the project. `ape doctor --help` describes every row.
+
+Drop `--strict` if you want WARN-level findings (e.g. `playwright.host_supported` on a runner OS Playwright does not list) to remain advisory rather than fail the job.
 
 ## GitHub Actions snippet
 
@@ -55,6 +60,12 @@ The canonical names are stable across minor releases. Inspect the current set wi
 ape doctor --output-format json | jq -r '.checks[].name'
 ```
 
+To keep a gate to host prerequisites only, skip the project rows. An unknown or not-run name in `--skip` is ignored, so in an APEX v1 project:
+
+```bash
+ape doctor --strict --skip project.check,hooks.project,hooks.prompt,hooks.pre-commit,plugins.project,state.gitignore,settings.shared
+```
+
 ## Running one check on its own
 
 `--only` is the inverse: it runs just the checks you name, so a single verdict can be scripted as its own gate.
@@ -63,7 +74,7 @@ ape doctor --output-format json | jq -r '.checks[].name'
 ape doctor --only hooks.contract_drift --strict --cwd "$PROJECT"
 ```
 
-That is the observational read of hook drift, against a project you have really run. (`make check-hooks` answers the same question the other way round — it seeds its own runlog with one unattended session, so it never depends on finding such a project.) The two flags compose — `--only` selects, then `--skip` removes from the selection.
+That is the observational read of hook drift, against a project you have really run (doctor reads the runlogs under `_apex/state/runs/` in an APEX v1 project, `{output_folder}/ape/` outside one). (`make check-hooks` answers the same question the other way round — it seeds its own runlog with one unattended session, so it never depends on finding such a project.) The two flags compose — `--only` selects, then `--skip` removes from the selection.
 
 The asymmetry between them is deliberate: an unknown name in `--skip` is ignored (the check simply runs, which costs nothing), but an unknown name in `--only` is a **hard error** listing the valid names. A typo there would otherwise select nothing, run zero checks, and exit 0 — a gate reporting success while checking nothing, which is the one outcome a single-check flag must never produce.
 
@@ -100,86 +111,59 @@ ape doctor --output-format json | jq -e '.checks[] | select(.name == "ape.update
 
 | Finding                                | Likely cause                                                            | Mitigation                                                                                            |
 | -------------------------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `claude.binary FAIL`                   | claude not installed on the runner                                      | Install Claude Code in a setup step, or pin a base image that already has it.                          |
-| `playwright.host_supported WARN`       | Runner OS not yet on the allowlist (e.g. fresh Ubuntu LTS)              | Skip the check if you don't run Excalidraw-rendering pipelines; otherwise pin to an older `ubuntu-*`. |
-| `framework.metadata WARN`              | Repo doesn't have `_apex/framework.yaml` committed                       | Run `ape framework setup` in a prior step or commit the metadata.                                     |
-| `operating_rules.fragment FAIL`        | A project that manages operating rules lost `_apex/apex-operating-rules.md` or the `CLAUDE.md` managed import | Run `ape framework update`. (Legacy / older-framework installs report WARN, not FAIL — see below.)   |
+| `claude.binary FAIL`                   | claude not installed on the runner                                      | **Required.** Install Claude Code in a setup step, or pin a base image that already has it.            |
+| `playwright.host_supported WARN`       | Runner OS not yet on the allowlist (e.g. fresh Ubuntu LTS)              | Skip the check if nothing in the job renders through Playwright; otherwise pin to an older `ubuntu-*`. |
 | `permissions.home_claude WARN`         | Container runs as a user without write access to `~/.claude`            | Mount or create the dir owned by the runner UID.                                                      |
 | `cost.price_table_coverage SKIP`       | No Claude Code transcripts on the runner — the price table cannot be checked against real usage | Expected in CI, and SKIP never fails `--strict`. This check is meaningful on a developer machine; the release gate runs it as `make check-prices`. |
-| `hooks.contract_drift SKIP`            | No runlogs under `_output/` from the last 30 days — the hook contract cannot be checked | Expected in CI, and SKIP never fails `--strict`. Only a project ape has actually run in can answer this read; the release gate sidesteps that by seeding its own runlog — `make check-hooks`. |
+| `hooks.contract_drift SKIP`            | No runlogs from the last 30 days — the hook contract cannot be checked | Expected in CI, and SKIP never fails `--strict`. Only a project ape has actually run in can answer this read; the release gate sidesteps that by seeding its own runlog — `make check-hooks`. |
 | `hooks.contract_drift WARN`            | The Claude Code that wrote your most recent run has stopped sending a hook field ape's step-completion gates read | The gates are now silently inactive — a run whose agent yields while a spawned agent is outstanding can again be reported as a success having done nothing. `ape update`; if it persists on the latest ape, report it. |
-| `framework.command_surface FAIL`       | The installed framework requires ape commands this binary does not provide | **Required — fails the run.** From framework v0.11.0 the skills shell out to ape with no fallback branch, so each missing command fails a skill mid-stage. The message lists every one. `ape update`; if they are still missing on the latest, the framework requires an ape that does not exist yet. |
-| `framework.command_surface SKIP`       | The framework ships no `_apex/ape-commands.yaml` | It predates the contract (pre-v0.11.0). Not a failure. |
+| `framework.ape_version FAIL`           | This ape is below the installed framework's `min_ape_version` (`_apex/ape-commands.yaml`) | **Required — fails the run.** Update ape: `ape update`, or, when the project pins ape in `.bingo/ape.mod`, `bingo get github.com/exoport/apex_process_ape/cmd/ape@v<min>`. A dev build or pseudo-version cannot be compared and reports WARN. |
+| `framework.command_surface FAIL`       | The installed framework's manifest requires ape commands this binary does not provide | **Required — fails the run.** The message lists every missing command. `ape update`; if they are still missing on the latest, the framework requires an ape that does not exist yet. |
+| `framework.command_surface SKIP`       | The framework ships no `_apex/ape-commands.yaml`, or it is an APEX v1 manifest, which declares only `min_ape_version` | Not a failure. In a v1 project `framework.ape_version` is the row that guards the floor. |
 | `aboard.skill_reference WARN`          | A `.claude/skills/aboard/` reference copied into this project was generated for a different `capsHash` than this binary serves | The board's renderers are compiled into ape and the skill is a COPY, so the two drift independently. An agent reading a stale one can write state no renderer reads — and the write still reports success, which is why nothing else catches it. Regenerate: `ape aboard capabilities --format md > .claude/skills/aboard/references/reference.generated.md`. |
 | `aboard.skill_reference SKIP`          | No aboard skill reference copied into this project | The normal state — most projects never copy it, and absence is not drift. |
 | `runs.legacy_layout WARN`              | Run artifacts still at the pre-`{output_folder}/ape` paths | ape's cost rollups and hook-contract check read a project with no history until they move. Nothing is lost — `ape framework update` relocates them, reporting rather than overwriting any collision. |
-| `config.resolved FAIL`                 | `_apex/config.yaml` or `_apex/config.local.yaml` exists but does not parse | Fix the YAML the message names. This one is **required**: every other project-data check resolves its paths through it, so a broken config would otherwise make five checks report clean against the wrong tree. |
-| `config.resolved INFO`                 | The checkout is not an APEX project                                     | Expected outside a project. INFO never fails.                                                          |
-| `memory.size FAIL`                     | `team-memory.md` is past the 200 KiB hard ceiling                       | **Required, and intended to fail.** The file is far past what one Read shows (~25,000 tokens, about 72 KB of markdown) and nearing Claude Code's 256 KiB byte cap, at which a Read fails outright. Compact it; the soft gate should have caught this several runs earlier. |
-| `memory.size WARN`                     | Over the 40 KiB soft budget                                             | Compaction is due at the next epic close. Nothing is broken yet.                                        |
-| `registry.drift WARN`                  | A record is on disk but absent from `index.yaml`, or vice versa, or an entry lacks a field its schema requires (`registry.entry_incomplete`) | `ape registry verify --all` lists them. `ape registry sync --all` repairs set and file drift, and `ape registry backfill --all` repairs incomplete entries. |
-| `story.frontmatter WARN`               | Stories are missing extension-gated keys, or carry a type mismatch      | `ape story verify` lists them. Frontmatter is authored, so these are fixed by hand.                    |
-| `sprint.divergence WARN`               | A tracker row and a story file disagree, or a row key is non-conforming | `ape sprint check` names both sides. Neither is assumed correct — a person decides, which is why this can never be more than a warn. A `sprint.nonstandard_row_key` finding is the one with a mechanical fix: the row is keyed `N-M` with no slug, so it names no story file *and* the two live epic-projection implementations count it differently. |
-| `sprint.lock_ignored WARN`             | `sprint-status.yaml.lock` is not gitignored, or is already committed    | `ape sprint reconcile` takes an advisory lock on that sidecar and never unlinks it, so it sits beside the tracker waiting for a `git add -A`. Add `*.lock` to `.gitignore`; if it is already committed, `git rm --cached` it too, because ignoring a tracked file changes nothing. |
-| `output.ape_ignored WARN`              | The resolved `{output_folder}/ape/` is not gitignored, or is already committed | The framework requires the whole output folder gitignored, and a project that does it never sees this row warn. ape rewrites every manifest, runlog and transcript link under `{output_folder}/ape/` on each run. Untracked, they wait in `git status` for a `git add -A`; tracked, every run dirties the tree and the next `ape pipeline` fails its dirty-tree pre-flight. Add the output folder (`_output/` by default) to `.gitignore`; if it is already committed, `git rm -r --cached` it too, because ignoring a tracked path changes nothing. Reports the **resolved** folder, so a project that renamed `output_folder` is judged on the path it actually writes to. |
-| `migration.pending WARN`               | A legacy `deferred-work.md` has not been converted to record files      | `ape framework update` runs it, or `ape deferred migrate --dry-run` to look first. Nothing is committed either way. |
 
-## Project-data checks
+## APEX v1 project findings
 
-Eight checks report on the project's own records rather than on the host:
-`config.resolved`, `registry.drift`, `story.frontmatter`,
-`sprint.divergence`, `sprint.lock_ignored`, `output.ape_ignored`,
-`memory.size` and `migration.pending`. All eight degrade to INFO outside a
-project root — absence of a project is not a finding.
+None of the v1 rows is required: a FAIL is reported as WARN, so they gate the job only under `--strict`.
 
-`sprint.lock_ignored` and `output.ape_ignored` **report and never write**.
-`.gitignore` is the operator's file, and a tool that edits it uninvited is
-worse than one that points. Both also separate *committed* from merely
-*unignored*, because an ignore line does not untrack anything — on a
-project that already committed the path, adding the line changes nothing
-at all, which is the failure mode a write-it-for-you fix would have hidden
-behind a success message.
+| Finding | Likely cause | Mitigation |
+| --- | --- | --- |
+| `project.check WARN` | `ape project check` has findings: an empty `development/project.md` section, a malformed record, and so on. The message shows the first three | `ape project check --cwd <root>` lists every finding with its fix. `ape project codes` explains each code. |
+| `hooks.project WARN` | ape's hooks are missing from, or altered in, `.claude/settings.json` | `ape project init` merges them back, keeping existing keys and hooks. `ape task` sessions get them inline either way. See the [hooks reference](../reference/hooks.md). |
+| `hooks.prompt WARN` | The UserPromptSubmit hook (`ape hook user-prompt`) is missing from, or altered in, `.claude/settings.json` | Without it, a person act typed in a Claude Code session is refused, because no prompt is recorded to grant it. `ape project init` restores it. |
+| `hooks.pre-commit WARN` | git's pre-commit hook does not run ape's secret scan: it is absent (git does not version hooks, so a fresh clone has none), it is another tool's hook, or it is not executable | Absent: `ape project init` installs ape's. Another tool's: add the line `ape hook pre-commit \|\| exit 1` to it (ape never edits a hook it did not write). Not executable: `chmod +x .git/hooks/pre-commit`. Until then, a commit ape does not make is not scanned for secrets until the archive. |
+| `plugins.project WARN` | A plugin `_apex/config.yaml` lists is not installed at project scope at its ref, or `.claude/settings.json` does not declare and enable it | `ape doctor --fix` installs or updates each plugin through the `claude plugin` CLI, writes the settings and commits them as "apex: plugins". It is the only fixer. SKIP when the config lists no plugins. |
+| `claude.version WARN` | `claude --version` printed nothing | Reinstall Claude Code. OK otherwise: the version is reported only. |
+| `state.gitignore WARN` | `_apex/state/`'s whitelist is broken: `milestones.json` or `decisions.json` ignored, ape's run records, logs or counters not ignored, or something else there tracked | Restore `_apex/state/.gitignore` to the whitelist ape writes (`*`, `!.gitignore`, `!milestones.json`, `!decisions.json`), and `git rm --cached` whatever is tracked there besides those two records. |
+| `settings.shared WARN` | `.claude/settings.json` or `.claude/skills/` is ignored by git, so ape's hooks or the framework's skills reach no other checkout | Un-ignore them. `ape project init` writes the shape that shares them: `.claude/*`, `!.claude/settings.json`, `!.claude/skills/`. |
 
-Two are **required**, and both for a mechanical reason. `runDoctor`
-downgrades a non-required FAIL to WARN, so:
+## APEX v0 project findings
 
-- `memory.size` has to be required or nothing could surface a
-  `team-memory.md` that has passed its hard ceiling. `ape memory check`
-  deliberately exits 0 in that state — a failing exit there would abort the
-  retrospective at exactly the moment compaction is due — so this row is
-  where the breach becomes non-ignorable.
-- `config.resolved` has to be required because the other five resolve their
-  paths through it. A malformed `config.local.yaml` would otherwise send
-  them all at the wrong tree, reporting clean.
+These rows run only outside an APEX v1 project. In an APEX v0 project, run the commands below **with the project's pinned v0 ape** (`.bingo`): this ape retired them. Its docs are at https://github.com/exoport/apex_process_ape/tree/v0.10.0/docs.
 
-The other four are warns by design. Registry drift, frontmatter gaps and
-tracker divergence are findings a person acts on; a project that has some
-should still be able to run `ape doctor` in CI without a red build. Add
-`--strict` when you want them to gate.
+| Finding | Likely cause | Mitigation (with the project's pinned v0 ape) |
+| --- | --- | --- |
+| `apex.v0 WARN` | The project is an APEX v0 one | Use its pinned v0 ape, or lift it: `ape framework update` to a v1 release runs `ape project lift` ([How to lift a v0 project](lift-a-v0-project.md)). |
+| `framework.metadata WARN` | Repo doesn't have `_apex/framework.yaml` committed | `ape framework setup` in a prior step, or commit the metadata. |
+| `operating_rules.fragment FAIL` | A project that manages operating rules lost `_apex/apex-operating-rules.md` or the `CLAUDE.md` managed import | `ape framework update`. Required, but self-gating: it hard-fails only when the install manages the operating rules (`sources.operating_rules.managed` in `framework.yaml`); a legacy or older install gets a WARN, and a repo without APEX gets INFO. `operating_rules.import` and `operating_rules.orchestrator_skill` work the same way. |
+| `config.resolved FAIL` | `_apex/config.yaml` or `_apex/config.local.yaml` exists but does not parse | Fix the YAML the message names. **Required**: the other project-data rows resolve their paths through it. INFO outside a project. |
+| `memory.size FAIL` | `team-memory.md` is past the 200 KiB hard ceiling | **Required, and intended to fail.** Compact it. Over the 40 KiB soft budget it WARNs instead. |
+| `registry.drift WARN` | A record is on disk but absent from `index.yaml`, or vice versa, or an entry lacks a field its schema requires | `ape registry verify --all` lists them; `ape registry sync --all` and `ape registry backfill --all` repair them. |
+| `story.frontmatter WARN` | Stories are missing extension-gated keys, or carry a type mismatch | `ape story verify` lists them. Frontmatter is authored, so these are fixed by hand. |
+| `sprint.divergence WARN` | A tracker row and a story file disagree, or a row key is non-conforming | `ape sprint check` names both sides. A person decides which is right. |
+| `output.ape_ignored WARN` | The resolved `{output_folder}/ape/` is not gitignored, or is already committed | Add the output folder (`_output/` by default) to `.gitignore`; if it is already committed, `git rm -r --cached` it too. |
+| `migration.pending WARN` | A legacy `deferred-work.md` has not been converted to record files | `ape framework update` runs it, or `ape deferred migrate --dry-run` to look first. |
 
-To keep a CI gate to host prerequisites only:
+The v0 project-data rows (`config.resolved`, `config.folders`, `registry.drift`, `story.frontmatter`, `sprint.divergence`, `output.ape_ignored`, `memory.size`, `migration.pending`) degrade to INFO outside a project root, and `output.ape_ignored` reports and never writes. To keep a gate on a v0 project to host prerequisites:
 
 ```bash
-ape doctor --skip config.resolved,registry.drift,story.frontmatter,sprint.divergence,sprint.lock_ignored,output.ape_ignored,memory.size,migration.pending
+ape doctor --strict --skip apex.v0,framework.metadata,pipelines.project,config.resolved,config.folders,registry.drift,story.frontmatter,sprint.divergence,output.ape_ignored,memory.size,migration.pending
 ```
-
-## Operating-rules checks (required, but self-gating)
-
-The `operating_rules.fragment`, `operating_rules.import`, and
-`operating_rules.orchestrator_skill` checks are **required** — a FAIL exits `1`
-even without `--strict`. But they self-gate on `sources.operating_rules.managed`
-in `framework.yaml`, so they only hard-fail when an install that *manages* the
-operating rules has lost the fragment, the `CLAUDE.md` import, or the
-`apex-orchestrator` skill (a real regression). Outside a framework project they
-are INFO; on a legacy install or an older framework that predates the fragment
-they are a WARN nudge (run `ape framework update`), never a hard failure. So a
-plain repo without APEX installed stays green.
-
-The `operating_rules.import` check is *syntactic* — it confirms the managed
-`@import` line is present in `CLAUDE.md`; it does not prove Claude Code resolved
-it at runtime. To verify resolution, drive a real session and check `/memory`.
 
 ## Related
 
-- Pipeline spec reference — what each check guards against at pipeline-run time.
 - [How to install ape](install.md) — used by the GitHub Actions snippet above.
+- [Hooks reference](../reference/hooks.md) — the hooks `hooks.project`, `hooks.prompt` and `hooks.pre-commit` check.
+- [CLI reference](../reference/cli.md) — `ape doctor` flags.

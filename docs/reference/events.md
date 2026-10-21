@@ -74,7 +74,10 @@ versioned, additive-only contract otherwise.
 - `<project>` — sanitized project-root slug.
 - `<kind>` ∈ `pipeline | task | prompt | script | session | svc`.
   `session` = standalone/agent-initiated reporting (PLAN-17); `svc` = daemon
-  lifecycle (PLAN-14).
+  lifecycle (PLAN-14). `pipeline` stays in the taxonomy (it is additive-only)
+  but nothing publishes it: `ape pipeline` was retired with APEX v0. An `ape
+  task` run publishes under `task`, an `ape script` under `script`; `ape prompt`
+  publishes no progress events.
 - `<id>` — the run / prompt / session / job id. `APE_JOB_ID` (env) overrides the
   run-generated id (the PLAN-14 daemon injects it so child events carry the job id).
 - `<event>` ∈ `run-start | stage-start | step-start | step-end | stage-end | hook |
@@ -83,7 +86,9 @@ versioned, additive-only contract otherwise.
   `svc`, all validated `[a-z0-9-]+`).
 
 `step-end` carries the per-model telemetry block (PLAN-10); `run-end` carries
-manifest totals + transcript-blob hashes.
+manifest totals + transcript-blob hashes. An `ape task` run is one stage holding
+one step, both named after the skill, so it publishes one `stage-start`/`stage-end`
+pair and one `step-start`/`step-end` pair.
 
 Under kind `session` (standalone `ape event`), the `<id>` segment is the
 session id and the payload adds `session_id` + `event` + a caller-supplied
@@ -97,8 +102,8 @@ the daemon publishes three lifecycle events: `job-accepted` (a job was admitted;
 payload adds `kind`, `exclusive`, `exclusivity_key`, `submitted_by`),
 `job-rejected` (admission lost an exclusivity race; payload adds `reason` = the
 busy code + `exclusivity_key`), and `job-end` (the child exited; payload adds
-`state` ∈ `done | failed | stopped` + `exit_code`). The dispatched child
-publishes its own `pipeline`/`task` progress events under the **same** job id —
+`state` ∈ `done | failed | stopped` + `exit_code`). A dispatched task or script
+child publishes its own `task`/`script` progress events under the **same** job id —
 the daemon injects `APE_JOB_ID` — so a consumer correlates the daemon's
 `svc.<job>` lifecycle with the child's `<kind>.<job>` progress by the shared id.
 
@@ -134,7 +139,8 @@ half + this contract.
 `ape.svc.<name>.<project-slug>` (`<name>` = `--name`, default `ape`;
 `<project-slug>` = the daemon's primary project). Endpoints:
 `pipeline.run | task.run | prompt.run | script.run | job.status | job.list |
-job.stop | status | health`. NATS-micro `$SRV.{PING,INFO,STATS}` discovery is
+job.stop | status | health`. `pipeline.run` is registered and always rejected
+`VALIDATION`: `ape pipeline` was retired with APEX v0. NATS-micro `$SRV.{PING,INFO,STATS}` discovery is
 free (liveness + per-endpoint request/error counters). Errors are returned via
 micro `req.Error` with stable codes: `BUSY_EXCLUSIVE`, `BUSY_KEY`,
 `PROJECT_NOT_ALLOWED`, `VALIDATION`, `NOT_FOUND`.
@@ -147,13 +153,13 @@ micro `req.Error` with stable codes: `BUSY_EXCLUSIVE`, `BUSY_KEY`,
 Every request/reply body is versioned JSON (`"v":2`). Every `*.run` request
 also carries `caller: {depth, run_id?, parent_run?, pid?}` (D83; added by `ape
 service submit`): one without it, or from depth 2, is refused `session.depth`,
-and a depth-1 caller must be a running apex-orchestrator run (see the
+and a depth-1 caller must be a running apex-loop run (see the
 [caller stamp](service-api.md#caller-stamp-the-nesting-rule)). Requests:
 
 | Endpoint | Request | Reply (or error) |
 | --- | --- | --- |
-| `pipeline.run` | `{project_root, pipeline, prompt?, from?, no_commit?, commit_allow_dirty?, upload_transcripts?, nonexclusive?, exclusivity_key?, submitted_by?}` | `{job_id, accepted:true}` · `BUSY_EXCLUSIVE`/`BUSY_KEY`/`PROJECT_NOT_ALLOWED`/`VALIDATION` |
-| `task.run` | `{project_root, skill, agent?, model?, args?, prompt?, prompt_flag?, task_commit?, no_commit?, commit_allow_dirty?, upload_transcripts?, nonexclusive?, exclusivity_key?, submitted_by?}` | same |
+| `pipeline.run` | any (still decoded) | always `VALIDATION` (`PROJECT_NOT_ALLOWED` first when `project_root` is not allowlisted) |
+| `task.run` | `{project_root, skill, agent?, model?, args?, prompt?, prompt_flag?, task_commit?, no_commit?, commit_allow_dirty?, upload_transcripts?, nonexclusive?, exclusivity_key?, submitted_by?}` | `{job_id, accepted:true}` · `BUSY_EXCLUSIVE`/`BUSY_KEY`/`PROJECT_NOT_ALLOWED`/`VALIDATION` |
 | `prompt.run` | `{project_root, prompt? \| handoff?, agent?, model?, workflow?, nonexclusive?, exclusivity_key?, submitted_by?}` — exactly one of `prompt`/`handoff` | same |
 | `script.run` | `{project_root, script_path? \| script_source?, script_args?, nonexclusive?, exclusivity_key?, submitted_by?}` — exactly one of `script_path`/`script_source` (see the script gates below) | same |
 | `job.status` | `{job_id}` | `{job_id, kind, state, started_at, last_event_at, pid?, exclusivity_key, exclusive, submitted_by?, log_path?, exit_code?}` · `NOT_FOUND` |
@@ -310,7 +316,7 @@ Per-event additions:
 
 | `event` | additional fields |
 | ------- | ----------------- |
-| `run-start` | `pipeline` (name), `stages` (count) |
+| `run-start` | `pipeline` (the run's name: the skill, for an `ape task` run), `stages` (count: `1` for an `ape task` run) |
 | `stage-start` | `stage` |
 | `step-start` | `stage`, `step` (1-based), `skill`, `agent`, `model` |
 | `step-end` | `stage`, `step`, `skill`, `duration_seconds`, `session_id` (when bound), `metrics` (see below) |

@@ -26,7 +26,7 @@ image: ""                     # "" → official ape-sandbox; or a custom OCI ref
 mount: host-fs                # host-fs (default) | volume | ephemeral
 credentials: oauth            # oauth (mode A) | api-key (mode B)
 skills:                       # guest ~/.claude/skills (bare name or /abs/path)
-  - apex-create-prd
+  - apex-plan
 agents: []                    # guest ~/.claude/agents (bare name or /abs/path)
 ignore_project_settings: true
 preferences:                  # → guest ~/.claude/settings.json (may carry hooks)
