@@ -59,6 +59,9 @@ func TestLive_ClaudeSurface(t *testing.T) {
 	base, err := Load(baselinePath)
 	require.NoError(t, err)
 	t.Logf("baseline reviewed through %s", base.ReviewedThrough)
+	if update {
+		require.NoError(t, RefuseLowering(installed, base.ReviewedThrough))
+	}
 
 	tools := liveTools(t, claudeBin)
 	realBin, err := filepath.EvalSymlinks(claudeBin)

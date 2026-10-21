@@ -311,6 +311,19 @@ func Compare(a, b string) int {
 	return semver.Compare(canonical(a), canonical(b))
 }
 
+// RefuseLowering is the update's guard (F5, D315): a review recorded
+// through reviewed is never rewritten from an older installed claude. The
+// v1 trial reviewed 2.1.305 from a PATH shim while 2.1.304 stayed
+// installed, and `make update-claude-surface` would have recorded 2.1.304's
+// surface as reviewed through 2.1.304, losing the newer review.
+func RefuseLowering(installed, reviewed string) error {
+	if reviewed != "" && Compare(installed, reviewed) < 0 {
+		return fmt.Errorf("the installed Claude Code %s is older than the baseline's reviewed_through %s: updating would lower the review — put %s first on PATH (DISABLE_AUTOUPDATER=1 PATH=<dir>:$PATH make update-claude-surface)",
+			Canonical(installed), Canonical(reviewed), Canonical(reviewed))
+	}
+	return nil
+}
+
 // Canonical returns the bare `X.Y.Z` of a `claude --version` line.
 func Canonical(v string) string {
 	return strings.TrimPrefix(canonical(v), "v")

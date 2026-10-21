@@ -121,6 +121,15 @@ func TestCompareAndCanonical(t *testing.T) {
 	require.Equal(t, "2.1.283", Canonical("2.1.283 (Claude Code)"))
 }
 
+// F5: an update never lowers reviewed_through.
+func TestRefuseLowering(t *testing.T) {
+	t.Parallel()
+	require.ErrorContains(t, RefuseLowering("2.1.304 (Claude Code)", "2.1.305"), "older than the baseline's reviewed_through 2.1.305")
+	require.NoError(t, RefuseLowering("2.1.305", "2.1.305"))
+	require.NoError(t, RefuseLowering("2.1.306", "2.1.305"))
+	require.NoError(t, RefuseLowering("2.1.304", ""), "no baseline yet")
+}
+
 func TestBaselineRoundTrip(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "b.json")
