@@ -3297,6 +3297,13 @@ Otherwise 'setup' refuses to seed silently (exit 5).
 For subsequent refreshes against a framework version bump, use
 'ape framework update'.
 
+Exit codes: 2 usage; 3 the framework source (no release, missing tag, not a
+release layout); 4 the project tree (not a git repository, a detached HEAD,
+modified or staged tracked files); 5 an APEX v0 release with no terminal and
+no --project-name/--extensions or --no-bootstrap; 6 already installed
+(_apex/framework.yaml exists); 11 ape below min_ape_version; 12 a commit
+failed (the changes are left staged).
+
 Flags:
 
 | Flag | Type | Default | Description |
@@ -3441,11 +3448,12 @@ update commit carries (see ape project init --help); a plugin that cannot be
 put right is a warning with the command to run, not a failed update.
 
   --plan        print the upgrade-migration plan and do NOTHING ELSE — no
-                install, no fetch, no migration. The plan is the list the
+                install, no migration (it fetches the clone's tags unless
+                --no-fetch). The plan is the list the
                 project will hold AFTER this update: the installed entries
                 overlaid by the repo's, with a SOURCE column marking the
                 ones the update brings, so a migration can be read before
-                it runs. The repo is read as it stands, unfetched. It
+                it runs. The repo is read at the release it selects. It
                 distinguishes pending / applied / half-applied /
                 cannot-tell rather than collapsing them, because a runner
                 that reads cannot-tell as pending re-applies things
@@ -3474,7 +3482,8 @@ Refuses to run when:
     release, or diverged from it, is left where it is and reported. ape's
     own clones under the user cache are always overwritten
 
-Exit codes: 1 a blocking migration was not applied (nothing committed);
+Exit codes: 1 a blocking migration was not applied (nothing committed), or
+--version names an APEX v0 release in an APEX v1 project (nothing installed);
 2 usage; 3 the framework source (no release, missing tag, not a release
 layout); 4 the project tree; 7 not installed; 11 ape below
 min_ape_version; 12 a commit failed (the changes are left staged).
@@ -3610,7 +3619,9 @@ PreToolUse hook for Edit|Write|MultiEdit|NotebookEdit|Bash. Denies, with
 {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny",
 "permissionDecisionReason":"… specs change only through ape change archive"}}, an edit
 whose target is under development/specs/, is development/changes/*/state.json, is under
-development/archive/, or is under _apex/state/.
+development/archive/, or is under _apex/state/, and an edit to .claude/settings.json or
+.claude/settings.local.json (ape's hooks and the session's environment are a person's;
+ape project init restores the hooks).
 
 A running check (RK-4b, Q144): while ape runs a check in this checkout (a verify, a gate,
 a baseline, a Stop hook's re-run), denies an edit outside development/ and _apex/state/,
@@ -4002,7 +4013,7 @@ approved milestone; gate and close refuse a gate that differs from the approved 
 Committed together as "apex: <M> approved".
 
 Before it records anything, approve runs the gate once against the current tree (D70 B),
-under timeouts.gate (default 30m), in a detached run (OI-12; below), with progress lines
+under timeouts.gate (default 30m without progress, 4h at most), in a detached run (OI-12; below), with progress lines
 in its log. A new
 gate must run and be red — it is red until the milestone's work is done:
   exit 0                                  refused, milestone.gate-green (action replan):
@@ -5662,7 +5673,7 @@ apex-loop run, which starts only allow-listed skills with ape task).
 Exit codes: 0 session completed (Stop hook) · 1 idle-timeout, session
 failed, or the typed line never submitted · 2 usage or preflight error (no _apex/config.yaml, unresolved
 --agent, missing --handoff file, the nesting rule) · 3 the claude REPL never became ready
-· 4 claude exited before the Stop hook.
+· 4 claude exited before the Stop hook · 5 an upstream API failure ended the session.
 
 Flags:
 
@@ -7136,7 +7147,7 @@ Show where the project stands, from the records ape keeps:
     human_review.docs not person); a task whose
     delegate failed (not returned) or was voided is a person's and not listed. next names the delegate
     for the first (`ape change accept <id> <T> --delegate --wait 9m`) before a person
-  - spend so far: the sum of finished ape task/pipeline run manifests
+  - spend so far: the sum of finished ape task run manifests (and pipeline runs an older ape recorded)
   - red at baseline, not any change's own (JSON "pre_existing_red": [{change, kind, ref,
     cmd, exit, sha}]): the regression command, and scenario checks of the spec a change
     leaves untouched, that were red when a change was baselined — for the planner to
@@ -7224,7 +7235,7 @@ Flags:
 
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
-| `--board` | bool | `false` | refresh the project's aboard status tab now and say where it wrote (JSON "board"); the tab is a view, never a record; until ape pins the aboard release that honours its quiet flag, a changed view posted to a running board raises the tab's unread dot |
+| `--board` | bool | `false` | refresh the project's aboard status tab now and say where it wrote (JSON "board"); the tab is a view, never a record, and quiet: a refresh raises no notification or unread dot |
 | `--brief` | bool | `false` | at most 25 lines |
 | `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
 | `--json` | bool | `false` | machine output (JSON on stdout) |
@@ -7478,7 +7489,7 @@ Flags:
 | `--args` | string | `—` | Verbatim skill args appended to the invocation (whitespace-separated) |
 | `--commit-allow-dirty` | bool | `false` | Bypass the dirty-tree gate (relevant only with --task-commit) |
 | `--cwd` | string | `—` | Project root directory (default: current working dir) |
-| `--detach` | bool | `false` | Start the run in the background, detached from this shell, print its id (with --output-format json: {id, wait, log, stdout}), and return at once; `ape run wait <id> --wait 9m` waits for it |
+| `--detach` | bool | `false` | Start the run in the background, detached from this shell, print its id (with --output-format json: {id, wait, log, stdout}), and return at once; then ape run wait <id> --wait 9m waits for it |
 | `--effort` | string | `—` | Explicit reasoning effort for the session and its sub-agents (low\|medium\|high\|xhigh\|max). Unset: the project's _apex/effort-defaults.yaml per model, or xhigh without one (see ape config effort). In an APEX v1 project: the session's effort only, passed as claude --effort; unset, models.<skill>, the parent session or _apex/config.yaml effort: decide, else none is passed |
 | `--events-subject-prefix` | string | `ape.evt` | Subject root for progress events. |
 | `--handoff` | string | `—` | Path to a handoff/context file; derives a "Read <path> and follow the Resume Protocol" --prompt value (mutually exclusive with --prompt) |

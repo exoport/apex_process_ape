@@ -146,6 +146,18 @@ Help text only: no command, flag, exit code or output changed.
 - `ape chat` and `ape costs` (`run`, `roll`, `reprice`) give ape's run root in a v1 project
   (`_apex/state/runs/`) beside `_output/ape/`. So does `costs run`'s not-found message.
   `ape config effort` and `ape config resolve` no longer speak of pipeline steps.
+- Help that disagreed with the code, found by the v1 docs rewrite:
+  - `ape task --help` shows `--detach` as the flag it is: a quoted command in its text had been
+    rendered as a value name.
+  - `ape framework setup --help` lists its exit codes (6, already installed, was in none).
+  - `ape framework update --help`: exit 1 also covers a `--version` naming an APEX v0 release in a
+    v1 project. `--plan` fetches the clone's tags unless `--no-fetch`; it said "no fetch".
+  - `ape prompt --help` lists exit 5 (an upstream API failure).
+  - `ape hook pre-tool --help` says it also denies edits to `.claude/settings.json` and
+    `.claude/settings.local.json`.
+  - `ape milestone approve --help` gives the gate's timeout as 30m without progress, 4h at most.
+  - `ape status --help`: `--board` says the tab is quiet (aboard v0.4.0); the spend line names
+    task runs.
 
 ### rc.7o: a gate fixed after the work, a gate's own files, and bash in a sh check (Q145, RK-6, RN-1; D310–D313)
 
