@@ -2173,8 +2173,8 @@ MODIFIED blocks — of the capabilities the change touches (frontmatter touches:
 other scenario whose check command is identical to a task's (H10). The rest of the spec
 is the milestone gate's to run (`ape milestone gate` runs all of it). human-review checks
 are not run. A command shared by several checks runs once. A check, regression or gate
-command that is one ( … ) block of several lines, each a simple command, runs as its lines
-joined by && — each line's exit counts, as under set -e (a line that is itself a ;, & or
+command that is one ( … ) block of several lines, each a simple command (a first line of
+set -e, as the lift writes, is dropped), runs as its lines joined by && — each line's exit counts, as under set -e (a line that is itself a ;, & or
 || list goes in { …; }) — and its log opens with "split into N commands". A line's
 constructs count as simple when they open and close on that line (for … done, while …
 done, if … fi, case … esac, { … }, [[ … ]], (( … ))). A block with a line that changes the
@@ -5273,7 +5273,11 @@ The commit:
                  _apex/config.yaml (rewritten to project_name, development_folder,
                  regression). A command with a placeholder — <…>, {…} (not a
                  shell ${…}) or a lone … — is listed, not run; Go's ./... is no
-                 placeholder. A trailing " # …" shell comment is dropped first
+                 placeholder. A trailing " # …" shell comment is dropped first.
+                 A code block whose lines hold a construct (for … done) is one
+                 command, ( set -e ⏎ its lines ⏎ ), so it fails on its first
+                 red line wherever it runs as written; its AGENTS.md bullet
+                 reads "The Code Validation block, as one command:"
   lays down      the v1 skeleton, as `ape project init --brownfield` (CLAUDE.md keeps its
                  content, loses the v0 apex:managed block and gains @AGENTS.md;
                  AGENTS.md gains "Talk to APEX: type `/apex-orchestrator` in Claude
@@ -5295,18 +5299,24 @@ The commit:
                  more; they are never cut, whatever its size): the binding-rule
                  candidates, EVERY one, under a line giving their count and the
                  file's size ("N rows, numbered 1–N … read on with offset/limit
-                 until row N"): from
-                 project-context.md and team-memory, every section, an overview
-                 too — its list items of three words or more (not one that is
-                 only links) and its rule-shaped paragraphs (must, never,
-                 always, do not, avoid, only, required, prefer, shall, forbidden),
-                 whole; a team-memory entry with neither is listed by its
-                 paragraphs, else by its title; the notes in ## Code
-                 Validation's code blocks (a command's # comment, with its
-                 command, or a run of comment lines), whose commands go to
-                 AGENTS.md ## Commands. CLAUDE.md, outside the apex-v0 managed
-                 block, is read whole: every list item, paragraph and table
-                 body row of three words or more, and every code-block note. Grouped by source and section (JSON
+                 until row N"): from project-context.md, every section, an
+                 overview too — its list items of three words or more (not one
+                 that is only links) and its rule-shaped paragraphs (must,
+                 never, always, do not, avoid, only, required, prefer, shall,
+                 forbidden), whole, and the notes in ## Code Validation's code
+                 blocks (a command's # comment, with its command, or a run of
+                 comment lines), whose commands go to AGENTS.md ## Commands.
+                 CLAUDE.md (outside the apex-v0 managed block) and team-memory
+                 are read whole: every list item, paragraph and table body row
+                 of three words or more, whatever its wording, and every
+                 code-block note (a fenced markdown example's lines are not); a
+                 team-memory entry that gives nothing else is listed by its
+                 title. An HTML comment is text: indented under a list item it
+                 continues the item, and a comment of several lines elsewhere
+                 is a paragraph. Each CLAUDE.md import the lift drops — the
+                 managed block's @_apex/apex-operating-rules.md, an @ import of
+                 any other file it deletes — is one row naming the file, its
+                 size, and git show apex-v0-final:<path>. Grouped by source and section (JSON
                  rule_candidates[].section, the heading path); text found twice is
                  listed once with both sources (also_in). An empty Disposition
                  column for apex-plan, then a fresh read-only review, then the
@@ -5391,7 +5401,7 @@ the worst one's, and --json lists every command in regression_commands (cmd, ver
 note, new_failures, regression, regression_at_tag; logs regression-<n>.log and
 regression-<n>-at-tag.log). From a command that changes the shell's state (cd, export,
 source, NAME=value, …) on, the chain stays one command. A ( … ) block of several lines
-that splits (each line a simple command, as a change's verify splits it) is, for these
+that splits (each line a simple command, a first set -e line dropped, as a change's verify splits it) is, for these
 two runs, one command per line in that chain, not its lines joined by &&: each line runs
 past a red one and is judged on its own in regression_commands, and its log opens with
 "split into N commands: the lift runs each line of the ( … ) block on its own"; a block

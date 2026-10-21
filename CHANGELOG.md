@@ -130,6 +130,31 @@ eval's E-R7-1 and E2 residual (D219).
   pointer, and `project check` lists the `roadmap.next-inline` notice. A project an rc.7b move
   left that way is repaired by running `ape next move` again.
 
+### rc.7k: the rehearsal findings on rc.7j (D289–D292)
+
+- **Every CLAUDE.md import the lift drops is a candidate row** (RJ-1, Q139): the apex:managed
+  block's `@_apex/apex-operating-rules.md`, and an `@` import of any other file the lift deletes.
+  The row names the file, its size and `git show apex-v0-final:<path>`; the operating rules' row
+  adds "apex-v1 replaces them; keep any rule that still applies to this project". A kept import
+  (`@AGENTS.md`) has no row.
+- **An HTML comment is text to the candidate walk** (RJ-3): indented under a list item it
+  continues the item, and the indented lines after it do too; a comment of several lines elsewhere
+  is a paragraph from its first line; a one-line comment outside an item still only ends a
+  paragraph. Before, a comment ended the item, and its body without its first line began a row
+  mid-sentence (cortex's pin bullet). The `<!--`/`-->` markers are left out of the row's text.
+- **The disposition legend has seven forms** (RJ-6, with framework's apex-plan): `kept in
+  AGENTS.md` · `kept in CLAUDE.md` · `development/project.md` · `gated by <cmd>` · `ADR-NNNN` ·
+  `docs/<page>` · `dropped: <reason>`.
+- **The lift's ( … ) regression block opens with `set -e`** (RJ-4, Q141), so it fails on its
+  first red line wherever it runs as written. ape's runners already join a splitting block's lines
+  with && and still do; a first `set -e` line no longer keeps a block from splitting.
+- **AGENTS.md labels the block's bullet** "The Code Validation block, as one command:" (RJ-5,
+  Q142); a bullet holding only a code block read as a broken list item.
+- **`ape project lift --help`** says CLAUDE.md and team-memory are read whole and
+  project-context.md keeps the rule-word test (RJ-2).
+- Tests: `check-task-subagents` judges concurrency by overlap (the last sub-agent starts before
+  the first ends), with a 120 s hang ceiling (Q138).
+
 ### rc.7j: the v1.0.1 list, folded into v1.0.0 (D277, D281, D282, D284)
 
 - **`ape task` refuses a prompt with nowhere to go** (DR-11): `--prompt`, `--prompt-file` or
