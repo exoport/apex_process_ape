@@ -94,7 +94,7 @@ func TestLive_ClaudeCodeContract(t *testing.T) {
 // no turn, no tokens.
 // liveSettingsWarningRefused: a settings file with an invalid permission
 // rule stops claude at its Settings Warning before the REPL (measured on
-// 2.1.294–2.1.305, W1), and WaitForReady must end at once with
+// 2.1.294–2.1.306, W1), and WaitForReady must end at once with
 // ErrSettingsWarning rather than answer it or idle out. Zero tokens.
 func liveSettingsWarningRefused(t *testing.T, claudeBin string) {
 	t.Helper()

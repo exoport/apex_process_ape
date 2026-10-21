@@ -33,8 +33,8 @@ An intact entry is left alone, so running init again changes nothing. A `pre-too
 and init adds the key in place.
 
 **Why `onFailure: block`.** Claude Code (2.1.295 and later) runs a PreToolUse hook that cannot
-start, crashes or times out as a pass: the tool call goes through unguarded. Measured on 2.1.304
-and 2.1.305, a `pre-tool` whose `ape` is not on `PATH` let a Bash call run; with
+start, crashes or times out as a pass: the tool call goes through unguarded. Measured on 2.1.304,
+2.1.305 and 2.1.306, a `pre-tool` whose `ape` is not on `PATH` let a Bash call run; with
 `"onFailure": "block"` the call was blocked, and so was one whose hook exited 1. So a session in a
 checkout without `ape` cannot edit or run commands until `ape` is on its `PATH`. `ape project
 operator-interface` uses the same merge.
