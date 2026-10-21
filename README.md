@@ -1,12 +1,19 @@
-# ape — APEX Process Engine
+# ape — the APEX v1 engine
 
-`ape` is a single-binary CLI that runs APEX framework pipelines on projects: collapsing six-to-eight skill invocations through Claude Code into one command, managing ADRs, governance patterns, and traits, and giving you a Bubble Tea TUI to watch each step land.
+`ape` is a single-binary CLI that runs APEX v1 work on a project. It owns the
+records of the APEX v1 loop: a person approves a milestone, each change is
+planned, applied on its own branch, verified, reviewed in a fresh session and
+archived as one squash commit, and a person closes the milestone. The
+framework's v1 skills do the work, each in a Claude Code session that ape
+drives through a PTY; ape keeps the records (`development/`, `_apex/state/`)
+and refuses what a session may not do.
 
-> **Status:** pre-1.0. Public API and command surface may change between minor releases until `v1.0.0`. See [CHANGELOG.md](CHANGELOG.md).
-
-## Why ape
-
-APEX is a planning-and-implementation framework for Claude Code that breaks software work into a sequence of named skills (`apex-create-prd`, `apex-create-architecture`, `apex-create-epics-and-stories`, etc.). On its own, exercising APEX means invoking each skill manually. `ape` collapses those into named pipelines (`design`, `governance`, `epics`, …) with pre-flight prerequisite checks, prompt-quoting safety, and a three-panel Bubble Tea TUI that streams per-skill events live, lets you scroll back through completed stages, and asks for confirmation before quitting.
+> **Status:** v1.0. It is built for one operator per checkout, working on a
+> local trunk; what v1.0 promises, and what it leaves out, is in
+> [What APEX v1.0 promises](docs/explanation/apex-v1-scope.md). An APEX v0 project keeps
+> the v0 ape its `.bingo` pins until it is lifted to v1
+> ([How to lift a v0 project](docs/how-to/lift-a-v0-project.md)). See
+> [CHANGELOG.md](CHANGELOG.md).
 
 ## Install
 
@@ -17,86 +24,153 @@ VERSION=$(curl -fsSL https://api.github.com/repos/exoport/apex_process_ape/relea
 curl -fsSL "https://github.com/exoport/apex_process_ape/releases/download/${VERSION}/ape_linux_amd64.tar.gz" \
   | sudo tar -xz -C /usr/local/bin ape
 ape version
+ape doctor
 ```
 
-For macOS, Windows, `go install`, or build-from-source paths, see [docs/how-to/install.md](docs/how-to/install.md).
+For macOS, Windows, `go install` (Go 1.27.3 or later) or a build from source,
+see [How to install ape](docs/how-to/install.md).
 
-The other recommended install path is to pin a specific release in your project repo using [bingo](https://github.com/bwplotka/bingo):
+A project can pin its ape with [bingo](https://github.com/bwplotka/bingo):
 
 ```bash
 # In your project repo:
-bingo get -l github.com/exoport/apex_process_ape/cmd/ape@latest 
-# or a specific release tag, e.g. v0.1.0
+bingo get -l github.com/exoport/apex_process_ape/cmd/ape@v1.0.0
 ```
 
-## Quickstart
+A bare `ape` run inside that project then runs the pinned version. See
+[How to pin ape in a project](docs/how-to/pin-ape-in-a-project.md).
 
-`ape` operates on the working directory. The first time you use ape against an APEX-bootstrapped project, install the framework:
+## Quickstart: a new project
 
 ```bash
-# One-time: install framework skills + pipelines, seed _apex/config.yaml
-# via an interactive Bubble Tea prompt.
-export APEX_FRAMEWORK_REPO=/path/to/apex_process_framework
-ape framework setup
+mkdir greeter && cd greeter && git init -q
+ape framework setup          # install the framework's v1 skills; ends with "next: ape project init"
+ape project init             # development/, _apex/config.yaml, AGENTS.md, hooks; commits "apex: project init"
+# fill in development/project.md (vision, users, scope, out of scope, constraints)
+ape milestone new "Walking skeleton" --gate "go test ./..." --goal "greets a name"
+ape milestone approve M1 --by "$(git config user.name)"   # a person's act: from a plain terminal
 ```
 
-Subsequent framework version bumps refresh in-place:
+Then open Claude Code in the project and type `/apex-orchestrator`, or run the
+milestone unattended from a terminal with `ape task apex-loop --args M1`.
+
+The [first v1 project tutorial](docs/tutorials/first-v1-project.md) walks
+through each step.
+
+## Upgrading an APEX v0 project
 
 ```bash
-# Refresh skills + pipelines against the framework repo's current HEAD.
-# Does not touch _apex/config.yaml.
-ape framework update
+ape update --pin                                         # this ape, and the project's bingo pin (committed)
+git tag -a apex-v0-final -m "APEX v0 corpus before the v1 lift"
+git push origin apex-v0-final                            # the lift needs the tag at HEAD and on the upstream
+ape project lift --dry-run                               # what the lift would do, writing nothing
+ape framework update                                     # installs v1 and runs the lift
 ```
 
-Then run pipelines:
+Move the pin before tagging: the lift refuses when HEAD is past `apex-v0-final`.
 
-```bash
-# Run the design pipeline: prd → ux-design → architecture (with shards).
-ape pipeline design
+The lift writes a disposition of everything v0 left behind, for `apex-plan` to
+review with you. Its verdict on the project's regression checks says whether
+the lift broke anything. See
+[How to lift a v0 project](docs/how-to/lift-a-v0-project.md).
 
-# Run ADR, pattern, capability and feature governance, as configured.
-ape pipeline governance
+## How the loop works
 
-# Decompose the architecture + governance into epics and stories.
-ape pipeline epics
+1. A person approves a milestone and its gate, a command that must fail until the milestone's work is done.
+2. `apex-loop` plans each change (`apex-change`), applies it on `change/<id>` (`apex-apply`) and verifies it (`ape change verify`).
+3. A separate session reviews it (`ape change review --run`).
+4. `ape change archive` squashes it onto the base branch.
+5. The milestone closes when its gate passes (`ape milestone close`), or a person accepts it red.
 
-# Disable the TUI for scripted runs (auto-detected on non-TTY).
-ape pipeline design --no-tui
-```
+[The change lifecycle](docs/reference/change-lifecycle.md) lists every state
+and verb. [The operator and the loop](docs/explanation/operator-and-loop.md)
+explains the `/apex-orchestrator` session and the `apex-loop` runner.
 
-Pre-flight checks run before any Claude invocation. If a pipeline requires upstream artifacts (e.g., `governance` needs `architecture.md`), `ape` fails fast with a message naming the missing file and the upstream pipeline that produces it.
+## What only a person does
 
-Stages and steps that need an extension your project has not enabled (`extensions:` in `_apex/config.yaml`) are skipped and recorded as skipped, so a project without, say, `ext-patterns` pays for no pattern sessions. `--ignore-extensions` runs everything. See [Extension gates](docs/reference/pipeline-spec.md#extension-gates).
+Approving a milestone or a tweak (and re-approving one with `--accept-green`),
+answering a blocked change, accepting a human-review task, a decision or a
+changed config, archiving past a pending human review, and closing a milestone
+red (`--accept-red`). ape refuses these inside a model session. Run them from a
+plain terminal, or type the act (for example `approve M1`) in your own Claude
+Code session. See [What only a person does](docs/explanation/person-acts.md).
 
-Every run writes a manifest, a report, and the hook/bridge/checkpoint streams under `{output_folder}/ape/` — the `output_folder` from `_apex/config.yaml`, `_output` by default. ape owns that one subtree and writes nothing outside it; the rest of the output folder is the framework's. See [How to read the output folder](docs/how-to/run-artefacts.md).
+## Commands
 
-## Pipeline TUI
+Run `ape <command> --help` for a command's flags, codes and exit codes, or see
+the generated [CLI reference](docs/reference/cli.md).
 
-While a pipeline runs, the TUI shows three regions:
+**Project and roadmap**
 
-- **Top-left, ~70% width** — live event feed for the active or pinned stage. Streams human-readable summaries of `claude` activity (`🔧 Read foo.md`, `✎ Drafting ADR table`, `↳ ⚠ validation failed`, `✓ skill complete`) as they arrive — no more frozen output between stages.
-- **Top-right, ~30% width** — ordered stage list. Status glyph (✓/✗/▸/⏳), stage name, elapsed time. Cursor row marked `>`.
-- **Bottom strip** — cursor stage's current step, elapsed time, and verdict.
+| Command | What it does |
+| --- | --- |
+| `ape project` | Create and check an APEX v1 project layout (`init`, `check`, `codes`, `lift`, `accept-config`, …). |
+| `ape milestone` | Add, approve, gate and close roadmap milestones. |
+| `ape next` | Record a finding for later in `development/next.md`. |
+| `ape decision` | Record architecture decisions (ADR-NNNN) in `development/decisions/`. |
+| `ape status` | The current milestone, active changes, blocks, pending human review and spend (`--json`). |
 
-Keybindings:
+**Changes**
 
-| Key             | Action                                                                                                                                                               |
-| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `↑` / `k`       | Move cursor up the stage list.                                                                                                                                       |
-| `↓` / `j`       | Move cursor down.                                                                                                                                                    |
-| `Enter`         | Pin the event panel to the cursor's stage (Pinned mode).                                                                                                             |
-| `L` / `Esc`     | Return to Live mode — cursor snaps to the running stage.                                                                                                             |
-| `PgUp` / `PgDn` | Scroll the event panel (Pinned mode only).                                                                                                                           |
-| `Home` / `End`  | Jump to first / latest event (Pinned mode).                                                                                                                          |
-| `q` / `Ctrl+C`  | Open the quit-confirmation modal. `y` aborts the run and SIGKILLs the in-flight `claude` subprocess; `n` / `Esc` dismisses. Two Ctrl+C presses within 1s force-quit. |
+| Command | What it does |
+| --- | --- |
+| `ape change` | The unit of change: new, check, approve (tweaks), start, verify, review, accept, block, answer, archive, tool. |
 
-`--no-tui` mode (auto-enabled on non-TTY) streams the same human-friendly events to stdout, prefixed with timestamp + stage + skill:
+**Sessions**
 
-```
-[20:08:42] design · apex-create-architecture · 🔧 Read development/planning/prd/index.md
-[20:08:43] design · apex-create-architecture · ✎ Drafting ADR table: 4 candidates
-[20:09:18] design · apex-create-architecture · ✓ skill complete (3 turns)
-```
+| Command | What it does |
+| --- | --- |
+| `ape task <skill>` | Run a single framework skill in a Claude Code session (`--detach` to run it in the background). |
+| `ape run` | Wait for, or inspect, a run started with `ape task --detach`. |
+| `ape prompt [text]` | Drive an unattended Claude session from a prompt or a handoff file. |
+| `ape chat` | Bridged `claude` REPL with hooks captured to a runlog. |
+| `ape script <file.go>` | Run a Go orchestration script through the yaegi interpreter. |
+| `ape sessions` | List, prune, or open the URL of live ape sessions. |
+
+See [Choosing between `ape chat`, `ape task`, and `ape prompt`](docs/explanation/chat-task-prompt.md).
+
+**Framework and configuration**
+
+| Command | What it does |
+| --- | --- |
+| `ape framework` | Install (`setup`), update (`update`) and inspect (`status`) the APEX framework in a project. |
+| `ape plugins` | Install the plugins `_apex/config.yaml` lists, and report what they and the tools slot bring. |
+| `ape hook` | The Claude Code and git hooks of an APEX v1 project (installed by `ape project init`). |
+| `ape config` | Resolve the project's APEX configuration (`resolve`, `effort`, `pin`). |
+
+**Platform**
+
+| Command | What it does |
+| --- | --- |
+| `ape aboard` | A shared visual board for a human and one or more agent sessions. |
+| `ape sandbox` | Provision hardware-isolated Kata microVM workspaces through `aped` (Linux + KVM). |
+| `ape service` | A NATS-micro job daemon that accepts task, prompt and script jobs over request/reply. |
+| `ape event`, `ape log`, `ape metrics` | Publish session progress events, log records and usage metrics over NATS. |
+| `ape transcript` | Work with Claude session transcripts (`upload` over NATS). |
+
+**Maintenance**
+
+| Command | What it does |
+| --- | --- |
+| `ape costs` | This project's Claude cost rollup; `coverage` audits the price table, `reprice` recomputes stored costs. |
+| `ape doctor` | Probe the host and the project; a verdict per check (`--only`, `--skip`, `--strict`, `--fix`). |
+| `ape update` | Update ape to the latest release (`--pin` to move a project's bingo pin). |
+| `ape rollback` | Roll back to the previously installed binary. |
+| `ape version` | Print version, build date and git commit. |
+
+## Where things live
+
+| Path | What it holds |
+| --- | --- |
+| `development/project.md`, `roadmap.md`, `next.md` | What the project is, its milestones, and findings for later. |
+| `development/changes/`, `archive/` | Changes in flight; archived and abandoned changes. |
+| `development/specs/`, `decisions/`, `briefs/` | Specs born from changes, ADRs, and each plan's input. |
+| `_apex/config.yaml` | Project settings: models, limits, checks, plugins. Some blocks change only with a person's `ape project accept-config` ([reference](docs/reference/config-yaml.md)). |
+| `_apex/state/` | ape's own records: `milestones.json` and `decisions.json` are tracked; `runs/`, `logs/` and `hooks/` are ignored. |
+| `.claude/settings.json` | The hooks `ape project init` merges in ([reference](docs/reference/hooks.md)). |
+
+Every run ape starts (task, prompt, chat, detached runs, service jobs) records
+under `_apex/state/runs/`. See [How to read run artefacts](docs/how-to/run-artefacts.md).
 
 ## A shared board
 
@@ -159,102 +233,29 @@ Needs a Linux host with KVM + containerd + Kata, and the `aped` daemon: see
 [How to use sandbox workspaces](docs/how-to/sandbox-workspaces.md). `ape doctor` reports
 what is missing.
 
-## Commands
-
-**Framework and pipelines**
-
-| Command                | What it does                                                                               |
-| ---------------------- | ------------------------------------------------------------------------------------------ |
-| `ape framework setup`  | One-time install: copy skills + pipelines into a project, bootstrap `_apex/config.yaml`.   |
-| `ape framework update` | Refresh skills + pipelines against the framework repo (preserves config.yaml).             |
-| `ape framework status` | Inspect the installed framework version + drift report.                                    |
-| `ape pipeline [name]`  | List installed pipelines; with a name, run the named pipeline.                             |
-| `ape planning`         | Show the planning pipeline diagram.                                                        |
-
-**Driving Claude**
-
-| Command                | What it does                                                                               |
-| ---------------------- | ------------------------------------------------------------------------------------------ |
-| `ape task <skill>`     | Run a single framework skill (no pipeline YAML) through the interactive PTY runner.        |
-| `ape prompt [text]`    | Drive an unattended Claude session from a prompt or `--handoff` file; Stop-hook completion. |
-| `ape chat`             | Bridged `claude` REPL with hooks captured to a runlog.                                     |
-| `ape script <file.go>` | Run a Go orchestration script through the yaegi interpreter with the `apescript` library injected. |
-| `ape sessions`         | List, prune, or open the URL of live ape sessions (`open`, `prune`).                       |
-
-See [Choosing between `ape chat`, `ape task`, and `ape prompt`](docs/explanation/chat-task-prompt.md) to pick one.
-
-**Project data** — the records the framework skills read and write. Full guide: [How to work with project data](docs/how-to/work-with-project-data.md).
-
-| Command          | What it does                                                                                     |
-| ---------------- | -------------------------------------------------------------------------------------------------- |
-| `ape config`     | `resolve` the project's APEX configuration — the folder variables everything else routes through. |
-| `ape adr`        | Architecture Decision Records (`list`, `new`, `verify`, `sync`, `update`).                        |
-| `ape pattern`    | Governance patterns (`list`, `verify`, `sync`, `update`).                                         |
-| `ape feature`    | The feature registry (`list`, `verify`, `sync`, `update`).                                        |
-| `ape capability` | The capability registry (`list`, `verify`, `sync`, `update`).                                     |
-| `ape registry`   | `verify` or `sync` every record registry at once.                                                 |
-| `ape story`      | Story frontmatter projection and verification (`fields`, `verify`).                               |
-| `ape sprint`     | Inspect and maintain `sprint-status.yaml` (`check`, `verify`, `reconcile`).                       |
-| `ape memory`     | Read the team-memory file without loading it whole (`check`, `index`, `show`).                    |
-| `ape deferred`   | The deferred-work record store (`list`, `ingest`, `close`, `verify`, `repair`, `migrate`).        |
-| `ape doc`        | Shard, assemble and survey Markdown documents (`shard`, `assemble`, `analyze`, `verify`).         |
-| `ape trait`      | Inspect APEX traits (`list`, `show`, `validate`, `conflicts`).                                    |
-| `ape bootstrap`  | Bootstrap governance artifacts from declared traits.                                              |
-
-**The board**
-
-| Command       | What it does                                                                                       |
-| ------------- | ---------------------------------------------------------------------------------------------------- |
-| `ape aboard`  | A shared visual board for a human and one or more agent sessions — `serve`, `status`, `apply`, … |
-
-**Sandbox workspaces**
-
-| Command       | What it does                                                                          |
-| ------------- | --------------------------------------------------------------------------------------- |
-| `ape sandbox` | Provision hardware-isolated Kata microVM dev workspaces through `aped` (Linux + KVM). |
-
-**Telemetry and NATS**
-
-| Command                 | What it does                                                                    |
-| ----------------------- | --------------------------------------------------------------------------------- |
-| `ape event <event>`     | Publish a session progress event over NATS (identity + session id baked in).    |
-| `ape log <level> <msg>` | Publish a structured log record over NATS.                                      |
-| `ape metrics`           | Scan and publish this session's per-model usage metrics over NATS.              |
-| `ape transcript upload` | Upload this session's transcript set as content-addressed blobs over NATS.      |
-| `ape service`           | Run a NATS-micro job daemon that accepts pipeline/task jobs over request/reply. |
-
-**Diagnostics and maintenance**
-
-| Command        | What it does                                                                                                 |
-| -------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `ape costs`    | This project's Claude cost rollup; `coverage` audits the price table, `reprice` recomputes stored costs.     |
-| `ape doctor`   | Probe the environment and the project; per-check verdict (human/json/yaml). `--only` / `--skip` narrow the run. |
-| `ape update`   | Self-update to the latest release.                                                                           |
-| `ape rollback` | Roll back to the previously installed binary.                                                                |
-| `ape version`  | Print version, build date, and git commit.                                                                   |
-
-Run `ape <command> --help` for command-specific flags, or see the generated [CLI reference](docs/reference/cli.md) for every command, flag, and default.
-
-> `ape sync adrs` / `ape sync patterns` are now `ape adr sync` / `ape pattern sync`. The verb-first spellings still work as hidden pointers.
-
-## Updating
+## Updating ape and the framework
 
 ```bash
-ape update
+ape update                     # move ape to its newest release (ape rollback undoes it)
+ape framework update --plan    # what a framework update would migrate, doing nothing else
+ape framework update           # install the newest framework release and run its migrations
 ```
 
-Self-updates to the latest release. Use `ape rollback` to undo the most recent update. Full details: [docs/how-to/update.md](docs/how-to/update.md).
+A framework release names the oldest ape it works with (`min_ape_version`);
+`ape framework setup` and `update` refuse an older ape with exit 11. See
+[How to update ape](docs/how-to/update.md) and
+[How to update the framework](docs/how-to/framework-update.md).
 
 ## Documentation
 
-Full docs follow the [Diátaxis](https://diataxis.fr/) framework — pick the quadrant that matches what you need:
+The docs follow [Diátaxis](https://diataxis.fr/):
 
-- **[Tutorials](docs/tutorials/)** — learn ape by walking through complete examples.
-- **[How-to guides](docs/how-to/)** — recipes for specific tasks (install, update, CI, etc.).
-- **[Reference](docs/reference/)** — exhaustive command, pipeline, and config descriptions.
-- **[Explanation](docs/explanation/)** — design rationale and conceptual background.
+- **[Tutorials](docs/tutorials/)** — [your first APEX v1 project](docs/tutorials/first-v1-project.md).
+- **[How-to guides](docs/how-to/)** — install, set up and update, run milestones and sessions, lift a v0 project, CI.
+- **[Reference](docs/reference/)** — the [CLI reference](docs/reference/cli.md), config, hooks, run manifests.
+- **[Explanation](docs/explanation/)** — start with [What APEX v1.0 promises](docs/explanation/apex-v1-scope.md).
 
-Start at [docs/README.md](docs/README.md) for a guided index.
+Start at [docs/README.md](docs/README.md) for the full index.
 
 ## Development
 
@@ -281,11 +282,11 @@ CI runs build + test + lint + govulncheck on every push to `main` and every pull
 make check-harness
 ```
 
-Seven gates, each reading what the installed Claude Code is *actually* doing: `check-prices` (model ids in local transcripts), `check-output-styles` (the built-in output-style names ape folds declarations onto), `check-hooks` (the hook fields ape's step-completion gates read, judged against a runlog the gate seeds itself with one short unattended session), `check-claude` (a live PTY session — ready signals, spawn flags, effort level, model aliases, foreground sub-agents staying foreground, transcript persistence), `check-task-subagents` (one `ape task` run of a skill that fans out to two foreground sub-agents, as the framework's batch skills do), `check-agents-md` (the installed Claude Code still loads this repo's `AGENTS.md`), and, last, `check-claude-surface` (the tool list, the binary's `CLAUDE_*` variables and unread CHANGELOG entries, diffed against a reviewed baseline; unread entries are a review to do, not a breakage).
+Seven gates, each reading what the installed Claude Code is *actually* doing: `check-prices` (model ids in local transcripts), `check-output-styles` (the built-in output-style names ape folds declarations onto), `check-hooks` (the hook fields ape's step-completion gates read, judged against a runlog the gate seeds itself with one short unattended session), `check-claude` (a live PTY session — ready signals, spawn flags, effort level, model aliases, foreground sub-agents staying foreground, transcript persistence), `check-task-subagents` (one `ape task` run of a skill that fans out to two foreground sub-agents), `check-agents-md` (the installed Claude Code still loads this repo's `AGENTS.md`), and, last, `check-claude-surface` (the tool list, the binary's `CLAUDE_*` variables and unread CHANGELOG entries, diffed against a reviewed baseline; unread entries are a review to do, not a breakage).
 
 None of them run in GitHub CI, which has no `claude`, no auth and no network. `check-prices` reports "not verified" rather than green when it finds no evidence, so **read the output, not just the exit code**.
 
-To read hook drift on a project you have actually run pipelines in, rather than on a seeded one:
+To read hook drift on a project ape has run sessions in, rather than on a seeded one:
 
 ```bash
 ape doctor --only hooks.contract_drift --strict --cwd ~/work/some-apex-project
@@ -294,16 +295,16 @@ ape doctor --only hooks.contract_drift --strict --cwd ~/work/some-apex-project
 ape has a second dependency that moves on its own schedule — the APEX framework itself, whose skills call ape subcommands with no fallback branch:
 
 ```bash
-make check-framework APEX_FRAMEWORK_REPO=/path/to/apex_process_framework
+make check-framework APEX_FRAMEWORK_REPO=/path/to/apex_process_framework APEX_PROJECT=/path/to/an/install
 ```
 
-That checks the command surface the installed framework declares it requires and the config variables its live template defines.
+Against an APEX v1 framework it checks that every `ape` command the framework's skills name resolves on this binary, that the binary meets the framework's `min_ape_version`, and that the standard ADR-0001 matches.
 
 Details for both: [How to verify a release before tagging](docs/how-to/pre-tag-release.md).
 
 Tooling is pinned via [bingo](https://github.com/bwplotka/bingo) — the `.bingo/` directory contains a per-tool `.mod` file, and `make lint` / `make fmt` / `make snapshot` build the pinned binary on first use. Bumping a version: `go install github.com/bwplotka/bingo@v0.10.0` (one-time), then `bingo get <module>@<version>`.
 
-Releases are cut by pushing a `v*` tag; the [release workflow](.github/workflows/release.yml) runs goreleaser and publishes artifacts to GitHub Releases. Issues and pull requests welcome.
+Releases are cut by pushing a `vX.Y.Z` tag (or `vX.Y.Z-rc.N` for a prerelease); the [release workflow](.github/workflows/release.yml) runs goreleaser and publishes artifacts to GitHub Releases. Issues and pull requests welcome.
 
 ## License
 
