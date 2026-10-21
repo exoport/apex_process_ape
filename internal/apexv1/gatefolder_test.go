@@ -1,6 +1,9 @@
 package apexv1
 
 import (
+	"errors"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -195,4 +198,66 @@ Goal: Five.
 	require.Equal(t, "M3 gate runs scripts outside development/gates/: scripts/third.sh", ns[1].Message)
 	require.Equal(t, "move them into development/gates/M3-<slug>/ before it is approved", ns[1].Fix)
 	require.NotContains(t, findingMessages(p.Check()), "outside", "a notice is not a finding")
+}
+
+// stateSnapshot is every file under _apex/state/ (the ignored logs and
+// gate-<M>.json included) by path, with its content.
+func stateSnapshot(t *testing.T, p *Project) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	root := filepath.Join(p.Root, "_apex", "state")
+	require.NoError(t, filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(root, path)
+		out[filepath.ToSlash(rel)] = string(data)
+		return nil
+	}))
+	return out
+}
+
+// Q162 (D350): close archived the gate folder, so the Gate: line names a
+// script that is gone. `ape milestone gate` on the done milestone is
+// refused with approve's code, before anything runs: no milestones.json
+// change, no gate log or gate-<M>.json, no commit.
+func TestRunGate_DoneMilestoneRefused(t *testing.T) {
+	p := fixture(t, gateFolderFiles())
+	_, err := p.CloseMilestone(ctx(), "M1", RunOptions{})
+	require.NoError(t, err)
+	require.NoFileExists(t, filepath.Join(p.Root, "development", "gates", "M1-skeleton", "gate.sh"))
+	head := HeadSHA(ctx(), p.Root)
+	before := stateSnapshot(t, p)
+
+	g, err := p.RunGate(ctx(), "M1", RunOptions{})
+	require.Nil(t, g)
+	fe, ok := errors.AsType[*FailError](err)
+	require.True(t, ok, "%v", err)
+	require.Equal(t, "milestone.done", fe.Code)
+	require.Empty(t, fe.Action, "the code's published action applies, as at approve")
+	require.Equal(t, ActionStop, ActionFor(fe.Code))
+	require.Contains(t, fe.Msg, "M1 is done")
+	require.Contains(t, fe.Msg, "recorded at the close")
+
+	require.Equal(t, head, HeadSHA(ctx(), p.Root), "nothing committed")
+	require.NotContains(t, strings.Join(subjects(t, p), "\n"), "gate red")
+	require.Equal(t, before, stateSnapshot(t, p), "nothing under _apex/state written")
+	clean(t, p, "a refused gate run")
+}
+
+// The guard beside Q162: an approved milestone's gate still runs and
+// records its first result.
+func TestRunGate_ApprovedMilestoneStillRuns(t *testing.T) {
+	p := fixture(t, gateFolderFiles())
+	g, err := p.RunGate(ctx(), "M1", RunOptions{})
+	require.NoError(t, err)
+	require.True(t, g.Run.Green())
+	require.True(t, g.ResultChanged)
+	require.Equal(t, "apex: M1 gate green", subjects(t, p)[0])
+	require.FileExists(t, filepath.Join(p.LogsDir(), "gate-M1.log"))
+	clean(t, p, "milestone gate")
 }

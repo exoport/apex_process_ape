@@ -403,11 +403,21 @@ func (p *Project) RunGate(ctx context.Context, id string, opt RunOptions) (*Gate
 	if err := p.refuseOnChangeBranch(ctx, "a milestone gate run"); err != nil {
 		return nil, err
 	}
-	// An approved milestone's gate is the one a person approved (H2).
 	if _, rm, err := p.loadRoadmapDoc(); err == nil {
-		if m := rm.Find(id); m != nil && m.Status == MilestoneApproved {
-			if err := p.requireApprovalRecord(m, true); err != nil {
-				return nil, err
+		if m := rm.Find(id); m != nil {
+			switch m.Status {
+			case MilestoneDone:
+				// A done milestone's gate was recorded at its close, and its
+				// gate folder archived (D155): run now, the Gate: line names
+				// a script that is gone, and a red would be recorded and
+				// committed against a closed milestone (Q162, D350).
+				// Refused before anything runs or is written.
+				return nil, doneMilestoneGate(m)
+			case MilestoneApproved:
+				// An approved milestone's gate is the one a person approved (H2).
+				if err := p.requireApprovalRecord(m, true); err != nil {
+					return nil, err
+				}
 			}
 		}
 	}
@@ -420,6 +430,13 @@ func (p *Project) RunGate(ctx context.Context, id string, opt RunOptions) (*Gate
 	}
 	g.Commit, err = p.commitMilestone(context.WithoutCancel(ctx), own, id, "gate "+gateResult(&g.Run))
 	return g, err
+}
+
+// doneMilestoneGate is `ape milestone gate`'s refusal of a done milestone:
+// approve's code (milestone.done), with its published action, stop.
+func doneMilestoneGate(m *Milestone) *FailError {
+	return &FailError{Code: "milestone.done", Msg: m.ID + " is done (Status: " + m.StatusText + "): it is closed, and its gate was recorded at the close " +
+		"in _apex/state/milestones.json — a done milestone's gate does not run again; nothing to run"}
 }
 
 func gateResult(run *GateRun) string {

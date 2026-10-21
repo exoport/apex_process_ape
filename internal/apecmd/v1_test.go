@@ -233,6 +233,16 @@ func TestV1Commands_ExitCodes(t *testing.T) {
 	require.Empty(t, v1Git(t, root, "status", "--porcelain"),
 		"D11: after the whole lifecycle, every v1 command has committed what it wrote")
 
+	// Q162 (D350): a done milestone's gate is refused, exit 1, approve's
+	// code and action; nothing is committed.
+	head := v1Git(t, root, "rev-parse", "HEAD")
+	stdout, _, err = v1Exec(t, newMilestoneCmd, "gate", "M1", "--json", "--cwd", root)
+	require.Equal(t, ExitRunFailed, exitCodeOf(t, err))
+	require.Contains(t, stdout, `"code": "milestone.done"`)
+	require.Contains(t, stdout, `"action": "stop"`)
+	require.Equal(t, head, v1Git(t, root, "rev-parse", "HEAD"))
+	require.Empty(t, v1Git(t, root, "status", "--porcelain"))
+
 	stdout, _, err = v1Exec(t, newStatusCmd, "--brief", "--cwd", root)
 	require.NoError(t, err)
 	require.Contains(t, stdout, "All milestones done.")
