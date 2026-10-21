@@ -185,6 +185,7 @@ var DiagnosticCodes = []CodeDoc{
 	{"usage.title", 2, "stop", "milestone new: a title is required"},
 	{"usage.touches", 2, "stop", "change new: --touches is empty or holds a non-kebab-case slug"},
 	{"usage.verdict", 2, "stop", "review: --verdict is not pass or block; accept --verdict: not pass or fail"},
+	{"usage.until", 2, "stop", "status: --until names no condition, or one other than person, stopped, done, blocked and event; --wait or --since without --until; --since below 0; or --board with --until (W3)"},
 	{"usage.wait", 2, "stop", "--wait is outside 0–9m30s: one call must stay under Claude Code's 10-minute Bash cap; run the same command again to wait longer (D58 2.3)"},
 	{"review.nested", 2, "stop", "review --run inside a review session (depth 1)"},
 	{"delegate.nested", 2, "stop", "accept --delegate inside a delegate session"},

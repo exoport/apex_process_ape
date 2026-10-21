@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/exoport/apex_process_ape/internal/apexv1"
 	"github.com/exoport/apex_process_ape/internal/statusboard"
@@ -899,6 +900,9 @@ func operatorLeft(res *apexv1.OperatorInterfaceResult) map[string]any {
 func newStatusCmd() *cobra.Command {
 	var f v1Flags
 	var brief, board bool
+	var until string
+	var since int64
+	var wait time.Duration
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show the current milestone, active changes, blocks, pending human review and spend",
@@ -1049,9 +1053,13 @@ when ape creates the tab (or first refreshes one an older ape made). ape sets qu
 that once: if a person turns it off from the tab's menu, it stays off, and ape's changed
 views raise the dot again.
 
-Exit codes: 0 ok · 2 usage. --board exits 0 whatever the board did.`,
-		Example: "  ape status\n  ape status --brief\n  ape status --json\n  ape status --board",
-		Args:    cobra.NoArgs,
+` + statusWaitHelp + `
+
+Exit codes: 0 ok (with --until: a condition holds) · 75 --until: --wait ran out, run it again
+with --since <seq> · 2 usage (usage.until, usage.wait). --board exits 0 whatever the board did.`,
+		Example: "  ape status\n  ape status --brief\n  ape status --json\n  ape status --board\n" +
+			"  ape status --wait 9m --until person,stopped --since 41 --json",
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			p, err := v1Project(&f)
 			if err != nil {
@@ -1060,6 +1068,15 @@ Exit codes: 0 ok · 2 usage. --board exits 0 whatever the board did.`,
 			if err := v1RefuseV0(cmd, &f, p); err != nil {
 				return err
 			}
+			wo, err := statusWaitOpts(cmd, until, since, wait, brief, board)
+			if err != nil {
+				return v1Fail(cmd, &f, err, nil)
+			}
+			if wo != nil {
+				return runStatusWait(cmd, &f, p, wo)
+			}
+			// W3: a detached run found lost is logged (run-lost, once).
+			_ = detachedRuns(cmd.Context(), p.Root)
 			r := p.Status()
 			if board {
 				o := refreshBoardNow(cmd.Context(), p, r, cmd.ErrOrStderr())
@@ -1085,6 +1102,10 @@ Exit codes: 0 ok · 2 usage. --board exits 0 whatever the board did.`,
 	cmd.Flags().BoolVar(&brief, "brief", false, "at most 25 lines")
 	cmd.Flags().BoolVar(&board, "board", false, "refresh the project's aboard status tab now and say where it wrote (JSON \"board\"); "+
 		"the tab is a view, never a record, and quiet: a refresh raises no notification or unread dot")
+	cmd.Flags().StringVar(&until, "until", "", "wait until one of these holds: person, stopped, done, blocked, event (comma = any); "+
+		"returns at once when one already does")
+	cmd.Flags().DurationVar(&wait, "wait", defaultLongWait, "with --until: how long this call waits (at most 9m30s); exit 75 when it runs out — run it again with --since <seq>")
+	cmd.Flags().Int64Var(&since, "since", 0, "with --until: the seq the last wait printed; the events after it count, so none is missed between two calls")
 	return cmd
 }
 

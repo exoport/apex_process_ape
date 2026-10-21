@@ -167,6 +167,9 @@ func TestRunLost_LoggedOnce(t *testing.T) {
 	require.NoError(t, writeHandle(handlePath(root, "lost"), &detachedHandle{
 		ID: "lost", Argv: []string{"task", "apex-plan", "--args", "M1"}, SupervisorPID: deadPID, StartedAt: time.Now(), RunID: "20261021-120000-abc",
 	}))
+	_, _, err := v1Exec(t, newStatusCmd, "--cwd", root)
+	require.NoError(t, err)
+	require.Len(t, eventsNamed(t, root, apexv1.EventRunLost), 1, "the next ape status logs it")
 	_, code := runRunCmd(t, "status", "lost", "--cwd", root, "--json")
 	require.Zero(t, code)
 	_, code = runRunCmd(t, "wait", "lost", "--cwd", root)
