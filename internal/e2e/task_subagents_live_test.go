@@ -115,6 +115,12 @@ func TestLive_TaskSubagents(t *testing.T) {
 	t.Run("subagents_concurrent", func(t *testing.T) {
 		span := run.lastResult.Sub(run.firstCall)
 		t.Logf("two %s sub-agents: first call → last result %s", subSleep, span.Round(time.Second))
+		// D284: each sub-agent's own span, from its transcript, so a failure
+		// says whether they ran one after the other (the second starting as
+		// the first ends) or together with one slow (both starting at once).
+		for _, sp := range subagentSpans(t, filepath.Join(run.runDir, "transcripts")) {
+			t.Logf("  %s: start +%s, end +%s", sp.name, sp.start.Sub(run.firstCall).Round(100*time.Millisecond), sp.end.Sub(run.firstCall).Round(100*time.Millisecond))
+		}
 		require.Less(t, span, 2*subSleep,
 			"the two foreground sub-agents took %s, at least the sum of their work: they ran one after the other, "+
 				"so a batch skill now takes N times as long", span.Round(time.Second))
@@ -150,7 +156,7 @@ func TestLive_TaskSubagents(t *testing.T) {
 
 // probeRun is what one probe run left behind.
 type probeRun struct {
-	project               string
+	project, runDir       string
 	manifest              pipeline.Manifest
 	calls                 []agentCall
 	firstCall, lastResult time.Time
@@ -191,6 +197,7 @@ func runProbe(t *testing.T, apeBin string) probeRun {
 	require.NoError(t, err)
 	require.NoError(t, yaml.Unmarshal(data, &run.manifest))
 	run.hooks = countHooks(t, filepath.Join(runDir, "hook-events.jsonl"))
+	run.runDir = runDir
 	run.calls, run.firstCall, run.lastResult = agentCalls(t, filepath.Join(runDir, "transcripts"))
 
 	switch {
@@ -350,4 +357,41 @@ func tail(s string, n int) string {
 		return strings.Join(ls, "\n")
 	}
 	return "…\n" + strings.Join(ls[len(ls)-n:], "\n")
+}
+
+// subagentSpan is one sub-agent's first and last transcript timestamps.
+type subagentSpan struct {
+	name       string
+	start, end time.Time
+}
+
+// subagentSpans reads the sub-agents' own transcripts (agent-*.jsonl) in a
+// run's transcripts dir.
+func subagentSpans(t *testing.T, dir string) []subagentSpan {
+	t.Helper()
+	files, err := filepath.Glob(filepath.Join(dir, "agent-*.jsonl"))
+	require.NoError(t, err)
+	out := make([]subagentSpan, 0, len(files))
+	for _, f := range files {
+		fh, err := os.Open(f)
+		require.NoError(t, err)
+		sp := subagentSpan{name: strings.TrimSuffix(filepath.Base(f), ".jsonl")}
+		sc := bufio.NewScanner(fh)
+		sc.Buffer(make([]byte, 1<<20), 64<<20)
+		for sc.Scan() {
+			var rec struct {
+				Timestamp time.Time `json:"timestamp"`
+			}
+			if json.Unmarshal(sc.Bytes(), &rec) != nil || rec.Timestamp.IsZero() {
+				continue
+			}
+			if sp.start.IsZero() {
+				sp.start = rec.Timestamp
+			}
+			sp.end = rec.Timestamp
+		}
+		_ = fh.Close()
+		out = append(out, sp)
+	}
+	return out
 }

@@ -30,9 +30,14 @@ install:     ## Build and install ape + aped to INSTALL_DIR (default: /usr/local
 	@rm -f $(BIN) aped
 	@echo "installed $(BIN) + aped to $(INSTALL_DIR)/"
 
+# TEST_TIMEOUT bounds one package's tests. go test's default, 10m, left
+# internal/e2e (541–577 s alone) under 10 % of headroom: on 2026-10-20 it hit
+# 600 s and failed ci-local while the machine built another branch (D284).
+TEST_TIMEOUT ?= 20m
+
 .PHONY: test
 test:        ## Run all tests with the race detector.
-	go test -race ./...
+	go test -race -timeout $(TEST_TIMEOUT) ./...
 
 # Packages whose SUBJECT is the Linux host stack: the rootful Kata VM daemon and its
 # privileged network helper. Both still get COMPILED everywhere — the Windows CI job
@@ -44,11 +49,11 @@ NON_PORTABLE_PKG_RE := /internal/(aped|netd)$$
 
 .PHONY: test-portable
 test-portable: ## Run the tests that are meaningful off Linux (the Windows CI gate).
-	go test -race $$(go list ./... | grep -vE '$(NON_PORTABLE_PKG_RE)')
+	go test -race -timeout $(TEST_TIMEOUT) $$(go list ./... | grep -vE '$(NON_PORTABLE_PKG_RE)')
 
 .PHONY: test-cover
 test-cover:  ## Run tests and produce a coverage profile.
-	go test -race -coverprofile=$(COVER_FILE) ./...
+	go test -race -timeout $(TEST_TIMEOUT) -coverprofile=$(COVER_FILE) ./...
 	@echo "view coverage: go tool cover -html=$(COVER_FILE)"
 
 .PHONY: lint
