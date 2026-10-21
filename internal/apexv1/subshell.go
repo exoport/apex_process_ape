@@ -31,7 +31,8 @@ var (
 // splitSubshell returns the commands of cmd's ( … ) block when cmd,
 // trimmed, is exactly one such block spanning several lines and every
 // line in it is a simple command: blank lines and full-line comments
-// dropped, a trailing comment cut. For a block it does not split, refused
+// dropped, a trailing comment cut, and a first line of set -e (the lift
+// writes one, Q141) dropped too. For a block it does not split, refused
 // says which line and why (( a ) ⏎ ( b ) is refused: its first ) leaves
 // line 1 unbalanced); both are empty for a command that is no such block,
 // or a block of a single command.
@@ -49,6 +50,11 @@ func splitSubshell(cmd string) (cmds []string, refused string) {
 		return nil, ""
 	}
 	for i, l := range strings.Split(t[1:len(t)-1], "\n") {
+		if len(cmds) == 0 && strings.TrimSpace(l) == "set -e" {
+			// The lift's first line (Q141): the && join already stops at
+			// the first red line.
+			continue
+		}
 		code, why := simpleLine(l)
 		if why != "" {
 			return nil, "line " + strconv.Itoa(i+1) + " " + why

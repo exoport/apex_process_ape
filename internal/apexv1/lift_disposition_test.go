@@ -244,7 +244,7 @@ func TestCodeValidationNotes(t *testing.T) {
 		{"`for g in tools/ci/*.sh; do \"$g\" || exit 1; done` — every guard, NO argument", "55", "Code Validation"},
 	}, got)
 	// The commands still go to AGENTS.md, and no note is one.
-	require.Equal(t, []string{"( make test\nmake vet\n" + `for g in tools/ci/*.sh; do "$g" || exit 1; done` + "\n)"},
+	require.Equal(t, []string{"( set -e\nmake test\nmake vet\n" + `for g in tools/ci/*.sh; do "$g" || exit 1; done` + "\n)"},
 		extractGates("pc.md", rg4ProjectContext).Commands)
 	require.Empty(t, codeValidationNotes("# T\n\n## Rules\n\n```sh\nmake x # not under Code Validation, so not here\n```\n"))
 }

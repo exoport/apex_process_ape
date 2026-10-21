@@ -94,7 +94,10 @@ func extractGates(file, doc string) LiftGates {
 			cont = ""
 		}
 		if compound {
-			add("( " + strings.Join(cmds, "\n") + "\n)")
+			// Q141 (RJ-4, D291): set -e, so a person or a CI step that
+			// runs the block as written fails on its first red line, as
+			// ape's runners do by joining its lines with && (R24b).
+			add("( set -e\n" + strings.Join(cmds, "\n") + "\n)")
 		} else {
 			for _, c := range cmds {
 				add(c)

@@ -139,7 +139,10 @@ The commit:
                  _apex/config.yaml (rewritten to project_name, development_folder,
                  regression). A command with a placeholder — <…>, {…} (not a
                  shell ${…}) or a lone … — is listed, not run; Go's ./... is no
-                 placeholder. A trailing " # …" shell comment is dropped first
+                 placeholder. A trailing " # …" shell comment is dropped first.
+                 A code block whose lines hold a construct (for … done) is one
+                 command, ( set -e ⏎ its lines ⏎ ), so it fails on its first
+                 red line wherever it runs as written
   lays down      the v1 skeleton, as ` + "`ape project init --brownfield`" + ` (CLAUDE.md keeps its
                  content, loses the v0 apex:managed block and gains @AGENTS.md;
                  AGENTS.md gains "Talk to APEX: type ` + "`/apex-orchestrator`" + ` in Claude
@@ -263,7 +266,7 @@ the worst one's, and --json lists every command in regression_commands (cmd, ver
 note, new_failures, regression, regression_at_tag; logs regression-<n>.log and
 regression-<n>-at-tag.log). From a command that changes the shell's state (cd, export,
 source, NAME=value, …) on, the chain stays one command. A ( … ) block of several lines
-that splits (each line a simple command, as a change's verify splits it) is, for these
+that splits (each line a simple command, a first set -e line dropped, as a change's verify splits it) is, for these
 two runs, one command per line in that chain, not its lines joined by &&: each line runs
 past a red one and is judged on its own in regression_commands, and its log opens with
 "split into N commands: the lift runs each line of the ( … ) block on its own"; a block

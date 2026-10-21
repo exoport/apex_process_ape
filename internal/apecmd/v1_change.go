@@ -542,8 +542,8 @@ MODIFIED blocks — of the capabilities the change touches (frontmatter touches:
 other scenario whose check command is identical to a task's (H10). The rest of the spec
 is the milestone gate's to run (`+"`ape milestone gate`"+` runs all of it). human-review checks
 are not run. A command shared by several checks runs once. A check, regression or gate
-command that is one ( … ) block of several lines, each a simple command, runs as its lines
-joined by && — each line's exit counts, as under set -e (a line that is itself a ;, & or
+command that is one ( … ) block of several lines, each a simple command (a first line of
+set -e, as the lift writes, is dropped), runs as its lines joined by && — each line's exit counts, as under set -e (a line that is itself a ;, & or
 || list goes in { …; }) — and its log opens with "split into N commands". A line's
 constructs count as simple when they open and close on that line (for … done, while …
 done, if … fi, case … esac, { … }, [[ … ]], (( … ))). A block with a line that changes the

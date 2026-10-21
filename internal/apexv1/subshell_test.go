@@ -2,6 +2,7 @@ package apexv1
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -60,7 +61,8 @@ func TestSplitSubshell(t *testing.T) {
 		{"pushd", "( make\npushd web\n)", nil, "line 2 changes shell state (pushd)"},
 		{"export", "( export GOFLAGS=-mod=mod\ngo test ./...\n)", nil, "changes shell state (export)"},
 		{"unset", "( unset GOPATH\ngo test ./...\n)", nil, "changes shell state (unset)"},
-		{"set -e", "( set -e\nmake lint\ngo test ./...\n)", nil, "changes shell state (set)"},
+		{"set -e after the first line (Q141 drops a first one)", "( make lint\nset -e\ngo test ./...\n)", nil, "line 2 changes shell state (set)"},
+		{"set -x", "( set -x\nmake lint\ngo test ./...\n)", nil, "line 1 changes shell state (set)"},
 		{"source", "( source env.sh\ngo test ./...\n)", nil, "changes shell state (source)"},
 		{"dot", "( . ./env.sh\ngo test ./...\n)", nil, "changes shell state (.)"},
 		{"alias, trap, umask, ulimit, exec, shopt", "( make\ntrap 'rm -f x' EXIT\n)", nil, "changes shell state (trap)"},
@@ -104,7 +106,7 @@ func TestSplitSubshell_LiftedBlockSplits(t *testing.T) {
 	needSh(t)
 	g := extractGates("pc.md", "## Code Validation\n\n```sh\nmake lint\ngo vet ./...\nfor f in a b; do echo $f; done\ngo test ./...\ngo build ./...\n```\n")
 	require.Len(t, g.Commands, 1)
-	require.Equal(t, "( make lint\ngo vet ./...\nfor f in a b; do echo $f; done\ngo test ./...\ngo build ./...\n)", g.Regression)
+	require.Equal(t, "( set -e\nmake lint\ngo vet ./...\nfor f in a b; do echo $f; done\ngo test ./...\ngo build ./...\n)", g.Regression)
 	cmds, refused := splitSubshell(g.Regression)
 	require.Empty(t, refused)
 	require.Equal(t, []string{"make lint", "go vet ./...", "for f in a b; do echo $f; done", "go test ./...", "go build ./..."}, cmds)
@@ -160,4 +162,26 @@ func TestRunCheck_SubshellBlockSplit(t *testing.T) {
 	data, err = os.ReadFile(log)
 	require.NoError(t, err)
 	require.Equal(t, "hi\n", string(data))
+}
+
+// Q141 (RJ-4, D291): the lift's block opens with set -e, so it fails on
+// its first red line wherever it runs as written — a person's shell, a CI
+// step, or ape with a block it does not split; ape's split is unchanged.
+func TestSplitSubshell_SetE(t *testing.T) {
+	needSh(t)
+	cmds, refused := splitSubshell("( set -e\nmake lint\ngo test ./...\n)")
+	require.Empty(t, refused)
+	require.Equal(t, []string{"make lint", "go test ./..."}, cmds, "a first set -e line is dropped")
+	_, refused = splitSubshell("( make lint\nset -e\ngo test ./...\n)")
+	require.Equal(t, "line 2 changes shell state (set)", refused, "only the first line")
+
+	dir := t.TempDir()
+	for _, block := range []string{
+		"( set -e\ntrue\nfalse\ntrue\n)", // ape splits it
+		"( set -e\ncd /\nfalse\ntrue\n)", // ape runs it as written
+	} {
+		require.Equal(t, 1, RunCheck(ctx(), dir, block, "", 0).Exit, block)
+		out, err := exec.Command("sh", "-c", block).CombinedOutput()
+		require.Error(t, err, "as written, in a shell: %s %s", block, out)
+	}
 }

@@ -279,7 +279,7 @@ func TestLift_RegressionAtTheTag(t *testing.T) {
 		root := liftWithGates(t, "true\nfalse\nfor f in a; do true; done\nfalse")
 		res, err := Lift(ctx(), root, LiftOptions{})
 		require.NoError(t, err)
-		require.Equal(t, "( true\nfalse\nfor f in a; do true; done\nfalse\n)", res.Gates.Regression)
+		require.Equal(t, "( set -e\ntrue\nfalse\nfor f in a; do true; done\nfalse\n)", res.Gates.Regression)
 		require.Len(t, res.RegressionCommands, 4)
 		cmds := make([]string, 0, len(res.RegressionCommands))
 		tag, after := make([]int, 0, len(res.RegressionCommands)), make([]int, 0, len(res.RegressionCommands))
@@ -302,12 +302,16 @@ func TestLift_RegressionAtTheTag(t *testing.T) {
 		root := liftWithGates(t, "cd .\nfalse\nfor f in a; do true; done")
 		res, err := Lift(ctx(), root, LiftOptions{})
 		require.NoError(t, err)
-		require.Equal(t, "( cd .\nfalse\nfor f in a; do true; done\n)", res.Gates.Regression)
+		require.Equal(t, "( set -e\ncd .\nfalse\nfor f in a; do true; done\n)", res.Gates.Regression)
 		require.Empty(t, res.RegressionCommands, "one command")
 		require.Equal(t, res.Gates.Regression, res.Regression.Cmd)
+		// Q141: run as written, set -e makes its red line count (rc.7j:
+		// the last line's exit 0 alone).
+		require.Equal(t, 1, res.Regression.Exit)
+		require.Equal(t, 1, res.RegressionAtTag.Exit)
 		data, err := os.ReadFile(filepath.Join(root, "_apex", "state", "logs", "lift", "regression.log"))
 		require.NoError(t, err)
-		require.True(t, strings.HasPrefix(string(data), "[ape] the ( … ) block runs as written, not split into commands: its line 1 changes shell state (cd)\n"), string(data))
+		require.True(t, strings.HasPrefix(string(data), "[ape] the ( … ) block runs as written, not split into commands: its line 2 changes shell state (cd)\n"), string(data))
 	})
 	t.Run("a command with no top-level && runs whole", func(t *testing.T) {
 		root := liftWithGates(t, "( test -f nowhere.txt && true )")
