@@ -60,8 +60,10 @@ type PreCommitHook struct {
 	// already), or kept (another hook was there: not touched, see
 	// RunsApe).
 	Status string `json:"status"`
-	// RunsApe: a kept hook already runs `ape hook pre-commit`.
-	RunsApe bool `json:"runs_ape,omitempty"`
+	// RunsApe: the hook runs `ape hook pre-commit` — always for ape's
+	// own (installed, present); for a kept one, when it already calls it.
+	// Always emitted, as init's help says.
+	RunsApe bool `json:"runs_ape"`
 }
 
 // preCommitHookPath is where git looks for the pre-commit hook of the
@@ -117,7 +119,7 @@ func (p *Project) installPreCommitHook(ctx context.Context) (*PreCommitHook, err
 	data, err := os.ReadFile(path)
 	switch {
 	case err == nil && strings.Contains(string(data), preCommitMarker):
-		h.Status = PreCommitPresent
+		h.Status, h.RunsApe = PreCommitPresent, true
 		if st, err := os.Stat(path); err == nil && !executable(st) {
 			if err := os.Chmod(path, 0o755); err != nil {
 				return nil, err
@@ -141,7 +143,7 @@ func (p *Project) installPreCommitHook(ctx context.Context) (*PreCommitHook, err
 	if err := os.Chmod(path, 0o755); err != nil {
 		return nil, err
 	}
-	h.Status = PreCommitInstalled
+	h.Status, h.RunsApe = PreCommitInstalled, true
 	return h, nil
 }
 

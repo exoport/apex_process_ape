@@ -324,7 +324,9 @@ func (s *Spawner) childEnv(jobID string) []string {
 	return env
 }
 
-// openJobLog creates <projectRoot>/_output/ape/service/ and opens the job's
+// openJobLog creates the project's service run root (runlog.ServiceRoot:
+// <output_folder>/ape/service/, or _apex/state/runs/service/ in an APEX v1
+// project) and opens the job's
 // append log for the child's combined stdout+stderr.
 func openJobLog(projectRoot, jobID string) (string, *os.File, error) {
 	dir := runlog.ServiceRoot(projectRoot)

@@ -1,6 +1,7 @@
 package apexv1
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,7 +42,7 @@ func hookNotices(p *Project) []Diagnostic {
 // in place project check has no hook notice.
 func TestInit_InstallsThePreCommitHook(t *testing.T) {
 	p, res := initRepo(t)
-	require.Equal(t, &PreCommitHook{Path: ".git/hooks/pre-commit", Status: PreCommitInstalled}, res.PreCommit)
+	require.Equal(t, &PreCommitHook{Path: ".git/hooks/pre-commit", Status: PreCommitInstalled, RunsApe: true}, res.PreCommit)
 	path := filepath.Join(p.Root, ".git", "hooks", "pre-commit")
 	require.Equal(t, preCommitScript, read(t, p, ".git/hooks/pre-commit"))
 	st, err := os.Stat(path)
@@ -56,6 +57,7 @@ func TestInit_InstallsThePreCommitHook(t *testing.T) {
 	res, err = Init(ctx(), p.Root, false)
 	require.NoError(t, err)
 	require.Equal(t, PreCommitPresent, res.PreCommit.Status)
+	require.True(t, res.PreCommit.RunsApe, "ape's own hook runs ape")
 
 	require.NoError(t, os.Remove(path))
 	ns := hookNotices(p)
@@ -124,7 +126,7 @@ func TestInit_PreCommitHookHonoursCoreHooksPath(t *testing.T) {
 	run(t, root, "config", "core.hooksPath", ".githooks")
 	res, err := Init(ctx(), root, false)
 	require.NoError(t, err)
-	require.Equal(t, &PreCommitHook{Path: ".githooks/pre-commit", Status: PreCommitInstalled}, res.PreCommit)
+	require.Equal(t, &PreCommitHook{Path: ".githooks/pre-commit", Status: PreCommitInstalled, RunsApe: true}, res.PreCommit)
 	require.NoFileExists(t, filepath.Join(root, ".git", "hooks", "pre-commit"))
 	p, err := Open(root)
 	require.NoError(t, err)
@@ -226,7 +228,7 @@ func TestLift_InstallsThePreCommitHook(t *testing.T) {
 
 	res, err := Lift(ctx(), root, LiftOptions{NoVerifyRun: true, Exclude: []string{"schema/**"}})
 	require.NoError(t, err)
-	require.Equal(t, &PreCommitHook{Path: ".git/hooks/pre-commit", Status: PreCommitInstalled}, res.Init.PreCommit)
+	require.Equal(t, &PreCommitHook{Path: ".git/hooks/pre-commit", Status: PreCommitInstalled, RunsApe: true}, res.Init.PreCommit)
 	data, err := os.ReadFile(hook)
 	require.NoError(t, err)
 	require.Equal(t, preCommitScript, string(data))
@@ -241,4 +243,12 @@ func TestLift_InstallsThePreCommitHook(t *testing.T) {
 	data, err = os.ReadFile(hook)
 	require.NoError(t, err)
 	require.Equal(t, "#!/bin/sh\nexit 0\n", string(data))
+}
+
+// init's JSON always carries pre_commit.runs_ape, false included, as its
+// help says ({path, status, runs_ape}).
+func TestPreCommit_RunsApeIsAlwaysEmitted(t *testing.T) {
+	data, err := json.Marshal(&PreCommitHook{Path: ".git/hooks/pre-commit", Status: PreCommitKept})
+	require.NoError(t, err)
+	require.JSONEq(t, `{"path": ".git/hooks/pre-commit", "status": "kept", "runs_ape": false}`, string(data))
 }

@@ -108,7 +108,7 @@ func TestProjectInit_SaysWhatItDidWithThePreCommitHook(t *testing.T) {
 		PreCommit *apexv1.PreCommitHook `json:"pre_commit"` //nolint:tagliatelle // the v1 --json payloads are snake_case by contract
 	}
 	require.NoError(t, json.Unmarshal([]byte(stdout), &res), stdout)
-	require.Equal(t, &apexv1.PreCommitHook{Path: ".git/hooks/pre-commit", Status: "installed"}, res.PreCommit)
+	require.Equal(t, &apexv1.PreCommitHook{Path: ".git/hooks/pre-commit", Status: "installed", RunsApe: true}, res.PreCommit)
 
 	require.NoError(t, os.WriteFile(hook, []byte("#!/bin/sh\nmake lint\n"), 0o755))
 	stdout, _, err = v1Exec(t, newProjectCmd, "init", "--cwd", root)
