@@ -1038,7 +1038,7 @@ func slashCommandLine(text string) (string, bool) {
 		return "", false
 	}
 	line := name[1]
-	if args := commandArgsRe.FindStringSubmatch(text); args != nil && strings.TrimSpace(args[1]) != "" {
+	if args := commandArgsRe.FindStringSubmatch(text); len(args) > 1 && strings.TrimSpace(args[1]) != "" {
 		line += " " + strings.TrimSpace(args[1])
 	}
 	return line, true

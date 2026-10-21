@@ -133,10 +133,12 @@ func e2Project(t *testing.T, apeBin string) string {
 	// self-check requires (a green gate proves nothing).
 	doc := strings.Replace(string(data), "Gate: true", "Gate: test -f m1-done", 1)
 	require.Contains(t, doc, "Gate: test -f m1-done")
+	var b strings.Builder
+	b.WriteString(doc)
 	for _, m := range []string{"M2", "M3"} {
-		doc += "\n## " + m + " — More\nStatus: proposed\nGate: test -f " + strings.ToLower(m) + "-done\nGoal: the fixture stays a valid v1 project\nOut of scope:\n"
+		b.WriteString("\n## " + m + " — More\nStatus: proposed\nGate: test -f " + strings.ToLower(m) + "-done\nGoal: the fixture stays a valid v1 project\nOut of scope:\n")
 	}
-	require.NoError(t, os.WriteFile(roadmap, []byte(doc), 0o644))
+	require.NoError(t, os.WriteFile(roadmap, []byte(b.String()), 0o644))
 	skill := filepath.Join(dir, ".claude", "skills", "approve-it", "SKILL.md")
 	require.NoError(t, os.MkdirAll(filepath.Dir(skill), 0o755))
 	require.NoError(t, os.WriteFile(skill, []byte("---\nname: approve-it\ndescription: approve a milestone the person named\n"+
@@ -210,7 +212,7 @@ func milestoneApproved(project, id string) bool {
 		after = after[:next]
 	}
 	m := statusLineRe.FindStringSubmatch(after)
-	return m != nil && m[1] == "approved"
+	return len(m) > 1 && m[1] == "approved"
 }
 
 func gitLog(t *testing.T, project string) string {
