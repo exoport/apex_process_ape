@@ -12,8 +12,8 @@
 #
 # `cache_read_mul:` is the multiple of base_input a cache READ bills at,
 # and it is OPTIONAL — omitted means the standard 0.10. It is per model
-# because it is not one number: Claude Opus 5.5 reads at 0.05x and Claude
-# Fable 5.1 / Mythos 5.1 at 0.025x. A single global 0.10 priced those two
+# because it is not one number: Claude Opus 5.5 and Sonnet 5.5 read at
+# 0.05x and Claude Fable 5.1 / Mythos 5.1 at 0.025x. A single global 0.10 priced those two
 # families' cache reads 2x and 4x high, and cache reads are usually the
 # LARGEST token category in an agentic run.
 #
@@ -127,14 +127,20 @@ prices:
   # and this correction ape priced every Sonnet 5 turn 50% high. There is
   # no date at which this model bills differently, so it carries no
   # dated_prices window — a scheduled price is not a price.
-  # Claude Sonnet 5.5 — succeeds Sonnet 5 at the same 2.00/10.00, with
-  # cache reads at the standard 0.10x ($0.20). Claude Code's `sonnet`
-  # resolves to it from 2.1.284; nothing noticed until a person asked,
-  # because ape pinned `sonnet` to Sonnet 5 and so never ran the new one.
+  # Claude Sonnet 5.5 — succeeds Sonnet 5 at the same 2.00/10.00. Claude
+  # Code's `sonnet` resolves to it from 2.1.284; nothing noticed until a
+  # person asked, because ape pinned `sonnet` to Sonnet 5 and so never ran
+  # the new one.
+  # NOTE: cache reads bill at 0.05x base input ($0.10/MTok), as Opus 5.5's
+  # do (pricing page, footnote 2, read 2026-10-21; Q161). This row first
+  # assumed the standard 0.10x and priced every Sonnet 5.5 cache read 2x
+  # high; Claude Code had used $0.10 since 2.1.296. `ape costs reprice`
+  # corrects recorded runs.
   claude-sonnet-5-5:
     base_input: 2.00
     output: 10.00
     context_window: 1000000
+    cache_read_mul: 0.05
   claude-sonnet-5:
     base_input: 2.00
     output: 10.00
