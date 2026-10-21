@@ -130,6 +130,23 @@ eval's E-R7-1 and E2 residual (D219).
   pointer, and `project check` lists the `roadmap.next-inline` notice. A project an rc.7b move
   left that way is repaired by running `ape next move` again.
 
+### rc.7p: help text written for v1 (D323–D325)
+
+Help text only: no command, flag, exit code or output changed.
+
+- `ape task` examples use the v1 skills (`apex-plan`, `apex-loop --detach`, `apex-apply`). Its
+  summary no longer compares it with a pipeline step. `--prompt` says no APEX v1 skill takes a
+  prompt flag, and the commit-owners passage says no v1 release ships `_apex/commit-owners.csv`.
+- `ape task` and `ape prompt` `--idle-timeout` give their default as 60m, not "matches
+  pipeline". `ape prompt`'s example names no v0 agent.
+- `ape run` says `--detach` is on `ape task`. The change and milestone verbs that take `--wait`
+  detach on their own, and you attach to them by running the same command again.
+- `ape project init` lists the UserPromptSubmit hook (`ape hook user-prompt`) it registers, and
+  says `ape task` passes every hook inline except that one.
+- `ape chat` and `ape costs` (`run`, `roll`, `reprice`) give ape's run root in a v1 project
+  (`_apex/state/runs/`) beside `_output/ape/`. So does `costs run`'s not-found message.
+  `ape config effort` and `ape config resolve` no longer speak of pipeline steps.
+
 ### rc.7o: a gate fixed after the work, a gate's own files, and bash in a sh check (Q145, RK-6, RN-1; D310–D313)
 
 - **`ape milestone approve <M> --accept-green "<reason>"` re-approves a gate fixed after the

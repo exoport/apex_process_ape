@@ -2331,8 +2331,9 @@ ape chat [flags]
 
 Spawn claude as a child of ape with the ape bridge attached.
 Bridge hooks (PreToolUse, PostToolUse, UserPromptSubmit, Stop, and
-friends) are captured to <project>/_output/ape/chats/<id>/ alongside
-pipeline runs.
+friends) are captured to <project>/_apex/state/runs/chats/<id>/ in an APEX
+v1 project (<project>/_output/ape/chats/<id>/ elsewhere), beside ape's
+other run records.
 
 ape chat must be run from a project root (a directory containing
 _apex/config.yaml).
@@ -2386,7 +2387,8 @@ ape config effort [flags]
 ```
 
 Read _apex/effort-defaults.yaml and report what ape gives a spawned claude
-session when no step, stage, pipeline or --effort value is declared.
+session when no --effort value is given, outside an APEX v1 project (for
+one, see "In an APEX v1 project" below).
 
 With the file, every spawn carries the table in its --settings: each model,
 sub-agents included, runs at its family's row, and any other model at the
@@ -2481,7 +2483,7 @@ An absent config.local.yaml is a normal outcome (local_overlay_applied:
 false). A config.local.yaml that exists but does not parse is a hard
 failure, not a fall-back to base values: this resolution is the first act
 of every skill, so one typo'd override would otherwise run a whole
-pipeline against folders nobody chose.
+session against folders nobody chose.
 
 governance_repository_path names the CANONICAL governance repository that
 apex-adr-reconciliation / apex-pattern-reconciliation import from. It is
@@ -2515,9 +2517,9 @@ Show this project's Claude cost rollup
 ape costs [flags]
 ```
 
-Reads <project>/_output/ape/cost-rollup.json and prints
-totals — today, this week, all-time — broken down per task, chat and (from
-an older ape) pipeline. In an APEX v1 project the loop's task runs are one
+Reads the project's cost-rollup.json (_apex/state/runs/ in an APEX v1
+project, _output/ape/ elsewhere) and prints totals — today, this week,
+all-time — broken down per task, prompt, chat and (from an older ape) pipeline. In an APEX v1 project the loop's task runs are one
 row, "task:apex-loop (+apex-orchestrator)" when an ape before rc.7 recorded
 some of them under the loop's older name (Q95); JSON keeps both buckets as
 recorded.
@@ -2547,8 +2549,8 @@ Subcommands:
 - `coverage` — Check the built-in price table against the models Claude Code is actually emitting
 - `prompt` — Show cost for a single prompt session (reads its prompt.yaml)
 - `reprice` — Recompute stored costs from on-disk token counts using the current price table
-- `roll` — Rebuild <project>/_output/ape/cost-rollup.json from on-disk run / chat artefacts
-- `run` — Show cost for a single pipeline or task run (reads its manifest.yaml)
+- `roll` — Rebuild the project's cost-rollup.json from on-disk run / chat artefacts
+- `run` — Show cost for a single task run, or a pipeline run an older ape recorded (reads its manifest.yaml)
 - `update` — Persist model price overrides from a YAML file to ~/.ape/prices.yaml
 
 Flags:
@@ -2649,9 +2651,10 @@ internal/cost/prices.yaml, or an override persisted via
 `ape costs update --from`) to fix runs that were recorded while the
 table was stale.
 
-Artefacts covered:
-  _output/{pipelines,tasks}/<name>/<run-id>/manifest.yaml
-  _output/ape/prompts/<prompt-id>/prompt.yaml
+Artefacts covered, under ape's run root (_apex/state/runs/ in an APEX v1
+project, _output/ape/ elsewhere):
+  tasks/<skill>/<run-id>/manifest.yaml (and pipelines/…, from an older ape)
+  prompts/<prompt-id>/prompt.yaml
 
 Chat session.yaml has no per-model breakdown, so there is nothing to
 reprice from — those are skipped.
@@ -2679,7 +2682,7 @@ Flags:
 
 ## ape costs roll
 
-Rebuild <project>/_output/ape/cost-rollup.json from on-disk run / chat artefacts
+Rebuild the project's cost-rollup.json from on-disk run / chat artefacts
 
 ```
 ape costs roll
@@ -2687,7 +2690,7 @@ ape costs roll
 
 ## ape costs run
 
-Show cost for a single pipeline or task run (reads its manifest.yaml)
+Show cost for a single task run, or a pipeline run an older ape recorded (reads its manifest.yaml)
 
 ```
 ape costs run <run-id> [flags]
@@ -5050,9 +5053,12 @@ Hooks merged into .claude/settings.json (existing keys and hooks are kept):
                                                 the edit guard, and the Bash guards:
                                                 git tag writes, git push, pkill/killall,
                                                 rebase/merge on a change branch)
+  UserPromptSubmit      ape hook user-prompt   (records the person's own prompts, for
+                                                person acts typed in Claude Code (E2))
 A hook that was altered (another matcher, async, a shorter stop timeout) is replaced
 by the one above; running init again changes nothing. ape task passes the same
-hooks inline as well, so its sessions have them even when settings.json does not.
+hooks inline as well, except UserPromptSubmit, so its sessions have them even when
+settings.json does not.
 
 Git's pre-commit hook (Q89): in a git work tree, init installs <hooks dir>/pre-commit
 (`git rev-parse --git-path hooks`: core.hooksPath when set, else .git/hooks) when no
@@ -5598,7 +5604,7 @@ Exactly one of the positional <text> or --handoff <file> must be given.
 
   ape prompt "add a CHANGELOG entry for the latest release"
   ape prompt --handoff development/handoffs/2026-07-13-resume.md
-  ape prompt "refactor the parser" --agent apex-agent-dev --workflow
+  ape prompt "refactor the parser" --workflow
   ape prompt "big refactor" --ultracode --model "opus[1m]"
 
 Prompt assembly:
@@ -5666,7 +5672,7 @@ Flags:
 | `--cwd` | string | `—` | Project root directory (default: current working dir) |
 | `--effort` | string | `—` | Explicit reasoning effort for the session and its sub-agents (low\|medium\|high\|xhigh\|max). Unset: the project's _apex/effort-defaults.yaml per model, or xhigh without one (see ape config effort). |
 | `--handoff` | string | `—` | Handoff document to seed the session with (mutually exclusive with the positional prompt) |
-| `--idle-timeout` | duration | `0s` | Idle backstop: end the session only after this long with no progress across hooks, transcript growth, or PTY output (e.g. 15m); default matches the pipeline (60m) |
+| `--idle-timeout` | duration | `0s` | Idle backstop: end the session only after this long with no progress across hooks, transcript growth, or PTY output (e.g. 15m); default 60m |
 | `--ignore-project-settings` | bool | `false` | Tell the spawned claude to skip project + local .claude/settings*.json |
 | `--max-duration` | duration | `0s` | Wall-clock ceiling regardless of progress (e.g. 8h); off by default (D159: a run showing progress stops only on the idle timeout, ape's limits or a person). The clock resets on each sub-agent boundary, so a sequential batch skill is bounded per item. |
 | `--model` | string | `—` | Claude model. A bare family (fable, haiku, mythos, opus, sonnet) resolves to its current generation; sonnet-5 / claude-sonnet-5 / opus[1m] pin explicitly |
@@ -5694,9 +5700,13 @@ Wait for, or inspect, a run started with --detach
 ape run
 ```
 
-A run started with --detach (ape task|change --detach) returns an id at
-once and continues in the background, orphaned from the shell that started
-it, so a tool's time limit on that shell does not reach it.
+A run started with ape task --detach returns an id at once and
+continues in the background, orphaned from the shell that started it, so
+a tool's time limit on that shell does not reach it.
+
+The ape change and ape milestone verbs that take --wait detach on their
+own and have no id here: run the same command again to attach (see their
+--help, "Detached runs").
 
   ape run wait <id>     wait for it; exit with the run's own exit code
                         (75: --wait/--timeout expired, wait again; 76:
@@ -7227,10 +7237,9 @@ Run a single framework skill through the interactive PTY runner
 ape task <skill> [flags]
 ```
 
-Run one framework skill as a single-step interactive run — everything a
-pipeline step gets (agent prefix, preflight, bridge hooks, manifest,
-telemetry) with all parameters passed as flags instead of a pipeline
-YAML file. Execution is PTY-interactive only: claude runs as a REPL,
+Run one framework skill in one interactive Claude Code session, with
+ape's agent prefix, preflight, bridge hooks, run manifest and telemetry,
+every parameter passed as a flag. Execution is PTY-interactive only: claude runs as a REPL,
 the prompt is typed as keystrokes, and completion is detected via the
 bridge Stop hook.
 
@@ -7349,7 +7358,9 @@ and "git stash" both leave HEAD alone, so HEAD by itself is not the
 check. A skill PRESENT in it must produce at least one commit, every one
 matching a message format the file declares for it.
 
-A project with NO commit-owners.csv is not asserted at all: with nothing
+No APEX v1 release ships _apex/commit-owners.csv, so a v1 project is not
+asserted unless it adds one. A project with NO commit-owners.csv is not
+asserted at all: with nothing
 declaring which skills commit, neither assertion has a basis, and the
 verdict is reported as skipped rather than guessed in either direction.
 Rows naming a skill ape never dispatches (the conducting session's own)
@@ -7453,11 +7464,10 @@ itself may have succeeded) · 14 a claude.ai usage limit stopped the session.
 Examples:
 
 ```
-  ape task apex-shard-doc --args "--doc prd"
-  ape task apex-create-prd --agent apex-agent-pm --model "opus[1m]" --prompt "a greeter CLI" --prompt-flag --prompt
-  ape task apex-create-prd --agent apex-agent-pm --handoff _output/handoffs/2026-07-05-x.md --prompt-flag --prompt
-  ape task apex-shard-doc --task-commit "chore: shard prd"
-  ape task apex-create-prd --agent apex-agent-pm --output-format json
+  ape task apex-plan --args development/briefs/greeter.md
+  ape task apex-loop --args M1 --detach --output-format json
+  ape task apex-apply --args <change-id> --model sonnet
+  ape task apex-plan --args "add a --name flag to greet" --output-format json
 ```
 
 Flags:
@@ -7472,7 +7482,7 @@ Flags:
 | `--effort` | string | `—` | Explicit reasoning effort for the session and its sub-agents (low\|medium\|high\|xhigh\|max). Unset: the project's _apex/effort-defaults.yaml per model, or xhigh without one (see ape config effort). In an APEX v1 project: the session's effort only, passed as claude --effort; unset, models.<skill>, the parent session or _apex/config.yaml effort: decide, else none is passed |
 | `--events-subject-prefix` | string | `ape.evt` | Subject root for progress events. |
 | `--handoff` | string | `—` | Path to a handoff/context file; derives a "Read <path> and follow the Resume Protocol" --prompt value (mutually exclusive with --prompt) |
-| `--idle-timeout` | duration | `0s` | Idle backstop: cancel only after this long with no progress across hook events or transcript growth (e.g. 15m); default matches pipeline (60m). PTY output is NOT an anchor here — see `ape prompt` |
+| `--idle-timeout` | duration | `0s` | Idle backstop: cancel only after this long with no progress across hook events or transcript growth (e.g. 15m); default 60m. PTY output is NOT an anchor here — see `ape prompt` |
 | `--ignore-project-settings` | bool | `false` | Tell the spawned claude to skip project + local .claude/settings*.json |
 | `--manifest-dir` | string | `—` | Override the run-artifact base dir (default: <project>/_output/ape/tasks; _apex/state/runs/tasks in an APEX v1 project) |
 | `--max-duration` | duration | `0s` | Wall-clock ceiling regardless of progress (e.g. 8h); off by default (D159: a run showing progress stops only on the idle timeout, ape's limits or a person). The clock resets on each sub-agent boundary, so a sequential batch skill is bounded per item. |
@@ -7482,7 +7492,7 @@ Flags:
 | `--no-commit` | bool | `false` | Skill layer: tell the skill/framework not to commit (types --no-commit into the skill invocation; without it none is typed) |
 | `--output-format` | string | `human` | Output format: human\|json (json = result envelope on stdout, progress on stderr) |
 | `--output-style` | string | `—` | Output style pinned on the spawned session (default "Default"). Pass "inherit" to keep whatever style the machine is configured with. |
-| `--prompt` | string | `—` | Run prompt forwarded via --prompt-flag (same semantics as pipeline --prompt) |
+| `--prompt` | string | `—` | Run prompt forwarded via --prompt-flag (no APEX v1 skill takes one) |
 | `--prompt-file` | string | `—` | File holding the --prompt text; "-" reads stdin. Mutually exclusive with --prompt and --handoff |
 | `--prompt-flag` | string | `—` | Skill flag name the --prompt value is forwarded through (spec prompt_flag equivalent) |
 | `--quiet` | bool | `false` | Suppress the per-event progress stream |
