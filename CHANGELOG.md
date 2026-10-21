@@ -130,6 +130,19 @@ eval's E-R7-1 and E2 residual (D219).
   pointer, and `project check` lists the `roadmap.next-inline` notice. A project an rc.7b move
   left that way is repaired by running `ape next move` again.
 
+### rc.7l: zsh, and the operating rules' carriers (D297, D299)
+
+- **`ape hook session-start` adds a zsh paragraph when the session's shell is zsh** (RK-3a):
+  `$CLAUDE_CODE_SHELL` when set, else `$SHELL`. Claude Code runs the model's Bash commands in that
+  shell, and apex-v0's operating rules said this, but the lift drops them: quote globs and variable
+  expansions, never an unquoted word starting with `=`, and take file names from `find`, not `ls`.
+  It follows the status brief after a blank line; the hook's JSON is unchanged otherwise. ape's own
+  checks run under `sh -c` and don't need it.
+- **The operating rules' import row names the two rules carried already** (RK-3b): tags and
+  pushes, enforced by `ape hook pre-tool`; zsh quoting, added by `ape hook session-start`.
+- Tests: the parent-gone stop test waits for the child to read its run's handle, not a fixed
+  300 ms (RK-1, Q143).
+
 ### rc.7k: the rehearsal findings on rc.7j (D289–D292)
 
 - **Every CLAUDE.md import the lift drops is a candidate row** (RJ-1, Q139): the apex:managed

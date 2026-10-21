@@ -3711,6 +3711,12 @@ ape hook session-start [flags]
 SessionStart hook. Prints {"hookSpecificOutput":{"hookEventName":"SessionStart",
 "additionalContext":"<ape status --brief>"}}. Prints nothing outside a v1 project.
 
+When the session's shell is zsh ($CLAUDE_CODE_SHELL when set, else $SHELL; Claude Code
+runs the model's Bash commands in it), a paragraph follows the brief after a blank line:
+quote globs and variable expansions, never an unquoted word starting with =, file names
+from find, never from ls (apex-v0's operating rules said it; the lift drops them). ape's own
+checks run under sh -c and need none of it.
+
 Flags:
 
 | Flag | Type | Default | Description |
@@ -5316,7 +5322,9 @@ The commit:
                  is a paragraph. Each CLAUDE.md import the lift drops — the
                  managed block's @_apex/apex-operating-rules.md, an @ import of
                  any other file it deletes — is one row naming the file, its
-                 size, and git show apex-v0-final:<path>. Grouped by source and section (JSON
+                 size, and git show apex-v0-final:<path>; the operating rules' row
+                 also names the two carried already: tags and pushes by ape hook
+                 pre-tool, zsh quoting by ape hook session-start. Grouped by source and section (JSON
                  rule_candidates[].section, the heading path); text found twice is
                  listed once with both sources (also_in). An empty Disposition
                  column for apex-plan, then a fresh read-only review, then the
