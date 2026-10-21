@@ -2,6 +2,18 @@
 
 ## v1.0.0-rc.7 (draft)
 
+### rc.7r: a done milestone's gate is refused (Q162, D350)
+
+- **Q162, `ape milestone gate` on a done milestone recorded it red (class C).** Seen by eval in
+  two full runs: after `apex: M<n> done` archives the milestone's gate folder, a later
+  `ape milestone gate M<n>` ran the `Gate:` line — a `gate.sh` that is gone, exit 127 — recorded
+  the done milestone's gate as red in `milestones.json` and committed `apex: M<n> gate red`. The
+  gate verb guarded only an approved milestone; close already returned early on a done one, and
+  approve refused it. `gate` now refuses it with approve's code, `milestone.done` (exit 1, action
+  `stop`), before anything runs: no check, no gate log or `gate-<M>.json`, no `milestones.json`
+  change, no commit. The archive recovery and the change-branch refusal still come first, as in
+  approve and close. `milestone.done`'s published meaning now names `gate` beside `approve`.
+
 ### rc.7q: three defects measured on the rc.7p candidate (D340, D281)
 
 - **F-1, a person act typed as a slash command was refused (class B).** On Claude Code 2.1.305

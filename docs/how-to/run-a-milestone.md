@@ -153,6 +153,10 @@ the result differs from the recorded one (green or red), or is the first, `miles
 committed as `apex: <M> gate green` or `apex: <M> gate red`. The gate never changes the
 milestone's status. Exit 0 is green, exit 1 red.
 
+A done milestone's gate does not run again: its result was recorded at the close, which archived
+its gate folder. `gate` refuses it with `milestone.done` (exit 1, action `stop`) before anything
+runs, and writes and commits nothing.
+
 ### The gate changed since approval
 
 `gate` and `close` refuse a gate that differs from the approved one: its command changed, or a
@@ -263,7 +267,7 @@ on an exit 75. For runs started with `ape task --detach`, see
 | --- | --- | --- | --- |
 | `new` | proposed (prints the id) | no `roadmap.md`, or HEAD on a change branch | usage |
 | `approve` | approved, or nothing to record | no such milestone, done, malformed, the gate green or broken, a change branch, `session.by-mismatch` | usage, or a model session with no grant |
-| `gate` | green | red, no such milestone, no approval record, a changed gate, a change branch | usage |
+| `gate` | green | red, no such milestone, a done milestone, no approval record, a changed gate, a change branch | usage |
 | `close` | done | red (without `--accept-red`), changes in flight, not approved, no record, a changed gate, an archived `gate/` in the way, a change branch | usage, or `--accept-red` from a model session |
 
 `ape project codes` lists every diagnostic code with its exit status and action.

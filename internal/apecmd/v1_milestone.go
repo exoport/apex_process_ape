@@ -276,9 +276,11 @@ the first, _apex/state/milestones.json is updated and committed as
 Refused on a change branch: the gate judges the base branch (see ` + "`ape milestone --help`" + `).
 On an approved milestone, refused when ape holds no approval record (milestone.status-unrecorded)
 or the gate differs from the approved one (milestone.gate-changed): a person approves it again.
+On a done milestone, refused (milestone.done) before anything runs: its gate was recorded at
+the close, which archived its gate folder; nothing is run, written or committed.
 
-Exit codes: 0 gate green · 1 gate red (last output lines shown), no such milestone, no
-approval record, a changed gate, or HEAD on a change branch · 2 usage.`,
+Exit codes: 0 gate green · 1 gate red (last output lines shown), no such milestone, a done
+milestone, no approval record, a changed gate, or HEAD on a change branch · 2 usage.`,
 		Example: "  ape milestone gate M1",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
