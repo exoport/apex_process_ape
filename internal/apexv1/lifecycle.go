@@ -411,6 +411,8 @@ type VerifyResult struct {
 	GreenAtBaseline []GreenAtBaseline `json:"green_at_baseline"`
 	// StrayFiles: what the checks left in the tree and ape undid (item 19).
 	StrayFiles []string `json:"stray_files"`
+	// StraysKept: where a copy of each is kept (Q144).
+	StraysKept []string `json:"strays_kept,omitempty"`
 	// Regression judges the regression command against the change's
 	// baseline (backlog 32); absent when none is configured. A docs-only
 	// change's says skipped: "docs-only" with the docs paths it touched
@@ -570,7 +572,7 @@ func (p *Project) verify(ctx context.Context, ci ChangeInfo, opt RunOptions, kee
 	gab := p.greenAtBaseline(ci.Doc, st)
 	p.saveLastVerify(id, st, sha, green, results)
 	if !green {
-		return p.redAttempt(ctx, ci, &VerifyResult{ID: id, Status: st.Status, SHA: sha, Green: false, Results: results, PendingHuman: pending, GreenAtBaseline: gab, StrayFiles: StrayFiles(results), Regression: regression})
+		return p.redAttempt(ctx, ci, &VerifyResult{ID: id, Status: st.Status, SHA: sha, Green: false, Results: results, PendingHuman: pending, GreenAtBaseline: gab, StrayFiles: StrayFiles(results), StraysKept: StraysKept(results), Regression: regression})
 	}
 	st.Verify = &Verify{SHA: sha, At: Stamp(), Results: results, PendingHuman: pending, Green: green, GreenAtBaseline: gab, Regression: skipped}
 	switch {
@@ -586,7 +588,7 @@ func (p *Project) verify(ctx context.Context, ci ChangeInfo, opt RunOptions, kee
 	}
 	a := p.attempts(id)
 	return &VerifyResult{
-		ID: id, Status: st.Status, SHA: sha, Green: green, Results: results, PendingHuman: pending, GreenAtBaseline: gab, StrayFiles: StrayFiles(results), Regression: regression,
+		ID: id, Status: st.Status, SHA: sha, Green: green, Results: results, PendingHuman: pending, GreenAtBaseline: gab, StrayFiles: StrayFiles(results), StraysKept: StraysKept(results), Regression: regression,
 		Attempts: a.Since, AttemptsTotal: a.Total, AttemptsCap: p.limits().AttemptsCap(),
 	}, nil
 }

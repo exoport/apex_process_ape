@@ -5,7 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // Item 19 (F3): a check command that leaves files behind — a coverage
@@ -62,21 +64,53 @@ func (p *Project) snapshot(ctx context.Context) treeSnapshot {
 
 // undoStrays removes what a check left: untracked files new since before,
 // and tracked files it changed that were clean before (restored from the
-// index/HEAD). Returns the paths, sorted. A path dirty before the check is
-// never touched: it is not the check's.
-func (p *Project) undoStrays(ctx context.Context, before treeSnapshot) []string {
+// index/HEAD). Returns the paths, sorted, and the folder that keeps a copy
+// of each as it was ("" when nothing was undone). A path dirty before the
+// check is never touched: it is not the check's.
+//
+// A copy, because git's view cannot tell the check's own write from
+// another writer's edit made while it ran (RK-4b, Q144): the pre-tool
+// hook refuses an Edit/Write then, but a shell or an editor can still
+// write. Nothing ape undoes is lost; the copy is under _apex/state/strays/.
+func (p *Project) undoStrays(ctx context.Context, before treeSnapshot) (undone []string, keptRel string) {
 	if !before.ok {
-		return nil
+		return nil, ""
 	}
 	after := p.snapshot(ctx)
 	if !after.ok {
-		return nil
+		return nil, ""
+	}
+	keep := filepath.Join(p.StateDir(), "strays", time.Now().UTC().Format("20060102-150405")+"-"+strconv.Itoa(os.Getpid())+"-"+randomHex(3))
+	kept := false
+	save := func(path string) bool {
+		src := filepath.Join(p.Root, filepath.FromSlash(path))
+		data, err := os.ReadFile(src)
+		if err != nil {
+			return os.IsNotExist(err) // nothing to keep; a folder or unreadable path is left alone
+		}
+		info, _ := os.Stat(src)
+		dst := filepath.Join(keep, filepath.FromSlash(path))
+		if os.MkdirAll(filepath.Dir(dst), 0o755) != nil {
+			return false
+		}
+		mode := os.FileMode(0o644)
+		if info != nil {
+			mode = info.Mode().Perm()
+		}
+		if os.WriteFile(dst, data, mode) != nil {
+			return false
+		}
+		kept = true
+		return true
 	}
 	var strays []string
 	var restore []string
 	for path := range after.untracked {
 		if before.untracked[path] {
 			continue
+		}
+		if !save(path) {
+			continue // never removed without its copy
 		}
 		abs := filepath.Join(p.Root, filepath.FromSlash(path))
 		if err := os.Remove(abs); err == nil || os.IsNotExist(err) {
@@ -85,7 +119,7 @@ func (p *Project) undoStrays(ctx context.Context, before treeSnapshot) []string 
 		}
 	}
 	for path := range after.modified {
-		if before.modified[path] {
+		if before.modified[path] || !save(path) {
 			continue
 		}
 		restore = append(restore, path)
@@ -97,7 +131,10 @@ func (p *Project) undoStrays(ctx context.Context, before treeSnapshot) []string 
 		}
 	}
 	sort.Strings(strays)
-	return strays
+	if !kept {
+		return strays, ""
+	}
+	return strays, p.Rel(keep)
 }
 
 // pruneEmptyParents removes empty directories from dir up to (not

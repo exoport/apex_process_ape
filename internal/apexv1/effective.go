@@ -206,7 +206,7 @@ func progressf(w io.Writer, format string, args ...any) {
 // stay beside the last as <name>.try<k>.log.
 func (p *Project) runWithRetries(ctx context.Context, pc *PlannedCheck, logPath string, lim TierTimeout, vacuous []string, retries int, inGit bool) CheckResult {
 	var r CheckResult
-	var strays []string
+	var strays, keptDirs []string
 	for try := 0; ; try++ {
 		path := logPath
 		if try < retries {
@@ -215,16 +215,22 @@ func (p *Project) runWithRetries(ctx context.Context, pc *PlannedCheck, logPath 
 			path = strings.TrimSuffix(logPath, ".log") + ".try" + strconv.Itoa(try+1) + ".log"
 		}
 		var before treeSnapshot
+		var kept string
 		if inGit {
 			// RK-4b (Q144): the marker is up from before the snapshot to
 			// after the cleanup — the whole window an edit would be undone.
 			done := p.markChecking(pc.Cmd, path)
 			before = p.snapshot(ctx)
 			r = runCheck(ctx, p.Root, pc.Cmd, path, pc.LogNote, lim, vacuous, pc.Env...)
-			strays = append(strays, p.undoStrays(ctx, before)...)
+			var undone []string
+			undone, kept = p.undoStrays(ctx, before)
+			strays = append(strays, undone...)
 			done()
 		} else {
 			r = runCheck(ctx, p.Root, pc.Cmd, path, pc.LogNote, lim, vacuous, pc.Env...)
+		}
+		if kept != "" {
+			keptDirs = append(keptDirs, kept)
 		}
 		retry := r.Exit != 0 && r.Reason == "" && try < retries && ctx.Err() == nil
 		if !retry {
@@ -240,7 +246,17 @@ func (p *Project) runWithRetries(ctx context.Context, pc *PlannedCheck, logPath 
 		}
 	}
 	r.StrayFiles = strays
+	r.StraysKept = keptDirs
 	return r
+}
+
+// StraysKept is the folders holding a copy of what ape undid, in order.
+func StraysKept(results []CheckResult) []string {
+	var out []string
+	for i := range results {
+		out = append(out, results[i].StraysKept...)
+	}
+	return out
 }
 
 // StrayFiles is the sorted union of the paths checks left and ape undid.

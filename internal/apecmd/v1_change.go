@@ -569,7 +569,10 @@ runs' output beside its log as <name>.try<k>.log), and listed by `+"`ape status`
 for scenario checks) are recorded in state.json; output under _apex/state/logs/<id>/.
 What a check leaves in the tree outside development/ — files it created, tracked files it
 changed — is undone after it and reported (JSON "stray_files"); files that were there
-before it ran are never touched. A red scenario of the lasting spec whose check names
+before it ran are never touched. A copy of each undone file, as it was when the check
+ended, is kept under _apex/state/strays/ (JSON "strays_kept"): git cannot tell a check's
+litter from another writer's edit made while it ran. While a check runs, ape hook pre-tool
+denies an Edit/Write that its cleanup would undo (Q144). A red scenario of the lasting spec whose check names
 what `+"`ape decision standard`"+` removed says so on its line and in results[].stale_names
 (D232; see `+"`ape decision standard --help`"+`).
 With "regression: <cmd>" in _apex/config.yaml (with tiers, its change tier), the
@@ -671,7 +674,7 @@ func renderVerify(cmd *cobra.Command, f *v1Flags, id string, res *apexv1.VerifyR
 			fmt.Fprintf(w, "human-review pending: %s\n", strings.Join(res.PendingHuman, ", "))
 		}
 		printGreenAtBaseline(w, res.GreenAtBaseline)
-		printStrays(w, res.StrayFiles)
+		printStrays(w, res.StrayFiles, res.StraysKept)
 	}
 	if err != nil {
 		// The attempts cap blocked the change: the red results first.
@@ -736,9 +739,13 @@ func printCatchUp(w io.Writer, id string, cu *apexv1.CatchUp) {
 }
 
 // printStrays lists what the checks left in the tree and ape undid.
-func printStrays(w io.Writer, strays []string) {
+func printStrays(w io.Writer, strays, kept []string) {
 	if len(strays) > 0 {
 		fmt.Fprintf(w, "cleaned up after the checks (created or changed by them, outside development/): %s\n", strings.Join(strays, ", "))
+	}
+	if len(kept) > 0 {
+		// Q144: an edit made while a check ran is undone with its litter.
+		fmt.Fprintf(w, "a copy of each, as it was when its check ended, is kept in %s\n", strings.Join(kept, ", "))
 	}
 }
 

@@ -49,6 +49,10 @@ type CheckResult struct {
 	// development folder and ape undid: files it created (removed) and
 	// tracked files it changed (restored). Item 19.
 	StrayFiles []string `json:"stray_files,omitempty"`
+	// StraysKept are the folders (under _apex/state/strays/) holding each
+	// undone path as it was when the check ended (Q144): what ape undoes is
+	// never lost, a concurrent writer's edit included.
+	StraysKept []string `json:"strays_kept,omitempty"`
 	// PreExistingRed marks a regression command that is red and was red
 	// at its baseline: reported, not a failure (backlog 32).
 	PreExistingRed bool `json:"pre_existing_red,omitempty"`

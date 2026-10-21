@@ -29,6 +29,8 @@ type GateRun struct {
 	// StrayFiles: what the gate and its checks left in the tree outside
 	// the development folder and ape undid (item 19).
 	StrayFiles []string `json:"stray_files,omitempty"`
+	// StraysKept: where a copy of each is kept (Q144).
+	StraysKept []string `json:"strays_kept,omitempty"`
 	// Regression judges the regression command against the milestone's
 	// baseline (backlog 32); absent when none is configured.
 	Regression *RegressionVerdict `json:"regression,omitempty"`
@@ -443,6 +445,7 @@ func (p *Project) runGate(ctx context.Context, id string, opt RunOptions) (*Gate
 	ctx = context.WithoutCancel(ctx)
 	ran := append([]CheckResult{gate}, results...)
 	run.StrayFiles = StrayFiles(ran)
+	run.StraysKept = StraysKept(ran)
 	for i := range ran {
 		if ran[i].Flaky {
 			run.Flaky = append(run.Flaky, ran[i].Task)
