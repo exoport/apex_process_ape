@@ -79,8 +79,9 @@ The loop stops when:
 - only changes with tasks awaiting a person are left;
 - the same `ape status` state came back three times with no progress.
 
-Before it stops for any reason but the first, it blocks its milestone's unfinished changes with the
-reason, so `ape status` shows why the run ended. To resume, run the same
+Before it stops for any reason but the first, it blocks its changes that are still draft or
+in-progress (never a queued tweak) with the reason, and switches back to the base branch, so
+`ape status` shows why the run ended. Verified and reviewed changes stay as they are. To resume, run the same
 `ape task apex-loop --args <M>` again.
 
 ape bounds the loop from outside:

@@ -613,17 +613,17 @@ durable host caches (PLAN-22):
 
 ```bash
 # host-side, with YOUR git credentials — aped never fetches
-ape sandbox framework materialize v0.3.1
+ape sandbox framework materialize v1.0.0
 ape sandbox framework ls
 
-ape sandbox up dev --framework-ref v0.3.1
+ape sandbox up dev --framework-ref v1.0.0
 ape sandbox setup dev            # asdf install + bingo get, into /cache
 ```
 
 Point the daemon at both roots (`dev-host.sh` writes this drop-in):
 
 ```
-aped front … --framework-root /srv/apex-framework --framework-ref v0.3.1 \
+aped front … --framework-root /srv/apex-framework --framework-ref v1.0.0 \
              --cache-root /srv/ape-caches
 ```
 
@@ -639,12 +639,12 @@ canon ADRs a v0 project cites but has no record of, so a workspace that lifts no
 v0 project needs no governance mount:
 
 ```bash
-ape sandbox governance materialize v0.1.2
-ape sandbox up dev --framework-ref v0.3.1 --governance-ref v0.1.2
+ape sandbox governance materialize <tag>
+ape sandbox up dev --framework-ref v1.0.0 --governance-ref <tag>
 ```
 
 ```
-aped front … --governance-root /srv/apex-governance --governance-ref v0.1.2
+aped front … --governance-root /srv/apex-governance --governance-ref <tag>
 ```
 
 Inside a workspace both mounts are read-only, so `ape framework update` treats them

@@ -169,5 +169,5 @@ insecure workspace. A profile is rejected when:
 - **`git.mode: agent`** binds a live signing capability (any key in the agent)
   for the workspace's lifetime — prefer `token` for untrusted work.
 
-See [Bridge security model](bridge-security.md) for how the in-guest `--web`
-bridge composes with the VM boundary.
+See [Bridge security model](bridge-security.md) for how ape's in-guest session
+bridge, a loopback IPC listener, composes with the VM boundary.

@@ -125,7 +125,7 @@ lives (its pid and start time), so a check that crashed never blocks an edit.
 | A git tag write: `git tag <name>` (with `-a`, `-s`, `-f`, `-m`, …), `git tag -d`; `git push --tags`, `--follow-tags`, `--mirror`; a push of a `refs/tags/…` ref, `tag <name>`, or a name the repository has as a tag and not as a branch; `git push --delete` of one | `APE_ALLOW_TAG=1` |
 | Every `git push`, in any form: a remote, a refspec, `--dry-run`, `git -C`, `sh -c`, a chain | `APE_ALLOW_PUSH=1` (a tag push needs both) |
 | `pkill`, `killall`, `killall5` and `skill`, in any form: `sudo`, `env`, `timeout`, `xargs`, `sh -c`, a chain, an absolute path | `APE_ALLOW_KILL=1` |
-| `git rebase` and `git merge` while the repository has a change branch, `change/<id>`, checked out | none |
+| `git rebase`, `git merge` and `git cherry-pick` while the repository has a change branch, `change/<id>`, checked out | none |
 | A command that names `_apex/state/prompts` or `_apex/state/grants`, or runs `ape hook user-prompt`, `ape hook pre-tool` or `ape __run` | none |
 
 Some commands stay allowed:
@@ -133,9 +133,9 @@ Some commands stay allowed:
 - listing tags: `git tag`, `-l`/`--list`, `-n`, `--contains`, `--merged`, `--points-at`, `--sort`,
   `--format`, `-v`;
 - `kill <pid>`;
-- `rebase --abort`/`--quit` and `merge --abort`/`--quit`, `git merge-base`, `merge-file` and
+- `--abort` and `--quit` of a rebase, merge or cherry-pick, and `git merge-base`, `merge-file` and
   `merge-tree`;
-- a rebase or merge on any other branch.
+- a rebase, merge or cherry-pick on any other branch.
 
 ape catches a change up with a moved base itself: `ape change start|verify|archive <id>` rebase it.
 

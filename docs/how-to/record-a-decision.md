@@ -129,7 +129,10 @@ To keep your own decision format instead, supersede ADR-0001 with an accepted AD
 ape decision new our-adr-format --supersedes ADR-0001
 # fill it in and commit, then, as a person:
 ape decision accept ADR-0003 --by "$(git config user.name)"
+ape decision standard
 ```
+
+`ape decision standard` then reports:
 
 ```text
 ADR-0001: development/decisions/0001-record-architecture-decisions.md left alone: the project opted out of the standard (ADR-0003 accepted, superseding it)

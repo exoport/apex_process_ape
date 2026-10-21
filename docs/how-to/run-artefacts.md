@@ -21,6 +21,8 @@ touches it. `ape project init` creates it.
 ├── logs/                 ← ignored: check output (logs/<change-id>/, gate-<M>-approve.log)
 ├── hooks/                ← ignored: the Stop hook's per-session verdicts and logs
 ├── strays/               ← ignored: copies of files a check left behind and ape undid
+├── prompts/              ← ignored: the person's typed prompts, which person acts typed in Claude Code (E2) are granted on
+├── grants/               ← ignored: the single-use grants the pre-tool hook issues for those acts
 └── runs/                 ← ignored: ape's run records
     ├── tasks/<skill>/<run-id>/
     ├── prompts/<prompt-id>/

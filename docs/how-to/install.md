@@ -39,7 +39,7 @@ If you have a Go toolchain at the version `go.mod` names (1.27.3 or later):
 go install github.com/exoport/apex_process_ape/cmd/ape@latest
 ```
 
-The binary lands at `$(go env GOPATH)/bin/ape`. Make sure that directory is on your `$PATH`. Note that `go install`-built binaries report `Version=dev` from `ape version` rather than a release tag — they're built from source without goreleaser's ldflags.
+The binary lands at `$(go env GOPATH)/bin/ape`. Make sure that directory is on your `$PATH`. `ape version` reports the module version: `go install …@vX.Y.Z` prints that release, and `@latest` the newest one. A build from a source checkout reports a Go pseudo-version instead, which `ape doctor`'s `framework.ape_version` row warns it cannot compare with a framework's `min_ape_version`.
 
 ## Option 4 — Build from source
 

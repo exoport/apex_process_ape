@@ -20,8 +20,10 @@ without Go, use a gate your machine can run, such as `test -x ./greet`.
 ape doctor
 ```
 
-Every host row should read ✅ or ℹ️. Outside a project, the project rows report
-INFO: there is nothing to judge yet.
+Every host row should read ✅ or ℹ️, except `node.binary` and `npx.binary` on a
+machine without Node: they read ⚠️. No APEX v1 skill needs Node, so that warning is
+safe to leave. Outside a project, the project rows report INFO: there is nothing to
+judge yet.
 
 ## 2. Install the framework and make the repository an APEX v1 project
 
@@ -86,8 +88,14 @@ ape doctor --strict
 `doctor --strict` runs the host checks plus the v1 project checks (project check,
 hooks, plugins, the ape floor, the Claude Code version, the `_apex/state` ignore
 rules, whether `.claude/settings.json` is shared through git). Every v1 row reads
-OK here, `skills.project` included, since step 2 installed the framework's skills;
-`--strict` exits 0 on a healthy project.
+OK here, `skills.project` included, since step 2 installed the framework's skills.
+
+`--strict` turns every warning into a failure, the host rows' included, so it exits 0
+only when nothing warns. On a machine without Node, skip the two Node rows:
+
+```bash
+ape doctor --strict --skip node.binary,npx.binary
+```
 
 ## Where to go next
 

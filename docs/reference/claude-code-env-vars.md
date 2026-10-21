@@ -260,7 +260,7 @@ One more variable is added rather than removed. Every spawned session gets a
 one-entry directory at the front of `PATH` in which `ape` is the binary
 that spawned it, and it is removed when the session is reaped.
 
-Without it, the ~69 framework skill files that run `ape …` lines resolve
+Without it, the framework's skills (all nine APEX v1 skills run `ape …` lines) resolve
 `ape` through the operator's `PATH` — which is whatever the machine has
 installed, and need not be the binary running the dispatch. Observed on a
 development machine with both `~/go/bin/ape` and `/usr/local/bin/ape`

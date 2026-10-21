@@ -4,7 +4,7 @@ This document is the source of truth for the TCP NDJSON protocol
 between the parent `ape` process and the bridge subprocess (`ape
 mcp-bridge`). The transport is intentionally small so a future plan
 can swap TCP+NDJSON for stdlib WebSocket or NATS-embedded without
-touching the SSE broker, the MCP runtime, or the orchestrator.
+touching the MCP runtime or the orchestrator.
 
 PLAN-5 / C3.
 
@@ -23,9 +23,7 @@ PLAN-5 / C3.
   connection is a one-shot `ape notify` writing a single
   `{"type":"hook",...}` frame.
 - The listener binds **127.0.0.1 only**. `0.0.0.0` and unspecified
-  binds are rejected at construction time (see
-  `internal/bridge/broker.Listen` for the matching invariant on the
-  HTTP listener).
+  binds are rejected at construction time.
 
 ## Frame format
 
@@ -41,7 +39,7 @@ Source: `internal/bridge/ipc/ipc.go`.
 | ----------------- | --------------------- | -------------------------------- | ------------------------------------------------------------------------ |
 | `ready`           | bridge → parent       | —                                | Handshake. Unblocks the io.Pipe bootstrap goroutine.                     |
 | `message`         | parent → bridge       | `content`                        | Wakes a pending `await_message`, or fills the FIFO if none pending.      |
-| `reply`           | bridge → parent       | `content`                        | Skill called `reply()`. Broker emits an SSE `reply` event.               |
+| `reply`           | bridge → parent       | `content`                        | Skill called `reply()`.                                                  |
 | `call`            | bridge → parent       | `tool`, `id`                     | Mirror of every MCP tool call. Carries `params` + `result` raw JSON.     |
 | `hook`            | `ape notify` → parent | `event`, `session_id`, `payload` | Forwarded hook envelope. `agent_id` for Subagent\* events.               |
 | `step-bind`       | parent → bridge       | `session_id`, `step`             | Tells the bridge which step a session id belongs to so calls are tagged. |
@@ -57,9 +55,7 @@ can pair them by `id`:
 2. Flush: `{"type":"call","tool":"await_message","params":{"flush":true},"result":{"text":"...","timeout":false},"id":"..."}`
 
 The flush's `result.timeout: true` means the await expired with no
-inbound message (the bridge respond with empty text). The orchestrator
-emits `await-pending` SSE on the deferred-entry and `await-resolved`
-on the flush.
+inbound message (the bridge responds with empty text).
 
 ## Timing contracts
 
@@ -71,8 +67,7 @@ on the flush.
 - `ape notify` dial timeout: **200 ms**. Write deadline: **500 ms**.
   All failure modes exit 0 so the tool loop never stalls.
 - IPC reader buffer: 256 KB. Hook envelopes carrying long
-  `tool_input.command` values truncate at the broker render layer,
-  not on the wire.
+  `tool_input.command` values are not truncated on the wire.
 
 ## Migration triggers
 

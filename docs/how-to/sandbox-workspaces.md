@@ -262,8 +262,8 @@ workspace shape accordingly (details in the
   server-denied every management subject and every other VM's subjects — the
   VM→host-escape barrier (see
   [per-VM telemetry](../reference/events.md#per-vm-telemetry-plan-18-reuses-apeevtlogmetrics)).
-- The in-guest `--web` bridge still binds `127.0.0.1` — now inside the VM's own
-  network namespace. See the [bridge security model](../reference/bridge-security.md).
+- ape's session bridge, a loopback IPC listener, still binds `127.0.0.1` — now
+  inside the VM's own network namespace. See the [bridge security model](../reference/bridge-security.md).
 
 ## The image
 

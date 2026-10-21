@@ -61,6 +61,7 @@ through each step.
 
 ```bash
 ape update --pin                                         # this ape, and the project's bingo pin (committed)
+git rev-parse @{u} >/dev/null 2>&1 || git push -u origin "$(git branch --show-current)"   # the lift needs an upstream
 git tag -a apex-v0-final -m "APEX v0 corpus before the v1 lift"
 git push origin apex-v0-final                            # the lift needs the tag at HEAD and on the upstream
 ape project lift --dry-run                               # what the lift would do, writing nothing

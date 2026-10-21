@@ -60,11 +60,13 @@ The canonical names are stable across minor releases. Inspect the current set wi
 ape doctor --output-format json | jq -r '.checks[].name'
 ```
 
-To keep a gate to host prerequisites only, skip the project rows. An unknown or not-run name in `--skip` is ignored, so in an APEX v1 project:
+To keep a gate to host prerequisites only, name them with `--only`. Skipping the project rows is not enough: the framework rows (`framework.ape_version`, `framework.command_surface`, `framework.tag_moved`, `migrations.pending`, `skills.*`) still run and still gate. An APEX v1 project needs Claude Code and git on the host:
 
 ```bash
-ape doctor --strict --skip project.check,hooks.project,hooks.prompt,hooks.pre-commit,plugins.project,state.gitignore,settings.shared
+ape doctor --strict --only claude.binary,git.binary,permissions.home_claude
 ```
+
+`--only` errors on a name this ape does not have, so the list fails loudly if a row is renamed. Add `node.binary,npx.binary` or the sandbox rows (`kvm.available`, `containerd.running`, `kata.runtime`) when the gate is for a machine that needs them.
 
 ## Running one check on its own
 
@@ -156,11 +158,7 @@ These rows run only outside an APEX v1 project. In an APEX v0 project, run the c
 | `output.ape_ignored WARN` | The resolved `{output_folder}/ape/` is not gitignored, or is already committed | Add the output folder (`_output/` by default) to `.gitignore`; if it is already committed, `git rm -r --cached` it too. |
 | `migration.pending WARN` | A legacy `deferred-work.md` has not been converted to record files | `ape framework update` runs it, or `ape deferred migrate --dry-run` to look first. |
 
-The v0 project-data rows (`config.resolved`, `config.folders`, `registry.drift`, `story.frontmatter`, `sprint.divergence`, `output.ape_ignored`, `memory.size`, `migration.pending`) degrade to INFO outside a project root, and `output.ape_ignored` reports and never writes. To keep a gate on a v0 project to host prerequisites:
-
-```bash
-ape doctor --strict --skip apex.v0,framework.metadata,pipelines.project,config.resolved,config.folders,registry.drift,story.frontmatter,sprint.divergence,output.ape_ignored,memory.size,migration.pending
-```
+The v0 project-data rows (`config.resolved`, `config.folders`, `registry.drift`, `story.frontmatter`, `sprint.divergence`, `output.ape_ignored`, `memory.size`, `migration.pending`) degrade to INFO outside a project root, and `output.ape_ignored` reports and never writes. To keep a gate on a v0 project to host prerequisites, use the same `--only` list as above, adding the host rows that project's skills need (`node.binary` and `npx.binary`, for example; each row's remediation says which skills use it). A `--skip` list would still leave the Required `operating_rules.*` and framework rows gating.
 
 ## Related
 

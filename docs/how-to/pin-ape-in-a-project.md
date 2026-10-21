@@ -13,7 +13,7 @@ git add .bingo && git commit -m "chore: pin ape v1.0.0"
 
 Later, `ape update --pin` or `ape framework update --update-ape` moves the pin to the newest release and commits it for you.
 
-bingo builds `<GOBIN>/ape-v1.0.0` and records the version in `.bingo/ape.mod`. `-l` also points the bare `<GOBIN>/ape` at it. To move the pin later, run the same command with the new version and commit `.bingo/` again. Don't use `ape update` for this: it refuses on a pinned binary because it would overwrite the versioned file.
+bingo builds `<GOBIN>/ape-v1.0.0` and records the version in `.bingo/ape.mod`. `-l` also points the bare `<GOBIN>/ape` at it. To move the pin later, run `ape update --pin`, or the same `bingo get` command with the new version and commit `.bingo/` again. Plain `ape update` never moves the pin, and it refuses when the launcher itself is a bingo pin, because it would overwrite the versioned file.
 
 ## What a bare `ape` does in a pinned project
 

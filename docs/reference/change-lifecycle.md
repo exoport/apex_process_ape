@@ -66,8 +66,9 @@ the index and the working tree stay as they were. They are refused when that bra
 out in another worktree (`git.base-checked-out`).
 
 `start`, `verify` and `archive` run in a detached worker, and `review --run`, `accept --delegate`
-and `tool` start a session. All of them wait up to `--wait` (default 9m, at most 9m30s) and exit 75
-while still running: run the same command again to attach. See
+and `tool` start a session. All of them wait up to `--wait` (default 9m) and exit 75 while still
+running: run the same command again to attach. `start`, `verify`, `archive` and `review --run`
+refuse a `--wait` above 9m30s (`usage.wait`); `tool` and `accept --delegate` take any value. See
 [How to run a milestone](../how-to/run-a-milestone.md#long-runs-and-exit-75).
 
 ## Branch per change

@@ -38,7 +38,7 @@ The base branch also receives **records**, which are not code:
 - `apex: project init`, and the lift commit `apex: lift from APEX v0 …`;
 - milestone records (proposed, approved, gate results, close), decisions accepted, tweaks approved;
 - the change's draft and its plan (written by `apex-change` before the branch exists);
-- `ape next add` lines under the roadmap's `## Next`, and acceptances of archived changes.
+- `ape next add` lines in `development/next.md`, and acceptances of archived changes.
 
 So "the base only receives verified changes" is true for code, not for every commit. A changelog
 generated from commit history should filter `apex:` subjects. The squash subject follows
@@ -52,7 +52,7 @@ needs `--type`. A person approves it with `ape change approve`, and the orchestr
 tweaks first at its next change boundary. One checkout cannot hold two actors: the
 orchestrator's working tree sits on `change/<id>` most of the time. So tweaks are planned and approved
 **between runs**: wait for the run to end, or `ape run stop` it, plan and approve the tweak, and start
-the run again. There is no run lock. If archive finds the base branch checked out in another
+the run again: nothing queues a tweak into a running loop. If archive finds the base branch checked out in another
 worktree, it stops with `git.base-checked-out`, naming the worktree. That is an environment problem,
 so the orchestrator stops and does not re-plan.
 
