@@ -233,7 +233,8 @@ failed, or the typed line never submitted · 2 usage or preflight error (no _ape
 	cmd.Flags().StringVar(&handoffFlag, "handoff", "", "Handoff document to seed the session with (mutually exclusive with the positional prompt)")
 	cmd.Flags().StringVar(&agentFlag, "agent", "", "Framework agent fronting the session: /<agent> --autonomous -- <prompt>")
 	cmd.Flags().StringVar(&modelFlag, "model", "", modelFlagUsage("Claude model."))
-	cmd.Flags().StringVar(&effortFlag, "effort", "", "Explicit reasoning effort for the session and its sub-agents (low|medium|high|xhigh|max). Unset: the project's _apex/effort-defaults.yaml per model, or xhigh without one (see ape config effort).")
+	cmd.Flags().StringVar(&effortFlag, "effort", "", "Explicit reasoning effort for the session and its sub-agents (low|medium|high|xhigh|max). Unset: the project's _apex/effort-defaults.yaml per model, or xhigh without one (see ape config effort). "+
+		"In an APEX v1 project, as ape task: --effort, else _apex/config.yaml effort:, else Claude Code's own default, passed as claude --effort")
 	cmd.Flags().BoolVar(&workflowFlag, "workflow", false, "Append a directive to run the task through a Claude Code workflow")
 	cmd.Flags().BoolVar(&ultracodeFlag, "ultracode", false, "Prepend the ultracode keyword (session runs workflows by default)")
 	cmd.Flags().DurationVar(&idleTimeoutFlag, "idle-timeout", 0, "Idle backstop: end the session only after this long with no progress across hooks, transcript growth, or PTY output (e.g. 15m); default 60m")
@@ -475,6 +476,7 @@ func runPromptCore(ctx context.Context, o promptOptions) (promptResult, int, err
 	if o.model != "" {
 		args = append(args, "--model", o.model)
 	}
+	args = append(args, effortPlan.ArgEntries()...)
 	argv := append([]string{"claude"}, args...)
 
 	progressf := func(format string, a ...any) {
@@ -794,9 +796,24 @@ func mainModel(tele *sessiondriver.Telemetry) string {
 // promptEffortPlan applies the pipeline stage's rule (effort.Decide) to a
 // prompt: --effort is an explicit, process-wide override; without it the
 // framework table governs per model; without a table, the legacy default.
+//
+// An APEX v1 project has ape task's rule instead (backlog 29, Q152):
+// --effort, then _apex/config.yaml's effort:, else nothing, and the value
+// goes on claude's command line, never in CLAUDE_CODE_EFFORT_LEVEL.
 func promptEffortPlan(o promptOptions) (effort.Plan, error) {
 	if err := effort.CheckLevel(o.effort); err != nil {
 		return effort.Plan{}, fmt.Errorf("ape prompt: --effort %w", err)
+	}
+	if p, ok := v1ProjectAt(o.projectRoot); ok {
+		cfg, err := apexv1.LoadConfig(p.Root)
+		if err != nil {
+			return effort.Plan{}, fmt.Errorf("ape prompt: %s: %w", apexv1.ConfigPath(p.Root), err)
+		}
+		if err := effort.CheckLevel(cfg.Effort); err != nil {
+			return effort.Plan{}, fmt.Errorf("ape prompt: %s effort: %w", apexv1.ConfigPath(p.Root), err)
+		}
+		l := apexv1.DecideLaunch("", o.effort, apexv1.SkillModel{}, cfg.Effort, "", "")
+		return effort.ArgPlan(l.Effort, l.EffortSource), nil
 	}
 	table, err := loadEffortTable(o.projectRoot)
 	if err != nil {

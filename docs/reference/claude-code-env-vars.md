@@ -76,7 +76,7 @@ processes.
 | --- | --- |
 | `CLAUDE_CODE_SUBAGENT_MODEL` | Overrides the model identifier used exclusively by worker/sub-agents or background processing loops, allowing heavier tasks to route to Sonnet/Opus and smaller tasks to Haiku. |
 | `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` | When enabled, actively scrubs sensitive tokens and credentials from the environment before spawning child shell processes/sub-commands, so executed tools don't leak tokens into logs. |
-| `CLAUDE_CODE_EFFORT_LEVEL` | Controls the reasoning/thinking budget sent to the API (`low`, `medium`, `high`, `xhigh`, `max`). Set globally, any sub-session or command follows the same constraint. **ape always removes an inherited value.** In an APEX v1 project `ape task` never sets it and passes `claude --effort` instead; `ape prompt`, `ape chat` and `ape task` outside a v1 project may set it. See [Reasoning effort](#reasoning-effort-claude_code_effort_level). |
+| `CLAUDE_CODE_EFFORT_LEVEL` | Controls the reasoning/thinking budget sent to the API (`low`, `medium`, `high`, `xhigh`, `max`). Set globally, any sub-session or command follows the same constraint. **ape always removes an inherited value.** In an APEX v1 project `ape task` and `ape prompt` never set it and pass `claude --effort` instead; `ape chat`, and `ape task` and `ape prompt` outside a v1 project, may set it. See [Reasoning effort](#reasoning-effort-claude_code_effort_level). |
 
 ### Context and token limits
 
@@ -149,7 +149,11 @@ applies to them. Each of those verbs decides the level first, from its own
 order in its `--help`, and passes it to the child `ape task` as `--effort`.
 Only `ape change review` has an `--effort` flag, and only with `--run`.
 
-**`ape task` outside a v1 project, and `ape prompt`.** The table rule:
+**`ape prompt` in a v1 project** has the same rule without a skill: `--effort`,
+then `_apex/config.yaml` `effort:`, then nothing, passed as `claude --effort`.
+`prompt.yaml` records it as `effort` and `effort_source`.
+
+**`ape task` and `ape prompt` outside a v1 project.** The table rule:
 
 - **An explicit `--effort`** is re-injected as this variable. It is
   **process-wide**: it reaches every sub-agent the session spawns and
@@ -160,11 +164,6 @@ Only `ape change review` has an `--effort` flag, and only with `--run`.
   model, sub-agents included, runs at its family's row. The variable would
   flatten them all to one level, which is exactly what the table exists to avoid.
 - **Neither**: `xhigh`, process-wide.
-
-`ape prompt` follows the table rule in a v1 project too
-(`promptEffortPlan`, `internal/apecmd/prompt.go`). The APEX v1 framework
-ships no `effort-defaults.yaml`, so in a v1 project without one, an
-`ape prompt` with no `--effort` runs at `xhigh`, process-wide.
 
 **`ape chat`** is interactive: it injects the variable **only when
 `--effort` is given**, and takes no table, leaving claude's native effort
