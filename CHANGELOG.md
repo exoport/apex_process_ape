@@ -132,7 +132,8 @@ eval's E-R7-1 and E2 residual (D219).
 
 ### rc.7p: help text written for v1 (D323–D325)
 
-Help text only: no command, flag, exit code or output changed.
+Help text only: no command, flag or exit code changed, and no output except one `ape doctor`
+remediation line (below).
 
 - `ape task` examples use the v1 skills (`apex-plan`, `apex-loop --detach`, `apex-apply`). Its
   summary no longer compares it with a pipeline step. `--prompt` says no APEX v1 skill takes a
@@ -160,6 +161,12 @@ Help text only: no command, flag, exit code or output changed.
     task runs.
   - `ape service` and `ape service submit` examples give `apex-plan` a brief or a request, which
     is what it takes, not a milestone id.
+  - `ape hook pre-tool --help` and `ape project init --help` name `git cherry-pick` beside rebase and
+    merge in the change-branch guard, which has always denied it.
+  - `ape doctor --help` no longer says `--strict` is green on every healthy v1 project: the host
+    rows still run, and on a host without Node `node.binary` and `npx.binary` WARN. No APEX v1
+    skill needs Node, and `node.binary`'s remediation now says so (`--skip node.binary,npx.binary`)
+    instead of naming a v0 skill. That remediation is the one output text this candidate changes.
 
 ### rc.7o: a gate fixed after the work, a gate's own files, and bash in a sh check (Q145, RK-6, RN-1; D310–D313)
 
