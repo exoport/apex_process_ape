@@ -130,10 +130,33 @@ eval's E-R7-1 and E2 residual (D219).
   pointer, and `project check` lists the `roadmap.next-inline` notice. A project an rc.7b move
   left that way is repaired by running `ape next move` again.
 
-### rc.7p: help text written for v1 (D323–D325)
+### rc.7p: no forged `apex:` commits, and help text written for v1 (Q156, D323–D333)
 
-Help text only: no command, flag or exit code changed, and no output except one `ape doctor`
-remediation line (below).
+- **Only ape writes an `apex:` commit** (Q156, class B). A commit subject starting `apex:` marks
+  ape's own records: the provenance checks (`config.changed`, `spec.edited`, `state.forged`)
+  exempt it, `apex: project init` and `apex: lift` start the v1 epoch, and `apex: config accepted`
+  is a person's acceptance. A session could get past an unaccepted guarded config change three
+  ways; each is closed:
+  - **A forged subject.** `ape hook pre-tool` denies a commit whose subject would start `apex:`:
+    `git commit` from `-m` (every form, `-am` and other clusters included), `-F` (ape reads the
+    file; `-F -` is denied), `-C`/`-c`, `--amend` keeping such a subject, or `-t`; `git merge -m`;
+    a cherry-pick of such a commit (so an old `apex: config accepted` cannot accept again); `git
+    commit-tree -m`; `git am` of such a patch. A `"$(cat <<'EOF' … EOF)"` message is read from its
+    here-doc. There is no override: ape's own commits never go through a session's Bash call.
+  - **Re-running init.** In a model session, on a project that is already v1, `ape project init`
+    writes and repairs but commits nothing (`commit_withheld`, with a warning): an `apex: project
+    init` commit restarts the epoch and would hide every finding before it. A project's first init
+    still commits from a session (apex-plan's first step).
+  - **A change titled `apex: …`.** Under the default subject template a change with no `type:`
+    archives with its title alone, and the session writes the title. `change check`, `start`,
+    `archive` and `project check` refuse a change whose squash subject would start `apex:`
+    (`change.subject-reserved`, action replan).
+  - Not seen: a script or program the session writes and runs, a git alias, a command
+    substitution ape cannot read, a `rebase --exec` string, and history plumbing (`fast-import`,
+    `filter-branch`, `replace`).
+
+The rest of rc.7p is help text: no other command, flag or exit code changed, and no other output
+except one `ape doctor` remediation line (below).
 
 - `ape task` examples use the v1 skills (`apex-plan`, `apex-loop --detach`, `apex-apply`). Its
   summary no longer compares it with a pipeline step. `--prompt` says no APEX v1 skill takes a

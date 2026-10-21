@@ -1585,8 +1585,9 @@ Archive a reviewed change onto its base branch (trial decision D38):
      unset), a change with no type: — one in flight when the default changed — archives
      with "{title}" alone, and says so ("subject: … the title alone"; JSON
      "subject_fallback": true, Q111); a configured template that uses {type} refuses a
-     change with no type: (change.check-failed, change.no-type). ape's own "apex: …"
-     commits are unchanged (Q112). The project's git hooks run on this
+     change with no type: (change.check-failed, change.no-type). A subject that would
+     start "apex:" is refused (change.subject-reserved, Q156): only ape's own records
+     carry it. ape's own "apex: …" commits are unchanged (Q112). The project's git hooks run on this
      commit (commit.hooks: run, the default; skip opts out) — ape's status commits keep
      skipping them. A hook that refuses rolls archive back: exit 1, archive.hook-failed,
      the hook output's tail in the message. Then keeps change/<id>'s tip as
@@ -1705,7 +1706,9 @@ Validate one change and list every failure:
     the project's commit types — _apex/config.yaml commit.types (D120), default feat,
     fix, perf, refactor, docs, test, build, ci, chore — required when the subject
     template uses {type}, as the default "{type}: {title}" does (D193; change.no-type;
-    change.bad-type; ape change new writes one);
+    change.bad-type; ape change new writes one); the archive subject it would make
+    (the title under the subject template) must not start apex:, the mark of ape's own
+    records (change.subject-reserved, Q156);
     review_tools: [<name>, …] names tools.review entries of _apex/config.yaml whose
     when: the change matches (the loop runs each before the review; else
     tools.unknown, D74); docs: true marks the milestone's docs change (D130, D152: its
@@ -3540,7 +3543,8 @@ the hook payload (JSON) on stdin.
                   development/specs/**, changes/*/state.json, archive/**, _apex/state/**,
                   an existing development/briefs/** file, and Bash commands that create,
                   delete or push a git tag, push at all, stop processes by name (pkill,
-                  killall), or rebase, merge or cherry-pick on a change branch; while ape runs a
+                  killall), commit with an apex: subject, or rebase, merge or cherry-pick
+                  on a change branch; while ape runs a
                   check in the checkout, denies an edit outside development/ that its
                   cleanup would undo; grants a person act on the person's own words
                   (E2), and denies one without them
@@ -3565,7 +3569,7 @@ user-prompt is never inline: in a session ape launched it records nothing.
 Subcommands:
 
 - `pre-commit` — git pre-commit hook: refuse a commit whose staged added lines hold a secret
-- `pre-tool` — PreToolUse hook: deny edits to specs, state.json, the archive, _apex/state and briefs, git tag writes, git push, pkill/killall, and rebase/merge/cherry-pick on a change branch
+- `pre-tool` — PreToolUse hook: deny edits to specs, state.json, the archive, _apex/state and briefs, git tag writes, git push, pkill/killall, apex: commit subjects, and rebase/merge/cherry-pick on a change branch
 - `session-start` — SessionStart hook: inject `ape status --brief` as additional context
 - `stop` — Stop/SubagentStop hook: block a stop while background work runs or the in-progress change's checks are red
 - `user-prompt` — UserPromptSubmit hook: record the prompt a person typed (E2)
@@ -3611,7 +3615,7 @@ Flags:
 
 ## ape hook pre-tool
 
-PreToolUse hook: deny edits to specs, state.json, the archive, _apex/state and briefs, git tag writes, git push, pkill/killall, and rebase/merge/cherry-pick on a change branch
+PreToolUse hook: deny edits to specs, state.json, the archive, _apex/state and briefs, git tag writes, git push, pkill/killall, apex: commit subjects, and rebase/merge/cherry-pick on a change branch
 
 ```
 ape hook pre-tool [flags]
@@ -3678,6 +3682,20 @@ another branch. Parsed like the tag rule, with the same limits.
 Bash, too (E2, T6): denies a command that names _apex/state/prompts or
 _apex/state/grants, or runs `ape hook user-prompt`, `ape hook pre-tool` or `ape __run`:
 they write or act on the records a person act rests on.
+
+Bash, too (Q156): denies a commit whose subject would start apex: — the mark of
+ape's own records, which the provenance checks (config.changed, spec.edited,
+state.forged) exempt, and which set the v1 epoch (apex: project init, apex: lift) and
+a config acceptance (apex: config accepted). ape writes them itself, never through a
+session's Bash call, so there is no override. Denied: git commit with such a subject
+from -m/--message (all of them, -am and other clusters too), -F/--file (ape reads the
+file; -F - is stdin and is denied), -C/-c/--reuse-message/--reedit-message, --amend
+keeping HEAD's subject, -t/--template; git merge -m/-F; git cherry-pick of a commit
+with such a subject (-n allowed); git commit-tree -m/-F; git am of such a patch (stdin
+denied). A "$(cat <<'EOF' … EOF)" message is read from its here-doc; any other command
+substitution is denied when apex: appears in it. Parsed like the tag rule, with its
+limits, and a rebase --exec string or history plumbing (fast-import, filter-branch,
+replace) is not seen.
 
 Person acts (E2; D178, D179): eight commands are a person's — from a terminal outside
 Claude Code as always, or in the person's own Claude Code session on the person's own
@@ -5110,6 +5128,13 @@ when it was tracked and clean) and the .gitignore when it was absent or tracked 
 clean; other files that existed before are not touched and
 not committed. JSON: "amended" lists the files init changed, "amended_uncommitted"
 those it left out of the commit.
+
+In a model session (APE_SESSION or CLAUDECODE set) on a project that is already v1,
+init writes and repairs as above but commits nothing (Q156): an "apex: project init"
+commit restarts the v1 epoch and would hide every finding before it, so only a
+person's init makes one after the first. The files stay for the session's own commit
+(apex-plan's plan: commit takes them); JSON "commit_withheld" lists them, with a
+warning. A project's first init commits from a session as from a terminal.
 
 Plugins: when _apex/config.yaml lists marketplaces/plugins, init installs each
 plugin at project scope through the claude plugin CLI (marketplace add, install,
