@@ -500,11 +500,11 @@ func main() { fmt.Println(greet("ADR-0004")) }
 		require.Contains(t, disp, want)
 	}
 	// D267: team-memory's prose outside the entries is a candidate too.
-	require.Contains(t, disp, "### `apex-v0-final:development/team-memory.md` — Team Memory\n\n| # | Candidate | Line | Disposition |\n|---|---|---|---|\n| 10 | Preamble prose that belongs to no entry. | `3` | |\n")
+	require.Contains(t, disp, "### `apex-v0-final:development/team-memory.md` — Team Memory\n\n| # | Candidate | Line | Disposition |\n|---|---|---|---|\n| 11 | Preamble prose that belongs to no entry. | `3` | |\n")
 	require.NotContains(t, disp, "Not an entry", "a heading inside a ```markdown fence is no code note")
 	// RG-4: every section counts, not only the don't-miss one.
-	require.Contains(t, disp, "### `apex-v0-final:development/project-context.md` — Workflow\n\n| # | Candidate | Line | Disposition |\n|---|---|---|---|\n| 9 | Every story gets two reviews. | `21` | |\n")
-	require.Contains(t, disp, "### `apex-v0-final:development/team-memory.md` — Conventions > Error handling\n\n| # | Candidate | Line | Disposition |\n|---|---|---|---|\n| 11 | Every HTTP handler returns an error to a single boundary. | `9` | |\n", "a team-memory entry that is not a gotcha, by its body (D257)")
+	require.Contains(t, disp, "### `apex-v0-final:development/project-context.md` — Workflow\n\n| # | Candidate | Line | Disposition |\n|---|---|---|---|\n| 10 | Every story gets two reviews. | `21` | |\n")
+	require.Contains(t, disp, "### `apex-v0-final:development/team-memory.md` — Conventions > Error handling\n\n| # | Candidate | Line | Disposition |\n|---|---|---|---|\n| 12 | Every HTTP handler returns an error to a single boundary. | `9` | |\n", "a team-memory entry that is not a gotcha, by its body (D257)")
 	// The full lists, whole, beside it (L11).
 	var report struct {
 		IDsLeft []LiftIDRef `json:"ids_left"`
@@ -718,4 +718,35 @@ func TestLiftDisposition_PendingOnlyAfterALift(t *testing.T) {
 	require.NotContains(t, findingMessages(p.Check()), "disposition")
 	commitAll(t, p, LiftSubjectPrefix+" from apex-v0 v0.30.0")
 	require.Contains(t, findingMessages(p.Check()), "development/lift-disposition.md: the lift's disposition list awaits review")
+}
+
+// RJ-1 (D289, D290): every CLAUDE.md import the lift drops has a row —
+// the apex:managed block's operating rules, and an import of any other
+// file the lift deletes; a kept import has none.
+func TestLift_DroppedImportsAreCandidates(t *testing.T) {
+	root := liftFixture(t, false)
+	for rel, content := range map[string]string{
+		"CLAUDE.md":                     "# Greeter\n\n<!-- apex:managed:begin -->\n@_apex/apex-operating-rules.md\n<!-- apex:managed:end -->\n\n## Notes\n\n@_apex/commit-owners.csv\n@AGENTS.md\n",
+		"_apex/apex-operating-rules.md": "# Operating rules\n\nRule one.\n",
+		"_apex/commit-owners.csv":       "skill,subject\n",
+		"AGENTS.md":                     "# Agents\n",
+	} {
+		require.NoError(t, os.WriteFile(filepath.Join(root, filepath.FromSlash(rel)), []byte(content), 0o644))
+	}
+	run(t, root, "add", "-A")
+	run(t, root, "commit", "-q", "-m", "claude imports")
+	run(t, root, "push", "-q", "origin", "main")
+	res, err := Lift(ctx(), root, LiftOptions{DryRun: true, NoVerifyRun: true})
+	require.NoError(t, err)
+	type row struct{ text, source, section string }
+	var got []row
+	for _, c := range res.Candidates {
+		if strings.Contains(c.Text, "imported by") {
+			got = append(got, row{c.Text, c.Source, c.Section})
+		}
+	}
+	require.Equal(t, []row{
+		{"`@_apex/apex-operating-rules.md`: the apex-v0 framework's operating rules (3 lines, 1 KB), imported by CLAUDE.md's apex:managed block; the lift removes the import and the file. Read it at the tag: `git show apex-v0-final:_apex/apex-operating-rules.md`. apex-v1 replaces them; keep any rule that still applies to this project.", "CLAUDE.md:4", "Greeter"},
+		{"`@_apex/commit-owners.csv`: a file (1 line, 1 KB), imported by CLAUDE.md; the lift removes the import and the file. Read it at the tag: `git show apex-v0-final:_apex/commit-owners.csv`.", "CLAUDE.md:9", "Notes"},
+	}, got, "the kept @AGENTS.md import has no row")
 }

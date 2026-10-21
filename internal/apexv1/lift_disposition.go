@@ -3,7 +3,9 @@ package apexv1
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"sort"
@@ -400,7 +402,9 @@ func (lf *lifter) candidates() []LiftCandidate {
 				raw[i] = ""
 			}
 		}
-		add("CLAUDE.md", claudeCandidates(strings.Join(raw, "\n")))
+		cs := append(claudeCandidates(strings.Join(raw, "\n")), lf.importCandidates(doc)...)
+		sort.SliceStable(cs, func(i, j int) bool { return cs[i].line < cs[j].line })
+		add("CLAUDE.md", cs)
 	}
 	if doc, ok := lf.texts["AGENTS.md"]; ok {
 		add("AGENTS.md", withSections(doc, listItems(splitLines(doc))))
@@ -417,6 +421,65 @@ func (lf *lifter) candidates() []LiftCandidate {
 		}
 	}
 	return dedupCandidates(out)
+}
+
+// importCandidates gives one row to each CLAUDE.md import the lift drops
+// (RJ-1, D289, D290): the apex:managed block's @_apex/apex-operating-rules.md,
+// and any @ import of a file the lift deletes. The blanked block and a
+// one-word line gave none, so the v0 operating rules every session loaded
+// had no disposition. The row names the file at the tag and how to read it
+// there, the lift having deleted it.
+func (lf *lifter) importCandidates(doc string) []LiftCandidate {
+	lines := strings.Split(strings.ReplaceAll(doc, "\r\n", "\n"), "\n")
+	paths := headingPaths(splitLines(doc))
+	var out []LiftCandidate
+	in := false
+	for i, l := range lines {
+		t := strings.TrimSpace(l)
+		switch {
+		case t == v0ManagedBegin:
+			in = true
+			continue
+		case t == v0ManagedEnd:
+			in = false
+			continue
+		case !strings.HasPrefix(t, "@"):
+			continue
+		}
+		rel := strings.TrimPrefix(t, "@")
+		if !in && !lf.isDeleted(rel) {
+			continue
+		}
+		from := "CLAUDE.md's apex:managed block"
+		if !in {
+			from = "CLAUDE.md"
+		}
+		what := "a file"
+		if rel == v0OperatingRules {
+			what = "the apex-v0 framework's operating rules"
+		}
+		text := "`" + t + "`: " + what + ", imported by " + from + "; the lift removes the import and the file."
+		if data, err := os.ReadFile(filepath.Join(lf.root, filepath.FromSlash(rel))); err == nil {
+			n := strings.Count(string(data), "\n")
+			if len(data) > 0 && !strings.HasSuffix(string(data), "\n") {
+				n++
+			}
+			unit := "lines"
+			if n == 1 {
+				unit = "line"
+			}
+			const kib = 1 << 10
+			text = "`" + t + "`: " + fmt.Sprintf("%s (%d %s, %d KB), imported by %s; the lift removes the import and the file. Read it at the tag: `git show %s:%s`.",
+				what, n, unit, (len(data)+kib-1)/kib, from, LiftTag, rel)
+		} else {
+			text += " (not in the tree at " + LiftTag + ")"
+		}
+		if rel == v0OperatingRules {
+			text += " apex-v1 replaces them; keep any rule that still applies to this project."
+		}
+		out = append(out, LiftCandidate{Text: text, Source: itoaLine(i + 1), Section: paths[i+1], line: i + 1})
+	}
+	return out
 }
 
 // dedupCandidates lists identical text once — compared without case,

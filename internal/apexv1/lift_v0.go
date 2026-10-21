@@ -217,7 +217,7 @@ type LiftDeletion struct {
 // under _apex/ (internal/framework's Project* paths). framework.yaml,
 // config.yaml, config.local.yaml and state/ are not among them.
 var v0Tables = []string{
-	"_apex/apex-operating-rules.md", "_apex/terminal-contracts.csv", "_apex/output-styles.csv",
+	v0OperatingRules, "_apex/terminal-contracts.csv", "_apex/output-styles.csv",
 	"_apex/agent-manifest.csv", "_apex/apex-help.csv", "_apex/effort-defaults.yaml",
 	"_apex/change-routes.yaml", "_apex/commit-owners.csv", "_apex/aboard/recipes",
 	"_apex/config.local.example.yaml",

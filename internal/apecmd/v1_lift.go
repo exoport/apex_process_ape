@@ -173,7 +173,10 @@ The commit:
                  of three words or more, whatever its wording, and every
                  code-block note (a fenced markdown example's lines are not); a
                  team-memory entry that gives nothing else is listed by its
-                 title. Grouped by source and section (JSON
+                 title. Each CLAUDE.md import the lift drops — the
+                 managed block's @_apex/apex-operating-rules.md, an @ import of
+                 any other file it deletes — is one row naming the file, its
+                 size, and git show apex-v0-final:<path>. Grouped by source and section (JSON
                  rule_candidates[].section, the heading path); text found twice is
                  listed once with both sources (also_in). An empty Disposition
                  column for apex-plan, then a fresh read-only review, then the

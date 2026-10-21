@@ -1040,6 +1040,9 @@ func (lf *lifter) listKeptApex() {
 const (
 	v0ManagedBegin = "<!-- apex:managed:begin -->"
 	v0ManagedEnd   = "<!-- apex:managed:end -->"
+	// v0OperatingRules is the fragment the block imports (internal/framework's
+	// ProjectOperatingRules).
+	v0OperatingRules = "_apex/apex-operating-rules.md"
 )
 
 // dropV0Imports removes CLAUDE.md's apex:managed block and any import of

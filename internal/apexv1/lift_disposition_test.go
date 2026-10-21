@@ -341,7 +341,7 @@ func TestLift_CandidatesFromEverySection(t *testing.T) {
 		// E-R7f-1: the rows under CLAUDE.md's title carry it as their section.
 		"### `CLAUDE.md` — Greeter\n\n| # | Candidate | Line | Disposition |\n|---|---|---|---|\n| 1 | Project rules (see ADR-0003). | `3` | |\n| 2 | NEVER push a tag without the operator's explicit say-so | `5` | |\n",
 		"| 3 | Commit messages follow Conventional Commits, always | `6` · `" + pc + ":62` | |\n",
-		"### `" + pc + "` — Technology Stack & Versions\n\n| # | Candidate | Line | Disposition |\n|---|---|---|---|\n| 9 | Go toolchain pinned exactly by go.mod's toolchain line. | `22` | |\n",
+		"### `" + pc + "` — Technology Stack & Versions\n\n| # | Candidate | Line | Disposition |\n|---|---|---|---|\n| 10 | Go toolchain pinned exactly by go.mod's toolchain line. | `22` | |\n",
 		"### `" + pc + "` — Critical Implementation Rules > Testing Rules\n",
 		"| A shared fixture is read-only: never write to it from a test, and always copy it into t.TempDir(). | `33` | |",
 		// RG-4c (D264): a CLAUDE.md rule written as a paragraph.
