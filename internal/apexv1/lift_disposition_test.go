@@ -462,3 +462,52 @@ func TestTeamMemoryCandidates_ReadWhole(t *testing.T) {
 		require.NotContains(t, c.Text, "Not an entry")
 	}
 }
+
+// RJ-3 (D291): an HTML comment is text. cortex's pin bullet went on in an
+// indented LOAD-BEARING comment and a continuation line; the comment ended
+// the item, so the bullet stood alone and the comment's body, minus its
+// first line, began a row mid-sentence.
+func TestRuleCandidates_HTMLComments(t *testing.T) {
+	doc := "# P\n\n## Build\n\n" +
+		"- **Substrate pin — engine currently `v0.13.0`; SDK v0.3.0.**\n" + // 5
+		"  <!-- LOAD-BEARING: `test/pinlint` parses the \"currently `vX.Y.Z`\" and\n" +
+		"  \"SDK vX.Y.Z\" phrases on this line. Update the numbers with the pin;\n" +
+		"  never delete the phrases. -->\n" +
+		"  Authoritative sites: the go.mod require line; never use sdk.Serve.\n" + // 9
+		"  - Do not restate the engine version in a story.\n" + // 10
+		"\n" +
+		"<!-- markdownlint-disable MD013 -->\n" + // 12
+		"Never commit generated files by hand.\n" + // 13
+		"\n" +
+		"<!--\n" + // 15
+		"Never edit the vendored tree; regenerate it.\n" +
+		"-->\n" +
+		"After the comment: never skip the gate.\n" + // 18
+		"\n" +
+		"- One item, then a comment at the margin, which ends the list\n" + // 20
+		"<!-- never a continuation of the item above -->\n" +
+		"\n" +
+		"<!-- an unclosed note: never mind\n" + // 23
+		"it runs to the end\n"
+	type row struct{ text, source string }
+	got := []row{}
+	for _, c := range ruleCandidates(doc, false) {
+		got = append(got, row{c.Text, c.Source})
+	}
+	require.Equal(t, []row{
+		{"**Substrate pin — engine currently `v0.13.0`; SDK v0.3.0.** LOAD-BEARING: `test/pinlint` parses the \"currently `vX.Y.Z`\" and \"SDK vX.Y.Z\" phrases on this line. Update the numbers with the pin; never delete the phrases. Authoritative sites: the go.mod require line; never use sdk.Serve.", "5"},
+		{"Do not restate the engine version in a story.", "10"},
+		{"Never commit generated files by hand.", "13"},
+		{"Never edit the vendored tree; regenerate it.", "15"},
+		{"After the comment: never skip the gate.", "18"},
+		{"One item, then a comment at the margin, which ends the list", "20"},
+		{"an unclosed note: never mind it runs to the end", "23"},
+	}, got)
+	// Read whole, a comment of several lines outside an item is a row too,
+	// rule word or not; a one-line comment is not.
+	got = got[:0]
+	for _, c := range claudeCandidates("# C\n\n<!-- build / test / e2e, one line each -->\n\n<!--\nThis block is kept by hand\n-->\n") {
+		got = append(got, row{c.Text, c.Source})
+	}
+	require.Equal(t, []row{{"This block is kept by hand", "5"}}, got)
+}

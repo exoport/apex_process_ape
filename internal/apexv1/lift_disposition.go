@@ -249,6 +249,27 @@ type ruleWalk struct {
 	// the last of them.
 	listed     map[int]bool
 	lastListed int
+	// comment is where an open multi-line HTML comment's lines go (RJ-3).
+	comment ruleComment
+}
+
+// ruleComment is where a ruleWalk puts an open HTML comment's text.
+type ruleComment int
+
+const (
+	commentNone ruleComment = iota
+	// commentItem continues the open list item: the comment is indented
+	// under it (cortex's pin bullet, whose LOAD-BEARING note says which
+	// gate parses it).
+	commentItem
+	// commentPara is a paragraph of its own, from the comment's first line.
+	commentPara
+)
+
+// commentText is an HTML comment line's text without its markers: a
+// <!-- left in a table cell would hide the rest of the row when rendered.
+func commentText(t string) string {
+	return strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(t, "<!--", ""), "-->", ""))
 }
 
 // ruleHeading is an open heading of a ruleWalk.
@@ -261,6 +282,10 @@ type ruleHeading struct {
 
 func (w *ruleWalk) line(l mdLine) {
 	t := strings.TrimSpace(l.Text)
+	if w.comment != commentNone {
+		w.commentLine(l.N, t)
+		return
+	}
 	if lv, title := headingLevel(l); lv > 0 {
 		w.flush()
 		w.closeTo(lv)
@@ -272,6 +297,10 @@ func (w *ruleWalk) line(l mdLine) {
 		w.flush()
 		c.Section = w.path()
 		w.out = append(w.out, c)
+		return
+	}
+	if !l.InCode && strings.HasPrefix(t, "<!--") {
+		w.openComment(l, t)
 		return
 	}
 	row := !l.InCode && tableRowRe.MatchString(l.Text)
@@ -286,7 +315,7 @@ func (w *ruleWalk) line(l mdLine) {
 			}
 			w.out = append(w.out, LiftCandidate{Text: strings.Join(cells, " | "), line: l.N, Section: w.path()})
 		}
-	case l.InCode, t == "", thematicRe.MatchString(l.Text), row, strings.HasPrefix(t, "<!--"):
+	case l.InCode, t == "", thematicRe.MatchString(l.Text), row:
 		w.flush()
 	case listItemRe.MatchString(l.Text):
 		w.flush()
@@ -298,6 +327,55 @@ func (w *ruleWalk) line(l mdLine) {
 	default:
 		w.para = append(w.para, l)
 	}
+}
+
+// openComment reads a line that opens an HTML comment (RJ-3, D291). The
+// comment is text, not a break: cortex's pin bullet went on in an
+// indented <!-- LOAD-BEARING … --> naming the gate that parses it, then in
+// a continuation line, and ending the item at the comment left the bullet
+// alone and made the comment's body, minus its first line, and the
+// continuation a row starting mid-sentence. Indented under an open list
+// item, the comment continues the item, and so do the indented lines
+// after it; outside one, a comment of several lines is a paragraph from
+// its first line; a one-line comment outside an item (a marker, a lint
+// directive) still only ends the paragraph.
+func (w *ruleWalk) openComment(l mdLine, t string) {
+	w.inTable = false
+	closes := strings.Contains(t[len("<!--"):], "-->")
+	text := commentText(t)
+	switch {
+	case w.item >= 0 && strings.TrimLeft(l.Text, " \t") != l.Text:
+		if text != "" {
+			w.out[w.item].Text += " " + text
+		}
+		if !closes {
+			w.comment = commentItem
+		}
+	case closes:
+		w.flush()
+	default:
+		w.flush()
+		w.para = append(w.para, mdLine{N: l.N, Text: text})
+		w.comment = commentPara
+	}
+}
+
+// commentLine reads a line inside an open HTML comment, up to its -->.
+func (w *ruleWalk) commentLine(n int, t string) {
+	closes := strings.Contains(t, "-->")
+	text := commentText(t)
+	if w.comment == commentItem && text != "" {
+		w.out[w.item].Text += " " + text
+	} else if w.comment == commentPara && text != "" {
+		w.para = append(w.para, mdLine{N: n, Text: text})
+	}
+	if !closes {
+		return
+	}
+	if w.comment == commentPara {
+		w.flush()
+	}
+	w.comment = commentNone
 }
 
 // path is the heading path of the line being read: the open headings, a

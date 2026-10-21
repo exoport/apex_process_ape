@@ -173,7 +173,9 @@ The commit:
                  of three words or more, whatever its wording, and every
                  code-block note (a fenced markdown example's lines are not); a
                  team-memory entry that gives nothing else is listed by its
-                 title. Each CLAUDE.md import the lift drops — the
+                 title. An HTML comment is text: indented under a list item it
+                 continues the item, and a comment of several lines elsewhere
+                 is a paragraph. Each CLAUDE.md import the lift drops — the
                  managed block's @_apex/apex-operating-rules.md, an @ import of
                  any other file it deletes — is one row naming the file, its
                  size, and git show apex-v0-final:<path>. Grouped by source and section (JSON
