@@ -108,16 +108,24 @@ type mdHeading struct {
 
 // headingPaths returns, per line number, the heading path a line sits
 // under: its titles joined with " > ", a document's lone H1 (its title)
-// left out.
+// left out — except for a line under that H1 before any other heading,
+// whose path is the title itself (E-R7f-1: those rows had none).
 func headingPaths(lines []mdLine) map[int]string {
 	out := map[int]string{}
 	var stack []mdHeading
 	h1 := soleTitle(lines)
+	title := ""
 	for _, l := range lines {
 		if lv, t := headingLevel(l); lv > 0 {
 			stack = pushHeading(stack, lv, t, h1)
+			if lv == 1 && h1 {
+				title = t
+			}
 		}
 		out[l.N] = joinPath(stack)
+		if out[l.N] == "" {
+			out[l.N] = title
+		}
 	}
 	return out
 }
@@ -174,15 +182,35 @@ func ruleCandidates(doc string, entries bool) []LiftCandidate {
 // candidate, every table body row (its cells joined), and every comment in
 // its code blocks (codeNotes), besides its list items.
 func claudeCandidates(doc string) []LiftCandidate {
-	cs := append(ruleWalkDoc(doc, false, true), codeNotes(splitLines(doc), 0, -1)...)
-	sort.SliceStable(cs, func(i, j int) bool { return cs[i].line < cs[j].line })
-	return cs
+	return ruleWalkDoc(doc, false, true)
 }
 
+// teamMemoryCandidates returns team-memory's candidates, read whole like
+// CLAUDE.md's (D267, D277): every entry body's list items, paragraphs and
+// table body rows of three words or more, and its code-block notes —
+// whatever their wording. mdpdf's review on rc7g found entry prose with
+// no rule word ("a session may not grant itself this route") with no row;
+// every team-memory entry is a lesson the project chose to keep, so its
+// prose binds as CLAUDE.md's does. An entry that gives nothing else is
+// still listed by its title.
+func teamMemoryCandidates(doc string) []LiftCandidate {
+	return ruleWalkDoc(doc, true, true)
+}
+
+// ruleWalkDoc walks doc for candidates. Read whole, a code block's notes
+// (codeNotes) are taken where they stand, so they carry the walk's heading
+// path and count as their entry's content (an entry whose only rule is a
+// commented command is not also listed by its title).
 func ruleWalkDoc(doc string, entries, whole bool) []LiftCandidate {
 	lines := splitLines(doc)
 	lines = lines[frontMatterEnd(lines):]
 	w := &ruleWalk{entries: entries, whole: whole, soleH1: soleTitle(lines), item: -1, listed: map[int]bool{}, lastListed: -1}
+	if whole {
+		w.notes = map[int]LiftCandidate{}
+		for _, c := range codeNotes(lines, 0, -1) {
+			w.notes[c.line] = c
+		}
+	}
 	for _, l := range lines {
 		w.line(l)
 	}
@@ -207,9 +235,11 @@ type ruleWalk struct {
 	// inTable is whether the previous line was a table row: a row after
 	// one is a body row, the first is the header.
 	inTable bool
-	out     []LiftCandidate
-	stack   []ruleHeading
-	para    []mdLine
+	// notes are the code blocks' notes by their first line (whole only).
+	notes map[int]LiftCandidate
+	out   []LiftCandidate
+	stack []ruleHeading
+	para  []mdLine
 	// item is the list item being read (its index in out), -1 when none.
 	item int
 	// listed are an entry's own paragraphs or title, listed because
@@ -234,6 +264,12 @@ func (w *ruleWalk) line(l mdLine) {
 		w.closeTo(lv)
 		w.inTable = false
 		w.stack = append(w.stack, ruleHeading{mdHeading: mdHeading{lv, entryDateTail.ReplaceAllString(title, "")}, line: l.N, from: len(w.out)})
+		return
+	}
+	if c, ok := w.notes[l.N]; ok {
+		w.flush()
+		c.Section = w.path()
+		w.out = append(w.out, c)
 		return
 	}
 	row := !l.InCode && tableRowRe.MatchString(l.Text)
@@ -262,12 +298,18 @@ func (w *ruleWalk) line(l mdLine) {
 	}
 }
 
+// path is the heading path of the line being read: the open headings, a
+// sole H1 (the document's title) left out unless it is the only one open
+// (E-R7f-1: a candidate right under the title had no section).
 func (w *ruleWalk) path() string {
 	hs := make([]mdHeading, 0, len(w.stack))
 	for _, h := range w.stack {
 		if h.level != 1 || !w.soleH1 {
 			hs = append(hs, h.mdHeading)
 		}
+	}
+	if len(hs) == 0 && len(w.stack) > 0 {
+		return w.stack[0].title
 	}
 	return joinPath(hs)
 }
@@ -371,7 +413,7 @@ func (lf *lifter) candidates() []LiftCandidate {
 	}
 	if tm := lf.rel(lf.layout.Cfg.Paths.TeamMemory); tm != "" {
 		if doc := lf.readRel(tm); doc != "" {
-			add(LiftTag+":"+tm, ruleCandidates(doc, true))
+			add(LiftTag+":"+tm, teamMemoryCandidates(doc))
 		}
 	}
 	return dedupCandidates(out)

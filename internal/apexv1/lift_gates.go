@@ -188,12 +188,24 @@ func codeNotes(lines []mdLine, from, level int) []LiftCandidate {
 	// the open note (if any) is a comment-only one.
 	cmdIndent := -1
 	indentOf := func(s string) int { return len(s) - len(strings.TrimLeft(s, " \t")) }
+	// markdown is whether the open fence holds Markdown, where `#` starts a
+	// heading, not a comment (a fenced example of an entry heading).
+	markdown, open := false, false
 	for _, l := range lines[from:] {
 		if lv, _ := headingLevel(l); lv > 0 && level > 0 && lv <= level {
 			break
 		}
 		t := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(l.Text), "$ "))
-		if !l.InCode || t == "" || strings.HasPrefix(t, "```") || strings.HasPrefix(t, "~~~") || strings.HasPrefix(t, "#!") {
+		if fence := strings.HasPrefix(t, "```") || strings.HasPrefix(t, "~~~"); fence && l.InCode {
+			if !open {
+				info := strings.ToLower(strings.TrimSpace(strings.TrimLeft(t, "`~")))
+				markdown = info == "markdown" || info == "md" || info == "mdx"
+			}
+			open = !open
+			cur = -1
+			continue
+		}
+		if !l.InCode || markdown || t == "" || strings.HasPrefix(t, "#!") {
 			cur = -1
 			continue
 		}

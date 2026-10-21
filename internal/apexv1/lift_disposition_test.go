@@ -213,7 +213,7 @@ func TestRuleCandidates_ProjectContext(t *testing.T) {
 		got = append(got, row{c.Text, c.Source, c.Section})
 	}
 	require.Equal(t, []row{
-		{"_This file holds the rules that agents must follow here._", "8", ""},
+		{"_This file holds the rules that agents must follow here._", "8", "Project Context for AI Agents"}, // E-R7f-1
 		{"Single Go module with three binaries and no daemon.", "12", "Overview"},
 		{"Never fold the release generator into the main binary.", "13", "Overview"},
 		{"A subsection of the overview is read like any other.", "18", "Overview > Layout"},
@@ -267,7 +267,7 @@ func TestClaudeCandidates(t *testing.T) {
 		got = append(got, row{c.Text, c.Source, c.Section})
 	}
 	require.Equal(t, []row{
-		{"Project guidance for agents. Keep this file current.", "3", ""},
+		{"Project guidance for agents. Keep this file current.", "3", "Cortex"}, // E-R7f-1
 		{"Memory plane | MCP session state is **not** the ledger.", "9", "Architecture"},
 		{"**Hybrid versioning decision (settled).** Power users may still author native workflows.", "11", "Architecture"},
 		{"`README.md` — Human entry point.", "16", "Repo structure"},
@@ -338,7 +338,8 @@ func TestLift_CandidatesFromEverySection(t *testing.T) {
 	d := string(disp)
 	pc := "apex-v0-final:development/project-context.md"
 	for _, want := range []string{
-		"### `CLAUDE.md`\n\n| # | Candidate | Line | Disposition |\n|---|---|---|---|\n| 1 | Project rules (see ADR-0003). | `3` | |\n| 2 | NEVER push a tag without the operator's explicit say-so | `5` | |\n",
+		// E-R7f-1: the rows under CLAUDE.md's title carry it as their section.
+		"### `CLAUDE.md` — Greeter\n\n| # | Candidate | Line | Disposition |\n|---|---|---|---|\n| 1 | Project rules (see ADR-0003). | `3` | |\n| 2 | NEVER push a tag without the operator's explicit say-so | `5` | |\n",
 		"| 3 | Commit messages follow Conventional Commits, always | `6` · `" + pc + ":62` | |\n",
 		"### `" + pc + "` — Technology Stack & Versions\n\n| # | Candidate | Line | Disposition |\n|---|---|---|---|\n| 9 | Go toolchain pinned exactly by go.mod's toolchain line. | `22` | |\n",
 		"### `" + pc + "` — Critical Implementation Rules > Testing Rules\n",
@@ -372,6 +373,7 @@ func TestLift_CandidatesFromEverySection(t *testing.T) {
 	})
 	require.Contains(t, report.Candidates, map[string]any{
 		"text": "Commit messages follow Conventional Commits, always", "source": "CLAUDE.md:6", "also_in": []any{pc + ":62"},
+		"section": "Greeter", // E-R7f-1: under CLAUDE.md's title
 	})
 }
 
@@ -398,4 +400,65 @@ func TestWriteCandidates_EveryRowAndItsCount(t *testing.T) {
 	b.Reset()
 	writeCandidates(&b, nil, 1)
 	require.NotContains(t, b.String(), "This file lists", "no count line when there is nothing to list")
+}
+
+// E-R7f-1 (eval 15:30): a candidate right under a document's sole H1,
+// before any other heading, has the title as its section — in the walk
+// (project-context, team-memory, CLAUDE.md) and in headingPaths (AGENTS.md's
+// list items) alike; text above the H1 still has none, and a document with
+// two H1s keeps them in its paths as before.
+func TestSection_UnderTheSoleH1(t *testing.T) {
+	doc := "above the title, must stay without a section\n\n# The Title\n\nNever skip the title's own rules here.\n\n- a list item under the title\n\n## Part\n\n- an item under the part\n"
+	type row struct{ text, section string }
+	cs := ruleCandidates(doc, false)
+	got := make([]row, 0, len(cs))
+	for _, c := range cs {
+		got = append(got, row{c.Text, c.Section})
+	}
+	require.Equal(t, []row{
+		{"above the title, must stay without a section", ""},
+		{"Never skip the title's own rules here.", "The Title"},
+		{"a list item under the title", "The Title"},
+		{"an item under the part", "Part"},
+	}, got)
+	paths := headingPaths(splitLines(doc))
+	require.Empty(t, paths[1])
+	require.Equal(t, "The Title", paths[7])
+	require.Equal(t, "Part", paths[11])
+	two := headingPaths(splitLines("# A\n\n- x\n\n# B\n\n- y\n"))
+	require.Equal(t, "A", two[3])
+	require.Equal(t, "B", two[7])
+}
+
+// D267 (D277): team-memory is read whole, like CLAUDE.md — mdpdf's review
+// on rc7g found entry prose with no rule word ("a session may not grant
+// itself this route") with no row. Every paragraph and table body row of
+// three words or more is a candidate now, and a code-block note; a
+// "Source:" line still is not, and an entry with nothing else is still
+// listed by its title.
+func TestTeamMemoryCandidates_ReadWhole(t *testing.T) {
+	doc := "# Team Memory\n\nDurable lessons, kept on purpose.\n\n## Security\n\n" +
+		"### Grants — 2026-10-01\n\nA session may not grant itself this route.\n\nSource: Epic 9 retrospective\n\n" +
+		"### Ports — 2026-10-02\n\n| Service | Port |\n|---|---|\n| nats server here | 4222 |\n\n" +
+		"### Gate — 2026-10-03\n\n```sh\nmake gate   # the whole gate, every time\n```\n\n" +
+		"### Error handling — 2026-08-01\n\nSource: Epic 1 retrospective\n"
+	type row struct{ text, source, section string }
+	cs := teamMemoryCandidates(doc)
+	got := make([]row, 0, len(cs))
+	for _, c := range cs {
+		got = append(got, row{c.Text, c.Source, c.Section})
+	}
+	require.Equal(t, []row{
+		{"Durable lessons, kept on purpose.", "3", "Team Memory"},
+		{"A session may not grant itself this route.", "9", "Security > Grants"},
+		{"nats server here | 4222", "17", "Security > Ports"},
+		{"`make gate` — the whole gate, every time", "22", "Security > Gate"},
+		{"Error handling", "25", "Security"},
+	}, got)
+	// project-context keeps the rule-word test: the same prose is no candidate there.
+	require.Empty(t, ruleCandidates("# P\n\n## Rules\n\nA session may not grant itself this route.\n", false))
+	// A heading inside a Markdown fence is an example, not a comment.
+	for _, c := range teamMemoryCandidates("# T\n\n## A\n\n### E — 2026-10-01\n\nKeep entries dated like this one.\n\n```markdown\n### Not an entry — 2026-10-02\n```\n") {
+		require.NotContains(t, c.Text, "Not an entry")
+	}
 }

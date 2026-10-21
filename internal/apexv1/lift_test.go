@@ -499,9 +499,12 @@ func main() { fmt.Println(greet("ADR-0004")) }
 	} {
 		require.Contains(t, disp, want)
 	}
+	// D267: team-memory's prose outside the entries is a candidate too.
+	require.Contains(t, disp, "### `apex-v0-final:development/team-memory.md` — Team Memory\n\n| # | Candidate | Line | Disposition |\n|---|---|---|---|\n| 10 | Preamble prose that belongs to no entry. | `3` | |\n")
+	require.NotContains(t, disp, "Not an entry", "a heading inside a ```markdown fence is no code note")
 	// RG-4: every section counts, not only the don't-miss one.
 	require.Contains(t, disp, "### `apex-v0-final:development/project-context.md` — Workflow\n\n| # | Candidate | Line | Disposition |\n|---|---|---|---|\n| 9 | Every story gets two reviews. | `21` | |\n")
-	require.Contains(t, disp, "### `apex-v0-final:development/team-memory.md` — Conventions > Error handling\n\n| # | Candidate | Line | Disposition |\n|---|---|---|---|\n| 10 | Every HTTP handler returns an error to a single boundary. | `9` | |\n", "a team-memory entry that is not a gotcha, by its body (D257)")
+	require.Contains(t, disp, "### `apex-v0-final:development/team-memory.md` — Conventions > Error handling\n\n| # | Candidate | Line | Disposition |\n|---|---|---|---|\n| 11 | Every HTTP handler returns an error to a single boundary. | `9` | |\n", "a team-memory entry that is not a gotcha, by its body (D257)")
 	// The full lists, whole, beside it (L11).
 	var report struct {
 		IDsLeft []LiftIDRef `json:"ids_left"`
