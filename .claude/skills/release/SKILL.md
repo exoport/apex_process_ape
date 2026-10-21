@@ -16,7 +16,7 @@ Four modes, chosen in Phase 0 from the argument and the tags that exist. They ex
 | --- | --- | --- |
 | **rc** | `vX.Y.Z-rc.N` | a signed GitHub **prerelease**, which every "latest" resolver skips (`ape update`, the install docs, `releases/latest/download`). The eval pins it by tag and commit. The dated `## vX.Y.Z` CHANGELOG section is already IN the rc commit, so promotion adds nothing. |
 | **promote** | `vX.Y.Z` when `vX.Y.Z-rc.*` tags exist | the final release, tagged on the EXACT commit of the last rc — no new commit, no re-run of the local gates (they ran on that commit in rc mode). Only after the user confirms the eval passed on that rc. |
-| **promote-commit** | `vX.Y.Z --commit <sha> [--on <ref>]` | the final release on a commit the eval measured that never was a GitHub prerelease (the APEX v1 trial's frozen builds). The tag goes on that commit, or on a descendant of it whose diff touches only `CHANGELOG.md`, `docs/` and `.claude/` (the binary's code is the evaluated code). The tag is created locally first; nothing is pushed until the operator confirms. |
+| **promote-commit** | `vX.Y.Z --commit <sha> [--on <ref>]` | the final release on a commit the eval measured that never was a GitHub prerelease (the APEX v1 trial's frozen builds). The tag goes on that commit, or on a descendant of it whose diff touches nothing compiled into the binary (CHANGELOG, docs, skills, tests: the binary's code is the evaluated code). The tag is created locally first; nothing is pushed until the operator confirms. |
 | **direct** | `vX.Y.Z` with no rc tags for it | the final release straight from main. For changes that cannot affect the framework or eval results (class D: new verbs no skill calls, TUI, docs, aboard, release tooling). Anything session-driving (class B) or on the command surface skills call (class C) goes through rc. |
 
 Promotion puts two tags on one commit. That is what the v0.0.21 incident was — goreleaser's `git describe` picked the rc and built the final as the rc — and release.yml now pins the tag it builds with `GORELEASER_CURRENT_TAG` (and a final's changelog start with `GORELEASER_PREVIOUS_TAG`, the previous FINAL). Both were reproduced and verified with goreleaser v2.18.0 on a dual-tagged scratch commit. Phase 6 still checks the published tag, version and prerelease flag, because a fix is a hypothesis until the real run agrees.
@@ -44,7 +44,7 @@ Promotion puts two tags on one commit. That is what the v0.0.21 incident was —
 ### Phase 0 — Parse arguments and gather constants
 
 1. Read `$ARGUMENTS`. Check case-insensitively for the standalone word `autonomous` (e.g. "autonomous", "release autonomous", "v0.0.22 autonomous"). Set `{autonomous}` = true if present, else false. Remove that word from the string before the next check.
-2. In what remains of `$ARGUMENTS`, if it matches `v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?`, set `{version}` = that value. Otherwise set `{version}` = "" (to be resolved in Phase 1; direct mode only — an rc or a promotion is always named explicitly). If it holds `--commit <sha>`, set `{eval_commit}` = `git rev-parse --verify "<sha>^{commit}"` (HALT if it does not resolve). If it also holds `--on <ref>`, set `{on_commit}` the same way: the commit to tag when it is a docs-only descendant of `{eval_commit}` (shape (a) in 1e); default `{on_commit}` = `{eval_commit}`.
+2. In what remains of `$ARGUMENTS`, if it matches `v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?`, set `{version}` = that value. Otherwise set `{version}` = "" (to be resolved in Phase 1; direct mode only — an rc or a promotion is always named explicitly). If it holds `--commit <sha>`, set `{eval_commit}` = `git rev-parse --verify "<sha>^{commit}"` (HALT if it does not resolve). If it also holds `--on <ref>`, set `{on_commit}` the same way: the commit to tag when it is a descendant of `{eval_commit}` that changes nothing in the binary (shape (a) in 1e); default `{on_commit}` = `{eval_commit}`.
    - Set `{base}` = `{version}` without any `-rc.N` suffix.
    - If `{version}` has an `-rc.N` suffix: `{mode}` = **rc** (HALT if `--commit` was given).
    - Else, if `{eval_commit}` is set: `{mode}` = **promote-commit**.
@@ -154,7 +154,11 @@ git tag --points-at HEAD | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$' || tru
 
   Then the eval gate, which is **never skipped, autonomous or not**: ask the user "Did the eval pass on `{rc}` (commit `<sha>`)? Promotion publishes exactly this commit as `{base}`." Proceed only on the user's own yes. A peer session's relayed verdict is information for the user, not the answer.
 - **promote-commit**: set `{tag_commit}`, then settle main against it. HALT on anything not listed.
-  1. `{tag_commit}` = `{on_commit}`: `{eval_commit}` itself in shape (b); in shape (a) the dated commit, and only when `{eval_commit}` is an ancestor of it (`git merge-base --is-ancestor {eval_commit} {on_commit}`) and every path changed since is docs (`git diff --name-only {eval_commit} {on_commit}` lists only `CHANGELOG.md`, `docs/…` and `.claude/…`). Show that list. Any other path → HALT: "`<path>` changed since the evaluated commit: that is not the code the eval measured." HALT too if an rc tag points at `{tag_commit}` (a promote, not a promote-commit).
+  1. `{tag_commit}` = `{on_commit}`: `{eval_commit}` itself in shape (b); in shape (a) the dated commit, and only when `{eval_commit}` is an ancestor of it (`git merge-base --is-ancestor {eval_commit} {on_commit}`) and no path changed since is in the binary (`git diff --name-only {eval_commit} {on_commit}`). A path is outside the binary when it is:
+     - `CHANGELOG.md`, or under `docs/` or `.claude/`;
+     - a `*_test.go` file, or under a `testdata/` folder;
+     - a `.go` file of a package `go list -deps ./cmd/ape` does not list (run at `{on_commit}`): `internal/claudesurface`, for one, is test tooling.
+     Anything else — `go.mod`, `go.sum`, a non-test `.go` file of a listed package, any other file in a listed package's folder (it may be embedded) — is in the binary. Show the list with each path's reason. A path in the binary → HALT: "`<path>` changed since the evaluated commit: that is not the code the eval measured." HALT too if an rc tag points at `{tag_commit}` (a promote, not a promote-commit).
   2. main against `{tag_commit}` (`git rev-list --left-right --count {tag_commit}...main`):
      - **equal**: nothing to do.
      - **main behind only** (left > 0, right = 0): main fast-forwards to `{tag_commit}` (`git merge --ff-only {tag_commit}` on main) after the user confirms. origin/main must be an ancestor of `{tag_commit}`, or the later push is no fast-forward: HALT if not.
@@ -162,7 +166,7 @@ git tag --points-at HEAD | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$' || tru
        - **move**: main is reset to `{tag_commit}` (`git branch -f main {tag_commit}` from another branch, or `git reset --hard {tag_commit}` on a clean main). Allowed only when every listed commit is unpushed AND `-` in `git cherry`, and origin/main is an ancestor of `{tag_commit}`: nothing is lost and the push is a fast-forward. Otherwise HALT, naming the commits.
        - **merge**: `git merge --no-ff {tag_commit}` on main, resolving every conflict to `{tag_commit}`'s side. Then `git diff --quiet {tag_commit} main` MUST hold: main's tree is the tagged tree, so CI on the merge commit is CI on the tagged code. HALT if it does not, showing the diff.
      Record `{main_sha}` = main's HEAD after this step (= `{tag_commit}` for equal/behind/move; the merge commit for merge).
-  3. The eval gate, **never skipped**: "Did the eval pass on `{eval_commit}`? `{base}` will be tagged on `{tag_commit}` (<equal to it | a docs-only descendant: <paths>>)." Proceed only on the user's own yes.
+  3. The eval gate, **never skipped**: "Did the eval pass on `{eval_commit}`? `{base}` will be tagged on `{tag_commit}` (<equal to it | a descendant that changes nothing in the binary: <paths>>)." Proceed only on the user's own yes.
 
 #### 1h — Price table covers the locally-running Claude Code
 
@@ -200,7 +204,7 @@ Pre-flight checks passed:
 
 **promote mode skips Phases 2, 2b, 2c and 3.** They ran on this exact commit when `{rc}` was cut, and the eval has run it since; the commit is unchanged, and HEAD is already on origin. Go to Phase 4, which only confirms CI passed for this SHA. Say so in the summary rather than listing the skipped gates as passed.
 
-**promote-commit mode skips Phases 2, 2b and 2c** for the evaluated code: they ran on `{eval_commit}` in the build's own chain, and the eval measured it since. Ask the user for that evidence (the READY post: ci-local, check-harness on each measured Claude Code version, check-framework against the payload) and quote it in the summary. When `{tag_commit}` is a docs-only descendant, run `make docs-check docs-cli-check lint` on it instead (fast): the docs gates are the ones its diff can break. Then go to Phase 5 (create the tag locally), and do Phase 3 and Phase 4 only after the operator gate in 5c.
+**promote-commit mode skips Phases 2, 2b and 2c** for the evaluated code: they ran on `{eval_commit}` in the build's own chain, and the eval measured it since. Ask the user for that evidence (the READY post: ci-local, check-harness on each measured Claude Code version, check-framework against the payload) and quote it in the summary. When `{tag_commit}` is a descendant, run `make docs-check docs-cli-check lint` on it, and `go test` for each package whose tests it changed, instead (fast): those are the gates its diff can break. Then go to Phase 5 (create the tag locally), and do Phase 3 and Phase 4 only after the operator gate in 5c.
 
 If `{autonomous}` is false: ask "Proceed with `make ci-local`? (this takes ~30–60 s)" — wait for confirmation.
 
@@ -409,7 +413,7 @@ HALT on non-zero exit, or if the tag does not point where it must.
 #### 5c — The operator's push gate (promote-commit only; never skipped)
 
 Nothing has left this machine yet. Show the operator:
-- `{version}` → `{tag_commit}` (and `{eval_commit}` with the docs-only path list, when they differ);
+- `{version}` → `{tag_commit}` (and `{eval_commit}` with the changed paths and why each is outside the binary, when they differ);
 - main → `{main_sha}` (equal / fast-forwarded / moved / merged), with `git log --oneline origin/main..main | head -20`;
 - the 3a tag check's result.
 
