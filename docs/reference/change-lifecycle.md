@@ -235,7 +235,13 @@ change tier runs at start and verify; the milestone tier (else the change tier) 
   `docs.user_docs`) and `development/` skips the regression command, and only that. Paths under
   `docs.tested` are never docs-only.
 - At the milestone gate the command is judged against the earliest baseline any change of the
-  milestone recorded for it. A tweak never supplies one.
+  milestone recorded for it. A tweak never supplies one. When the milestone tier differs from the
+  change tier, the milestone's first change to start also runs the milestone tier once and records
+  it as `milestone_regression_baseline`, so red then and red now at the gate is
+  `pre_existing_red` (W2).
+- `ape project check` notices `regression.slow` (action replan) when `regression:` is a single
+  command and its last recorded run took longer than `checks.slow_regression` (default 5m): every
+  start and verify pays for the whole suite, so split it into tiers.
 
 ### Flaky checks
 

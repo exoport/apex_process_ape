@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -90,10 +91,17 @@ func TestConfig_ChecksAndRequires(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []string{"0 examples"}, cfg.Checks.Vacuous())
 	require.Equal(t, Requires{"RADIX_DSN": RequireEnv, "docker": RequireCmd}, cfg.Requires)
+	require.Equal(t, DefaultSlowRegression, cfg.Checks.SlowRegressionAt(), "W2 Q-W2a: 5m")
+	cfg, err = load(t, "checks: {slow_regression: 90s}\n")
+	require.NoError(t, err)
+	require.Equal(t, 90*time.Second, cfg.Checks.SlowRegressionAt())
+	require.Equal(t, DefaultVacuousOutput, cfg.Checks.Vacuous(), "vacuous_output absent: the defaults")
 
 	for yaml, want := range map[string]string{
 		"checks: {vacuous: [x]}\n":           "checks.vacuous: not a key",
 		"checks: {vacuous_output: [\"\"]}\n": "empty phrase",
+		"checks: {slow_regression: soon}\n":  "checks.slow_regression",
+		"checks: {slow_regression: -1m}\n":   "checks.slow_regression",
 		"requires: {RADIX_DSN: envvar}\n":    "is not env or cmd",
 		"requires: {RADIX-DSN: env}\n":       "not an environment variable name",
 		"requires: {/usr/bin/docker: cmd}\n": "without a path",

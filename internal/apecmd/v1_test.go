@@ -537,7 +537,7 @@ func TestV1Commands_RegressionRedAtBaseline(t *testing.T) {
 	require.Equal(t, map[string]any{
 		"cmd": "./suite.sh", "exit": 1.0, "baseline_exit": 1.0, "pre_existing_red": true, "failed": false,
 		"output_sha256": v.Regression["output_sha256"], "log": "_apex/state/logs/add-wave/regression.log",
-		"baseline_sha": v.Regression["baseline_sha"],
+		"baseline_sha": v.Regression["baseline_sha"], "secs": v.Regression["secs"],
 	}, v.Regression)
 
 	stdout, _, err = v1Exec(t, newStatusCmd, "--json", "--cwd", root)

@@ -15,6 +15,7 @@ tree dirty. Each verb's full rules are in [cli.md](../reference/cli.md#ape-miles
 | `ape milestone approve <M> --by <who>` | a person | Refused in a model session. |
 | `ape milestone approve <M> --accept-green "<reason>" --by <who>` | a person | Re-approval only. |
 | `ape milestone gate <M>` | anyone; apex-loop runs it | Records the result. |
+| `ape milestone gate <M> --spec-only` | anyone; apex-plan runs it before approval | The spec's scenario checks alone. Records nothing. |
 | `ape milestone close <M>` | anyone; apex-loop runs it on a green gate | Done only when it exits 0. |
 | `ape milestone close <M> --accept-red "<reason>" --by <who>` | a person | Closes on a red gate. |
 
@@ -141,8 +142,9 @@ The gate is green only when all of these pass:
 - every scenario check of the whole spec (human-review ones are not run);
 - the project's regression command, when `_apex/config.yaml` sets `regression:` (its `milestone`
   tier, else the one command). It only needs to be not newly red: it is judged against the
-  earliest baseline any change of the milestone recorded for the same command. With no such
-  baseline, red fails the gate.
+  earliest baseline any change of the milestone recorded for the same command. A milestone tier
+  that differs from the change tier is baselined by the milestone's first change to start. With
+  no such baseline, red fails the gate.
 
 Each runs under its timeout tier (`timeouts.gate`, `timeouts.check`, `timeouts.regression`), and
 `--timeout` sets the max for all three. Files a run leaves outside `development/` are undone and
@@ -156,6 +158,13 @@ milestone's status. Exit 0 is green, exit 1 red.
 A done milestone's gate does not run again: its result was recorded at the close, which archived
 its gate folder. `gate` refuses it with `milestone.done` (exit 1, action `stop`) before anything
 runs, and writes and commits nothing.
+
+`ape milestone gate <M> --spec-only` runs only the scenario checks, in the foreground under the
+milestone's run lock. It runs no `Gate:` command and no regression command, and records nothing:
+no `milestones.json`, no `gate-<M>.json`, no commit. It is allowed on a proposed milestone, which
+is when apex-plan runs it to see which of the plan's scenarios are red. Its output goes to
+`_apex/state/logs/gate-<M>-spec/` and `gate-<M>-spec.json`. JSON carries `spec_only: true` and
+`mode: "spec-only"`. A red scenario fails it with `gate.spec-red` (exit 1, action replan).
 
 ### The gate changed since approval
 

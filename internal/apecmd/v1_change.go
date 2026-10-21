@@ -416,6 +416,9 @@ func newChangeStartCmd() *cobra.Command {
      "regression: {change: <cmd>, milestone: <cmd>}", its change tier) it runs that too,
      the same way, and records it in state.json (regression_baseline: cmd, exit, output
      sha256, sha); a red regression baseline is recorded, it does not block start.
+     With tiers that differ, the milestone's first change to start also runs the milestone
+     tier once and records it (milestone_regression_baseline; JSON milestone_regression):
+     the gate judges that tier against it. Never for a tweak (W2)
      Vacuous checks (backlog 43): when the change has an ADDED or MODIFIED delta, a task
      check that already passes here, before any of the change's work, proves nothing
      about it — start refuses (exit 1, change.vacuous-check, nothing written, no branch
@@ -528,6 +531,9 @@ func renderStart(cmd *cobra.Command, f *v1Flags, id string, res *apexv1.StartRes
 				note = fmt.Sprintf("red (%s) — recorded: verify fails only if it is newly red; roadmap the fix (apex-plan)", r.Outcome())
 			}
 			fmt.Fprintf(w, "  regression %s  %s\n", note, r.Cmd)
+		}
+		if r := res.MilestoneRegression; r != nil {
+			fmt.Fprintf(w, "  milestone regression baseline recorded (%.0fs, %s)  %s\n", r.Secs, r.Outcome(), r.Cmd)
 		}
 	})
 }

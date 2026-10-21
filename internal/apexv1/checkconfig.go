@@ -326,15 +326,23 @@ func (r *Retries) UnmarshalYAML(n *yaml.Node) error {
 // ordinary whole-module run vacuous.
 var DefaultVacuousOutput = []string{"no tests to run", "running 0 tests", "Ran 0 tests", "0 passing", "collected 0 items"}
 
+// DefaultSlowRegression is checks.slow_regression's default (W2 Q-W2a).
+const DefaultSlowRegression = 5 * time.Minute
+
 // ChecksConfig is checks: (H11).
 //
 //	checks:
 //	  vacuous_output: ["no tests to run", "0 examples"]   # replaces the default list
 //	  vacuous_output: []                                   # turns the rule off
+//	  slow_regression: 10m                                 # regression.slow's threshold (W2)
 //
-// Absent, the rule uses DefaultVacuousOutput.
+// Absent, the rule uses DefaultVacuousOutput, and slow_regression is
+// DefaultSlowRegression.
 type ChecksConfig struct {
 	VacuousOutput []string
+	// SlowRegression: a single-command regression: whose last run took
+	// longer is project check's regression.slow notice (W2); 0 is unset.
+	SlowRegression time.Duration
 	// vacuousSet: vacuous_output: was given (an empty list turns the rule
 	// off), as opposed to absent (the default list).
 	vacuousSet bool
@@ -342,26 +350,40 @@ type ChecksConfig struct {
 
 // UnmarshalYAML parses and validates the block.
 func (c *ChecksConfig) UnmarshalYAML(n *yaml.Node) error {
-	if err := checkKeys(n, "checks", "vacuous_output"); err != nil {
+	if err := checkKeys(n, "checks", "vacuous_output", "slow_regression"); err != nil {
 		return err
 	}
-	var raw map[string][]string
-	if err := n.Decode(&raw); err != nil {
-		return fmt.Errorf("checks.vacuous_output: %w — a list of phrases", err)
+	var raw struct {
+		VacuousOutput  *[]string `yaml:"vacuous_output"`
+		SlowRegression string    `yaml:"slow_regression"`
 	}
-	phrases, ok := raw["vacuous_output"]
-	if !ok {
+	if err := n.Decode(&raw); err != nil {
+		return fmt.Errorf("checks: %w — vacuous_output is a list of phrases, slow_regression a Go duration", err)
+	}
+	if s := strings.TrimSpace(raw.SlowRegression); s != "" {
+		d, err := time.ParseDuration(s)
+		if err != nil || d <= 0 {
+			return fmt.Errorf("checks.slow_regression: %q is not a positive Go duration (e.g. 5m, 90s)", raw.SlowRegression)
+		}
+		c.SlowRegression = d
+	}
+	if raw.VacuousOutput == nil {
 		return nil
 	}
 	c.vacuousSet = true
 	c.VacuousOutput = []string{}
-	for _, ph := range phrases {
+	for _, ph := range *raw.VacuousOutput {
 		if strings.TrimSpace(ph) == "" {
 			return fmt.Errorf("checks.vacuous_output: an empty phrase would match every output")
 		}
 		c.VacuousOutput = append(c.VacuousOutput, ph)
 	}
 	return nil
+}
+
+// SlowRegressionAt is the regression.slow threshold in force.
+func (c ChecksConfig) SlowRegressionAt() time.Duration {
+	return orDuration(c.SlowRegression, DefaultSlowRegression)
 }
 
 // Vacuous is the phrase list in force.
@@ -614,6 +636,21 @@ func (p *Project) configKeyNotices() []Diagnostic {
 		}
 	}
 	return out
+}
+
+// configKeyLine is the line of a top-level _apex/config.yaml key, 0 when
+// it is not there.
+func configKeyLine(root, key string) int {
+	n := configRoot(root)
+	if n == nil {
+		return 0
+	}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if n.Content[i].Value == key {
+			return n.Content[i].Line
+		}
+	}
+	return 0
 }
 
 // configRoot is _apex/config.yaml's top-level mapping, nil when the file

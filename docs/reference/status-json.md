@@ -63,7 +63,7 @@ A fresh project with one approved milestone gives, in part:
 | `changes` | array | Every change not archived, plus archived ones with unaccepted human-review tasks (below). |
 | `archived` | int | How many changes are archived. |
 | `tweaks` | array of ids | Approved tweaks not archived or blocked, in the order they run. |
-| `pre_existing_red` | array | What was red at a change's baseline that is not the change's own: `{change, kind, ref, cmd, exit, sha}`. For the planner to roadmap. |
+| `pre_existing_red` | array | What was red at a change's baseline that is not the change's own: `{change, kind, ref, cmd, exit, sha}`. A milestone tier's baseline (W2) is `ref: "milestone-regression"`. For the planner to roadmap. |
 | `spend` | object | `{total_usd, runs, note}`: the sum of the finished run manifests; a run still in progress is not counted yet. |
 | `next` | string | What comes next, derived from the state alone. |
 | `next_why` | string | Its reason, one line. |

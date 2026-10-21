@@ -2,9 +2,11 @@ package apexv1
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
 )
 
 // Backlog 32, 37: the project's own test suite as a regression command,
@@ -18,14 +20,20 @@ import (
 // Tiers (H10): `regression: {change: <cmd>, milestone: <cmd>}` runs the
 // change tier at start and verify and the milestone tier at the gate. The
 // gate judges it by the earliest baseline a change of the milestone
-// recorded for that same command, so a milestone tier that differs from
-// the change tier has no baseline: red at the gate is red.
+// recorded for that same command. A milestone tier that differs from the
+// change tier is baselined once per milestone, by the first of its
+// changes to start (W2 Part 1, State.MilestoneRegression), so the gate
+// reports red then and red now as pre-existing rather than failing on it.
 
 // KindRegression is the regression command's kind in a run of checks.
 const KindRegression = "regression"
 
 // regressionRef is the regression command's ref (and log name).
 const regressionRef = "regression"
+
+// milestoneRegressionRef is the milestone tier's baseline as pre_existing_red
+// lists it (W2 Part 1).
+const milestoneRegressionRef = "milestone-regression"
 
 // RegressionBaseline is the regression command's run at a change's start:
 // recorded once, and kept across re-starts unless the command changed.
@@ -35,6 +43,9 @@ type RegressionBaseline struct {
 	OutputSHA256 string `json:"output_sha256"`
 	SHA          string `json:"sha"`
 	At           string `json:"at"`
+	// Secs is how long the run took (W2: regression.slow); 0 for a
+	// baseline recorded before v1.1.
+	Secs float64 `json:"secs,omitempty"`
 	// Failing are the failing tests the run's output named (Q47), read
 	// when it was red; none for a green run, a run whose runner names
 	// nothing ape reads, a run naming more than regressionFailingCap, or
@@ -61,6 +72,8 @@ type RegressionVerdict struct {
 	Exit         int    `json:"exit"`
 	OutputSHA256 string `json:"output_sha256"`
 	Log          string `json:"log,omitempty"`
+	// Secs is how long the run took (W2: regression.slow).
+	Secs float64 `json:"secs,omitempty"`
 	// BaselineExit is the baseline's exit; null when there is no baseline
 	// for this command.
 	BaselineExit *int   `json:"baseline_exit"`
@@ -157,7 +170,7 @@ func (p *Project) runRegression(ctx context.Context, cmd, logDir, prefix string,
 // codes decide, as before rc.5. An unrun command is never pre-existing
 // red: it is red for want of a requirement, not by its tests.
 func judgeRegression(r *CheckResult, base *RegressionBaseline, out string) *RegressionVerdict {
-	v := &RegressionVerdict{Cmd: r.Cmd, Exit: r.Exit, OutputSHA256: r.OutputSHA256, Log: r.Log, Reason: r.Reason, Detail: r.Detail, ShellNote: r.ShellNote}
+	v := &RegressionVerdict{Cmd: r.Cmd, Exit: r.Exit, OutputSHA256: r.OutputSHA256, Log: r.Log, Secs: r.Secs, Reason: r.Reason, Detail: r.Detail, ShellNote: r.ShellNote}
 	if base != nil && base.Cmd == r.Cmd {
 		exit := base.Exit
 		v.BaselineExit, v.BaselineSHA = &exit, base.SHA
@@ -199,7 +212,7 @@ func (p *Project) checkOutput(r *CheckResult) string {
 // the failing tests its output names when it is red (Q47) — none past
 // regressionFailingCap.
 func (p *Project) regressionBaseline(r *CheckResult, sha string) *RegressionBaseline {
-	b := &RegressionBaseline{Cmd: r.Cmd, Exit: r.Exit, OutputSHA256: r.OutputSHA256, SHA: sha, At: Stamp()}
+	b := &RegressionBaseline{Cmd: r.Cmd, Exit: r.Exit, OutputSHA256: r.OutputSHA256, SHA: sha, At: Stamp(), Secs: r.Secs}
 	if r.Exit != 0 && r.Reason != ReasonUnrun {
 		if names := failingTests(p.checkOutput(r)); len(names) <= regressionFailingCap {
 			b.Failing = names
@@ -221,6 +234,27 @@ func (p *Project) rebaselineRegression(ctx context.Context, id string, st *State
 	return &r
 }
 
+// rebaselineMilestoneRegression records the milestone tier's baseline
+// (W2 Part 1) at a milestone change's start, when the tiers differ and no
+// change of the milestone, active or archived, has one for that command
+// yet: one full run per milestone and command. A tweak (milestone: none)
+// never records one (D40). Returns the run when there was one.
+func (p *Project) rebaselineMilestoneRegression(ctx context.Context, ci ChangeInfo, st *State, head string, opt RunOptions) *CheckResult {
+	if ci.Doc == nil || ci.Doc.IsTweak() {
+		return nil
+	}
+	cmd := p.milestoneRegressionCmd()
+	if cmd == "" || cmd == p.regressionCmd() || (st.MilestoneRegression != nil && st.MilestoneRegression.Cmd == cmd) {
+		return nil
+	}
+	if other, b := p.milestoneRegressionBaseline(ctx, ci.Doc.Meta.Milestone, cmd); b != nil && other != ci.ID {
+		return nil
+	}
+	r := p.runRegression(ctx, cmd, p.LogDir(ci.ID), "baseline-milestone-", opt)
+	st.MilestoneRegression = p.regressionBaseline(&r, head)
+	return &r
+}
+
 // regressionStale reports a started change whose regression baseline is
 // missing or was taken for another command: a reason to re-start.
 func (p *Project) regressionStale(st *State) bool {
@@ -238,12 +272,13 @@ func (p *Project) milestoneRegressionBaseline(ctx context.Context, milestone, cm
 		if c.Doc == nil || c.State == nil || c.Doc.Meta.Milestone != milestone {
 			continue
 		}
-		b := c.State.Regression
-		if b == nil || b.Cmd != cmd {
-			continue
-		}
-		if best == nil || b.At < best.At || (b.At == best.At && c.ID < change) {
-			change, best = c.ID, b
+		for _, b := range []*RegressionBaseline{c.State.Regression, c.State.MilestoneRegression} {
+			if b == nil || b.Cmd != cmd {
+				continue
+			}
+			if best == nil || b.At < best.At || (b.At == best.At && c.ID < change) {
+				change, best = c.ID, b
+			}
 		}
 	}
 	return change, best
@@ -293,6 +328,9 @@ func (p *Project) preExistingRed(changes []ChangeInfo) []PreExistingRed {
 		if r := st.Regression; r != nil && r.Exit != 0 {
 			out = append(out, PreExistingRed{Change: c.ID, Kind: KindRegression, Ref: regressionRef, Cmd: r.Cmd, Exit: r.Exit, SHA: r.SHA})
 		}
+		if r := st.MilestoneRegression; r != nil && r.Exit != 0 {
+			out = append(out, PreExistingRed{Change: c.ID, Kind: KindRegression, Ref: milestoneRegressionRef, Cmd: r.Cmd, Exit: r.Exit, SHA: r.SHA})
+		}
 		if c.Doc == nil || len(st.Baseline) == 0 {
 			continue
 		}
@@ -313,4 +351,62 @@ func (p *Project) preExistingRed(changes []ChangeInfo) []PreExistingRed {
 		}
 	}
 	return out
+}
+
+// regressionSlowNotices is project check's regression.slow notice (W2 Part
+// 1): a single-command regression: — one command for both tiers, so every
+// change's start and verify pays for the whole suite — whose last recorded
+// run took longer than checks.slow_regression. The remedy is the tiers.
+func (p *Project) regressionSlowNotices(ctx context.Context) []Diagnostic {
+	cfg, err := LoadConfig(p.Root)
+	if err != nil || cfg.Regression.Change == "" || cfg.Regression.MilestoneCmd() != cfg.Regression.Change {
+		return nil
+	}
+	cmd := cfg.Regression.Change
+	secs, where := p.lastRegressionRun(ctx, cmd)
+	limit := cfg.Checks.SlowRegressionAt()
+	if secs <= limit.Seconds() {
+		return nil
+	}
+	took := (time.Duration(secs) * time.Second).Round(time.Second)
+	return []Diagnostic{notice(Diagnostic{Code: CodeRegressionSlow, File: configYAML, Line: configKeyLine(p.Root, "regression"), Message: fmt.Sprintf(
+		"regression: `%s` took %s at its last run (%s), over checks.slow_regression (%s), and as the single command it runs at every change's start and verify as well as at the gate"+
+			" — split it into tiers, regression: {change: <a fast subset>, milestone: %s}, or raise checks.slow_regression", cmd, took, where, limit, cmd)})}
+}
+
+// lastRegressionRun is how long cmd took at its newest recorded run, and
+// where that was: an active change's baseline or verify, or a milestone's
+// last gate. 0 when none is recorded with a duration.
+func (p *Project) lastRegressionRun(ctx context.Context, cmd string) (secs float64, where string) {
+	var at string
+	seen := func(when string, s float64, w string) {
+		if s > 0 && when > at {
+			at, secs, where = when, s, w
+		}
+	}
+	for _, c := range p.changes(ctx) {
+		st := c.State
+		if st == nil {
+			continue
+		}
+		if b := st.Regression; b != nil && b.Cmd == cmd {
+			seen(b.At, b.Secs, c.ID+"'s baseline")
+		}
+		if v := st.Verify; v != nil {
+			for i := range v.Results {
+				if r := &v.Results[i]; r.Kind == KindRegression && r.Cmd == cmd {
+					seen(v.At, r.Secs, c.ID+"'s verify")
+				}
+			}
+		}
+	}
+	if rm := p.roadmap(); rm != nil {
+		for i := range rm.Milestones {
+			id := rm.Milestones[i].ID
+			if run := p.LastGateRun(id); run != nil && run.Regression != nil && run.Regression.Cmd == cmd {
+				seen(run.At, run.Regression.Secs, id+"'s gate")
+			}
+		}
+	}
+	return secs, where
 }

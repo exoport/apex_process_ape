@@ -233,13 +233,18 @@ type State struct {
 	Approved *Approval `json:"approved,omitempty"`
 	// Regression is the regression command's baseline (backlog 32): run
 	// at the first start, kept across re-starts unless the command changed.
-	Regression        *RegressionBaseline `json:"regression_baseline,omitempty"`
-	Verify            *Verify             `json:"verify"`
-	Review            *Review             `json:"review"`
-	Accepted          []Accept            `json:"accepted"`
-	BlockedReason     *string             `json:"blocked_reason"`
-	ReviewVoided      []ReviewVoid        `json:"review_voided,omitempty"`
-	AllowPendingHuman bool                `json:"allow_pending_human,omitempty"`
+	Regression *RegressionBaseline `json:"regression_baseline,omitempty"`
+	// MilestoneRegression is the milestone tier's baseline (W2 Part 1),
+	// when the tiers differ: taken once per milestone and command, by the
+	// first change of the milestone to start, so the gate can tell a red
+	// that was there before the milestone's work from one it made.
+	MilestoneRegression *RegressionBaseline `json:"milestone_regression_baseline,omitempty"`
+	Verify              *Verify             `json:"verify"`
+	Review              *Review             `json:"review"`
+	Accepted            []Accept            `json:"accepted"`
+	BlockedReason       *string             `json:"blocked_reason"`
+	ReviewVoided        []ReviewVoid        `json:"review_voided,omitempty"`
+	AllowPendingHuman   bool                `json:"allow_pending_human,omitempty"`
 	// AllowPendingHumanBy is who archived it so (E2: a person's act in a
 	// Claude Code session records its by and prompt).
 	AllowPendingHumanBy string `json:"allow_pending_human_by,omitempty"`

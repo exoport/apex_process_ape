@@ -102,6 +102,16 @@ const (
 	CodeDecisionPlaceholderAccepted = "decision.placeholder-accepted"
 )
 
+// v1.1 W2.
+const (
+	// CodeGateSpecRed: `ape milestone gate --spec-only` found a red
+	// scenario check (SpecOnlyResult.Err).
+	CodeGateSpecRed = "gate.spec-red" //nolint:gosec // G101 false positive: "SpecRed" reads as "cred"; a diagnostic code, not a credential
+	// CodeRegressionSlow: project check's notice for a single-command
+	// regression: whose last run took over checks.slow_regression.
+	CodeRegressionSlow = "regression.slow"
+)
+
 // CodeDoc documents one diagnostic code.
 type CodeDoc struct {
 	Code string `json:"code"`
@@ -438,5 +448,8 @@ var DiagnosticCodes = []CodeDoc{
 	{CodeConfigUnknownTopKey, 0, "person", "a notice, never a finding (project check's notices; the exit is unchanged): _apex/config.yaml has a top-level key no ape reader knows (Q154) — neither a v1 key (config-yaml reference) nor a framework folder variable — so it does nothing: a typo of a real key is fixed, a leftover dropped"},
 	{CodeDecisionPlaceholder, 1, "person", "decision accept: the ADR still holds a placeholder comment of the skeleton `ape decision new` wrote (`<!-- the forces at play -->`, `<!-- what we decided -->`, `<!-- what becomes easier or harder -->`; Q155), so it records no decision yet: write its Context, Decision and Consequences, then accept it"},
 	{CodeDecisionPlaceholderAccepted, 0, "person", "a notice, never a finding (project check's notices; the exit is unchanged): an accepted ADR still holds a placeholder comment of `ape decision new`'s skeleton (Q155), accepted before decision accept refused one — its accepted text is fixed, so a person writes the decision as a new ADR, `ape decision new <slug> --supersedes ADR-NNNN`, and accepts that"},
+	// v1.1 W2.
+	{CodeGateSpecRed, 1, "replan", "`ape milestone gate <M> --spec-only` (W2): a scenario check of the effective spec is red now (JSON spec_failed) — apex-plan fixes the plan's scenarios or their checks before the milestone is approved; nothing was recorded"},
+	{CodeRegressionSlow, 0, "replan", "a notice, never a finding (project check's notices; the exit is unchanged): regression: is a single command, so every change's start and verify runs the whole suite, and its last recorded run (a change's baseline or verify, or a milestone's last gate) took longer than checks.slow_regression (default 5m; W2) — apex-plan splits it into tiers, regression: {change: <a fast subset>, milestone: <the suite>}, whose milestone tier is baselined once per milestone"},
 	{UnclassifiedFinding, 1, "stop", "a finding no rule classifies (a bug: report it)"},
 }

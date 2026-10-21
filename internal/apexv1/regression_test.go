@@ -71,7 +71,7 @@ func TestVerify_RegressionFailsOnlyWhenNewlyRed(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, v.Green, "%+v", v.Failing())
 		require.Equal(t, &RegressionVerdict{
-			Cmd: "./suite.sh", Exit: 1, OutputSHA256: v.Regression.OutputSHA256, Log: "_apex/state/logs/add-wave/regression.log",
+			Cmd: "./suite.sh", Exit: 1, OutputSHA256: v.Regression.OutputSHA256, Log: "_apex/state/logs/add-wave/regression.log", Secs: v.Regression.Secs,
 			BaselineExit: v.Regression.BaselineExit, BaselineSHA: state(t, p, "add-wave").Regression.SHA, PreExistingRed: true,
 		}, v.Regression)
 		require.Equal(t, 1, *v.Regression.BaselineExit)

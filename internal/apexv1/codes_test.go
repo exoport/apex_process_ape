@@ -27,6 +27,8 @@ var noticeCodes = []string{
 	CodeHooksFailOpen,
 	// v1.1 follow-ups (Q154, Q155).
 	CodeConfigUnknownTopKey, CodeDecisionPlaceholderAccepted,
+	// v1.1 W2.
+	CodeRegressionSlow,
 }
 
 // The published list and the code agree: every code the source sets or a
@@ -100,6 +102,8 @@ func TestDiagnosticCodes_PublishedListMatchesTheCode(t *testing.T) {
 		// v1.1 follow-ups (Q154, Q155).
 		"CodeConfigUnknownTopKey": CodeConfigUnknownTopKey, "CodeDecisionPlaceholder": CodeDecisionPlaceholder,
 		"CodeDecisionPlaceholderAccepted": CodeDecisionPlaceholderAccepted,
+		// v1.1 W2.
+		"CodeGateSpecRed": CodeGateSpecRed, "CodeRegressionSlow": CodeRegressionSlow,
 	}
 	for _, glob := range []string{"*.go", filepath.Join("..", "apecmd", "v1_*.go")} {
 		files, err := filepath.Glob(glob)

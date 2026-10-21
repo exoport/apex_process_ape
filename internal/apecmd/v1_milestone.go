@@ -239,8 +239,9 @@ func gateHuman(g *apexv1.GateResult) func(io.Writer) {
 
 func newMilestoneGateCmd() *cobra.Command {
 	var f v1Flags
+	var specOnly bool
 	cmd := &cobra.Command{
-		Use:   "gate <M>",
+		Use:   "gate <M> [--spec-only]",
 		Short: "Run the milestone's gate and record the result",
 		Long: `Run the milestone's Gate: command from the project root — with APE_MILESTONE=<M> and
 APE_MILESTONE_BASE=<the milestone's start: HEAD at its first approval, ape status --json
@@ -257,9 +258,10 @@ milestone: none, is no change of any milestone and never supplies it — D40);
 red there and red now is reported (JSON run.regression.pre_existing_red), not failed —
 unless, with failing tests named by both runs (as for ` + "`ape change verify`" + `), a test fails
 now that did not at that baseline: red, the names in run.regression.new_failures.
-When no change of the milestone has a baseline for the command, a red regression fails
-the gate: nothing shows it was red before the milestone's work — always the case for a
-milestone tier that differs from the change tier, which no change baselines. Timeouts:
+For a milestone tier that differs from the change tier, the baseline is the one the
+milestone's first change to start recorded for that tier (milestone_regression_baseline,
+W2). When no change of the milestone has a baseline for the command, a red regression fails
+the gate: nothing shows it was red before the milestone's work. Timeouts:
 the Gate: command runs under timeouts.gate (default idle 30m, max 4h), each scenario check
 under timeouts.check (idle 15m, max 2h), the regression command under timeouts.regression
 (idle 30m, max 2h) — killed at idle without progress (output or CPU time) or at max: exit
@@ -279,9 +281,20 @@ or the gate differs from the approved one (milestone.gate-changed): a person app
 On a done milestone, refused (milestone.done) before anything runs: its gate was recorded at
 the close, which archived its gate folder; nothing is run, written or committed.
 
-Exit codes: 0 gate green · 1 gate red (last output lines shown), no such milestone, a done
-milestone, no approval record, a changed gate, or HEAD on a change branch · 2 usage.`,
-		Example: "  ape milestone gate M1",
+--spec-only (W2): runs the spec's scenario checks alone, as the gate runs them — no Gate:
+command, no regression command — and records nothing: no milestones.json, no gate-<M>.json,
+no commit. It runs in this process (no detached worker, so never exit 75) under the
+milestone's run lock (run.busy beside a gate or close of it), with the same refusals as
+the gate, and is allowed on a proposed milestone: apex-plan runs it before the approval to
+see which scenarios of the plan are red. Output under _apex/state/logs/gate-<M>-spec/, the
+result beside it in gate-<M>-spec.json (never the gate's gate-<M>.json). JSON {milestone,
+spec_only: true, mode: "spec-only", spec_checks, spec_failed: [...], log, at, sha}; a red
+scenario is the diagnostic gate.spec-red (exit 1, action replan), the result under "result".
+
+Exit codes: 0 gate green (--spec-only: every scenario passed) · 1 gate red (last output
+lines shown), a red scenario under --spec-only, no such milestone, a done milestone, no
+approval record, a changed gate, or HEAD on a change branch · 2 usage · 3 run.busy (--spec-only).`,
+		Example: "  ape milestone gate M1\n  ape milestone gate M2 --spec-only --json",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			p, err := v1Project(&f)
@@ -292,6 +305,9 @@ milestone, no approval record, a changed gate, or HEAD on a change branch · 2 u
 				return err
 			}
 			id := args[0]
+			if specOnly {
+				return runSpecOnly(cmd, &f, p, id)
+			}
 			return runLong(cmd, &f, p, id, func(ctx context.Context, opt apexv1.RunOptions) renderFn {
 				g, err := p.RunGate(ctx, id, opt)
 				return func(cmd *cobra.Command, f *v1Flags) error {
@@ -312,7 +328,39 @@ milestone, no approval record, a changed gate, or HEAD on a change branch · 2 u
 	addV1Flags(cmd, &f)
 	addV1TimeoutFlag(cmd, &f)
 	addV1WaitFlags(cmd, &f)
+	cmd.Flags().BoolVar(&specOnly, "spec-only", false, "run only the spec's scenario checks (no Gate: command, no regression) and record nothing; allowed on a proposed milestone")
 	return cmd
+}
+
+// runSpecOnly is `ape milestone gate <M> --spec-only` (W2 Part 4): in this
+// process, under the milestone's run lock.
+func runSpecOnly(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, id string) error {
+	ctx := cmd.Context()
+	lock, held, err := p.TakeRunLock(ctx, "milestone gate --spec-only", id)
+	if err != nil {
+		return v1Fail(cmd, f, err, nil)
+	}
+	if held != nil {
+		return v1Fail(cmd, f, apexv1.RunBusy(held), nil)
+	}
+	defer p.ReleaseRunLock(lock)
+	r, err := p.RunSpecOnly(ctx, id, f.runOptions())
+	if err != nil {
+		return v1Fail(cmd, f, err, nil)
+	}
+	human := func(w io.Writer) {
+		fmt.Fprintf(w, "%s spec-only: %d scenario check(s), %d red — nothing recorded (log %s/)\n", id, r.SpecChecks, len(r.SpecFailed), r.Log)
+		for i := range r.SpecFailed {
+			fmt.Fprintf(w, "  red  %s: %s\n", r.SpecFailed[i].Task, r.SpecFailed[i].Cmd)
+		}
+	}
+	if err := r.Err(); err != nil {
+		if !f.json {
+			human(cmd.OutOrStdout())
+		}
+		return v1Fail(cmd, f, err, r)
+	}
+	return v1Emit(cmd.OutOrStdout(), f, r, human)
 }
 
 func newMilestoneCloseCmd() *cobra.Command {

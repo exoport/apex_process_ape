@@ -61,7 +61,7 @@ leaves an existing `models:` alone, warning for each default skill it lacks.
 | [`regression`](#regression) | command, or `{change, milestone}` | none: no regression net | yes |
 | [`timeouts`](#timeouts) | mapping per tier | check 15m idle / 2h max, regression 30m / 2h, gate 30m / 4h | yes |
 | [`retries`](#retries) | integer 0–5 | 0 | yes |
-| [`checks`](#checks) | `{vacuous_output: [phrases]}` | five runner phrases | yes |
+| [`checks`](#checks) | `{vacuous_output: [phrases], slow_regression: <duration>}` | five runner phrases; `5m` | yes |
 | [`requires`](#requires) | map: name → `env` or `cmd` | none | yes |
 | [`caps`](#caps) | map: artefact → size | per artefact | yes |
 | [`docs`](#docs) | `{changelog, user_docs, tested}` | none | no |
@@ -158,7 +158,7 @@ limits:
 | `relays` | integer ≥ 0 | 5 | Relays per loop run. The relay past it stops the run (`limits.relays`, exit 1, action person) |
 
 [The operator and the loop](../explanation/operator-and-loop.md#the-loop-relay) explains the relay.
-Unknown keys in this block are ignored.
+An unknown key in this block is the `ape project check` finding `config.unknown-key`.
 
 ## `regression`
 
@@ -172,7 +172,10 @@ regression: {change: make test, milestone: make test-all}
 ```
 
 `change` runs at start and verify, and `milestone` at the gate (else `change`).
-`milestone` without `change` is an error.
+`milestone` without `change` is an error. When the two differ, the first change of a milestone to
+start also runs `milestone` once and records it (`milestone_regression_baseline` in its
+`state.json`), so the gate can report a suite that was red before the milestone's work as
+`pre_existing_red` instead of failing on it.
 
 ## `timeouts`
 
@@ -209,12 +212,18 @@ retried. Guarded.
 ```yaml
 checks:
   vacuous_output: ["no tests to run", "0 examples"]   # replaces the default list
+  slow_regression: 10m                                # regression.slow's threshold
 ```
 
 A check that exits 0 but whose output says it ran nothing is red, reason `vacuous`. The default
 phrases are `no tests to run` (go test), `running 0 tests` (cargo), `Ran 0 tests` (unittest before
 3.12), `0 passing` (mocha) and `collected 0 items` (pytest). An empty list turns the rule off; an
 empty phrase is an error. Guarded.
+
+`slow_regression` (a Go duration, default `5m`): when `regression:` is a single command and its
+last recorded run (a change's baseline or verify, or a milestone's last gate) took longer,
+`ape project check` notices `regression.slow`: split it into a fast change tier and the whole suite
+as the milestone tier.
 
 ## `requires`
 

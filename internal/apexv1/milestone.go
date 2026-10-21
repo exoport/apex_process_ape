@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -536,6 +537,96 @@ func (p *Project) runGate(ctx context.Context, id string, opt RunOptions) (*Gate
 	}
 	g.ResultChanged = true
 	return g, nil
+}
+
+// SpecOnlyResult is what `ape milestone gate <M> --spec-only` reports
+// (W2 Part 4): the spec's scenario checks run alone, recording nothing.
+type SpecOnlyResult struct {
+	Milestone string `json:"milestone"`
+	// SpecOnly and Mode both mark the partial run (D333 answer 2, and the
+	// W2 build brief's "mode").
+	SpecOnly bool   `json:"spec_only"`
+	Mode     string `json:"mode"`
+	// SpecChecks is how many scenario checks ran.
+	SpecChecks int           `json:"spec_checks"`
+	SpecFailed []CheckResult `json:"spec_failed"`
+	// Log is the folder the checks' output went to.
+	Log string `json:"log"`
+	At  string `json:"at"`
+	SHA string `json:"sha"`
+}
+
+// Green reports that every scenario check passed.
+func (r *SpecOnlyResult) Green() bool { return len(r.SpecFailed) == 0 }
+
+// Err is the red result's failure (gate.spec-red), nil when it is green.
+func (r *SpecOnlyResult) Err() error {
+	if r.Green() {
+		return nil
+	}
+	names := make([]string, 0, len(r.SpecFailed))
+	for i := range r.SpecFailed {
+		names = append(names, r.SpecFailed[i].Task)
+	}
+	return &FailError{Code: CodeGateSpecRed, Msg: fmt.Sprintf("%s: %d scenario check(s) of the spec are red now (%s) — fix the plan's scenarios or their checks before the milestone is approved",
+		r.Milestone, len(r.SpecFailed), strings.Join(limit(names, 5), ", "))}
+}
+
+// specOnlyPath is the spec-only run's record: beside its logs, never read
+// as the gate's (lastGatePath).
+func (p *Project) specOnlyPath(id string) string {
+	return filepath.Join(p.LogsDir(), "gate-"+id+"-spec.json")
+}
+
+// RunSpecOnly runs the effective spec's scenario checks of a milestone
+// the way its gate runs them, without the Gate: command and the
+// regression command, and records nothing: no milestones.json, no last
+// gate run, no commit (W2 Part 4; apex-plan's step 8). Refused like the
+// gate on a change branch and, for an approved milestone, without its
+// approval record or with a changed gate; allowed on a proposed one,
+// which is when apex-plan runs it.
+func (p *Project) RunSpecOnly(ctx context.Context, id string, opt RunOptions) (*SpecOnlyResult, error) {
+	if err := p.recoverArchive(ctx); err != nil {
+		return nil, err
+	}
+	if err := p.refuseOnChangeBranch(ctx, "a milestone gate run"); err != nil {
+		return nil, err
+	}
+	_, rm, err := p.loadRoadmapDoc()
+	if err != nil {
+		return nil, err
+	}
+	m := rm.Find(id)
+	if m == nil {
+		return nil, &FailError{Code: CodeMilestoneNotFound, Msg: "no milestone " + id + " in roadmap.md"}
+	}
+	if m.Status == MilestoneApproved {
+		if err := p.requireApprovalRecord(m, true); err != nil {
+			return nil, err
+		}
+	}
+	dir := filepath.Join(p.LogsDir(), "gate-"+id+"-spec")
+	spec := p.EffectiveSpecChecks(nil)
+	res := &SpecOnlyResult{
+		Milestone: id, SpecOnly: true, Mode: "spec-only", SpecChecks: len(spec), Log: p.Rel(dir),
+		At: Stamp(), SHA: HeadSHA(ctx, p.Root), SpecFailed: []CheckResult{},
+	}
+	results := p.RunChecks(ctx, dir, "", spec, opt)
+	if err := interrupted(ctx, "the spec-only run of "+id); err != nil {
+		return nil, err
+	}
+	p.markStale(results)
+	for i := range results {
+		if results[i].Exit != 0 {
+			results[i].Tail = lastN(results[i].Tail, 15)
+			res.SpecFailed = append(res.SpecFailed, results[i])
+		}
+	}
+	// The log's record (gitignored); never the gate's gate-<M>.json.
+	if data, err := json.MarshalIndent(res, "", "  "); err == nil {
+		_ = writeFileAtomic(p.specOnlyPath(id), string(data)+"\n")
+	}
+	return res, nil
 }
 
 // markDone records in milestones.json that ape closed the milestone, the

@@ -199,5 +199,7 @@ func (p *Project) Notices() []Diagnostic {
 	out = append(out, p.failOpenNotices()...)
 	// v1.1 follow-ups (Q154, Q155).
 	out = append(out, p.configKeyNotices()...)
-	return append(out, p.decisionPlaceholderNotices()...)
+	out = append(out, p.decisionPlaceholderNotices()...)
+	// v1.1 W2.
+	return append(out, p.regressionSlowNotices(context.Background())...)
 }

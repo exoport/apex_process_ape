@@ -59,6 +59,10 @@ type StartResult struct {
 	// Regression is the regression command's baseline run, when this
 	// start took one (a first start, or the command changed).
 	Regression *CheckResult `json:"regression,omitempty"`
+	// MilestoneRegression is the milestone tier's baseline run, when this
+	// start took one (W2 Part 1: the tiers differ and no change of the
+	// milestone had one for that command).
+	MilestoneRegression *CheckResult `json:"milestone_regression,omitempty"`
 	// CatchUp: start found the base branch moved ahead of the change and
 	// caught it up — rebased, re-baselined at the base tip (D40).
 	CatchUp *CatchUp `json:"catch_up,omitempty"`
@@ -263,6 +267,10 @@ func (p *Project) start(ctx context.Context, id string, opt RunOptions, enter fu
 	if err := interrupted(ctx, "the start of "+id); err != nil {
 		return nil, err
 	}
+	milestoneRegression := p.rebaselineMilestoneRegression(ctx, ci, st, head, opt)
+	if err := interrupted(ctx, "the start of "+id); err != nil {
+		return nil, err
+	}
 	// The checks are done: what they found is recorded, a signal or not.
 	ctx = context.WithoutCancel(ctx)
 	st.PlanDigest = digest
@@ -279,7 +287,7 @@ func (p *Project) start(ctx context.Context, id string, opt RunOptions, enter fu
 	}
 	return &StartResult{
 		ID: id, Status: st.Status, BaseSHA: st.BaseSHA, BaseBranch: st.BaseBranch, Branch: CurrentBranch(ctx, p.Root),
-		Baseline: results, Regression: regression,
+		Baseline: results, Regression: regression, MilestoneRegression: milestoneRegression,
 	}, nil
 }
 

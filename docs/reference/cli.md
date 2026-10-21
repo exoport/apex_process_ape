@@ -1996,6 +1996,9 @@ Start a draft (or resume a blocked or answered) change:
      "regression: {change: <cmd>, milestone: <cmd>}", its change tier) it runs that too,
      the same way, and records it in state.json (regression_baseline: cmd, exit, output
      sha256, sha); a red regression baseline is recorded, it does not block start.
+     With tiers that differ, the milestone's first change to start also runs the milestone
+     tier once and records it (milestone_regression_baseline; JSON milestone_regression):
+     the gate judges that tier against it. Never for a tweak (W2)
      Vacuous checks (backlog 43): when the change has an ADDED or MODIFIED delta, a task
      check that already passes here, before any of the change's work, proves nothing
      about it — start refuses (exit 1, change.vacuous-check, nothing written, no branch
@@ -4229,7 +4232,7 @@ Flags:
 Run the milestone's gate and record the result
 
 ```
-ape milestone gate <M> [flags]
+ape milestone gate <M> [--spec-only] [flags]
 ```
 
 Run the milestone's Gate: command from the project root — with APE_MILESTONE=<M> and
@@ -4247,9 +4250,10 @@ milestone: none, is no change of any milestone and never supplies it — D40);
 red there and red now is reported (JSON run.regression.pre_existing_red), not failed —
 unless, with failing tests named by both runs (as for `ape change verify`), a test fails
 now that did not at that baseline: red, the names in run.regression.new_failures.
-When no change of the milestone has a baseline for the command, a red regression fails
-the gate: nothing shows it was red before the milestone's work — always the case for a
-milestone tier that differs from the change tier, which no change baselines. Timeouts:
+For a milestone tier that differs from the change tier, the baseline is the one the
+milestone's first change to start recorded for that tier (milestone_regression_baseline,
+W2). When no change of the milestone has a baseline for the command, a red regression fails
+the gate: nothing shows it was red before the milestone's work. Timeouts:
 the Gate: command runs under timeouts.gate (default idle 30m, max 4h), each scenario check
 under timeouts.check (idle 15m, max 2h), the regression command under timeouts.regression
 (idle 30m, max 2h) — killed at idle without progress (output or CPU time) or at max: exit
@@ -4269,8 +4273,19 @@ or the gate differs from the approved one (milestone.gate-changed): a person app
 On a done milestone, refused (milestone.done) before anything runs: its gate was recorded at
 the close, which archived its gate folder; nothing is run, written or committed.
 
-Exit codes: 0 gate green · 1 gate red (last output lines shown), no such milestone, a done
-milestone, no approval record, a changed gate, or HEAD on a change branch · 2 usage.
+--spec-only (W2): runs the spec's scenario checks alone, as the gate runs them — no Gate:
+command, no regression command — and records nothing: no milestones.json, no gate-<M>.json,
+no commit. It runs in this process (no detached worker, so never exit 75) under the
+milestone's run lock (run.busy beside a gate or close of it), with the same refusals as
+the gate, and is allowed on a proposed milestone: apex-plan runs it before the approval to
+see which scenarios of the plan are red. Output under _apex/state/logs/gate-<M>-spec/, the
+result beside it in gate-<M>-spec.json (never the gate's gate-<M>.json). JSON {milestone,
+spec_only: true, mode: "spec-only", spec_checks, spec_failed: [...], log, at, sha}; a red
+scenario is the diagnostic gate.spec-red (exit 1, action replan), the result under "result".
+
+Exit codes: 0 gate green (--spec-only: every scenario passed) · 1 gate red (last output
+lines shown), a red scenario under --spec-only, no such milestone, a done milestone, no
+approval record, a changed gate, or HEAD on a change branch · 2 usage · 3 run.busy (--spec-only).
 
 Detached runs (D58 2.3): the command takes the run lock of its change (or milestone),
 _apex/state/runs/<id|M>.json, and runs in a detached worker (`ape __run`, its own
@@ -4298,6 +4313,7 @@ Examples:
 
 ```
   ape milestone gate M1
+  ape milestone gate M2 --spec-only --json
 ```
 
 Flags:
@@ -4306,6 +4322,7 @@ Flags:
 | ---- | ---- | ------- | ----------- |
 | `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
 | `--json` | bool | `false` | machine output (JSON on stdout) |
+| `--spec-only` | bool | `false` | run only the spec's scenario checks (no Gate: command, no regression) and record nothing; allowed on a proposed milestone |
 | `--timeout` | duration | `0s` | ceiling for each command run, overriding _apex/config.yaml timeouts.<tier>.max (default: check 2h, regression 2h, gate 4h; capped at ape's hard ceilings 4h/8h/12h); the tier's idle window still applies; exit 124 when exceeded |
 | `--wait` | duration | `9m0s` | how long this call waits for the detached run (at most 9m30s; 0 returns at once); exit 75 while it still runs — run the same command again to attach |
 
@@ -5177,7 +5194,8 @@ unparseable and every command refuses it):
                                      only when newly red; or in tiers:
   regression: {change: make test, milestone: make test-all}
                                      change: at start and verify (baseline-aware);
-                                     milestone (else change): at the milestone gate
+                                     milestone (else change): at the milestone gate, its
+                                     baseline taken by the milestone's first start
   timeouts: {check: 20m, regression: {idle: 10m, max: 1h}, gate: {idle: 3m}}
                                      per tier, a Go duration (its max) or {idle, max}. A
                                      command is killed (exit 124, reason idle|ceiling, its

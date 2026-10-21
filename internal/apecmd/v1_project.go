@@ -211,7 +211,8 @@ unparseable and every command refuses it):
                                      only when newly red; or in tiers:
   regression: {change: make test, milestone: make test-all}
                                      change: at start and verify (baseline-aware);
-                                     milestone (else change): at the milestone gate
+                                     milestone (else change): at the milestone gate, its
+                                     baseline taken by the milestone's first start
   timeouts: {check: 20m, regression: {idle: 10m, max: 1h}, gate: {idle: 3m}}
                                      per tier, a Go duration (its max) or {idle, max}. A
                                      command is killed (exit 124, reason idle|ceiling, its
