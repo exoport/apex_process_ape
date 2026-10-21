@@ -130,6 +130,25 @@ eval's E-R7-1 and E2 residual (D219).
   pointer, and `project check` lists the `roadmap.next-inline` notice. A project an rc.7b move
   left that way is repaired by running `ape next move` again.
 
+### rc.7m: a check's cleanup never loses an edit (RK-4b, Q144; D300, D301)
+
+After each check ape undoes what changed in the tree outside the development folder while it
+ran: the check's litter, but also an edit another writer made meanwhile (the person's session,
+another session, the model once `ape change verify --wait` returned 75 and the check went on).
+
+- **While a check runs, `ape hook pre-tool` denies an Edit/Write that the cleanup would undo**
+  (outside development/ and _apex/state/). The message names the check, its run (`ape change
+  verify <id>` and run id), pid and start, and says to wait (`--wait 9m` attaches). The check's
+  marker, `_apex/state/runs/checking-*.json`, counts only while the process that wrote it lives:
+  its pid and that process's start time. A crashed check never blocks an edit.
+- **Run locks record their process's start time** (`pid_start`), so a pid reused by a later
+  process no longer reads as a live run. A lock without it is judged by its pid, as before.
+- **The cleanup keeps a copy of everything it undoes**, as it was when the check ended, under
+  `_apex/state/strays/<stamp>-<pid>-<rand>/` (git-ignored). The copy is named in `strays_kept`:
+  per check result, on `change verify --json` and on the gate run. A path whose copy can't be
+  written is not undone. Git can't tell a check's write from another writer's, so nothing is
+  thrown away.
+
 ### rc.7l: zsh, and the operating rules' carriers (D297, D299)
 
 - **`ape hook session-start` adds a zsh paragraph when the session's shell is zsh** (RK-3a):

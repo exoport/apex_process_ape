@@ -2200,7 +2200,10 @@ runs' output beside its log as <name>.try<k>.log), and listed by `ape status`. R
 for scenario checks) are recorded in state.json; output under _apex/state/logs/<id>/.
 What a check leaves in the tree outside development/ — files it created, tracked files it
 changed — is undone after it and reported (JSON "stray_files"); files that were there
-before it ran are never touched. A red scenario of the lasting spec whose check names
+before it ran are never touched. A copy of each undone file, as it was when the check
+ended, is kept under _apex/state/strays/ (JSON "strays_kept"): git cannot tell a check's
+litter from another writer's edit made while it ran. While a check runs, ape hook pre-tool
+denies an Edit/Write that its cleanup would undo (Q144). A red scenario of the lasting spec whose check names
 what `ape decision standard` removed says so on its line and in results[].stale_names
 (D232; see `ape decision standard --help`).
 With "regression: <cmd>" in _apex/config.yaml (with tiers, its change tier), the
@@ -3517,8 +3520,10 @@ the hook payload (JSON) on stdin.
                   development/specs/**, changes/*/state.json, archive/**, _apex/state/**,
                   an existing development/briefs/** file, and Bash commands that create,
                   delete or push a git tag, push at all, stop processes by name (pkill,
-                  killall), or rebase or merge on a change branch; grants a person act
-                  on the person's own words (E2), and denies one without them
+                  killall), or rebase or merge on a change branch; while ape runs a
+                  check in the checkout, denies an edit outside development/ that its
+                  cleanup would undo; grants a person act on the person's own words
+                  (E2), and denies one without them
   user-prompt     UserPromptSubmit: records the prompt a person typed, which is what
                   grants a person act (E2); never blocks the prompt
 
@@ -3597,6 +3602,13 @@ PreToolUse hook for Edit|Write|MultiEdit|NotebookEdit|Bash. Denies, with
 "permissionDecisionReason":"… specs change only through ape change archive"}}, an edit
 whose target is under development/specs/, is development/changes/*/state.json, is under
 development/archive/, or is under _apex/state/.
+
+A running check (RK-4b, Q144): while ape runs a check in this checkout (a verify, a gate,
+a baseline, a Stop hook's re-run), denies an edit outside development/ and _apex/state/,
+naming the check, its run and pid: when the check ends ape undoes what changed in the
+tree while it ran. The check's marker (_apex/state/runs/checking-*.json) counts only while
+the process that wrote it lives — its pid and that process's start time — so a check that
+crashed never blocks an edit.
 
 Briefs: denies an edit to a file that already exists under development/briefs/ (any
 depth) — a brief is a plan's input, dated and verbatim, and is history: a new or
@@ -4177,7 +4189,8 @@ under timeouts.check (idle 15m, max 2h), the regression command under timeouts.r
 (idle 30m, max 2h) — killed at idle without progress (output or CPU time) or at max: exit
 124, reason idle|ceiling; --timeout sets max for all three. A vacuous or unrun gate command, scenario or regression command is
 red (see `ape change verify --help`; JSON reason/detail). Files the gate
-or a check leaves outside development/ are undone and reported ("stray_files"). A red scenario
+or a check leaves outside development/ are undone and reported ("stray_files"), a copy of
+each kept under _apex/state/strays/ ("strays_kept"; see `ape change verify --help`). A red scenario
 whose check names what `ape decision standard` removed says so on its line and in
 run.spec_failed[].stale_names (D232; see `ape decision standard --help`). The run (exit, sha, time,
 output hash, last lines) goes to _apex/state/logs/gate-<M>.json (gitignored; shown by
