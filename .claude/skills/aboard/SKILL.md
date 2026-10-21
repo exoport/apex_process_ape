@@ -60,6 +60,17 @@ which is more than the built-in set: a project can add its own under
 of those four wins on a name collision. [references/recipes.md](references/recipes.md) lists the
 built-ins only, which is why `recipes list` is the complete answer.
 
+**There is a curated library `recipes list` cannot show you**: the `recipes/`
+folder of the aboard repository (github.com/exoport/aboard, `recipes/`). Those
+recipes are not built into the binary and not a discovery tier. A project has one
+only after somebody copies the file into `.aboard/recipes/`, so from here it is
+invisible by design. Look there before building one of its shapes by hand:
+`decision-wizard-with-live-summary` (N items one panel at a time, each with its
+own verdict or approve-and-notes fields, plus a Summary panel that reads the same
+data: review queues, per-item sign-off, anything you would otherwise render as a
+wall of cards) and `human-checklist` (steps only a person can carry out, read
+back tick by tick).
+
 **Otherwise `$ARGUMENTS` is a plain description** (or empty). Proceed normally:
 read the rest of this skill, choose a type, and put the thing on the board. You
 can still reach for a recipe on your own initiative — nothing about the `--name`
@@ -546,7 +557,7 @@ wrong; there is no iframe or CSP to reason about; and the next session can chang
 one node of it instead of reading a page of your JavaScript. Reports, summaries,
 dashboards, small forms, stats, comparison tables: `ui`.
 
-**Ask for the component's props rather than guessing them** — `aboard
+**Ask for the component's props rather than guessing them** — `ape aboard
 capabilities ui` lists all 25 with what each one reads, including the fixed item
 shapes (`kv` takes `pairs[{key, value}]`, not `items[{k, v}]`). Guessing is the
 expensive mistake here: an unknown component TYPE draws a visible marker, but an
@@ -670,6 +681,14 @@ reading, and tell the user you have asked.
 and the banner inside it, and only the user dismissing it takes it down. Do not
 try; the server carries it forward regardless.
 
+**A tab you rewrite constantly can be `quiet: true`.** Then your changes to its
+`state` raise no dot. Use it for a status tab you update after every step, where
+a dot on every write would teach the user to ignore the dot everywhere. The
+write that makes a tab quiet is announced once, and so is creating a tab with
+it. Renames, a new `note` and a `done` stamp still raise the dot. Do not use it
+to make a change the user needs to see go unnoticed: a quiet tab is one you have
+told them they can stop watching.
+
 ## Answering their requests
 
 `requests` is the one channel on this board that runs the other way: the human
@@ -747,7 +766,7 @@ working directory, or from `--cwd`. One line in `.gitignore` covers all of it.
 | `.aboard/run/journal.jsonl` | every accepted write; what `trace`, `ape aboard journal` and `ape aboard history` read (`journal.<name>.jsonl` per named board) |
 | `.aboard/run/rendered.json` | mount receipts: what a browser reported it drew, per tab (`ape aboard rendered`; `rendered.<name>.json` per named board) |
 | `.aboard/run/logs/<tab>.log` | one sidecar log per `log` tab (`logs/<name>/<tab>.log` per named board) |
-| `.aboard/run/shots/` | screenshots from the local browser suite |
+| `.aboard/run/shots/` | screenshots `ape aboard shot` took |
 
 The split is content against machine-local runtime: everything under `run/` is
 true only for this machine and this moment, which is why nothing there is ever
@@ -785,9 +804,53 @@ binary. Shadowing is allowed and always reported by `ape aboard recipes list`.
 - **Per-viewer UI state stays in the browser** — selection, zoom, collapsed
   blocks, marks-hidden, and each tab's scroll position. Never write it into the
   state file.
-- **Look at a screenshot before claiming a visual change works.** `make shot`
-  then read the image. Several real bugs here passed every DOM and colour
-  assertion and were obvious in a picture.
+- **Look at a screenshot before claiming a visual change works.** Several real
+  bugs here passed every DOM and colour assertion and were obvious in a picture.
+
+  ```sh
+  ape aboard shot <tab-id>                     # prints the path; READ the picture
+  ape aboard shot <tab-id> --node <panel>      # a ui panel other than the first
+  ape aboard shot <tab-id> --theme light --width 600
+  ```
+
+  The board must be running and a chromium-family browser installed. Pictures go
+  to `.aboard/run/shots/`, and the output says what a picture does NOT show: the
+  first panel only, or an `html` widget without the board around it. Under each
+  picture it lists what DID NOT FIT at that width, as measured by the page:
+  `cut` (not on screen at all), `spill` (draws past its box) or `scroll` (a box in
+  the tab has to be scrolled). That list catches what the picture hides, such as
+  text below a clipped edge or the columns a table scrolls away. Fix those before
+  saying the tab is ready, and shoot at `--width 600` too if the board may be seen
+  in a side panel. A `--node`
+  the tab does not have is refused, because the page would open on the first
+  panel and look exactly like success. The command handles `?nosse=1`, picking the
+  tab, `html` tabs, scrolled pages and snap confinement, and posts no mount
+  receipt, so `wait --for "rendered <id>"` still means a person looked.
+
+  **On a binary without `ape aboard shot`**, drive chromium by hand against the URL
+  `ape aboard status` prints:
+
+  ```sh
+  chromium --headless --disable-gpu --hide-scrollbars \
+    --window-size=1400,900 --virtual-time-budget=10000 \
+    --screenshot="$PWD/.aboard/run/shots/<tab-id>.png" \
+    "<board-url>/?nosse=1&tab=<tab-id>"
+  ```
+
+  Without `?nosse=1` the page never reaches network-idle and chromium writes
+  nothing at all. `tab=` picks the tab; a bare `#<id>` fragment does not, but
+  `#tab=<id>` does. On a `ui` tab, `&node=<panel label>` opens that panel on a
+  binary that has panel deep links; older ones always show the first. For an
+  `html` tab, shoot `<board-url>/tab/<tab-id>/html`, because headless chromium does
+  not reliably paint the iframe. A snap-confined chromium can write only under
+  `$HOME`, and not inside a hidden directory at its top such as `~/.cache`.
+  Anywhere else it writes nothing and says "No such file or directory", which is
+  not true.
+- **A component reads more than its own `props`.** `ape aboard capabilities ui` lists
+  `commonProps` separately: `id`, `children` and `grow` apply to every component.
+  `grow: true` is how a `field` takes the free width in a `row`. Copying nodes
+  between trees filtered to a component's `props` list drops them, and nothing
+  warns, because the result is valid. It is just narrower.
 - **Render it and look before you say it is ready.** That applies to what you
   WRITE, not only to renderer code — a tab is a thing on someone's screen, and
   "I put it on the board" is a claim about how it looks. Three sessions in a row
@@ -796,10 +859,11 @@ binary. Shadowing is allowed and always reported by `ape aboard recipes list`.
   prints `applied` and exits 0 whether the tree renders or draws an empty box.
   Read the stderr warnings (they descend into a `ui` tree and into `stack`
   blocks, so a mistyped prop or a `{bind}` pointing nowhere is named at the write),
-  then shoot the tab and read the picture. Neither step is optional, because the
+  then `ape aboard shot` the tab and read the picture. Neither step is optional, because the
   warnings cannot see a layout that is legal and still unreadable.
 - **`ape aboard rendered <tab>` says what the browser actually drew** — the control
-  ids on screen, the ones somebody pressed, and any unknown-component marker.
+  ids on screen, the ones somebody pressed, any unknown-component marker, and on
+  `ui` and `html` tabs what did not fit at the width the HUMAN's browser had.
   Two things it is deliberately not: **no receipt means nobody had the tab open**,
   not that it failed; and a control listed there was **reached**, never proved
   correct. It is a third source, after the write warnings and the picture, not a

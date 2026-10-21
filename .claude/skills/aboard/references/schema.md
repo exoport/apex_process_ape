@@ -106,6 +106,9 @@ independently of whatever tab or stack block holds it.
   "stateFrom": "ab1",         // OPTIONAL: render another tab's state with this
                               // type — a kanban and a DAG over one dataset
 
+  "quiet": true,              // OPTIONAL: your changes to this tab's STATE raise no
+                              // unread dot. For a tab you rewrite constantly.
+
   "touched": {                // set BY THE SERVER when an agent changed the tab
     "by": "agent-1", "at": "…", "note": "optional"
   },
@@ -131,6 +134,15 @@ Three fields you do not control:
   on a stamp is rewritten to whoever actually wrote it. Reach for the commands
   rather than editing the array: `ape aboard requests`, then
   `ape aboard requests done <id> --by agent-1 --note "what you did"`.
+
+**`quiet`** is yours to set, and it changes only when the server stamps
+`touched`. On a tab that is quiet before and after your write, a `state`
+change raises no dot; the write is still journaled. Turning it on, creating a
+tab with it, turning it off, and changing `name`, `type`, `stateFrom`, `note`
+or a request's `done` are all still stamped, and a marker already up is never
+cleared. Use it for a tab you rewrite after every step, such as a status tab,
+and for nothing the user needs to notice when it changes. The user can toggle
+it from the tab's right-click menu.
 
 ## state, per type
 

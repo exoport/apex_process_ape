@@ -1,7 +1,7 @@
 # Recipes
 
 <!-- Generated from the built-in recipes compiled into the binary. Do not edit.
-     Regenerate with `ape aboard recipes index > <this file>`, or `make caps`
+     Regenerate with `aboard recipes index > <this file>`, or `make caps`
      in aboard's own checkout, which also rebuilds the other two. -->
 
 | name | description | when to use | scope |
@@ -17,17 +17,17 @@
 | `show-a-structure` | Put a plan or a dependency set on the board as a dag the human can drag into the right shape, and mirror it as a kanban. | When you have inferred a structure — a plan, a dependency graph, an order of work — and want it argued with rather than approved in prose. Also when the same nodes want a second reading by status. | built-in |
 
 **The table above is only the recipes shipped in the binary. This project may
-have more.** Run `ape aboard recipes list` to see every recipe actually available
+have more.** Run `aboard recipes list` to see every recipe actually available
 here — one line per recipe (`name`, `scope`, `description`), and, indented
 under it, the file's path and anything it shadows. A clean built-in is one
 line; a recipe with something worth knowing about it is two, and says what.
-`ape aboard recipes list --output-format json` carries the whole record, including
+`aboard recipes list --output-format json` carries the whole record, including
 `whenToUse`, `tags`, `requires`, `hasTemplate` and `shadowedBy`. It is the only
 complete answer, because a project's own recipes are files on disk that no
-generated document can know about. `ape aboard recipes show <name>` prints the
+generated document can know about. `aboard recipes show <name>` prints the
 recipe body to stdout; read it and follow it. If the recipe carries a tab
-skeleton, `ape aboard recipes show <name> --template` prints just that JSON, ready to
-edit and hand to `ape aboard apply` — and a recipe with no skeleton exits non-zero
+skeleton, `aboard recipes show <name> --template` prints just that JSON, ready to
+edit and hand to `aboard apply` — and a recipe with no skeleton exits non-zero
 naming itself, rather than printing an empty document you would apply as an
 empty tab. When two recipes share a name the first of `_apex/aboard/recipes/` →
 `_aboard/recipes/` → `.aboard/recipes/` → built-in wins, and the winning row

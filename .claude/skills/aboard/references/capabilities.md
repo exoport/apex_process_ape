@@ -51,7 +51,7 @@ ape aboard capabilities ui                     # what this board can do — no s
 ape aboard recipes list                        # every recipe available here, with scope and shadowing
 ape aboard recipes show show-a-structure       # one recipe's body; --template for just the JSON skeleton
 ape aboard version                             # which binary is this
-make caps | e2e | shot | build | test | lint | status
+# make caps | e2e | shot | build | test | lint | status: targets of aboard's own checkout, not of a project that hosts it
 ```
 
 Every command takes `--cwd DIR` on the root, to resolve the project from
@@ -139,6 +139,7 @@ that is what the tag is for. Form *field* ids stay semantic.
 | `state` | type-specific (below) |
 | `stateFrom` | render another tab's state with this type |
 | `note` | what the tab is FOR, in whoever's words — read it before acting |
+| `quiet` | `true`: your changes to this tab's state raise no dot (going quiet is announced once) |
 | `touched` | server-set when an agent changed the tab; only the user clears it |
 | `pendingRemoval` | `{by, at, reason}` — a removal request the user answers |
 
@@ -598,7 +599,9 @@ was aimed at.
   redo, apply again. Never fall back to `Edit` on a live board.
 - **Atomic writes.** Readers never see a half-written file.
 - **An agent cannot delete a tab** — a dropped tab is restored as a request.
-- **An agent cannot clear `touched`** — only the human's dismiss does.
+- **An agent cannot clear `touched`** — only the human's dismiss does. A `quiet`
+  tab gets no NEW marker for a state change; an existing one is still carried
+  forward, and the write that makes a tab quiet is stamped.
 - **An agent cannot un-ack a chat message.** Once a session stamps `ackBy` on a
   message, the human's edit/delete window on it is closed; dropping the ack would
   reopen a window on something already acted on, so acks are carried forward.
