@@ -82,6 +82,7 @@ func TestLive_ClaudeCodeContract(t *testing.T) {
 	t.Run("pty_repaints_during_tool", func(t *testing.T) { livePTYRepaintsDuringTool(t, claudeBin) })
 	t.Run("typed_line_renders", func(t *testing.T) { liveTypedLineRenders(t, claudeBin) })
 	t.Run("args_whitespace", func(t *testing.T) { liveArgsWhitespace(t, claudeBin) })
+	t.Run("settings_warning_refused", func(t *testing.T) { liveSettingsWarningRefused(t, claudeBin) })
 }
 
 // liveTypedLineRenders checks what Deliver's Enter waits for: that a line
@@ -91,6 +92,27 @@ func TestLive_ClaudeCodeContract(t *testing.T) {
 // typedRenderTimeout, so every typed line would cost ten seconds and the
 // load protection would be gone; this says so. Enter is never pressed:
 // no turn, no tokens.
+// liveSettingsWarningRefused: a settings file with an invalid permission
+// rule stops claude at its Settings Warning before the REPL (measured on
+// 2.1.294–2.1.305, W1), and WaitForReady must end at once with
+// ErrSettingsWarning rather than answer it or idle out. Zero tokens.
+func liveSettingsWarningRefused(t *testing.T, claudeBin string) {
+	t.Helper()
+	dir := t.TempDir()
+	settings := filepath.Join(dir, "settings.json")
+	require.NoError(t, os.WriteFile(settings, []byte(`{"permissions":{"deny":["Bash()"]}}`), 0o644))
+	name := sessionName(t, "settings-warning")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	argv := []string{claudeBin, "--dangerously-skip-permissions", "--settings", settings}
+	require.NoError(t, NewSessionWithEnv(ctx, name, dir, argv, nil))
+	t.Cleanup(func() { _ = KillSession(context.Background(), name) })
+	err := WaitForReady(ctx, name)
+	require.ErrorIsf(t, err, ErrSettingsWarning, "an invalid permission rule no longer stops at the screen settingsWarningVisible "+
+		"matches: either claude now shows it differently (update the matcher) or it no longer blocks the REPL.\npane:\n%s", paneOf(ctx, name))
+	require.Contains(t, err.Error(), `Invalid permission rule "Bash()"`)
+}
+
 func liveTypedLineRenders(t *testing.T, claudeBin string) {
 	t.Helper()
 	cases := []struct {

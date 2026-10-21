@@ -825,6 +825,46 @@ var blockingModals = []modalSpec{
 	},
 }
 
+// ErrSettingsWarning is the REPL stopped at Claude Code's "Settings
+// Warning" screen: a settings file holds a value it skips — an invalid
+// permission rule, say — and it asks Continue / Fix with Claude / Exit
+// before the REPL. Measured on 2.1.294, 2.1.304 and 2.1.305 (W1).
+//
+// ape never answers it. Continue would run the session without the
+// skipped value, and a skipped deny rule is a guard the person wrote,
+// silently gone from an unattended run. So the wait ends at once with
+// the warning's own lines instead of idling out the ready window.
+var ErrSettingsWarning = errors.New("claude stopped at its Settings Warning")
+
+// settingsWarningVisible matches that screen on its heading and its exit
+// option, not on any one value's wording.
+func settingsWarningVisible(s string) bool {
+	l := strings.ToLower(s)
+	return strings.Contains(l, "settings warning") && strings.Contains(l, "exit and fix")
+}
+
+// settingsWarningError carries the warning's lines, from its heading to
+// the menu, and the remedy.
+func settingsWarningError(pane string) error {
+	var lines []string
+	in := false
+	for l := range strings.SplitSeq(pane, "\n") {
+		t := strings.TrimSpace(l)
+		switch {
+		case strings.EqualFold(t, "settings warning"):
+			in = true
+			continue
+		case in && (strings.Contains(t, "1. Continue") || strings.HasPrefix(t, "❯")):
+			in = false
+		}
+		if in && t != "" {
+			lines = append(lines, t)
+		}
+	}
+	return fmt.Errorf("%w — %s — fix the settings file it names, then run again; ape does not press Continue, "+
+		"which would run without the value it skipped (a skipped deny rule is a guard gone)", ErrSettingsWarning, strings.Join(lines, " "))
+}
+
 // menuMove is one pass of the trust walk: what the pane read as selected,
 // whether the read changed after Down was pressed, and the pane it was
 // read from.
@@ -1096,6 +1136,9 @@ func WaitForReady(ctx context.Context, name string) error {
 				// Modal dismissed — poll again before testing readiness.
 			case replReady(snap):
 				return nil
+			case settingsWarningVisible(snap):
+				// Never answered: see ErrSettingsWarning.
+				return &NotReadyError{Name: name, Pane: snap, Err: settingsWarningError(snap), Output: recentOutputFn(name)}
 			}
 		}
 		select {

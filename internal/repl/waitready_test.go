@@ -151,3 +151,46 @@ func TestDismissBlockingModalsActsAtMostOnce(t *testing.T) {
 		t.Fatalf("expected exactly one dismissal Enter, got %d", f.enters)
 	}
 }
+
+// W1: Claude Code's Settings Warning (an invalid permission rule, here
+// as 2.1.305 draws it) ends the wait at once, never answered, and the
+// error carries the warning's lines.
+func TestWaitForReadySettingsWarningIsRefusedAtOnce(t *testing.T) {
+	const pane = `  Settings Warning
+
+  /tmp/p/.claude/settings.json
+  └ permissions.deny: Invalid permission rule "Bash()" was skipped: Empty parentheses. Either specify a pattern or use just "Bash" without parentheses
+
+  The values listed above were skipped; the rest of the file is in effect.
+
+  ❯ 1. Continue
+    2. Fix with Claude
+    3. Exit and fix manually
+
+  Enter to confirm · Esc to cancel`
+	f := installFakePane(t, []string{pane})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	start := time.Now()
+	err := WaitForReady(ctx, "fake")
+	if !errors.Is(err, ErrSettingsWarning) {
+		t.Fatalf("want ErrSettingsWarning, got %v", err)
+	}
+	if time.Since(start) > 2*time.Second {
+		t.Fatalf("the wait should end at once, took %s", time.Since(start))
+	}
+	if _, ok := errors.AsType[*NotReadyError](err); !ok {
+		t.Fatalf("want *NotReadyError (exit 3), got %T", err)
+	}
+	for _, want := range []string{`Invalid permission rule "Bash()" was skipped`, "/tmp/p/.claude/settings.json", "does not press Continue"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error lacks %q:\n%v", want, err)
+		}
+	}
+	if f.enters != 0 {
+		t.Fatalf("pressed Enter %d times on the warning", f.enters)
+	}
+	if settingsWarningVisible(readyFooterPane) || settingsWarningVisible(trustModalPane) {
+		t.Fatal("matched a pane that is not the warning")
+	}
+}
