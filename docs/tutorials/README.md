@@ -10,7 +10,7 @@ Good ape tutorials hold the reader's hand from "I haven't used ape before" to "I
 
 ## Planned tutorials
 
-- **Lift a v0 project.** `ape framework update` to v1 on an APEX v0 project, which runs `ape project lift` (the branch needs an upstream, and the `apex-v0-final` tag pushed to it). End state: the v1 layout in one commit, with the disposition list a person reviews.
+- **Lift a v0 project.** A guided walk through lifting a sample APEX v0 project. Until then, [How to lift an APEX v0 project to v1](../how-to/lift-a-v0-project.md) has the steps.
 
 ## Writing a tutorial
 

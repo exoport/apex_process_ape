@@ -4,32 +4,46 @@ How-to guides are **recipes** — they answer "how do I X?" for a reader who alr
 
 ## Available guides
 
+**Install and set up**
+
 - [How to install ape](install.md)
 - [How to update ape](update.md)
 - [How to verify a release artifact](verify.md)
-- [How to set up the APEX framework in a project](framework-setup.md)
-- [How to refresh the APEX framework in a project](framework-update.md)
-- [How to pass arguments to skills](pass-args-to-skills.md)
+- [How to pin ape in a project](pin-ape-in-a-project.md)
+- [How to install the APEX framework into a project](framework-setup.md)
+- [How to refresh the framework in a project](framework-update.md)
+- [How to lift an APEX v0 project to v1](lift-a-v0-project.md)
+
+**Run APEX v1 work**
+
+- [How to run a milestone](run-a-milestone.md)
+- [How to record a decision](record-a-decision.md)
 - [How to run a single skill with `ape task`](run-a-single-skill.md)
+- [How to run ape in the background](detach-a-run.md)
 - [How to run an unattended session with `ape prompt`](run-a-prompt-session.md)
-- [How to tune long-running steps](tune-long-running-steps.md)
-- [How ape runs claude (PTY-only)](interactive-vs-programmatic.md)
-- [How to read run artefacts](run-artefacts.md)
-- [How to keep cost pricing current](keep-cost-pricing-current.md)
+- [How to tune long-running sessions](tune-long-running-steps.md)
+- [How to write and run an `ape script`](write-ape-scripts.md)
+- [How to find and read run artefacts](run-artefacts.md)
+
+**Integrate**
+
+- [How to use the board (`ape aboard`)](use-the-board.md)
+- [How to run ape as a service (NATS job daemon)](run-ape-as-a-service.md)
 - [How to publish run progress to NATS](publish-progress-to-nats.md)
-- [How to report from a Claude session (event/log/metrics/transcript)](report-from-a-session.md)
+- [How to report from a Claude session](report-from-a-session.md)
 - [How to upload run transcripts as content-addressed blobs](upload-transcripts.md)
+
+**Sandbox workspaces**
+
 - [How to run a sandboxed Kata VM workspace](sandbox-workspaces.md)
 - [How to use a workspace as your dev container](devcontainer-workspaces.md)
-- [How to run ape as a service (NATS job daemon)](run-ape-as-a-service.md)
 - [How to run aped (the VM-management daemon)](run-aped.md)
+
+**Operate**
+
+- [How to keep cost pricing current](keep-cost-pricing-current.md)
 - [How to run `ape doctor` in CI](run-doctor-in-ci.md)
 - [How to verify a release before tagging](pre-tag-release.md)
-
-## Planned guides
-
-- **How to run ape in CI.** Exit code semantics, environment requirements (`ANTHROPIC_API_KEY`, etc.).
-- **How to record a decision.** `ape decision new` / `accept`, and superseding an accepted ADR.
 
 ## Writing a how-to guide
 

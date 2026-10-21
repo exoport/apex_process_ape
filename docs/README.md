@@ -13,52 +13,100 @@ The four quadrants serve different needs and are written in different styles. Tu
 
 ## Index
 
+New to APEX v1? Start with [What APEX v1.0 promises](explanation/apex-v1-scope.md), then
+[the tutorial](tutorials/first-v1-project.md). Every command and flag is in the
+[CLI reference](reference/cli.md).
+
 ### Tutorials — _learning by doing_
 
-- [Your first APEX v1 project](tutorials/first-v1-project.md) — install → doctor → `project init` → a milestone → green `project check` and `doctor --strict`
+- [Your first APEX v1 project](tutorials/first-v1-project.md) — `framework setup` → `project init` → a milestone a person approves → a green `project check` and `doctor --strict`
 
 ### How-to guides — _recipes for specific problems_
 
+**Install and set up**
+
 - [How to install ape](how-to/install.md)
 - [How to update ape](how-to/update.md)
+- [How to verify a release artifact](how-to/verify.md)
 - [How to pin ape in a project](how-to/pin-ape-in-a-project.md) — a bare `ape` honours `.bingo/ape.mod`
-- [How to set up the APEX framework in a project (first install)](how-to/framework-setup.md)
-- [How to refresh the APEX framework in a project](how-to/framework-update.md)
-- [How to pass arguments to skills](how-to/pass-args-to-skills.md)
+- [How to install the APEX framework into a project](how-to/framework-setup.md)
+- [How to refresh the framework in a project](how-to/framework-update.md)
+- [How to lift an APEX v0 project to v1](how-to/lift-a-v0-project.md)
+
+**Run APEX v1 work**
+
+- [How to run a milestone](how-to/run-a-milestone.md) — new, approve, gate, close
+- [How to record a decision](how-to/record-a-decision.md) — ADRs, and findings for later in `next.md`
 - [How to run a single skill with `ape task`](how-to/run-a-single-skill.md)
-- [How to run ape in the background, beyond a tool's time limit](how-to/detach-a-run.md) — `--detach`, `ape run wait` and its exit 75
+- [How to run ape in the background](how-to/detach-a-run.md) — `ape task --detach`, `ape run wait`, and the verbs that detach on their own
 - [How to run an unattended session with `ape prompt`](how-to/run-a-prompt-session.md)
+- [How to tune long-running sessions](how-to/tune-long-running-steps.md)
 - [How to write and run an `ape script`](how-to/write-ape-scripts.md)
-- [How to run a sandboxed Kata VM workspace](how-to/sandbox-workspaces.md)
-- [How to use a workspace as your dev container](how-to/devcontainer-workspaces.md)
+- [How to find and read run artefacts](how-to/run-artefacts.md)
+
+**Integrate**
+
 - [How to use the board (`ape aboard`)](how-to/use-the-board.md)
 - [How to run ape as a service (NATS job daemon)](how-to/run-ape-as-a-service.md)
+- [How to publish run progress to NATS](how-to/publish-progress-to-nats.md)
+- [How to report from a Claude session](how-to/report-from-a-session.md)
+- [How to upload run transcripts as content-addressed blobs](how-to/upload-transcripts.md)
+
+**Sandbox workspaces**
+
+- [How to run a sandboxed Kata VM workspace](how-to/sandbox-workspaces.md)
+- [How to use a workspace as your dev container](how-to/devcontainer-workspaces.md)
 - [How to run aped (the VM-management daemon)](how-to/run-aped.md)
-- [How ape runs claude (PTY-only)](how-to/interactive-vs-programmatic.md)
-- [How to read run artefacts](how-to/run-artefacts.md)
+
+**Operate**
+
 - [How to keep cost pricing current](how-to/keep-cost-pricing-current.md)
 - [How to run `ape doctor` in CI](how-to/run-doctor-in-ci.md)
 - [How to verify a release before tagging](how-to/pre-tag-release.md)
 
 ### Reference — _technical descriptions_
 
+**APEX v1**
+
 - [CLI reference](reference/cli.md) — every command, flag, and default (generated from the command tree)
-- [`apescript` library reference](reference/apescript.md) — the public v1 surface `ape script` files import (orchestration, introspection, plumbing, sandbox rules)
-- [`framework.yaml` reference](reference/framework-yaml.md) — schema for `_apex/framework.yaml`
-- [Sandbox profile reference](reference/sandbox-profile.md) — schema for `_apex/sandbox/*.yaml` (Kata VM workspaces)
-- [Claude Code environment variables](reference/claude-code-env-vars.md) — `CLAUDECODE` / `CLAUDE_CODE_*`, nested-session protection, and why ape scrubs them from spawned sessions
-- [NATS subjects & event payloads](reference/events.md) — the `ape.evt`/`log`/`metrics`/`svc`/`vmm`/`audit` subject taxonomy + payload schemas (**proposed** — the single contract for the PLAN-13/14/17/18 NATS work)
+- [The change lifecycle](reference/change-lifecycle.md) — every state and `ape change` verb, the squash archive, checks and limits
+- [`_apex/config.yaml`](reference/config-yaml.md) — every key, its default, and which blocks a person must accept
+- [Hooks](reference/hooks.md) — what `ape project init` registers and what each hook decides
+- [`ape status` and `ape project check` JSON](reference/status-json.md)
+- [Run manifest](reference/pipeline-run-manifest.md) — the `manifest.yaml` an `ape task` run writes
+- [Step contract](reference/step-contract.md) — the line `ape task` types, and how the step completes
+- [`_apex/framework.yaml`](reference/framework-yaml.md) — what an install records, its migrations ledger included
+
+**Claude Code**
+
+- [Claude Code environment variables](reference/claude-code-env-vars.md) — what ape sets and scrubs in each spawn, and the effort rules
+- [How ape spawns `claude`](reference/claude-spawn-modes.md) — per command
+
+**Scripts, services and NATS**
+
+- [`apescript` library reference](reference/apescript.md) — the surface `ape script` files import
+- [`ape service` endpoint contract](reference/service-api.md)
+- [NATS subjects & event payloads](reference/events.md)
+- [Transcript blob offload](reference/blob-offload.md)
+- [Bridge IPC wire schema](reference/bridge-ipc.md) and [bridge security model](reference/bridge-security.md)
+
+**Sandbox**
+
+- [`.apesandbox.yaml`](reference/apesandbox-yaml.md) — the project sandbox descriptor
+- [Sandbox profile reference](reference/sandbox-profile.md) — `_apex/sandbox/<name>.yaml`
 
 ### Explanation — _the why and the what_
 
-- [Why PTY-only execution](explanation/why-pty-only.md) — why every run drives an interactive `claude` REPL inside a PTY, and why the programmatic `claude -p` axis was removed in v0.0.36
-- [Choosing between `ape chat`, `ape task`, and `ape prompt`](explanation/chat-task-prompt.md) — the three ways ape drives a Claude session and how to pick one
-- [The per-stage interactive runtime](explanation/exec-modes.md) — process-spawn cost, context sharing, the step contract, and what hooks add
-- [Why a `Stop` hook is not proof a step finished](explanation/step-completion-gates.md) — detached agents, the four completion gates, and why they degrade safely on an older Claude Code
-- [When `ape` runs inside a session `ape` started](explanation/nested-ape-runs.md) — the nesting rule (D62): depth 0/1/2, the orchestrator's one child, how ape knows (marker and process ancestry), and why v0 closed nesting
-- [`ape framework update` installs releases](explanation/framework-updates-from-releases.md) — why setup and update install a release tag rather than the clone's `main` (v0.4.0), how `min_ape_version` is checked, and the commits that record an install
-- [The framework and governance clones are caches](explanation/framework-and-governance-clones.md) — why setup and update check the newest release out in both clones (v0.7.0), where each clone lives when nothing names one, and how a skill finds the governance clone
-- [Why setup and update are separate](explanation/why-setup-and-update-are-separate.md) — the v0.0.7 split of `framework update` into two commands
+- [What APEX v1.0 promises, and where it stops](explanation/apex-v1-scope.md) — start here
+- [What only a person does](explanation/person-acts.md) — the person acts, and typing them in your own Claude Code session
+- [The operator and the loop](explanation/operator-and-loop.md) — `/apex-orchestrator` and `ape task apex-loop`
+- [When `ape` runs inside a session `ape` started](explanation/nested-ape-runs.md) — the nesting rule
+- [Choosing between `ape chat`, `ape task`, and `ape prompt`](explanation/chat-task-prompt.md)
+- [Why PTY-only execution](explanation/why-pty-only.md)
+- [Why a `Stop` hook is not proof a step finished](explanation/step-completion-gates.md)
+- [`ape framework update` installs releases](explanation/framework-updates-from-releases.md)
+- [The framework and governance clones are caches](explanation/framework-and-governance-clones.md)
+- [Why `framework setup` and `framework update` are separate commands](explanation/why-setup-and-update-are-separate.md)
 
 ## Contributing to the docs
 

@@ -4,20 +4,22 @@ Explanation docs answer "why" — design rationale, conceptual background, the s
 
 ## Available explanation
 
-- [apex-v1-scope.md](apex-v1-scope.md) — what APEX v1.0 promises (code reaches the base only as a reviewed squash), the shape it is built for (one operator per checkout, local trunk), the fix queue, and what only a person does.
-- [why-pty-only.md](why-pty-only.md) — why every run drives an interactive `claude` REPL inside a PTY, and why the programmatic `claude -p` axis was removed in v0.0.36.
+- [apex-v1-scope.md](apex-v1-scope.md) — what APEX v1.0 promises (code reaches the base only as a reviewed squash), the shape it is built for (one operator per checkout, local trunk), the fix queue, and what only a person does. Start here.
+- [person-acts.md](person-acts.md) — the acts only a person does, why, and the two ways a person does them: a plain terminal, or the typed phrase in their own Claude Code session.
+- [operator-and-loop.md](operator-and-loop.md) — `/apex-orchestrator`, the person's own session, versus `ape task apex-loop`, the unattended runner; the relay, the nesting rule and delegates as the loop meets them.
+- [nested-ape-runs.md](nested-ape-runs.md) — the nesting rule: depth 0/1/2, which skills a loop may start, and how ape knows.
 - [chat-task-prompt.md](chat-task-prompt.md) — the three ways ape drives a Claude session (`ape chat` / `ape task` / `ape prompt`) and how to choose between them.
-- [exec-modes.md](exec-modes.md) — the per-stage interactive runtime: process-spawn cost, context sharing, the step contract, and what hooks add.
-- [step-completion-gates.md](step-completion-gates.md) — why a `Stop` hook alone is not proof a step finished, and the four gates that decide completion since v0.0.52.
-- [why-setup-and-update-are-separate.md](why-setup-and-update-are-separate.md) — the v0.0.7 split of `framework update` into two commands.
-- [framework-and-governance-clones.md](framework-and-governance-clones.md) — why `framework setup/update` keep the framework and governance clones at their newest release (v0.7.0), and where ape keeps its own clones.
+- [why-pty-only.md](why-pty-only.md) — why every run drives an interactive `claude` REPL inside a PTY, and what hooks add.
+- [step-completion-gates.md](step-completion-gates.md) — why a `Stop` hook alone is not proof a step finished, and what decides completion.
+- [framework-updates-from-releases.md](framework-updates-from-releases.md) — why setup and update install a release tag, how `min_ape_version` is checked, and blocking migrations.
+- [framework-and-governance-clones.md](framework-and-governance-clones.md) — why `framework setup/update` keep the framework and governance clones at their newest release, and where ape keeps its own clones.
+- [why-setup-and-update-are-separate.md](why-setup-and-update-are-separate.md) — why installing and refreshing the framework are two commands.
 
 ## Planned explanation
 
 - **What is ape.** What ape is, what APEX is, the relationship between them, and why a separate CLI exists when APEX skills can be invoked directly from Claude Code.
-- **How ape works.** The task runner: pre-flight checks, Claude CLI dispatch over a PTY, the completion gates, exit-code semantics.
+- **How ape works.** The task runner end to end: pre-flight checks, Claude CLI dispatch over a PTY, the completion gates, exit-code semantics.
 - **Why Go.** Why ape ships as a single Go binary instead of a Python package or a shell script. Trade-offs of that choice.
-- **The unit of change.** Why APEX v1 replaced v0's pipelines and story ceremony with changes ape validates and records.
 
 ## Writing explanation
 
