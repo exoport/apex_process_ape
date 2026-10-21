@@ -30,6 +30,10 @@ const probeSkill = "apex-probe-subagents"
 // that. The concurrency assertion sits between the two.
 const subSleep = 20 * time.Second
 
+// subagentsHangCeiling bounds the two sub-agents' whole span: well past
+// one slow sub-agent (46 s seen on claude 2.1.305), short of a hang (Q138).
+const subagentsHangCeiling = 120 * time.Second
+
 const probeSkillBody = `---
 name: apex-probe-subagents
 description: ape's end-to-end probe. Dispatches two foreground sub-agents in parallel and records what they saw.
@@ -115,15 +119,32 @@ func TestLive_TaskSubagents(t *testing.T) {
 	t.Run("subagents_concurrent", func(t *testing.T) {
 		span := run.lastResult.Sub(run.firstCall)
 		t.Logf("two %s sub-agents: first call → last result %s", subSleep, span.Round(time.Second))
-		// D284: each sub-agent's own span, from its transcript, so a failure
-		// says whether they ran one after the other (the second starting as
-		// the first ends) or together with one slow (both starting at once).
-		for _, sp := range subagentSpans(t, filepath.Join(run.runDir, "transcripts")) {
+		// D284: each sub-agent's own span, from its transcript.
+		spans := subagentSpans(t, filepath.Join(run.runDir, "transcripts"))
+		for _, sp := range spans {
 			t.Logf("  %s: start +%s, end +%s", sp.name, sp.start.Sub(run.firstCall).Round(100*time.Millisecond), sp.end.Sub(run.firstCall).Round(100*time.Millisecond))
 		}
-		require.Less(t, span, 2*subSleep,
-			"the two foreground sub-agents took %s, at least the sum of their work: they ran one after the other, "+
-				"so a batch skill now takes N times as long", span.Round(time.Second))
+		// Q138 (D287): concurrency is overlap — every sub-agent starts
+		// before the first of them ends. The total span used to be the
+		// test (< 2×subSleep), and on claude 2.1.305 it failed when both
+		// started together and one was slow (+0.1→23.8 s, +1.2→46.2 s),
+		// calling that "one after the other". The span stays bounded by a
+		// ceiling that only a hang reaches.
+		require.Len(t, spans, 2, "two sub-agent transcripts")
+		firstEnd, lastStart := spans[0].end, spans[0].start
+		for _, sp := range spans[1:] {
+			if sp.end.Before(firstEnd) {
+				firstEnd = sp.end
+			}
+			if sp.start.After(lastStart) {
+				lastStart = sp.start
+			}
+		}
+		require.True(t, lastStart.Before(firstEnd),
+			"the last sub-agent started %s after the first call, after the first one had ended (+%s): they ran one after the other, "+
+				"so a batch skill now takes N times as long", lastStart.Sub(run.firstCall).Round(100*time.Millisecond), firstEnd.Sub(run.firstCall).Round(100*time.Millisecond))
+		require.Less(t, span, subagentsHangCeiling,
+			"the two foreground sub-agents took %s, past the %s ceiling: a hang, not a slow sub-agent", span.Round(time.Second), subagentsHangCeiling)
 	})
 
 	t.Run("subagent_environment", func(t *testing.T) {
