@@ -7,13 +7,13 @@ A project that pins ape with [bingo](https://github.com/bwplotka/bingo) runs tha
 In the project's repo root:
 
 ```bash
-bingo get -l github.com/exoport/apex_process_ape/cmd/ape@v0.9.0
-git add .bingo && git commit -m "chore: pin ape v0.9.0"
+bingo get -l github.com/exoport/apex_process_ape/cmd/ape@v1.0.0
+git add .bingo && git commit -m "chore: pin ape v1.0.0"
 ```
 
 Later, `ape update --pin` or `ape framework update --update-ape` moves the pin to the newest release and commits it for you.
 
-bingo builds `<GOBIN>/ape-v0.9.0` and records the version in `.bingo/ape.mod`. `-l` also points the bare `<GOBIN>/ape` at it. To move the pin later, run the same command with the new version and commit `.bingo/` again. Don't use `ape update` for this: it refuses on a pinned binary because it would overwrite the versioned file.
+bingo builds `<GOBIN>/ape-v1.0.0` and records the version in `.bingo/ape.mod`. `-l` also points the bare `<GOBIN>/ape` at it. To move the pin later, run the same command with the new version and commit `.bingo/` again. Don't use `ape update` for this: it refuses on a pinned binary because it would overwrite the versioned file.
 
 ## What a bare `ape` does in a pinned project
 

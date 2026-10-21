@@ -1,10 +1,8 @@
 # `ape framework update` installs releases
 
-**Status: specification for ape v0.4.0.** The first cycle through the
-release-candidate process (see `AGENTS.md` → "Releases"), class C. Written
-before the code, so the eval can build fixtures while it is built. Where the
-shipped behaviour differs from this document, the document is updated in the
-same commit.
+**Status: shipped since ape v0.4.0.** APEX v1 adds blocking migrations
+(below). This page explains why `ape framework setup` and `update` install a
+tagged release, how one is chosen, and what an install records and commits.
 
 ## Why
 
@@ -17,12 +15,12 @@ for it by name.
 
 ## Choosing what to install
 
-The framework clone (`--repo`, or `$APEX_FRAMEWORK_REPO`) keeps its meaning,
-and the install uses it only as a **store of git objects**: it never reads the
-working tree or branch. (Until v0.7.0 ape also never checked anything out in
-it. Since v0.7.0 it brings the clone forward to the release, so the clone is
-where a person reads the release. See
-[The framework and governance clones are caches](framework-and-governance-clones.md).)
+The install uses the framework clone (`--repo`, else `$APEX_FRAMEWORK_REPO`,
+else ape's own clone under the user cache directory) only as a **store of git
+objects**: it never reads the working tree or branch. ape separately brings
+the clone forward to the release, so the clone is where a person reads the
+release; see
+[The framework and governance clones are caches](framework-and-governance-clones.md).
 
 1. **Fetch tags:** `git fetch --tags --force origin`, unless `--no-fetch`.
    If the fetch fails (offline, or no `origin`), ape warns, names the newest
@@ -42,9 +40,10 @@ where a person reads the release. See
    `.claude/` at its root). A build-repo tag, which nests them under
    `framework/`, is refused (exit 3, `framework_layout_invalid`), with a
    hint to point `--repo` at the ship repo.
-4. **Install from the export**, exactly as before: skills, pipelines,
-   tables, operating rules, migrations. Then the temporary directory is
-   removed.
+4. **Install from the export**: the skills, `_apex/ape-commands.yaml`, the
+   upgrade migrations and the standard ADR (an APEX v0 release also brings
+   its pipelines, tables and operating rules). Then the temporary directory
+   is removed.
 
 **`--from-worktree`** keeps the v0.3.x behaviour unchanged: install the
 clone's working tree, with the `main`-only / clean / fast-forward guards
@@ -59,6 +58,12 @@ newer than the newest final one, it is a candidate someone installed by
 name. `update` without `--version` then keeps it, prints why, commits
 nothing and exits 0. `--version vX.Y.Z` goes back when you mean it, and
 `status` reports the install as ahead rather than as drift.
+
+**An APEX v1 project never goes back to an APEX v0 release.** v0's
+migrations call commands a v1 ape no longer has, and its install would
+replace the v1 skills. When the newest final release is a v0 one, `update`
+keeps what is installed and says so; a `--version` naming one is refused
+with exit 1, and nothing is installed.
 
 ## What is recorded
 
@@ -92,15 +97,15 @@ The framework declares the oldest ape a release works with, as a top-level
 field in its `_apex/ape-commands.yaml`:
 
 ```yaml
-min_ape_version: 0.4.0
+min_ape_version: "1.0.0"
 ```
 
 - **Where ape reads it:** from the TAG it is about to install
   (`git show <tag>:_apex/ape-commands.yaml`), before anything is written;
   and from the installed `_apex/ape-commands.yaml` in the new `ape doctor`
   check `framework.ape_version`.
-- **An rc of exactly that version satisfies it:** `0.4.0-rc.N` satisfies
-  `>= 0.4.0`; `0.4.0-rc.N` does not satisfy `>= 0.4.1`. Otherwise it is
+- **An rc of exactly that version satisfies it:** `1.0.0-rc.N` satisfies
+  `>= 1.0.0`; `1.0.0-rc.N` does not satisfy `>= 1.0.1`. Otherwise it is
   ordinary semver.
 - **Unknown is not a pass:** a `dev` build or a Go pseudo-version
   (`0.3.2-0.20260930…`) cannot be compared. ape warns and continues. A
@@ -114,9 +119,10 @@ min_ape_version: 0.4.0
 | stdin and stderr are a terminal | Asks `ape 0.3.1 is older than v0.27.0 needs (0.4.0). Update ape first? [Y/n]`. Yes: update, then continue (below). No: exit 11, nothing written. |
 | not a terminal (CI, scripts, a skill) | Never asks, never updates. Prints the exact command to run and exits 11, nothing written. |
 
-When ape meets the minimum and the update check has cached a newer final
-ape, one line says so. It never prompts and never blocks: a courtesy must
-not make an install depend on GitHub being reachable.
+When ape meets the minimum and a newer final ape exists, nothing changes
+unless asked. `--update-ape` moves ape the same way as below, and at a
+terminal you are asked, defaulting to No. Otherwise one line says so: an
+unattended run never picks up an ape nobody measured.
 
 ### How ape updates itself here
 
@@ -167,32 +173,31 @@ Generator: ape framework update
 **Commit 2**, the install plus the derivable migrations that ran:
 
 ```
-chore(framework): update APEX framework to v0.27.0
+chore(framework): update APEX framework to v1.0.0
 
-Framework-Version: v0.27.0
+Framework-Version: v1.0.0
 Framework-Commit: 3c1f7602e4…(full sha)
-Framework-Migrations: v0.27.0_seq-01, v0.27.0_seq-02
+Framework-Migrations: v1.0.0_seq-01
 Generator: ape framework update
 ```
 
-- `ape framework setup` writes `chore(framework): install APEX framework v0.27.0`
-  with the same trailers.
+- `ape framework setup` writes `chore(framework): install APEX framework v1.0.0`
+  with the same trailers, and `Generator: ape framework setup`.
+- A migration that commits on its own, such as the v1.0.0 lift, lands its
+  commits before commit 2.
 - `Framework-Migrations:` is present only when a migration was applied.
 - `Governance-Version:` / `Governance-Commit:` (ape v0.7.0) are present when
   the project's governance clone was synced. An update where only it moved
   is titled `chore(framework): sync governance vX.Y.Z`; see
   [The framework and governance clones are caches](framework-and-governance-clones.md). A
   judged migration never runs, so it never appears.
-- `--repair` runs after commit 2, and what it changes is left uncommitted.
+- `--repair` (APEX v0 project data) runs after commit 2, and what it changes
+  is left uncommitted.
 - If the install changed nothing (already at that release, files
   identical), there is no commit, and the output says so.
 - Commits use your git identity and run your hooks, never `--no-verify`. If
   a hook fails, everything stays staged, ape names the commit it could not
   make, and exits 12.
-
-The framework's release record skips a commit only when it carries
-`Generator: ape framework update` AND every path it changes is under
-`.bingo/`.
 
 **A partial result is kept on purpose.** If ape was updated (commit 1) and
 the framework install then fails, the ape update stays committed. It is
@@ -205,14 +210,36 @@ exits with the install's own code.
 | code | meaning |
 | --- | --- |
 | 0 | installed, or already at that release |
+| 1 | a blocking migration was not applied: nothing committed, the install reverted (below). Also a `--version` naming an APEX v0 release in an APEX v1 project |
 | 2 | usage: a bad `--version` shape, or conflicting flags (`--version` with `--from-worktree`) |
 | 3 | the framework source: no release tag found, the `--version` tag does not exist, the layout is not the released one, or a `--from-worktree` guard failed |
 | 4 | the project tree: modified tracked files in commit mode, or modified apex skills with `--no-commit` |
-| 5, 6, 7 | unchanged: headless setup without arguments, already installed, not installed |
-| 11 | **new:** ape is below the release's `min_ape_version`, and was not (or could not be) updated |
-| 12 | **new:** the install is complete but a commit could not be made (a hook failed); the changes are staged |
+| 5 | `setup` of an APEX v0 release without a terminal and without `--project-name`/`--extensions` or `--no-bootstrap` |
+| 6 | `setup`: already installed |
+| 7 | `update`: not installed |
+| 11 | ape is below the release's `min_ape_version`, and was not (or could not be) updated |
+| 12 | the install is complete but a commit could not be made (a hook failed); the changes are staged |
 
-8–10 remain reserved for `ape change`.
+## Blocking migrations
+
+A migration that fails is normally reported, and the update still commits
+the install and exits 0: the install succeeded, and a non-zero exit would
+make it look as if it had not happened. The ledger keeps what succeeded, and
+the next run resumes after it.
+
+Some migrations are different. The lift that turns an APEX v0 project into
+an APEX v1 project is the first entry of the v1.0.0 release: without it, v1
+skills would sit on a v0 layout they do not fit. Such an entry carries
+`blocking: true`. When a blocking derivable entry fails or is not attempted,
+the update exits 1, commits nothing, and reverts the install, so the tree is
+as the update found it and a re-run starts from the release again. Commits
+the migration made itself stay, and the re-run carries on after them. With
+`--no-commit` the result is left in the working tree for the person to
+decide.
+
+A judged blocking entry never fails the update. It is never run by ape: it
+is a dispatch a person owes after the install, such as the lift's
+disposition for `apex-plan`, and the update lists it.
 
 ## `ape doctor`
 

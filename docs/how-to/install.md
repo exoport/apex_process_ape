@@ -13,7 +13,7 @@ curl -fsSL "https://github.com/exoport/apex_process_ape/releases/download/${VERS
 ape version
 ```
 
-To pin a specific version, set `VERSION` directly: `VERSION=v0.1.0`.
+To pin a specific version, set `VERSION` directly: `VERSION=v1.0.0`.
 
 The Linux asset is `ape_linux_amd64.tar.gz`. Replace with `ape_darwin_amd64.tar.gz`, `ape_darwin_arm64.tar.gz`, or `ape_windows_amd64.zip` as needed (Windows uses zip, not tar.gz).
 
@@ -24,16 +24,16 @@ If you want a specific ape version checked into a project's own tooling (so ever
 ```bash
 # In your project repo:
 bingo get -l github.com/exoport/apex_process_ape/cmd/ape@latest
-# or a specific release tag, e.g. v0.1.0
+# or a specific release tag, e.g. v1.0.0
 ```
 
 This adds a per-tool `.mod` file under `.bingo/` and a `Makefile`-friendly variable for invoking the pinned binary, the same pattern this repo itself uses for its own dev tooling (see `.bingo/Variables.mk`). Commit the generated `.bingo/` files so the pin travels with the repo.
 
-From v0.9.0 a bare `ape` run anywhere in that repo hands the command to the pinned version, so a Claude session opened in the project runs the pin too. See [How to pin ape in a project](pin-ape-in-a-project.md).
+A bare `ape` run anywhere in that repo hands the command to the pinned version, so a Claude session opened in the project runs the pin too. See [How to pin ape in a project](pin-ape-in-a-project.md).
 
 ## Option 3 — `go install`
 
-If you have a Go toolchain (1.26 or later):
+If you have a Go toolchain at the version `go.mod` names (1.27.3 or later):
 
 ```bash
 go install github.com/exoport/apex_process_ape/cmd/ape@latest
@@ -60,7 +60,7 @@ ape version
 Should print something like:
 
 ```
-ape 0.1.0
+ape 1.0.0
   build date: ...
   git commit: ...
 ```
@@ -81,9 +81,10 @@ sudo rm /usr/local/bin/ape
 
 ## Next steps
 
-ape is just the CLI binary. To run any pipeline you also need the framework assets (skills + pipeline specs) installed in your project. Order of operations:
+ape is the CLI only. A project also needs the framework's skills and its own APEX v1 layout. Order of operations for a new project:
 
-1. **[Set up the APEX framework in a project (first install)](framework-setup.md)** — `ape framework setup` copies the `apex-*` skills and the canonical pipeline specs from a checked-out `apex_process_framework` repo, and seeds `_apex/config.yaml` via an interactive prompt. Run once per project.
-2. **[Refresh the framework](framework-update.md)** — `ape framework update` re-copies skills + pipelines whenever you bump the framework repo to a newer version. Doesn't touch `config.yaml`.
-3. [Update ape itself](update.md) — keep the CLI binary current.
-4. [Tutorials](../tutorials/) — once a "first pipeline" tutorial exists, that's the natural next step after the framework setup.
+1. **[Install the framework into the project](framework-setup.md)**: `ape framework setup` installs the newest framework release and commits it. Run it once per project.
+2. **`ape project init`**: writes `_apex/config.yaml`, the project skeleton and the hooks. `ape project init --help` lists what it creates.
+3. **[Your first APEX v1 project](../tutorials/first-v1-project.md)**: the tutorial walks from there to a first milestone.
+
+Later, [refresh the framework](framework-update.md) with `ape framework update` when it publishes a release, and [update ape itself](update.md) with `ape update`. An APEX v0 project is upgraded with `ape framework update`: see [Upgrading a v0 project to v1](framework-update.md#upgrading-a-v0-project-to-v1).

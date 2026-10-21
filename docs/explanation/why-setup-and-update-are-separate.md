@@ -7,6 +7,8 @@ Up to and including ape `v0.0.6`, a single command `ape framework update` did tw
 
 ape `v0.0.7` (PLAN-1 / I3) splits them into `ape framework setup` and `ape framework update` with strict refusal semantics either way. This page explains why.
 
+> **APEX v1:** setup of a v1 release seeds no `_apex/config.yaml` and asks nothing; `ape project init` writes the config. The split still holds: `setup` refuses when `_apex/framework.yaml` exists (exit 6), `update` refuses when it does not (exit 7), and only `update` runs upgrade migrations. The config rows below describe setup of an APEX v0 release.
+
 ## Two jobs, one verb is a leaky abstraction
 
 The two jobs differ on every axis that matters:

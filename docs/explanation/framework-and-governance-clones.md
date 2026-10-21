@@ -1,11 +1,9 @@
 # The framework and governance clones are caches
 
-**Status: specification for ape v0.7.0**, class C (it changes
-`ape framework setup/update`, `ape config resolve` and `_apex/framework.yaml`).
-Written before the code. Where the shipped behaviour differs from this
-document, the document is updated in the same commit. It extends
+**Status: shipped since ape v0.7.0.** This page explains where ape keeps
+the framework and governance clones, and what it may do to each. It extends
 [`ape framework update` installs releases](framework-updates-from-releases.md),
-which still describes how a release is chosen and installed.
+which describes how a release is chosen and installed.
 
 ## Why
 
@@ -15,11 +13,20 @@ leaves the clone's checkout alone. Two things were still missing:
 - **The clone's working tree is what people read.** A person reading the
   framework's docs, or anything opening files in the clone, saw whatever
   branch happened to be checked out, not the release their projects run.
-- **The governance repo was not managed at all.** `apex-adr-reconciliation`
-  and `apex-pattern-reconciliation` read
+- **The governance repo was not managed at all.** APEX v0's ADR and
+  pattern reconciliation skills read
   `{governance_repository_path}/governance/` straight from that working
   tree, every time they run. Nothing kept it at a release, and a machine
   with no human to set the path could not run them.
+
+### What APEX v1 needs from governance
+
+No APEX v1 skill reads the governance clone. In v1 it is read by one thing:
+`ape project lift`, which copies the canon ADRs a v0 project cites but has
+no record of. A v1 project that is not being lifted needs no governance
+repo, and `ape project init` configures none. When the lift finds none, the
+canon ADRs it would have copied are listed under unresolved citations
+instead.
 
 So both clones are now treated as caches of their newest release: fetched,
 and checked out at the newest final `vX.Y.Z` tag. And when no one has said
@@ -32,7 +39,7 @@ ape resolves each clone in this order. The first that is set wins.
 | | framework | governance |
 | --- | --- | --- |
 | 1 | `--repo` | `governance_repository_path` in `_apex/config.local.yaml`, else `_apex/config.yaml` |
-| 2 | `$APEX_FRAMEWORK_REPO` | `$APEX_GOVERNANCE_REPO` (new) |
+| 2 | `$APEX_FRAMEWORK_REPO` | `$APEX_GOVERNANCE_REPO` |
 | 3 | the ape cache (below) | the ape cache (below) |
 
 Rows 1 and 2 are **the user's** clone. Row 3 is **ape's** clone. Who owns a
@@ -66,13 +73,11 @@ cache that does not exist yet and never create one.
   `https://github.com/exoar/apex_process_framework.git`.
 - **Governance:** `governance_repository_url` in `_apex/config.yaml`
   (optional; a project-wide value, so it is committed, while the local path
-  stays per-machine). ape has no built-in default: the value comes from the
-  framework's config template, which `setup` copies into a new project.
-  From framework v0.29.3 that template carries
-  `https://github.com/exoar/apex_process_governance.git`; earlier templates
-  carry `""`, and `setup` never rewrites an existing `config.yaml`, so older
-  projects opt in by hand. No URL and no path means the project has no
-  governance repo, and nothing is done.
+  stays per-machine). ape has no built-in default. An APEX v0 project has it
+  from the framework's config template (from framework v0.29.3,
+  `https://github.com/exoar/apex_process_governance.git`); an APEX v1
+  project's config has none. No URL, no path and no `$APEX_GOVERNANCE_REPO`
+  means the project has no governance repo, and nothing is done.
 
 Both repositories are private. ape runs plain `git`, so cloning uses
 whatever credentials the machine has for that URL: a credential helper or
@@ -150,17 +155,18 @@ reach. ape detects it (a write into the git dir fails) and:
 - `--from-worktree` installs the clone's working tree, so it must not move
   it. Its main-only / clean / fast-forward guards are unchanged.
 - `--plan` and `--dry-run` write nothing, the clones included.
-- `setup` syncs governance only when the project already has an
-  `_apex/config.yaml`. A brand-new project's config is seeded by setup
-  itself; the next `update` syncs it.
+- Governance syncs only when the project has an `_apex/config.yaml` to
+  resolve it from. A new APEX v1 project gets its config from
+  `ape project init`, after setup.
 
 ### Governance in the sequence
 
 Governance syncs just before the framework checkout moves, so a refused
 governance clone stops the run before anything is written. A governance
 clone that cannot be cloned or fetched is a warning, not a failure: the
-framework update does not depend on it, and the reconciliation skills fail
-fast with their own message when the canon is missing.
+framework update does not depend on it. In the update that lifts a v0
+project, governance syncs before the lift runs, so the lift copies canon
+ADRs from the newest governance release.
 
 **A configured path that is a directory but not a git clone** (the eval
 injects a `git archive` export of a governance tag) is read as it is: no
@@ -168,7 +174,7 @@ clone, no fetch, no `governance:` record, no warning, exit 0, and one line,
 `governance repo: <path> (not a git clone: read as-is)`. ape never clones
 `governance_repository_url` while a path is configured.
 
-## How skills find the governance clone
+## How APEX v0 skills find the governance clone
 
 They ask ape. `ape config resolve` emits the **effective**
 `governance_repository_path`: the configured value, else
@@ -184,16 +190,16 @@ governance_repository_url: https://github.com/exoar/apex_process_governance.git
 `cache_missing` means the URL is set but ape's clone does not exist yet; the
 path is then empty, and the fix is `ape framework update`.
 
-The ADR and pattern reconciliation skills read the effective path and
-`governance_repository_source` from `ape config resolve` since framework
-v0.29.0 (ape floor 0.7.0), so they see the env and cache fallbacks and
-report `cache_missing` themselves. A skill that read `_apex/config.yaml`
+APEX v0's ADR and pattern reconciliation skills read the effective path and
+`governance_repository_source` from `ape config resolve` (framework v0.29.0
+and later), so they see the env and cache fallbacks and report
+`cache_missing` themselves. A skill that read `_apex/config.yaml`
 directly would see only the configured path, and miss both fallbacks.
 
 ## What is recorded
 
-`_apex/framework.yaml` gains a `governance:` block, present when a
-governance clone was synced:
+`_apex/framework.yaml` has a `governance:` block when a governance clone was
+synced (see the [framework.yaml reference](../reference/framework-yaml.md#governance)):
 
 ```yaml
 framework:
@@ -213,8 +219,7 @@ governance:
 `url.<base>.insteadOf` rewrite of it, which `git remote get-url` returns.
 The record is committed: a rewrite would put a private ssh host alias in the
 project's history, and two machines with different rules would flip it on
-every update. Projects installed with an earlier ape may see `repo_origin`
-change once, back to the configured URL.
+every update.
 
 It records which canon this project's update synced. It is not a pin:
 skills read the clone, which moves when any project on the machine updates.
@@ -254,9 +259,10 @@ Inside the workspace both clones are pinned (above).
 
 ## Exit codes
 
-Unchanged, plus: a clone of yours that is behind the release and has local
-changes exits **3** (the framework source) without `--force-clone`,
-whichever clone it is.
+A clone of yours that is behind the release and has local changes exits
+**3** (the framework source) without `--force-clone`, whichever clone it
+is. The other codes are in
+[`ape framework update` installs releases](framework-updates-from-releases.md#exit-codes).
 
 ## A release is installable once its tag is pushed
 

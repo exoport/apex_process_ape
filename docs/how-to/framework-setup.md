@@ -1,129 +1,81 @@
 # How to install the APEX framework into a project (first time)
 
-`ape framework setup` is the one-time install command. It copies the framework's skills and pipeline specs from a checked-out `apex_process_framework` repo into your project, seeds `_apex/config.yaml` interactively, and records what was installed in `_apex/framework.yaml`. After this command runs, `ape pipeline <name>` works against the project.
+`ape framework setup` is the one-time install of an APEX framework release into a project. It copies the release's skills and tables into the project, records what it installed in `_apex/framework.yaml`, and commits the result. It writes no `_apex/config.yaml`: for an APEX v1 release, `ape project init` does that next.
 
-For subsequent framework version bumps, use [`ape framework update`](framework-update.md) — it refreshes skills + pipelines without re-bootstrapping config.
+For later framework releases, use [`ape framework update`](framework-update.md).
 
 ## Prerequisites
 
-- ape `v0.0.7` or later — `ape version` to confirm.
-- A clone of `apex_process_framework`. Pass `--repo PATH`, set `$APEX_FRAMEWORK_REPO` once, or set neither and ape clones its own under the user cache directory (from `$APEX_FRAMEWORK_URL`, else the framework's GitHub repo; this machine needs git access to it):
+- An ape at or above the release's `min_ape_version` (1.0.0 for an APEX v1 release). `ape version` shows yours. Below it, see [ape's minimum version](framework-update.md#apes-minimum-version).
+- Access to the framework repository. You do not need a clone of your own: with neither `--repo` nor `$APEX_FRAMEWORK_REPO` set, ape keeps its own clone under the user cache directory, cloned from `$APEX_FRAMEWORK_URL`, else `https://github.com/exoar/apex_process_framework.git`. The repository is private, so the machine needs git credentials for it. To use a clone you already have:
 
   ```bash
   export APEX_FRAMEWORK_REPO=/path/to/apex_process_framework
   ```
 
-- Since ape v0.4.0, `setup` installs the framework's newest **release** tag (or the one `--version` names), exported from that clone. Since v0.7.0 ape also checks that release out in the clone, so the clone is where to read the release's docs. A clone of yours only moves forward, and local changes in one that would move are refused unless `--force-clone`. See [The framework and governance clones are caches](../explanation/framework-and-governance-clones.md). `--from-worktree` installs the working tree instead and never moves it, and then the clone must be on `main` and clean (`--force` bypasses that). See [Which release is installed](framework-update.md#which-release-is-installed).
-- The install is committed (`chore(framework): install APEX framework vX.Y.Z`), so the project must be a git repository on a branch with no modified or staged tracked files. Pass `--no-commit` to leave it uncommitted. See [Commits](framework-update.md#commits).
-- The project's `_apex/framework.yaml` must **not** already exist — if it does, `setup` refuses to run. Use `update` instead, or pass `--force` to re-bootstrap (which resets `project_name` and `extensions`).
+  See [The framework and governance clones are caches](../explanation/framework-and-governance-clones.md) for what ape does to each kind of clone.
+- The project is a git repository on a branch, with no modified or staged tracked files, because the install is committed. Untracked files are fine. Pass `--no-commit` to leave the result in the working tree instead.
+- `_apex/framework.yaml` does not exist yet. If it does, the framework is installed: use `ape framework update`.
 
-## Quickstart
+## Install
 
 ```bash
 cd /path/to/your/project
 ape framework setup
+ape project init
 ```
 
-What happens:
+What `setup` does:
 
-1. Validates that `_apex/framework.yaml` is **absent** (the not-yet-installed signal). If present, the command exits with `Error: framework already installed at <path> — run "ape framework update" to refresh, or "ape framework setup --force" to re-bootstrap …`.
-2. When committing, checks the project tree is clean (exit 4 otherwise).
-3. Fetches tags (skip with `--no-fetch`), picks the release and exports its files, and checks this ape against its `min_ape_version` (exit 11 below it without a terminal). See [ape's minimum version](framework-update.md#apes-minimum-version).
-4. Records the release's tag and commit for the metadata file.
-5. Opens an interactive Bubble Tea prompt for the project name and which extensions to enable. (Skip the TUI with `--project-name` + `--extensions`, or skip seeding entirely with `--no-bootstrap`.)
-6. Removes any pre-existing `<project>/.claude/skills/apex-*` (so leftover skills from a prior install disappear).
-7. Copies all `apex-*` skill directories into `<project>/.claude/skills/` (including the `apex-orchestrator` persona skill).
-8. Copies all framework pipeline YAMLs into `<project>/_apex/pipelines/`, and the framework-owned tables the runner reads. These include `_apex/effort-defaults.yaml`, the per-model reasoning-effort table every spawned session gets (`ape config effort` shows it; without it, every session runs at `xhigh`, as before v0.2.0).
-9. Relocates any run artifacts still at the pre-`{output_folder}/ape` paths. Usually a no-op on a fresh project — but `ape chat` and `ape prompt` work without a framework install, so a project can have run history before `setup` ever runs. Same rules as on update: nothing overwritten, collisions reported. See [How to refresh the framework](framework-update.md#what-the-relocation-does).
-10. Installs the always-on operating-rules fragment (`_apex/apex-operating-rules.md`) and ensures the repo-root `CLAUDE.md` imports it inside a managed block — see [Operating rules](#operating-rules-always-on-apex-discipline) below. Skipped with a warning if the framework repo predates the fragment.
-11. Copies the framework's [`ape aboard` recipe library](use-the-board.md#recipes) into `<project>/_apex/aboard/recipes/`. Nothing is installed when the framework ships no library — the recipes built into ape reach the project regardless.
-12. Creates the project's [board](use-the-board.md#the-board-is-already-there) at `<project>/.aboard/` and seeds `.aboard/.gitignore`, which ignores everything beside itself — the directory is committed, its contents never are. An existing board is never overwritten.
-13. Writes `<project>/_apex/framework.yaml` recording what was installed.
+1. Refuses if `_apex/framework.yaml` exists (exit 6), and, when committing, if the tree is not clean (exit 4).
+2. Fetches the framework clone's tags (skip with `--no-fetch`) and picks the newest final release `vX.Y.Z`. `--version vX.Y.Z` picks one exactly, and `--version vX.Y.Z-rc.N` is the only way to install a release candidate. See [Which release is installed](framework-update.md#which-release-is-installed).
+3. Checks this ape against the release's `min_ape_version`. Below it, nothing is written: at a terminal it offers to update ape first and re-runs itself; otherwise it exits 11.
+4. Installs the release's files (below) and creates the board.
+5. Writes the `.claude/` shape into the root `.gitignore`.
+6. Commits everything as `chore(framework): install APEX framework vX.Y.Z`, with `Framework-Version`, `Framework-Commit` and `Generator: ape framework setup` trailers.
+7. Ends with `next: ape project init` when the project has no v1 layout yet.
+
+Either order works, and each command names the other in its `next:` line. Running `setup` first keeps the install commit before the project's v1 history starts.
 
 ## What gets installed
 
-| Path                              | Source                                      | Behavior             |
-| --------------------------------- | ------------------------------------------- | -------------------- |
-| `.claude/skills/apex-*/`          | `.claude/skills/apex-*/`                    | Created              |
-| `_apex/pipelines/*.yaml`          | `_apex/pipelines/*.yaml`                    | Created              |
-| `_apex/config.yaml`               | `_apex/config.yaml` (template)              | **Seeded if absent** |
-| `_apex/config.local.example.yaml` | `_apex/config.local.example.yaml`           | **Seeded if absent** |
-| `_apex/apex-operating-rules.md`   | `_apex/apex-operating-rules.md`             | Created (if shipped) |
-| `_apex/effort-defaults.yaml`      | `_apex/effort-defaults.yaml`                | Created (if shipped) |
-| `_apex/aboard/recipes/*.md`       | `_apex/aboard/recipes/*.md`                 | Created (if shipped) |
-| `.aboard/`                        | _(created by the board)_                    | Created if absent    |
-| `.aboard/.gitignore`              | _(generated)_                               | **Seeded if absent** |
-| `CLAUDE.md` (repo root)           | _(managed block written in place)_          | Created or updated   |
-| `_apex/framework.yaml`            | _(generated)_                               | Created              |
+| Path | What it is |
+| --- | --- |
+| `.claude/skills/apex-*/` | The framework's skills. Existing `apex-*` directories are removed first, so a skill the release no longer ships disappears. Skills not named `apex-*` are never touched. |
+| `_apex/ape-commands.yaml` | The release's manifest. Its `min_ape_version` is the oldest ape the release runs on. |
+| `_apex/migrations/*.md` | The release's upgrade entries, which `ape framework update` runs. `setup` installs them and runs none. |
+| `_apex/standards/adr-0001.md` | APEX's standard ADR, "Record architecture decisions", which `ape project init` writes as the project's ADR-0001. |
+| `_apex/framework.yaml` | What was installed, from which release, by which ape. See the [framework.yaml reference](../reference/framework-yaml.md). |
+| `.aboard/` | The project's [board](use-the-board.md), with a `.aboard/.gitignore` that ignores everything beside itself. An existing board is never overwritten. |
+| `.gitignore` (repo root) | The `.claude/` shape, below. Created when absent. |
 
-Non-`apex-*` entries under `.claude/skills/` are never touched — they belong to your project, not the framework.
+An APEX v1 release ships no pipelines, config template, operating rules or effort table, so a v1 install writes none of them, and its `framework.yaml` records `config.seeded: false`.
 
-## Operating rules (always-on APEX discipline)
+### The `.claude/` shape in `.gitignore`
 
-Every ape-installed project gets a framework-maintained
-`_apex/apex-operating-rules.md` fragment, and the repo-root `CLAUDE.md` is
-given a managed block that imports it:
+The skills must be committed, but most of `.claude/` is personal. `setup` makes the root `.gitignore` say so:
 
-```text
-<!-- apex:managed:begin -->
-@_apex/apex-operating-rules.md
-<!-- apex:managed:end -->
+```gitignore
+# APEX (ape): .claude/settings.json and .claude/skills/ are the team's; the rest of .claude/ and CLAUDE.local.md stay personal
+.claude/*
+!.claude/settings.json
+!.claude/skills/
+CLAUDE.local.md
 ```
 
-Because Claude Code loads `CLAUDE.md` (and its `@import`s) into every session,
-this means any session in the project picks up the APEX operating rules with no
-hooks and no manual playbook hand-over.
+A line that ignores the whole `.claude` folder is rewritten in place to this shape, so the installed skills are committed even where `.claude/` used to be ignored. A file of yours that the rewrite un-ignores, such as a skill of your own, is listed in the output and left out of the commit: commit it or ignore it by name. The output's `Ignore:` line (JSON `gitignore`) says what was done.
 
-- **If `CLAUDE.md` is absent**, setup silently creates a minimal one containing
-  only the managed block (no prompt — headless-safe).
-- **Content outside the markers is yours** and is preserved byte-for-byte across
-  every `setup`/`update`. Only the bytes *between* the markers are ape-owned; do
-  not hand-edit inside them, as `update` refreshes that region wholesale.
-- **The block must live in the repo-root `CLAUDE.md`** — the `@import` path is
-  resolved relative to it.
-- **Version skew:** if your framework checkout predates the fragment, setup skips
-  fragment + block management and prints a warning naming the file to upgrade
-  toward, rather than failing. `ape doctor` reports the skip as a WARN nudge, not
-  a hard failure.
+## Then: `ape project init`
 
-`ape doctor` gains required checks that the fragment, the managed `CLAUDE.md`
-import, and the `apex-orchestrator` skill are all present once a project manages
-them. Note the import check is *syntactic* — it confirms the line is in the file;
-it can't prove Claude resolved it. Use `/memory` inside a live session (or drive
-a real session) to confirm the rules actually loaded.
+`setup` installs the framework. It does not make the repository an APEX v1 project. `ape project init` writes `_apex/config.yaml`, `AGENTS.md`, `CLAUDE.md`, the `development/` skeleton, the hooks in `.claude/settings.json` and the pre-commit secret scan, and commits them as `apex: project init`. `ape project init --help` lists everything it writes. The [first v1 project tutorial](../tutorials/first-v1-project.md) continues from there.
 
-## Headless / scripted contexts
+## Headless and scripted runs
 
-When stdout isn't a TTY (CI, scripts, `--output-format json`), `setup` refuses to launch the interactive TUI. Either:
+A v1 install asks nothing, so it runs the same with or without a terminal. `--project-name` and `--extensions` are not needed; passed, they are ignored, and `setup` says so. Use `--output-format json` or `yaml` for a structured result: `summary` counts what was installed, `next` carries the next command, and `gitignore` says what happened to `.gitignore`.
 
-- **Provide the values explicitly** so no prompt is needed:
+## Re-installing with `--force`
 
-  ```bash
-  ape framework setup \
-      --project-name myproject \
-      --extensions ext-adrs,ext-features \
-      --output-format json
-  ```
-
-  `--extensions ""` means "no extensions". Recognized IDs: `ext-adrs`, `ext-patterns`, `ext-capabilities`, `ext-features`.
-
-- **Skip the seed entirely** — install only skills + pipelines:
-
-  ```bash
-  ape framework setup --no-bootstrap
-  ```
-
-  The result payload reports `sources.config.seeded: false`. You can re-run `setup --force` interactively later to bootstrap config.yaml.
-
-## Re-bootstrapping with `--force`
-
-`ape framework setup --force` re-runs the full install even when `framework.yaml` already exists. Effect:
-
-- `apex-*` skills are wiped + reinstalled (same as `update`).
-- Pipelines are overwritten (same as `update`).
-- `_apex/config.yaml` is **re-seeded** — `project_name` and `extensions` are reset to whatever you provide (interactively or via flags).
-
-This is destructive to the prior bootstrap values. The legitimate use case is "I made a typo in `project_name` during initial setup and want to start over."
+`ape framework setup --force` installs again over an existing `_apex/framework.yaml`, and resets what it recorded from the first setup. To move an installed project to a newer release, use `ape framework update` instead.
 
 ## Inspecting what was installed
 
@@ -131,45 +83,37 @@ This is destructive to the prior bootstrap values. The legitimate use case is "I
 ape framework status
 ```
 
-Prints the framework version installed and (if `--repo` or `$APEX_FRAMEWORK_REPO` is set) compares against the framework HEAD. See [framework.yaml reference](../reference/framework-yaml.md) for the structured payload shape.
+Prints the installed release, compares it with the newest release in the framework clone, and says where the framework and governance clones are.
 
-## Output formats
+## APEX v0 releases
 
-All flags work with `--output-format human|json|yaml`. The structured forms emit the full metadata block plus an install summary suitable for parsing by tooling.
+`setup` still installs an APEX v0 release (one whose `min_ape_version` is below 1.0.0, or that ships `_apex/pipelines/` instead of the manifest). For a v0 release it also copies the pipelines, seeds `_apex/config.yaml` (an interactive prompt, or `--project-name` and `--extensions`, or `--no-bootstrap` to skip it; without a terminal and without those flags it exits 5), installs the operating rules and the v0 tables, and adds the `sprint-status.yaml.lock` line to `.gitignore`. A v0 project is served by the v0 ape its `.bingo` pins; its docs are at https://github.com/exoport/apex_process_ape/tree/v0.10.0/docs.
 
-```bash
-ape framework setup --project-name X --extensions ext-adrs --output-format json | jq '.summary'
-# { "skillsInstalled": 86, "skillsRemoved": 0, "pipelinesInstalled": 3, ... }
-```
+## Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| 0 | Installed. |
+| 3 | The framework source: no release, the `--version` tag does not exist, or the tag is not a release layout (no `.claude/skills/`, or neither `_apex/ape-commands.yaml` nor `_apex/pipelines/`). Also a clone of yours that is behind the release and has local changes (`--force-clone` overwrites them). |
+| 4 | The project tree: not a git repository, a detached HEAD, or modified or staged tracked files. |
+| 5 | APEX v0 only: no terminal, and no `--project-name`/`--extensions` or `--no-bootstrap`. |
+| 6 | Already installed: `_apex/framework.yaml` exists. |
+| 11 | This ape is below the release's `min_ape_version`. |
+| 12 | The install is complete but the commit failed (a hook failed). The changes are left staged. |
 
 ## Troubleshooting
 
 ### `framework already installed at <path>`
 
-You already ran `setup` on this project. Either:
+The project already has `_apex/framework.yaml`. Run `ape framework update`, or `ape framework setup --force` to install again from scratch.
 
-- Run `ape framework update` to refresh skills + pipelines while keeping the existing `project_name` + `extensions`.
-- Run `ape framework setup --force` to re-bootstrap from scratch (resets `project_name` and `extensions`).
+### `framework repo has uncommitted changes` or `framework repo is on branch X (expected main)`
 
-### `framework repo path not set`
-
-Pass `--repo /path/to/apex_process_framework` or export `APEX_FRAMEWORK_REPO`.
-
-### `framework repo has uncommitted changes` (`--from-worktree` only)
-
-The framework repo must be clean. Either commit/stash the framework-side changes, or pass `--force` to install from a dirty tree (recorded in `framework.yaml` so the divergence is auditable).
-
-### `framework repo is on branch X (expected main)` (`--from-worktree` only)
-
-The command refuses to install from a non-`main` branch unless `--force` is passed. This is to prevent accidentally pinning a project to an experimental branch's HEAD.
-
-### `config bootstrap required but no TTY`
-
-You ran `setup` non-interactively (no TTY, or `--output-format json|yaml`) without supplying `--project-name` and `--extensions`, and without `--no-bootstrap`. Pick one of the headless paths above.
+Only with `--from-worktree`, which installs the clone's working tree instead of a release, and needs that clone clean and on `main`. Drop `--from-worktree` to install a release, or pass `--force`.
 
 ## Related
 
-- [How to update the framework](framework-update.md) — refresh-only command, used after the initial setup.
-- Pipeline spec reference — the YAML shape of `_apex/pipelines/*.yaml`.
-- [framework.yaml reference](../reference/framework-yaml.md) — the metadata file written on every install.
-- Why project-local pipelines — design rationale.
+- [How to refresh the framework](framework-update.md): every install after the first.
+- [framework.yaml reference](../reference/framework-yaml.md): the metadata file `setup` writes.
+- [Why setup and update are separate](../explanation/why-setup-and-update-are-separate.md).
+- [APEX v1 scope](../explanation/apex-v1-scope.md).
