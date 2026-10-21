@@ -232,7 +232,11 @@ regression_new_failures) · red-after-lift (green at the tag: the LIFT broke it 
 in a commit, or reset to the tag and lift with --exclude) · cannot-run (exit 126/127, or
 an output saying a command was not found — "command not found", "No such file or
 directory" — with make's "Error 127", and no failing test named: a tool it runs is
-missing here, which is not a red; read the same at both points) · red-no-baseline. A run
+missing here, which is not a red; read the same at both points) · red-no-baseline ·
+flaky (RG-1: a red-after-lift or red-at-tag-new-failures command is run once more at the
+lift commit, and passed — as at the tag — that time: a flake, not the lift's; record it,
+plan no fix; red again keeps its verdict, its note saying so; regression_commands[] /
+regression.commands[] carry the re-run's exit_rerun and log_rerun). A run
 that exits 0 but whose output names failing tests (as below) is red for the verdict, by
 those names, and its note says "exit 0, but the output names N failing tests": green at
 the tag, it is red-after-lift with the names in regression_new_failures (a ( … ) block
@@ -317,6 +321,7 @@ Exit codes: 0 lifted (or planned) · 1 refused or failed (code in --json) · 2 u
 			// pin moved, which the update swallowed.
 			if opt.FromUpdate && !res.DryRun {
 				printLiftApe(cmd.ErrOrStderr(), res)
+				printLiftWarnings(cmd.ErrOrStderr(), res)
 				printLiftRegression(cmd.ErrOrStderr(), res)
 			}
 			return v1Emit(cmd.OutOrStdout(), &f, res, func(w io.Writer) { printLift(w, res, !opt.FromUpdate) })
@@ -383,6 +388,9 @@ func printLift(w io.Writer, r *apexv1.LiftResult, regression bool) {
 		printLiftApe(w, r)
 	}
 	fmt.Fprintf(w, "APEX v0 %s (%s); skills from %s\n", r.Version, r.VersionSource, r.SkillsSource)
+	if regression || r.DryRun {
+		printLiftWarnings(w, r)
+	}
 	for _, p := range r.Preflight {
 		fmt.Fprintf(w, "would refuse  %s — %s\n", p.Code, p.Message)
 	}
@@ -460,6 +468,14 @@ func printLift(w io.Writer, r *apexv1.LiftResult, regression bool) {
 // printLiftRegression is the lift's regression verdict: the runs at the
 // tag and at the lift commit, each command of a split chain, and where the
 // verdict is recorded (RG-6).
+// printLiftWarnings prints what the lift does not refuse but the person
+// must act on (RG-2), with the file's absolute path.
+func printLiftWarnings(w io.Writer, r *apexv1.LiftResult) {
+	for _, x := range r.Warnings {
+		fmt.Fprintf(w, "warning   %s (%s): %s\n", x.Code, x.Path, x.Message)
+	}
+}
+
 // printLiftApe prints which ape runs the lift and where the project's ape
 // pin goes (L1, R5).
 func printLiftApe(w io.Writer, r *apexv1.LiftResult) {
@@ -488,6 +504,9 @@ func printLiftRegression(w io.Writer, r *apexv1.LiftResult) {
 		after := fmt.Sprintf("exit %d", c.Regression.Exit)
 		if c.Regression.Exit == 0 && c.Verdict != apexv1.LiftRegressionGreen {
 			after = "exit 0 (but the output names failing tests)" // R24: red by the names
+		}
+		if re := c.RegressionRerun; re != nil {
+			after += fmt.Sprintf(", exit %d on a re-run", re.Exit) // RG-1
 		}
 		fmt.Fprintf(w, "  %d [%s] %s at %s, %s at the lift commit — %s\n", i+1, c.Verdict, at, apexv1.LiftTag, after, c.Cmd)
 	}

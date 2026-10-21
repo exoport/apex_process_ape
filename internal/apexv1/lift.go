@@ -127,10 +127,13 @@ type LiftResult struct {
 	TagSHA        string   `json:"tag_sha,omitempty"`
 	Remote        string   `json:"remote,omitempty"`
 	// Preflight lists what a real run would refuse (dry run only).
-	Preflight []LiftProblem  `json:"preflight,omitempty"`
-	Deleted   []LiftDeletion `json:"deleted"`
-	KeptApex  []string       `json:"kept_apex,omitempty"`
-	ADRs      []LiftADR      `json:"adrs"`
+	Preflight []LiftProblem `json:"preflight,omitempty"`
+	// Warnings are what the lift does not refuse but the person must act
+	// on, in a dry run and a real one alike (RG-2).
+	Warnings []LiftWarning  `json:"warnings,omitempty"`
+	Deleted  []LiftDeletion `json:"deleted"`
+	KeptApex []string       `json:"kept_apex,omitempty"`
+	ADRs     []LiftADR      `json:"adrs"`
 	// StandardADR is ADR-0001, APEX's standard, which the lift writes:
 	// created, or replaced — the apex-v0 governance standard it does not
 	// convert (D205 Q119).
@@ -182,6 +185,9 @@ type LiftResult struct {
 	// RegressionVerdict is one of the LiftRegression* values.
 	RegressionVerdict string `json:"regression_verdict,omitempty"`
 	RegressionNote    string `json:"regression_note,omitempty"`
+	// RegressionRerun is the worst command's second run at the lift
+	// commit, when it was a lift-caused red (RG-1).
+	RegressionRerun *CheckResult `json:"regression_rerun,omitempty"`
 	// RegressionNewFailures are the failing tests after the lift that the
 	// run at the tag did not have (red-at-tag-new-failures, and
 	// red-after-lift whenever the output names them, whatever the exit
@@ -229,6 +235,10 @@ type LiftRegressionRecordCommand struct {
 	NewFailures []string `json:"regression_new_failures"`
 	Log         string   `json:"log"`
 	LogAtTag    string   `json:"log_at_tag,omitempty"`
+	// ExitRerun and LogRerun are its second run at the lift commit, made
+	// only for a lift-caused red (RG-1); absent otherwise.
+	ExitRerun *int   `json:"exit_rerun,omitempty"`
+	LogRerun  string `json:"log_rerun,omitempty"`
 }
 
 // LiftRegressionCommand is one command of a split regression chain,
@@ -241,6 +251,9 @@ type LiftRegressionCommand struct {
 	NewFailures     []string     `json:"new_failures,omitempty"`
 	Regression      *CheckResult `json:"regression,omitempty"`
 	RegressionAtTag *CheckResult `json:"regression_at_tag,omitempty"`
+	// RegressionRerun is its second run at the lift commit, made only for
+	// a lift-caused red (RG-1).
+	RegressionRerun *CheckResult `json:"regression_rerun,omitempty"`
 }
 
 // The lift's regression verdicts: the command at the lift commit judged
@@ -266,6 +279,11 @@ const (
 	// LiftRegressionNoBaseline: red at the lift commit, and the run at
 	// the tag could not run, so nothing says whose red it is.
 	LiftRegressionNoBaseline = "red-no-baseline"
+	// LiftRegressionFlaky: a lift-caused red (red-after-lift,
+	// red-at-tag-new-failures) that ape ran once more at the lift commit,
+	// and that passed (as at the tag) that time — a flake, not the lift's
+	// (RG-1, D248, D277). Recorded for the disposition; no fix is planned.
+	LiftRegressionFlaky = "flaky"
 )
 
 type lifter struct {
@@ -373,6 +391,7 @@ func Lift(ctx context.Context, root string, opt LiftOptions) (*LiftResult, error
 		}
 		lf.res.Preflight = append(lf.res.Preflight, LiftProblem{Code: fe.Code, Message: fe.Msg})
 	}
+	lf.res.Warnings = parentV0Claude(abs)
 	if err := lf.plan(); err != nil {
 		return nil, err
 	}
@@ -1339,7 +1358,7 @@ func (lf *lifter) regressionRecord() *LiftRegressionRecord {
 	rec := &LiftRegressionRecord{Verdict: r.RegressionVerdict, Note: r.RegressionNote, NewFailures: nonNil(r.RegressionNewFailures), Commit: r.Commit}
 	cmds := r.RegressionCommands
 	if len(cmds) == 0 && r.Regression != nil {
-		cmds = []LiftRegressionCommand{{Cmd: r.Gates.Regression, Verdict: r.RegressionVerdict, Note: r.RegressionNote, NewFailures: r.RegressionNewFailures, Regression: r.Regression, RegressionAtTag: r.RegressionAtTag}}
+		cmds = []LiftRegressionCommand{{Cmd: r.Gates.Regression, Verdict: r.RegressionVerdict, Note: r.RegressionNote, NewFailures: r.RegressionNewFailures, Regression: r.Regression, RegressionAtTag: r.RegressionAtTag, RegressionRerun: r.RegressionRerun}}
 	}
 	for _, c := range cmds {
 		rc := LiftRegressionRecordCommand{Cmd: c.Cmd, Verdict: c.Verdict, Note: c.Note, NewFailures: nonNil(c.NewFailures)}
@@ -1349,6 +1368,10 @@ func (lf *lifter) regressionRecord() *LiftRegressionRecord {
 		if t := c.RegressionAtTag; t != nil {
 			exit := t.Exit
 			rc.ExitAtTag, rc.LogAtTag = &exit, t.Log
+		}
+		if re := c.RegressionRerun; re != nil {
+			exit := re.Exit
+			rc.ExitRerun, rc.LogRerun = &exit, re.Log
 		}
 		rec.Commands = append(rec.Commands, rc)
 	}
@@ -1430,17 +1453,47 @@ func (lf *lifter) liftRegression(p *Project) {
 		c := &cmds[i]
 		c.Cmd, c.Regression, c.RegressionAtTag = parts[i].Cmd, &after[i], tag
 		c.Verdict, c.Note, c.NewFailures = judgeLiftRegression(tag, &after[i], readLog(tag), readLog(&after[i]))
+		if c.Verdict == LiftRegressionRedAfterLift || c.Verdict == LiftRegressionRedAtTagNewFailures {
+			ref := regressionRef
+			if len(parts) > 1 {
+				ref = liftPartRef(i)
+			}
+			re := p.RunChecks(lf.ctx, p.LogDir("lift"), "rerun-", []PlannedCheck{{Ref: ref, Kind: KindRegression, Cmd: parts[i].Cmd, LogNote: parts[i].LogNote}}, lf.opt.Run)[0]
+			c.RegressionRerun = &re
+			rv, _, _ := judgeLiftRegression(tag, &re, readLog(tag), readLog(&re))
+			c.Verdict, c.Note, c.NewFailures = rerunVerdict(c, rv)
+		}
 		if liftVerdictRank(c.Verdict) > liftVerdictRank(cmds[worst].Verdict) {
 			worst = i
 		}
 	}
 	w := cmds[worst]
-	lf.res.Regression, lf.res.RegressionAtTag = w.Regression, w.RegressionAtTag
+	lf.res.Regression, lf.res.RegressionAtTag, lf.res.RegressionRerun = w.Regression, w.RegressionAtTag, w.RegressionRerun
 	lf.res.RegressionVerdict, lf.res.RegressionNote, lf.res.RegressionNewFailures = w.Verdict, w.Note, w.NewFailures
 	if len(parts) > 1 {
 		lf.res.RegressionCommands = cmds
 		lf.res.RegressionNote = splitNote(cmds, worst, parts)
 	}
+}
+
+// rerunVerdict is RG-1's judgement of a lift-caused red that ape ran once
+// more at the lift commit: rerun is that second run's verdict against the
+// same run at the tag. Green — or, for red-at-tag-new-failures, red only
+// as at the tag — is a flake: the tenax rehearsal's timing test failed
+// once after the lift and passed 5 of 5 on re-runs (D248), and the lift
+// called it the lift's. Red again keeps the first verdict, saying so.
+func rerunVerdict(c *LiftRegressionCommand, rerun string) (verdict, note string, fresh []string) {
+	re := c.RegressionRerun
+	logs := fmt.Sprintf("Logs: %s, %s", c.Regression.Log, re.Log)
+	switch {
+	case c.Verdict == LiftRegressionRedAfterLift && rerun == LiftRegressionGreen:
+		return LiftRegressionFlaky, fmt.Sprintf("FLAKY: red at the lift commit (exit %d), green when ape ran it again (exit %d), green at %s — not a lift failure: record it in the disposition as flaky and plan no fix for it. %s",
+			c.Regression.Exit, re.Exit, LiftTag, logs), nil
+	case c.Verdict == LiftRegressionRedAtTagNewFailures && (rerun == LiftRegressionGreen || rerun == LiftRegressionRedAtTag):
+		return LiftRegressionFlaky, fmt.Sprintf("FLAKY: red at %s with new failures at the lift commit (%s), the same failures as at the tag when ape ran it again — not a lift failure: record it in the disposition as flaky and plan no fix for it. %s",
+			LiftTag, failureList(c.NewFailures), logs), nil
+	}
+	return c.Verdict, fmt.Sprintf("%s Red again when ape ran it again (exit %d, %s).", c.Note, re.Exit, re.Log), c.NewFailures
 }
 
 // liftPartRef is the ref, and log name, of a split chain's i-th command.
@@ -1477,6 +1530,7 @@ func liftParts(cmd string) []PlannedCheck {
 // The lift's verdicts in rank order, worst highest (liftVerdictRank).
 const (
 	liftRankGreen = iota
+	liftRankFlaky
 	liftRankCannotRun
 	liftRankRedAtTag
 	liftRankNoBaseline
@@ -1496,6 +1550,8 @@ func liftVerdictRank(v string) int {
 		return liftRankRedAtTag
 	case LiftRegressionCannotRun:
 		return liftRankCannotRun
+	case LiftRegressionFlaky:
+		return liftRankFlaky
 	}
 	return liftRankGreen
 }

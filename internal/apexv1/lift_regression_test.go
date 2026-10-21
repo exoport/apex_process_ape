@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -545,7 +546,9 @@ func TestLift_RecordsTheRegressionVerdict(t *testing.T) {
 		"regression_new_failures: `TestKnownUnwiredList`",
 		"1. `sh ./lint.sh` — `red-at-tag`: exit 1 at apex-v0-final, exit 1 after the lift. Logs: `_apex/state/logs/lift/regression-1.log`, `_apex/state/logs/lift/regression-1-at-tag.log`. red at the lift commit",
 		"failing as it did there",
-		"2. `sh ./gotest.sh` — `red-at-tag-new-failures`: exit 1 at apex-v0-final, exit 1 after the lift; regression_new_failures: `TestKnownUnwiredList`. Logs: `_apex/state/logs/lift/regression-2.log`, `_apex/state/logs/lift/regression-2-at-tag.log`.",
+		// RG-1: a lift-caused red runs once more; red again keeps its verdict.
+		"2. `sh ./gotest.sh` — `red-at-tag-new-failures`: exit 1 at apex-v0-final, exit 1 after the lift, exit 1 on a re-run; regression_new_failures: `TestKnownUnwiredList`. Logs: `_apex/state/logs/lift/regression-2.log`, `_apex/state/logs/lift/regression-2-at-tag.log`, `_apex/state/logs/lift/rerun-regression-2.log`.",
+		"Red again when ape ran it again (exit 1, _apex/state/logs/lift/rerun-regression-2.log).",
 		"`regression` in `_apex/state/lift-disposition.json`",
 	} {
 		require.Contains(t, sec, want)
@@ -604,5 +607,66 @@ func TestWriteRegression_CompactKeepsTheWorstNote(t *testing.T) {
 		require.NotContains(t, compact.String(), "cannot run here", c.name)
 		require.Contains(t, full.String(), "cannot run here", "the full form keeps every note")
 		require.Less(t, compact.Len(), full.Len())
+	}
+}
+
+// RG-1 (D248, D277): tenax's lift reported red-after-lift for a timing
+// test that passed 5 of 5 on re-runs. A lift-caused red is run once more
+// at the lift commit: green that time is `flaky` (record it, plan no
+// fix), red again keeps the verdict and says so. The counter makes the
+// command green at the tag (run 1), red after the lift (run 2), and then
+// green (flaky) or red again on the re-run (run 3).
+func TestLift_RegressionRerunsALiftCausedRed(t *testing.T) {
+	for _, tc := range []struct {
+		name, test, verdict, note string
+		rerunExit                 int
+	}{
+		{
+			"green on the re-run is flaky", `[ "$n" -ne 2 ]`, LiftRegressionFlaky,
+			"FLAKY: red at the lift commit (exit 1), green when ape ran it again (exit 0), green at apex-v0-final — not a lift failure: record it in the disposition as flaky and plan no fix for it. Logs: ", 0,
+		},
+		{"red again keeps red-after-lift", `[ "$n" -lt 2 ]`, LiftRegressionRedAfterLift, " Red again when ape ran it again (exit 1, ", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			script := filepath.Join(dir, "flaky.sh")
+			body := "#!/bin/sh\nc=" + filepath.Join(dir, "count") + "\nn=$(cat \"$c\" 2>/dev/null || echo 0)\nn=$((n+1))\necho \"$n\" > \"$c\"\n" + tc.test + "\n"
+			require.NoError(t, os.WriteFile(script, []byte(body), 0o755))
+			root := liftWithGates(t, "sh "+script)
+			res, err := Lift(ctx(), root, LiftOptions{})
+			require.NoError(t, err)
+			require.Equal(t, 0, res.RegressionAtTag.Exit, "green at the tag")
+			require.Equal(t, 1, res.Regression.Exit, "red after the lift")
+			require.NotNil(t, res.RegressionRerun)
+			require.Equal(t, tc.rerunExit, res.RegressionRerun.Exit)
+			require.Equal(t, tc.verdict, res.RegressionVerdict)
+			require.Contains(t, res.RegressionNote, tc.note)
+
+			var rep struct {
+				Regression LiftRegressionRecord `json:"regression"`
+			}
+			data, err := os.ReadFile(filepath.Join(root, "_apex", "state", LiftReport))
+			require.NoError(t, err)
+			require.NoError(t, json.Unmarshal(data, &rep))
+			require.Equal(t, tc.verdict, rep.Regression.Verdict)
+			require.Len(t, rep.Regression.Commands, 1)
+			c := rep.Regression.Commands[0]
+			require.NotNil(t, c.ExitRerun)
+			require.Equal(t, tc.rerunExit, *c.ExitRerun)
+			require.FileExists(t, filepath.Join(root, filepath.FromSlash(c.LogRerun)))
+			require.NotEqual(t, c.Log, c.LogRerun, "the re-run has its own log")
+			disp, err := os.ReadFile(filepath.Join(root, "development", LiftDisposition))
+			require.NoError(t, err)
+			require.Contains(t, string(disp), "`"+tc.verdict+"`: exit 0 at apex-v0-final, exit 1 after the lift, exit "+strconv.Itoa(tc.rerunExit)+" on a re-run.")
+		})
+	}
+}
+
+// RG-1: flaky ranks just above green — below cannot-run and every red —
+// so a lift whose only lift-caused red was a flake reports flaky.
+func TestLiftVerdictRank_Flaky(t *testing.T) {
+	require.Greater(t, liftVerdictRank(LiftRegressionFlaky), liftVerdictRank(LiftRegressionGreen))
+	for _, v := range []string{LiftRegressionCannotRun, LiftRegressionRedAtTag, LiftRegressionNoBaseline, LiftRegressionRedAfterLift, LiftRegressionRedAtTagNewFailures} {
+		require.Less(t, liftVerdictRank(LiftRegressionFlaky), liftVerdictRank(v), v)
 	}
 }

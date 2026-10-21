@@ -21,6 +21,8 @@ var noticeCodes = []string{
 	CodeRoadmapNextInline,
 	// rc.7d (rc7d-std).
 	CodeSpecCheckNamesRemoved,
+	// rc.7j (RG-2): the lift's warning, exit 0 like a notice.
+	CodeLiftParentClaude,
 }
 
 // The published list and the code agree: every code the source sets or a
@@ -59,7 +61,9 @@ func TestDiagnosticCodes_PublishedListMatchesTheCode(t *testing.T) {
 		"CodeAttemptsTotalExceeded": CodeAttemptsTotalExceeded, "CodeReplansExceeded": CodeReplansExceeded, "CodeBlocksExceeded": CodeBlocksExceeded,
 		"CodeChangeNotFound": CodeChangeNotFound, "CodeStateUnreadable": CodeStateUnreadable,
 		"CodeUnsupportedLayout": CodeUnsupportedLayout, "CodeTagNotPushed": CodeTagNotPushed, "CodeLiftWriteFailed": CodeLiftWriteFailed, "CodeClaudeIgnored": CodeClaudeIgnored,
-		"CodeCapsOverCeiling": CodeCapsOverCeiling, "CodeGateGreen": CodeGateGreen, "CodeGateBroken": CodeGateBroken,
+		// rc.7j (RG-2).
+		"CodeLiftParentClaude": CodeLiftParentClaude,
+		"CodeCapsOverCeiling":  CodeCapsOverCeiling, "CodeGateGreen": CodeGateGreen, "CodeGateBroken": CodeGateBroken,
 		"CodeNoSuchTask": CodeNoSuchTask, "CodeNoChangeMD": CodeNoChangeMD, "CodeDelegateInvalidConfig": CodeDelegateInvalidConfig,
 		// D89 (rc.4).
 		"CodeChangeOverCeiling": CodeChangeOverCeiling,

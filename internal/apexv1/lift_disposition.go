@@ -591,6 +591,10 @@ func (lf *lifter) dispositionWith(lim dispLimits) string {
 	p("This file is the lift's hand-off. apex-plan fills the Disposition column and carries each kept rule to its one home;\n")
 	p("a fresh read-only session reviews the result; then the person does, and deletes this file.\n")
 	p("Every binding-rule candidate is in this file. The other long lists are summarised here; `%s` holds every one whole. Git ignores it: it is in the checkout that lifted, never committed.\n\n", report)
+	// RG-2: named relative to the project root, never a home path (D282).
+	for _, w := range r.Warnings {
+		p("**Warning (%s):** %s.\n\n", w.Code, w.Message)
+	}
 
 	p("## Binding-rule candidates\n\n")
 	p("Disposition is one of: `kept in AGENTS.md` · `gated by <cmd>` · `ADR-NNNN` · `docs/<page>` · `dropped: <reason>`.\n\n")
@@ -760,18 +764,25 @@ func writeRegression(b *strings.Builder, rec *LiftRegressionRecord, report strin
 	if len(rec.NewFailures) > 0 {
 		p("regression_new_failures: `%s`\n\n", strings.Join(rec.NewFailures, "`, `"))
 	}
-	for i, c := range rec.Commands {
+	for i := range rec.Commands {
+		c := &rec.Commands[i]
 		at := "not run at " + LiftTag
 		if c.ExitAtTag != nil {
 			at = fmt.Sprintf("exit %d at %s", *c.ExitAtTag, LiftTag)
 		}
 		p("%d. `%s` — `%s`: %s, exit %d after the lift", i+1, strings.ReplaceAll(c.Cmd, "\n", " ⏎ "), c.Verdict, at, c.ExitAfter)
+		if c.ExitRerun != nil {
+			p(", exit %d on a re-run", *c.ExitRerun) // RG-1
+		}
 		if len(c.NewFailures) > 0 {
 			p("; regression_new_failures: `%s`", strings.Join(c.NewFailures, "`, `"))
 		}
 		p(". Logs: `%s`", c.Log)
 		if c.LogAtTag != "" {
 			p(", `%s`", c.LogAtTag)
+		}
+		if c.LogRerun != "" {
+			p(", `%s`", c.LogRerun)
 		}
 		if len(rec.Commands) > 1 && (!compact || i == worst) {
 			p(". %s", c.Note)
