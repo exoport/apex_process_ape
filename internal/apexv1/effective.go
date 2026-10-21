@@ -41,6 +41,8 @@ type PlannedCheck struct {
 	// of its split note: the lift's note on a ( … ) block's line run on
 	// its own (R30).
 	LogNote string
+	// Line is a scenario's heading line in its spec or change.md.
+	Line int
 }
 
 func scenarioRef(capName, req, scen string) string { return capName + "/" + req + "/" + scen }
@@ -58,7 +60,7 @@ func scenarioChecks(capName string, reqs []Requirement, delta bool) []PlannedChe
 			}
 			out = append(out, PlannedCheck{
 				Ref: scenarioRef(capName, r.Name, s.Name), Kind: KindScenario,
-				Capability: capName, Requirement: r.Name, Scenario: s.Name, Delta: delta, Cmd: cmd,
+				Capability: capName, Requirement: r.Name, Scenario: s.Name, Delta: delta, Cmd: cmd, Line: s.Line,
 			})
 		}
 	}

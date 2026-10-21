@@ -243,6 +243,19 @@ change tier runs at start and verify; the milestone tier (else the change tier) 
   command and its last recorded run took longer than `checks.slow_regression` (default 5m): every
   start and verify pays for the whole suite, so split it into tiers.
 
+### What the checks cost
+
+The gate records each scenario check's run time in `_apex/state/logs/gate-<M>.json`
+(`scenario_secs`, kept out of `milestones.json`, the gate's output and `ape status`).
+`ape project check` reads the newest one:
+
+- `checks.duplicate-run` (notice, action replan): two or more scenario checks start with the same
+  command, up to the first top-level `&&` or `|`, differ after it, and each ran over a minute at
+  the last gate. ape runs a shared command once only when the whole check is the same, so the gate
+  runs that command once per check. The notice names the scenarios and their time per gate. Give
+  the command one scenario and have the others check what it leaves under `development/`, or merge
+  the scenarios. ape memoizes nothing.
+
 ### Flaky checks
 
 With `retries: <n>` (0–5, default 0), a red check runs again up to n times. A pass on a retry is

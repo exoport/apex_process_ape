@@ -43,6 +43,11 @@ type GateRun struct {
 	// Flaky lists what passed only on a retry (H12): the gate command
 	// ("gate-<M>"), scenarios, the regression command.
 	Flaky []string `json:"flaky,omitempty"`
+	// ScenarioSecs is each scenario check's run time, by ref (W2): what
+	// project check's test-cost notices read. Kept only in the gitignored
+	// logs/gate-<M>.json (gateTimings); never in milestones.json, the
+	// gate's output or ape status.
+	ScenarioSecs map[string]float64 `json:"scenario_secs,omitempty"`
 }
 
 // Green reports a passing gate: its command exited 0, every scenario
@@ -159,16 +164,50 @@ func (p *Project) lastGatePath(id string) string {
 // LastGateRun is the milestone's most recent gate run: the gitignored
 // latest-run record, else the committed one.
 func (p *Project) LastGateRun(id string) *GateRun {
-	if data, err := os.ReadFile(p.lastGatePath(id)); err == nil {
-		var run GateRun
-		if json.Unmarshal(data, &run) == nil {
-			return &run
-		}
+	if run := p.lastGateRecord(id); run != nil {
+		run.ScenarioSecs = nil
+		return run
 	}
 	if recs, err := p.LoadMilestoneRecords(); err == nil && recs[id] != nil {
 		return recs[id].Since
 	}
 	return nil
+}
+
+// lastGateRecord is logs/gate-<M>.json as written, ScenarioSecs
+// included; nil when absent or unreadable.
+func (p *Project) lastGateRecord(id string) *GateRun {
+	data, err := os.ReadFile(p.lastGatePath(id))
+	if err != nil {
+		return nil
+	}
+	var run GateRun
+	if json.Unmarshal(data, &run) != nil {
+		return nil
+	}
+	return &run
+}
+
+// latestGate is the newest gate run of any milestone of the roadmap that
+// recorded its scenario timings (W2), nil when none did: "the last gate"
+// of project check's test-cost notices.
+func (p *Project) latestGate() (string, *GateRun) {
+	rm := p.roadmap()
+	if rm == nil {
+		return "", nil
+	}
+	var id string
+	var best *GateRun
+	for i := range rm.Milestones {
+		run := p.lastGateRecord(rm.Milestones[i].ID)
+		if run == nil || run.ScenarioSecs == nil {
+			continue
+		}
+		if best == nil || run.At > best.At {
+			id, best = rm.Milestones[i].ID, run
+		}
+	}
+	return id, best
 }
 
 // milestonePaths are the files a milestone commit records.
@@ -514,9 +553,14 @@ func (p *Project) runGate(ctx context.Context, id string, opt RunOptions) (*Gate
 			run.SpecFailed = append(run.SpecFailed, results[i])
 		}
 	}
+	run.ScenarioSecs = map[string]float64{}
+	for i := range results {
+		run.ScenarioSecs[results[i].Task] = results[i].Secs
+	}
 	if data, err := json.MarshalIndent(run, "", "  "); err == nil {
 		_ = writeFileAtomic(p.lastGatePath(id), string(data)+"\n")
 	}
+	run.ScenarioSecs = nil
 	g := &GateResult{Milestone: id, Run: run, Status: m.Status, checks: ran}
 	recs, err := p.LoadMilestoneRecords()
 	if err != nil {

@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"time"
 )
 
 // Backlog 32, 37: the project's own test suite as a regression command,
@@ -368,7 +367,7 @@ func (p *Project) regressionSlowNotices(ctx context.Context) []Diagnostic {
 	if secs <= limit.Seconds() {
 		return nil
 	}
-	took := (time.Duration(secs) * time.Second).Round(time.Second)
+	took := roundSecs(secs)
 	return []Diagnostic{notice(Diagnostic{Code: CodeRegressionSlow, File: configYAML, Line: configKeyLine(p.Root, "regression"), Message: fmt.Sprintf(
 		"regression: `%s` took %s at its last run (%s), over checks.slow_regression (%s), and as the single command it runs at every change's start and verify as well as at the gate"+
 			" — split it into tiers, regression: {change: <a fast subset>, milestone: %s}, or raise checks.slow_regression", cmd, took, where, limit, cmd)})}

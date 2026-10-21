@@ -110,6 +110,9 @@ const (
 	// CodeRegressionSlow: project check's notice for a single-command
 	// regression: whose last run took over checks.slow_regression.
 	CodeRegressionSlow = "regression.slow"
+	// CodeChecksDuplicateRun: project check's notice for scenario checks
+	// that start with the same slow command (checkcost.go).
+	CodeChecksDuplicateRun = "checks.duplicate-run"
 )
 
 // CodeDoc documents one diagnostic code.
@@ -451,5 +454,6 @@ var DiagnosticCodes = []CodeDoc{
 	// v1.1 W2.
 	{CodeGateSpecRed, 1, "replan", "`ape milestone gate <M> --spec-only` (W2): a scenario check of the effective spec is red now (JSON spec_failed) — apex-plan fixes the plan's scenarios or their checks before the milestone is approved; nothing was recorded"},
 	{CodeRegressionSlow, 0, "replan", "a notice, never a finding (project check's notices; the exit is unchanged): regression: is a single command, so every change's start and verify runs the whole suite, and its last recorded run (a change's baseline or verify, or a milestone's last gate) took longer than checks.slow_regression (default 5m; W2) — apex-plan splits it into tiers, regression: {change: <a fast subset>, milestone: <the suite>}, whose milestone tier is baselined once per milestone"},
+	{CodeChecksDuplicateRun, 0, "replan", "a notice, never a finding (project check's notices; the exit is unchanged): two or more scenario checks of the spec start with the same command (up to the first top-level && or |) and differ after it, and each ran over a minute at the last gate (W2) — so every gate runs that command once per check, which ape does not memoize; the notice names the scenarios and their time per gate: apex-plan gives the command one scenario and has the others check what it leaves under development/, or merges them"},
 	{UnclassifiedFinding, 1, "stop", "a finding no rule classifies (a bug: report it)"},
 }

@@ -201,5 +201,6 @@ func (p *Project) Notices() []Diagnostic {
 	out = append(out, p.configKeyNotices()...)
 	out = append(out, p.decisionPlaceholderNotices()...)
 	// v1.1 W2.
-	return append(out, p.regressionSlowNotices(context.Background())...)
+	out = append(out, p.regressionSlowNotices(context.Background())...)
+	return append(out, p.duplicateRunNotices()...)
 }
