@@ -130,6 +130,18 @@ eval's E-R7-1 and E2 residual (D219).
   pointer, and `project check` lists the `roadmap.next-inline` notice. A project an rc.7b move
   left that way is repaired by running `ape next move` again.
 
+### rc.7i: every binding-rule candidate stays in the committed disposition (D274, D276)
+
+- **The lift never cuts a binding-rule candidate from `development/lift-disposition.md`**: past
+  its 48 KB ceiling the file used to keep as many rows as fit and send the rest to
+  `_apex/state/lift-disposition.json`, which git ignores, so apex-plan run in any other clone
+  never saw them (cortex on rc.7f: 271 of 384). Every row is in the committed file now, whatever
+  its size (on the rehearsal projects 71–146 KB), under a line giving the row count and the
+  file's size, so a reader that reads it in parts can tell it reached the last row. The 16 KB
+  cap and 48 KB ceiling still bound the other lists (ids left, path references, the v0 state
+  readers, the ADR table), whose full lists stay in the JSON; the "… and N more candidate(s)"
+  line is gone.
+
 ### rc.7h: the startup check on a monochrome screen (D269, D270)
 
 - **The startup check accepts claude's placeholder hint on a monochrome screen**: with
