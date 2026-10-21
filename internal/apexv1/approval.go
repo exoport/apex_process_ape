@@ -44,6 +44,11 @@ type MilestoneApproval struct {
 	// files (every word that named one); gateDrift ignores the extra ones.
 	GateFiles       map[string]string `json:"gate_files,omitempty"`
 	GateFilesSHA256 string            `json:"gate_files_sha256"`
+	// GateOwnFiles are the gate's own files beside its scripts (RK-6 R1,
+	// gateOwnFiles): what its scripts source, its gate folders, the files
+	// it names under its own folder — each with its SHA-256 at approval.
+	// Absent on approvals before rc.7o.
+	GateOwnFiles map[string]string `json:"gate_own_files,omitempty"`
 	// SelfCheck is the gate's run at approval (D70 B): red, its exit,
 	// duration and log. Absent on approvals before rc.3.
 	SelfCheck *GateSelfCheck `json:"self_check,omitempty"`
@@ -130,12 +135,15 @@ func gateFilesDigest(files map[string]string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// newApproval records a person approving gate now.
-func (p *Project) newApproval(gate, by string) *MilestoneApproval {
-	files := p.gateFiles(gate)
-	a := &MilestoneApproval{By: by, At: Stamp(), GateCmd: gate, GateFilesSHA256: gateFilesDigest(files)}
+// newApproval records a person approving m's gate now.
+func (p *Project) newApproval(m *Milestone, by string) *MilestoneApproval {
+	files := p.gateFiles(m.Gate)
+	a := &MilestoneApproval{By: by, At: Stamp(), GateCmd: m.Gate, GateFilesSHA256: gateFilesDigest(files)}
 	if len(files) > 0 {
 		a.GateFiles = files
+	}
+	if own := p.gateOwnFiles(m); len(own) > 0 {
+		a.GateOwnFiles = own
 	}
 	return a
 }
@@ -164,7 +172,7 @@ func (p *Project) gateDrift(m *Milestone, a *MilestoneApproval) []string {
 			out = append(out, n+" changed")
 		}
 	}
-	return out
+	return append(out, p.gateOwnDrift(a)...)
 }
 
 // gateScriptUnrecorded reports a script of m's gate that exists now and
@@ -175,7 +183,7 @@ func (p *Project) gateScriptUnrecorded(m *Milestone, a *MilestoneApproval) bool 
 			return true
 		}
 	}
-	return false
+	return p.gateOwnUnrecorded(m, a)
 }
 
 // requireApprovalRecord refuses an approved milestone ape holds no

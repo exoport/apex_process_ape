@@ -213,7 +213,7 @@ var DiagnosticCodes = []CodeDoc{
 	{"milestone.budget-exceeded", 1, "person", "ape task: the current milestone's spend is at its enforced budget (limits.budget: enforce); no session starts"},
 	{"milestone.changes-in-flight", 1, "apply", "close: changes of the milestone are in-progress, verified or reviewed; the action is person instead when one of them has a non-empty awaiting_human (reviewed, human-review tasks not accepted: D49)"},
 	{CodeStatusUnrecorded, 1, "person", "a milestone's Status says approved (or done) and ape holds no record of it in milestones.json — approved by hand, or before ape recorded approvals (H2); change start, gate and close refuse it: a person runs `ape milestone approve <M> --by <who>` (a done one: restore its Status line)"},
-	{CodeGateChanged, 1, "person", "the milestone's Gate: command, or a script it runs (a recorded gate file), differs from what a person approved (H2, D51); gate and close refuse it: a person reviews the gate and runs `ape milestone approve <M> --by <who>` again"},
+	{CodeGateChanged, 1, "person", "the milestone's Gate: command, a script it runs (a recorded gate file), or one of the gate's own files (gate_own_files, rc.7o), differs from what a person approved (H2, D51); gate and close refuse it: a person reviews the gate and runs `ape milestone approve <M> --by <who>` again"},
 	{"milestone.done", 1, "stop", "approve: the milestone is already done"},
 	{"milestone.malformed", 1, "person", "approve: the milestone lacks a Gate or Goal (findings follow)"},
 	{"milestone.no-gate", 1, "person", "the milestone has no Gate: line"},

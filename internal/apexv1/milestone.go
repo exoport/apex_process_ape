@@ -339,7 +339,7 @@ func (p *Project) approveMilestone(ctx context.Context, id, by, acceptGreen stri
 		rec = &MilestoneRecord{}
 		recs[id] = rec
 	}
-	rec.Approval = p.newApproval(m.Gate, strings.TrimSpace(by))
+	rec.Approval = p.newApproval(m, strings.TrimSpace(by))
 	rec.Approval.SelfCheck = selfCheck
 	rec.Approval.BaseSHA = base
 	if selfCheck.Exit == 0 {

@@ -96,7 +96,7 @@ func newMilestoneApproveCmd() *cobra.Command {
 		Short: "Write Status: approved (by <who> <ts>)",
 		Long: `Approve a proposed milestone: its Status: line becomes "approved (by <who> <ts>)", and
 milestones.json records the approval (H2): {by, at, gate_cmd, gate_files, gate_files_sha256,
-base_sha} — base_sha the milestone's start (D130): HEAD at its first approval, kept by a
+gate_own_files, base_sha} — base_sha the milestone's start (D130): HEAD at its first approval, kept by a
 re-approval, passed to every gate run as APE_MILESTONE_BASE (see ` + "`ape milestone gate --help`" + `)
 — the Gate: command, exactly as written, and the SHA-256 of each gate file: a script the
 command runs that is a regular file under the project root at approval. Of each simple
@@ -109,10 +109,19 @@ node -e and friends name no script). No other word is hashed: arguments and data
 (grep -q x CHANGELOG.md), commands inside $(…) or backquotes (test "$(python3 greet.py)"
 = Hello hashes nothing), bare command names (looked up on PATH), absolute paths, paths
 leaving the root and words with $ or a glob; what a script runs in turn is not covered.
-gate_files_sha256 digests the gate files. The gate differs from the approved one when its
-command changed, or a recorded gate file it still runs is gone or changed (compared file
-by file); a gate file created since the approval, and a file an older approval recorded
-that the gate does not run as a script, are not drift. Changes can start only under an
+gate_files_sha256 digests the gate files. gate_own_files (RK-6, rc.7o) records the gate's own
+files beside its scripts, each with its SHA-256: every file under the milestone's gate
+folders (development/gates/<M>-*/) and development/gates/lib/; every file a recorded script
+sources (". <path>", "source <path>", literal or "$(dirname "$0")/<path>"); and every
+literal relative path a recorded script names under its own folder, when that folder is
+not the project root or the development folder (scripts/checks/m4.checks beside
+scripts/m4.sh) — never the files a gate checks elsewhere (README.md, docs/), which are the
+milestone's work. One level: a file found is not read in turn. The gate differs from the
+approved one when its command changed, or a recorded gate file it still runs, or a recorded
+own file, is gone or changed (compared file by file); a gate file or own file created since
+the approval, and a file an older approval recorded that the gate does not run as a
+script, are not drift (the next re-approval records it). A change's commits that edit a
+recorded gate file are refused by verify and archive (change.touches-gate). Changes can start only under an
 approved milestone; gate and close refuse a gate that differs from the approved one.
 Committed together as "apex: <M> approved".
 

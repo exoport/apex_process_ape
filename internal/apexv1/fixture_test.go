@@ -60,7 +60,7 @@ func recordApprovals(t *testing.T, p *Project) {
 			if recs[m.ID] == nil {
 				recs[m.ID] = &MilestoneRecord{}
 			}
-			recs[m.ID].Approval = p.newApproval(m.Gate, "eval")
+			recs[m.ID].Approval = p.newApproval(m, "eval")
 			n++
 		}
 	}
