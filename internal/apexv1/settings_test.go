@@ -114,3 +114,60 @@ func TestCheckHooks_PreItem10MatcherIsUpgraded(t *testing.T) {
 func bytesReplace(s, old, repl []byte) []byte {
 	return []byte(strings.Replace(string(s), string(old), string(repl), 1))
 }
+
+// F-2 (D340): pre-tool is registered with "onFailure": "block", so a guard
+// that cannot run blocks the call. A registration from before rc.7q without the key is
+// intact — never a finding — but a hooks.fail-open notice, and init adds
+// the key in place; another value is an alteration, restored.
+func TestCheckHooks_PreToolFailsClosed(t *testing.T) {
+	p := settingsProject(t, "")
+	_, err := MergeHooks(p.SettingsJSON())
+	require.NoError(t, err)
+	data, err := os.ReadFile(p.SettingsJSON())
+	require.NoError(t, err)
+	require.Equal(t, 1, strings.Count(string(data), `"onFailure": "block"`), "pre-tool only:\n%s", data)
+	require.Empty(t, p.failOpenNotices())
+
+	v10 := bytesReplace(data, []byte(`,
+            "onFailure": "block"`), nil)
+	require.NotContains(t, string(v10), "onFailure", "the fixture must be the pre-rc.7q shape")
+	require.NoError(t, os.WriteFile(p.SettingsJSON(), v10, 0o644))
+	require.Empty(t, p.CheckHooks(), "a registration from before rc.7q is intact")
+	notes := p.failOpenNotices()
+	require.Len(t, notes, 1)
+	require.Equal(t, CodeHooksFailOpen, notes[0].Code)
+	require.Equal(t, SeverityNotice, notes[0].Severity)
+	require.Contains(t, notes[0].Message, "hook `ape hook pre-tool` for PreToolUse has no \"onFailure\": \"block\"")
+	require.Contains(t, noticeCodesOf(p.Notices()), CodeHooksFailOpen)
+
+	added, err := MergeHooks(p.SettingsJSON())
+	require.NoError(t, err)
+	require.Equal(t, []string{"PreToolUse: ape hook pre-tool (onFailure: block)"}, added)
+	require.Empty(t, p.failOpenNotices())
+	after, err := os.ReadFile(p.SettingsJSON())
+	require.NoError(t, err)
+	require.Equal(t, 1, strings.Count(string(after), `"onFailure": "block"`))
+	require.Equal(t, 1, strings.Count(string(after), `"ape hook pre-tool"`), "upgraded in place, not added beside")
+	added, err = MergeHooks(p.SettingsJSON())
+	require.NoError(t, err)
+	require.Empty(t, added, "idempotent")
+
+	require.NoError(t, os.WriteFile(p.SettingsJSON(), bytesReplace(after, []byte(`"onFailure": "block"`), []byte(`"onFailure": "ignore"`)), 0o644))
+	fs := p.CheckHooks()
+	require.Equal(t, []string{"hooks.altered"}, codesOf(fs))
+	require.Contains(t, fs[0].Message, `onFailure ignore, want "block"`)
+	added, err = MergeHooks(p.SettingsJSON())
+	require.NoError(t, err)
+	require.Equal(t, []string{"PreToolUse: ape hook pre-tool (restored)"}, added)
+	require.Empty(t, p.CheckHooks())
+}
+
+func TestInlineHooks_PreToolFailsClosed(t *testing.T) {
+	for _, h := range InlineHooks() {
+		want := ""
+		if h.Event == "PreToolUse" {
+			want = OnFailureBlock
+		}
+		require.Equal(t, want, h.OnFailure, h.Event)
+	}
+}

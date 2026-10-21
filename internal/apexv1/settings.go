@@ -10,20 +10,29 @@ import (
 )
 
 // HookSpec is one hook ape registers: the event, the tool matcher ("" for
-// none), the command and its timeout in seconds (0 for Claude Code's).
+// none), the command, its timeout in seconds (0 for Claude Code's) and
+// its onFailure ("" for Claude Code's default, which passes the call).
 type HookSpec struct {
 	Event, Matcher, Command string
 	Timeout                 int
+	OnFailure               string
 }
+
+// OnFailureBlock is pre-tool's onFailure (F-2, D340): a guard that cannot
+// run — ape not on PATH, a crash, a timeout — blocks the call instead of
+// letting every tool call through. Measured on Claude Code 2.1.304 and
+// 2.1.305: a PreToolUse hook whose command does not exist PASSES the call
+// by default, and blocks it with onFailure "block"; an exit 1 blocks too.
+const OnFailureBlock = "block"
 
 // APEHooks are the hooks `ape project init` merges into
 // .claude/settings.json, in the order it writes them.
 func APEHooks() []HookSpec {
 	return []HookSpec{
-		{"SessionStart", "", HookCmdSessionStart, 0},
-		{"Stop", "", HookCmdStop, StopHookTimeout},
-		{"SubagentStop", "", HookCmdStop, StopHookTimeout},
-		{"PreToolUse", PreToolMatcher, HookCmdPreTool, 0},
+		{"SessionStart", "", HookCmdSessionStart, 0, ""},
+		{"Stop", "", HookCmdStop, StopHookTimeout, ""},
+		{"SubagentStop", "", HookCmdStop, StopHookTimeout, ""},
+		{"PreToolUse", PreToolMatcher, HookCmdPreTool, 0, OnFailureBlock},
 		promptHook,
 	}
 }
@@ -32,7 +41,7 @@ func APEHooks() []HookSpec {
 // session ape launches it records nothing (T7) — and, missing, a notice
 // (hooks.prompt-absent), not a finding: without it a person act from
 // Claude Code is refused, as before, and nothing else changes.
-var promptHook = HookSpec{"UserPromptSubmit", "", HookCmdUserPrompt, 0}
+var promptHook = HookSpec{"UserPromptSubmit", "", HookCmdUserPrompt, 0, ""}
 
 // requiredHooks are the hooks a missing or altered one of is a finding.
 func requiredHooks() []HookSpec {
@@ -118,7 +127,20 @@ func alteration(w HookSpec, e hookEntry) string {
 			return fmt.Sprintf("timeout %v, want %d", e.entry["timeout"], w.Timeout)
 		}
 	}
+	// An onFailure other than the one ape writes is an alteration; none
+	// at all is what every init before rc.7q wrote, so it is the notice
+	// hooks.fail-open (failOpen) and init's upgrade, never a finding.
+	if of, ok := e.entry["onFailure"]; ok && w.OnFailure != "" && of != w.OnFailure {
+		return fmt.Sprintf("onFailure %v, want %q", of, w.OnFailure)
+	}
 	return ""
+}
+
+// failOpen reports an intact entry of w that lacks the onFailure ape
+// writes: a registration from before rc.7q, which a failing guard passes.
+func failOpen(w HookSpec, e hookEntry) bool {
+	_, ok := e.entry["onFailure"]
+	return w.OnFailure != "" && !ok
 }
 
 // readSettings reads a settings.json into a map; an absent file is empty.
@@ -170,8 +192,13 @@ func MergeHooks(path string) ([]string, error) {
 	for _, w := range APEHooks() {
 		groups, _ := hooks[w.Event].([]any)
 		found := findHook(groups, w.Command)
-		intact := slices.ContainsFunc(found, func(e hookEntry) bool { return alteration(w, e) == "" })
-		if intact {
+		intact := slices.IndexFunc(found, func(e hookEntry) bool { return alteration(w, e) == "" })
+		if intact >= 0 {
+			// F-2: a registration from before rc.7q gains onFailure in place.
+			if e := found[intact]; failOpen(w, e) {
+				e.entry["onFailure"] = w.OnFailure
+				added = append(added, w.Event+": "+w.Command+" (onFailure: "+w.OnFailure+")")
+			}
 			continue
 		}
 		note := ""
@@ -182,6 +209,9 @@ func MergeHooks(path string) ([]string, error) {
 		cmd := map[string]any{"type": "command", "command": w.Command}
 		if w.Timeout > 0 {
 			cmd["timeout"] = w.Timeout
+		}
+		if w.OnFailure != "" {
+			cmd["onFailure"] = w.OnFailure
 		}
 		group := map[string]any{"hooks": []any{cmd}}
 		if w.Matcher != "" {
@@ -252,6 +282,31 @@ func (p *Project) CheckHooks() []Finding {
 			continue
 		}
 		out = append(out, Finding{File: file, Message: fmt.Sprintf("hook %#q for %s is altered (%s) — run `ape project init` to restore it", w.Command, w.Event, alteration(w, found[0]))})
+	}
+	return out
+}
+
+// failOpenNotices are project check's hooks.fail-open notices (F-2, D340): an
+// intact ape hook registered without the onFailure ape writes — every
+// project's pre-tool before rc.7q — so a guard that cannot run (ape not on PATH,
+// a crash) passes every tool call. `ape project init` adds it in place.
+func (p *Project) failOpenNotices() []Diagnostic {
+	root, err := readSettings(p.SettingsJSON())
+	if err != nil {
+		return nil
+	}
+	hooks, _ := root["hooks"].(map[string]any)
+	var out []Diagnostic
+	for _, w := range requiredHooks() {
+		groups, _ := hooks[w.Event].([]any)
+		found := findHook(groups, w.Command)
+		i := slices.IndexFunc(found, func(e hookEntry) bool { return alteration(w, e) == "" })
+		if i < 0 || !failOpen(w, found[i]) {
+			continue
+		}
+		out = append(out, notice(Diagnostic{Code: CodeHooksFailOpen, File: settingsJSONRel, Message: fmt.Sprintf(
+			"hook %#q for %s has no \"onFailure\": %q, so if it cannot run (ape not on PATH, a crash, a timeout) Claude Code lets the tool call through unguarded"+
+				" — `ape project init` adds it in place", w.Command, w.Event, w.OnFailure)}))
 	}
 	return out
 }

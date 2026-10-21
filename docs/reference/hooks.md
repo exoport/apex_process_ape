@@ -11,13 +11,13 @@ report a missing or altered hook. Each handler's full text is in `ape hook <name
 `ape project init` merges these entries into `.claude/settings.json`, keeping every other key and
 hook:
 
-| Event | Matcher | Command | Timeout |
-| ----- | ------- | ------- | ------- |
-| `SessionStart` | none | `ape hook session-start` | Claude Code's default |
-| `Stop` | none | `ape hook stop` | 1800 s |
-| `SubagentStop` | none | `ape hook stop` | 1800 s |
-| `PreToolUse` | `Edit\|Write\|MultiEdit\|NotebookEdit\|Bash` | `ape hook pre-tool` | Claude Code's default |
-| `UserPromptSubmit` | none | `ape hook user-prompt` | Claude Code's default |
+| Event | Matcher | Command | Timeout | onFailure |
+| ----- | ------- | ------- | ------- | --------- |
+| `SessionStart` | none | `ape hook session-start` | Claude Code's default | Claude Code's default |
+| `Stop` | none | `ape hook stop` | 1800 s | Claude Code's default |
+| `SubagentStop` | none | `ape hook stop` | 1800 s | Claude Code's default |
+| `PreToolUse` | `Edit\|Write\|MultiEdit\|NotebookEdit\|Bash` | `ape hook pre-tool` | Claude Code's default | `block` |
+| `UserPromptSubmit` | none | `ape hook user-prompt` | Claude Code's default | Claude Code's default |
 
 Each is a `type: command` hook. An entry that was altered is removed and written again as init
 writes it. Altered means one of:
@@ -25,9 +25,18 @@ writes it. Altered means one of:
 - another matcher;
 - a type other than `command`;
 - `async` (an async hook cannot block);
-- a stop timeout below 1800 s.
+- a stop timeout below 1800 s;
+- an `onFailure` other than the one in the table.
 
-An intact entry is left alone, so running init again changes nothing. `ape project
+An intact entry is left alone, so running init again changes nothing. A `pre-tool` entry with no
+`onFailure`, as an init before v1.0.0-rc.7q wrote it, is intact; `ape project check` lists the notice `hooks.fail-open`,
+and init adds the key in place.
+
+**Why `onFailure: block`.** Claude Code (2.1.295 and later) runs a PreToolUse hook that cannot
+start, crashes or times out as a pass: the tool call goes through unguarded. Measured on 2.1.304
+and 2.1.305, a `pre-tool` whose `ape` is not on `PATH` let a Bash call run; with
+`"onFailure": "block"` the call was blocked, and so was one whose hook exited 1. So a session in a
+checkout without `ape` cannot edit or run commands until `ape` is on its `PATH`. `ape project
 operator-interface` uses the same merge.
 
 `.claude/settings.json` is the team's file: init writes the `.claude/` shape into the root

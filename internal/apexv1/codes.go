@@ -78,6 +78,13 @@ const (
 	CodeHooksPreCommitAbsent = "hooks.pre-commit-absent"
 )
 
+// rc.7q (D340): F-2.
+const (
+	// CodeHooksFailOpen: project check's notice for ape's pre-tool hook
+	// registered without onFailure "block" (settings.go failOpenNotices).
+	CodeHooksFailOpen = "hooks.fail-open"
+)
+
 // CodeDoc documents one diagnostic code.
 type CodeDoc struct {
 	Code string `json:"code"`
@@ -406,5 +413,7 @@ var DiagnosticCodes = []CodeDoc{
 	{"next.bad-item", 1, "person", "a development/next.md item is malformed (D217 Q127): its leading date is not a real YYYY-MM-DD, it has no text after its date, or its `(from <id>)` names no change id — an item reads `- YYYY-MM-DD <text> (from <change-id>)` as ape next add writes it; an undated line (as apex-plan wrote them under its roadmap label) is accepted"},
 	// rc.7d (rc7d-std).
 	{CodeSpecCheckNamesRemoved, 0, "replan", "a notice, never a finding (project check's notices; the exit is unchanged): a scenario of a lasting spec (development/specs/<capability>/spec.md) has a check: that names what `ape decision standard` removed (D232 Q131) — the apex-v0 ADR-0001 file it replaced or a proposed ADR that superseded it (its path, file name or id; `Supersedes: ADR-0001` once a supersede was removed), by decisions.json's ADR-0001 standard.removed record (Q130); for a project whose seq-08 ran before that record (rc.7b), a check naming a decisions/ file that does not exist or an ADR-0001 file name that is not the standard's (Q133). A check asserting the name's absence (`! test -e …`, `[ ! -f … ]`) is not stale. The scenario can never pass again: plan a change whose REMOVED delta of the requirement cites the migration v1.0.0_seq-08 (re-ADD what still holds under a new name); never recreate the records or supersede ADR-0001 again — an accepted supersede opts the project out of APEX's standard (D205). ape never edits the spec itself (Q132); the gate's and verify's red line for that scenario carries the same pointer (stale_names)"},
+	// rc.7q (D340): F-2.
+	{CodeHooksFailOpen, 0, "person", "a notice, never a finding (project check's notices; the exit is unchanged): .claude/settings.json registers ape's pre-tool hook without \"onFailure\": \"block\" (Claude Code 2.1.295+), as every init before rc.7q wrote it — so if the hook cannot run (ape not on PATH, a crash, a timeout) Claude Code passes the tool call unguarded (measured on 2.1.304 and 2.1.305); `ape project init` adds the key in place (F-2, D340)"},
 	{UnclassifiedFinding, 1, "stop", "a finding no rule classifies (a bug: report it)"},
 }

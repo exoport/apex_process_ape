@@ -12,7 +12,7 @@ func TestBuildSettings_ExtraHooks(t *testing.T) {
 		APEBin: "/bin/ape", BridgePort: 4242, Mode: ModeTUI, InjectHooks: true,
 		ExtraHooks: []ExtraHook{
 			{Event: "Stop", Command: "ape hook stop --inline", Timeout: 1800},
-			{Event: "PreToolUse", Matcher: "Edit|Write", Command: "ape hook pre-tool --inline"},
+			{Event: "PreToolUse", Matcher: "Edit|Write", Command: "ape hook pre-tool --inline", OnFailure: "block"},
 		},
 	})
 	if err != nil {
@@ -29,8 +29,11 @@ func TestBuildSettings_ExtraHooks(t *testing.T) {
 		t.Errorf("Stop groups = %+v", stop)
 	}
 	pre := s.Hooks["PreToolUse"]
-	if len(pre) != 2 || pre[1].Matcher != "Edit|Write" || pre[1].Hooks[0].Timeout != 0 {
+	if len(pre) != 2 || pre[1].Matcher != "Edit|Write" || pre[1].Hooks[0].Timeout != 0 || pre[1].Hooks[0].OnFailure != "block" {
 		t.Errorf("PreToolUse groups = %+v", pre)
+	}
+	if stop[1].Hooks[0].OnFailure != "" {
+		t.Errorf("Stop gained an onFailure: %+v", stop[1])
 	}
 	if len(s.Hooks["SessionStart"]) != 1 {
 		t.Errorf("SessionStart gained a group: %+v", s.Hooks["SessionStart"])

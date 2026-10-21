@@ -23,6 +23,8 @@ var noticeCodes = []string{
 	CodeSpecCheckNamesRemoved,
 	// rc.7j (RG-2): the lift's warning, exit 0 like a notice.
 	CodeLiftParentClaude,
+	// rc.7q (D340): F-2.
+	CodeHooksFailOpen,
 }
 
 // The published list and the code agree: every code the source sets or a
@@ -91,6 +93,8 @@ func TestDiagnosticCodes_PublishedListMatchesTheCode(t *testing.T) {
 		"CodeNextMovePending": CodeNextMovePending, "CodeRoadmapNextInline": CodeRoadmapNextInline,
 		// rc.7d (rc7d-std).
 		"CodeSpecCheckNamesRemoved": CodeSpecCheckNamesRemoved,
+		// rc.7q (D340): F-2.
+		"CodeHooksFailOpen": CodeHooksFailOpen,
 	}
 	for _, glob := range []string{"*.go", filepath.Join("..", "apecmd", "v1_*.go")} {
 		files, err := filepath.Glob(glob)

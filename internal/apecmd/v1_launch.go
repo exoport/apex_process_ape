@@ -137,7 +137,7 @@ func v1InlineHooks() (hooks []config.ExtraHook, env []string) {
 	specs := apexv1.InlineHooks()
 	hooks = make([]config.ExtraHook, 0, len(specs))
 	for _, h := range specs {
-		hooks = append(hooks, config.ExtraHook{Event: h.Event, Matcher: h.Matcher, Command: h.Command, Timeout: h.Timeout})
+		hooks = append(hooks, config.ExtraHook{Event: h.Event, Matcher: h.Matcher, Command: h.Command, Timeout: h.Timeout, OnFailure: h.OnFailure})
 	}
 	return hooks, []string{apexv1.EnvInlineHooks + "=inline"}
 }

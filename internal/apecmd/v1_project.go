@@ -126,11 +126,14 @@ Hooks merged into .claude/settings.json (existing keys and hooks are kept):
                                                 the edit guard, and the Bash guards:
                                                 git tag writes, git push, pkill/killall,
                                                 rebase/merge/cherry-pick on a change
-                                                branch)
+                                                branch; "onFailure": "block", so a
+                                                guard that cannot run blocks the call)
   UserPromptSubmit      ape hook user-prompt   (records the person's own prompts, for
                                                 person acts typed in Claude Code (E2))
-A hook that was altered (another matcher, async, a shorter stop timeout) is replaced
-by the one above; running init again changes nothing. ape task passes the same
+A hook that was altered (another matcher, async, a shorter stop timeout, another
+onFailure) is replaced by the one above; a pre-tool hook with no onFailure, as v1.0
+wrote it, gains the key in place (project check: notice hooks.fail-open). Running
+init again changes nothing. ape task passes the same
 hooks inline as well, except UserPromptSubmit, so its sessions have them even when
 settings.json does not.
 

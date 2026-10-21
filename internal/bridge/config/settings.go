@@ -65,10 +65,12 @@ type SettingsOptions struct {
 }
 
 // ExtraHook is one hook command for SettingsOptions.ExtraHooks. Timeout is
-// in seconds, 0 for Claude Code's default.
+// in seconds, 0 for Claude Code's default; OnFailure is "" (Claude Code's
+// default: a hook that fails to run passes the call) or "block".
 type ExtraHook struct {
 	Event, Matcher, Command string
 	Timeout                 int
+	OnFailure               string
 }
 
 // Output-style pinning.
@@ -223,6 +225,10 @@ type hookCommand struct {
 	// complete (run-log flush) so it stays sync.
 	Async   bool `json:"async"`
 	Timeout int  `json:"timeout,omitempty"`
+	// OnFailure "block" makes a hook that cannot start, times out or
+	// exits oddly block the call instead of passing it (Claude Code
+	// 2.1.295+; F-2, D340, measured on 2.1.304 and 2.1.305).
+	OnFailure string `json:"onFailure,omitempty"`
 }
 
 // BuildSettings produces the JSON blob handed to `claude --settings`.
@@ -329,7 +335,7 @@ func BuildSettings(opts SettingsOptions) (json.RawMessage, error) {
 	for _, h := range opts.ExtraHooks {
 		hooks[h.Event] = append(hooks[h.Event], hookSpec{
 			Matcher: h.Matcher,
-			Hooks:   []hookCommand{{Type: "command", Command: h.Command, Timeout: h.Timeout}},
+			Hooks:   []hookCommand{{Type: "command", Command: h.Command, Timeout: h.Timeout, OnFailure: h.OnFailure}},
 		})
 	}
 
