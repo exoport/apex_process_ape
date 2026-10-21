@@ -18,9 +18,10 @@ import (
 // project without one pays a stat and nothing else.
 
 // boardRefreshVerbs are the v1 leaves that change what `ape status`
-// reports, so the board is refreshed after each, whatever its exit (a red
-// verify records attempts, a refused start may block). Paths are below the
-// root: "change start", not "ape change start".
+// reports, so the board is refreshed after each, and the person acts it
+// waits on are logged (W3), whatever its exit (a red verify records
+// attempts, a refused start may block). Paths are below the root: "change
+// start", not "ape change start".
 var boardRefreshVerbs = map[string]bool{
 	"project init": true, "project lift": true, "project accept-config": true,
 	"milestone new": true, "milestone approve": true, "milestone gate": true, "milestone close": true,
@@ -97,20 +98,27 @@ func boardPath(c *cobra.Command) string {
 	return rest
 }
 
-// refreshBoardAfter refreshes the status tab after a state-changing
-// command: the project its --cwd names (else the one around the working
-// directory), only when that project has .aboard/. Never fails, never
-// writes stdout: a problem is one line on stderr.
+// refreshBoardAfter runs after a state-changing command, on the project
+// its --cwd names (else the one around the working directory): it logs a
+// `person` event for each person act the new state waits on that it did
+// not before (W3, apexv1.EmitPersonDelta), and refreshes the status tab
+// when the project has .aboard/. Both read one status report. Never fails,
+// never writes stdout: a problem is one line on stderr.
 func refreshBoardAfter(cmd *cobra.Command) {
 	var f v1Flags
 	if fl := cmd.Flags().Lookup("cwd"); fl != nil {
 		f.cwd = fl.Value.String()
 	}
 	p, err := v1Project(&f)
-	if err != nil || !statusboard.Present(p.Root) || !p.IsV1() || apexv1.IsV0Project(p.Root) {
+	if err != nil || !p.IsV1() || apexv1.IsV0Project(p.Root) {
 		return
 	}
-	statusboard.Refresh(context.WithoutCancel(cmd.Context()), p.Root, p.Status(), time.Now(), cmd.ErrOrStderr())
+	ctx := context.WithoutCancel(cmd.Context())
+	r := p.Status()
+	p.EmitPersonDelta(ctx, r, cmd.ErrOrStderr())
+	if statusboard.Present(p.Root) {
+		statusboard.Refresh(ctx, p.Root, r, time.Now(), cmd.ErrOrStderr())
+	}
 }
 
 // refreshBoardNow is `ape status --board`: the tab refreshed from r, which

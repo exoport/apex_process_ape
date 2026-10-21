@@ -473,6 +473,9 @@ func (p *Project) RunGate(ctx context.Context, id string, opt RunOptions) (*Gate
 		return g, err
 	}
 	g.Commit, err = p.commitMilestone(context.WithoutCancel(ctx), own, id, "gate "+gateResult(&g.Run))
+	if err == nil {
+		p.emitGateGreen(context.WithoutCancel(ctx), g)
+	}
 	return g, err
 }
 
@@ -481,6 +484,15 @@ func (p *Project) RunGate(ctx context.Context, id string, opt RunOptions) (*Gate
 func doneMilestoneGate(m *Milestone) *FailError {
 	return &FailError{Code: "milestone.done", Msg: m.ID + " is done (Status: " + m.StatusText + "): it is closed, and its gate was recorded at the close " +
 		"in _apex/state/milestones.json — a done milestone's gate does not run again; nothing to run"}
+}
+
+// emitGateGreen logs gate-green (W3) for a run that turned the recorded
+// result green — red, or never run, before — once that result is
+// committed.
+func (p *Project) emitGateGreen(ctx context.Context, g *GateResult) {
+	if g.ResultChanged && g.Run.Green() {
+		p.Emit(ctx, Event{Event: EventGateGreen, Milestone: g.Milestone, Reason: "gate green at " + short(g.Run.SHA)}, nil)
+	}
 }
 
 func gateResult(run *GateRun) string {
@@ -890,5 +902,11 @@ func (p *Project) closeMilestone(ctx context.Context, id string, opt RunOptions,
 	if g.Commit, err = p.commitMilestone(ctx, nil, id, what, extra...); err != nil {
 		return g, err
 	}
+	p.emitGateGreen(ctx, g)
+	reason := "closed, gate green at " + short(g.Run.SHA)
+	if red != nil {
+		reason = "closed with its gate red, accepted by " + red.By + ": " + red.Reason
+	}
+	p.Emit(ctx, Event{Event: EventMilestoneDone, Milestone: id, Reason: reason}, nil)
 	return g, nil
 }

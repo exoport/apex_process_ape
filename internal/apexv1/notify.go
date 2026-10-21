@@ -81,3 +81,26 @@ func (p *Project) ChangeIDIn(ctx context.Context, args string) string {
 	}
 	return fields[0]
 }
+
+// ChangeMilestone is the milestone a change belongs to, "" for a tweak
+// (milestone: none) or a change that does not load.
+func (p *Project) ChangeMilestone(ctx context.Context, id string) string {
+	ci, err := p.requireChange(ctx, id)
+	if err != nil || ci.Doc == nil || ci.Doc.Meta.Milestone == MilestoneNone {
+		return ""
+	}
+	return ci.Doc.Meta.Milestone
+}
+
+// EventScope is the milestone and the change an `ape task` dispatch's args
+// name, for its events: the change its first word names (ChangeIDIn) and
+// that change's milestone, else the milestone its first word is (M<n>).
+func (p *Project) EventScope(ctx context.Context, args string) (milestone, change string) {
+	if change = p.ChangeIDIn(ctx, args); change != "" {
+		return p.ChangeMilestone(ctx, change), change
+	}
+	if fields := strings.Fields(args); len(fields) > 0 && milestoneIDRe.MatchString(fields[0]) {
+		return fields[0], ""
+	}
+	return "", ""
+}

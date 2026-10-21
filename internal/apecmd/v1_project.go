@@ -64,8 +64,9 @@ for setup while no .claude/skills/apex-* exists; JSON "next" carries the same li
                                      is written: the subject defaults to
                                      "{type}: {title}", D193), and evidence:
                                      archive|off (default off) — see ape change archive
-                                     --help; notify: <command>, run on a limit stop or a
-                                     blocked change — see ape task --help); see "Check
+                                     --help; notify: <command>, run on every event ape
+                                     logs in _apex/state/events.jsonl — see ape status
+                                     --help); see "Check
                                      settings" below
   AGENTS.md                          the project map (skeleton). Right under its title:
                                      Project context: read @development/project.md before

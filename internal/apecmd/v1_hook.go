@@ -1,6 +1,7 @@
 package apecmd
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -449,9 +450,32 @@ escape; the archive's scan of the squash stays the backstop.`,
 					_ = os.Setenv("GIT_INDEX_FILE", filepath.Join(wd, idx))
 				}
 			}
-			return v1Fail(cmd, &v1Flags{}, apexv1.PreCommitScan(cmd.Context(), dir), nil)
+			if err := apexv1.PreCommitScan(cmd.Context(), dir); err != nil {
+				return v1Fail(cmd, &v1Flags{}, err, nil)
+			}
+			preCommitPersonDelta(cmd, dir)
+			return nil
 		},
 	}
 	cmd.Flags().StringVar(&cwd, "cwd", "", "project directory (default: the working directory, where git runs its hooks)")
 	return cmd
+}
+
+// preCommitPersonDelta logs the person acts a commit that passed the scan
+// leaves the project waiting on (W3): every commit runs the hook, so a
+// roadmap commit proposing a milestone — apex-plan's, which no ape verb
+// makes — is heard of. It reads the working tree, as every ape command
+// does, not the index git hands its hooks, and never changes the verdict.
+// Not on ape's own commits (APE_SCANNED=1): the verb that made them logs.
+func preCommitPersonDelta(cmd *cobra.Command, dir string) {
+	if os.Getenv(apexv1.EnvScanned) == "1" {
+		return
+	}
+	_ = os.Unsetenv("GIT_INDEX_FILE")
+	p, err := apexv1.Open(apexv1.FindRoot(dir))
+	if err != nil || !p.IsV1() || apexv1.IsV0Project(p.Root) {
+		return
+	}
+	ctx := context.WithoutCancel(cmd.Context())
+	p.EmitPersonDelta(ctx, p.Status(), cmd.ErrOrStderr())
 }

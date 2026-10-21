@@ -94,10 +94,12 @@ development/specs/** outside an archive squash (a "Change: <id>" trailer of an a
 change) or a state.json outside an "apex: …" commit or a squash. A person reverts the
 commit (git revert), which clears it.
 
-Notifier (H20): a subcommand that leaves the change blocked (block, verify at its attempts
-limit, a rebase conflict) runs _apex/config.yaml's optional notify: command with
-APE_EVENT=block, APE_CHANGE=<id> and APE_REASON=<the blocked reason>; best effort, it never
-changes the outcome (see ape task --help).
+Events (H20, W3): a subcommand that leaves the change blocked (block, verify at its attempts
+limit, a rebase conflict) logs "block" in _apex/state/events.jsonl, then runs
+_apex/config.yaml's optional notify: command with APE_EVENT=block, APE_CHANGE=<id>,
+APE_MILESTONE and APE_REASON=<the blocked reason>; best effort, it never changes the outcome
+(see ape task --help). Every subcommand that changes what ape status reports also logs a
+"person" event for each person act the project newly waits on (see ape status --help).
 
 Exit codes for every subcommand: 0 ok · 1 check failed (one-line remediation) · 2 usage ·
 3 conflict (another change claims the same requirement or the delta no longer applies:
@@ -159,7 +161,7 @@ func v1ChangeLeaf(use, short, long, example string, f *v1Flags, run func(cmd *co
 			}
 			ctx := context.WithoutCancel(cmd.Context())
 			if after, reason := p.ChangeStatus(ctx, args[0]); after == apexv1.StatusBlocked && before != apexv1.StatusBlocked {
-				p.Notify(ctx, apexv1.NotifyBlock, args[0], reason, cmd.ErrOrStderr())
+				p.Emit(ctx, apexv1.Event{Event: apexv1.EventBlock, Milestone: p.ChangeMilestone(ctx, args[0]), Change: args[0], Reason: reason}, cmd.ErrOrStderr())
 			}
 			return err
 		},

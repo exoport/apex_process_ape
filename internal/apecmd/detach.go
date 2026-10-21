@@ -31,6 +31,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/exoport/apex_process_ape/internal/apexv1"
 	"github.com/exoport/apex_process_ape/internal/atomicfile"
 	"github.com/exoport/apex_process_ape/internal/cost"
 	"github.com/exoport/apex_process_ape/internal/pipeline"
@@ -63,8 +64,9 @@ type detachedHandle struct {
 	ID            string     `json:"id"`
 	Argv          []string   `json:"argv"`
 	Dir           string     `json:"dir"`
-	Log           string     `json:"log"`    // the run's stderr
-	Stdout        string     `json:"stdout"` // the run's stdout, alone: a --output-format json envelope, clean
+	Root          string     `json:"root,omitempty"` // the project root --detach resolved (W3: where its events go)
+	Log           string     `json:"log"`            // the run's stderr
+	Stdout        string     `json:"stdout"`         // the run's stdout, alone: a --output-format json envelope, clean
 	SupervisorPID int        `json:"supervisor_pid"`
 	ChildPID      int        `json:"child_pid,omitempty"`
 	StartedAt     time.Time  `json:"started_at"`
@@ -117,6 +119,15 @@ func newDetachedID() string {
 
 func handlePath(projectRoot, id string) string {
 	return filepath.Join(runlog.DetachedRoot(projectRoot), id+".json")
+}
+
+// projectRootOfHandle is the project a handle file belongs to: the root
+// its handle records, else the one around the handle file itself.
+func projectRootOfHandle(path string) string {
+	if h, err := readHandle(path); err == nil && h.Root != "" {
+		return h.Root
+	}
+	return apexv1.FindRoot(filepath.Dir(path))
 }
 
 func readHandle(path string) (*detachedHandle, error) {
@@ -262,6 +273,7 @@ func launchDetached(root, dir string, argv, env []string, meta detachMeta) (*det
 		ID:        id,
 		Argv:      argv,
 		Dir:       dir,
+		Root:      root,
 		Log:       filepath.Join(hdir, id+".log"),
 		Stdout:    filepath.Join(hdir, id+".out"),
 		StartedAt: time.Now().UTC(),
@@ -408,6 +420,7 @@ func waitDetached(ctx context.Context, cmd *cobra.Command, path string, timeout 
 			lost := fmt.Errorf(
 				"run %s: its supervisor (pid %d) is gone without recording an exit — it was killed, or the machine restarted; see %s",
 				h.ID, h.SupervisorPID, h.Log)
+			noteRunLost(ctx, projectRootOfHandle(path), h)
 			if jsonOut {
 				_ = printDetachedReport(out, h, runLost)
 				fmt.Fprintf(os.Stderr, "Error: %s\n", lost)
@@ -573,6 +586,7 @@ at most 2048 bytes; absent without a transcript) — and exits 0.`,
 					state = runEnded
 				case h.SupervisorPID != 0 && !supervisorIsOurs(cmd.Context(), h):
 					state = runLost
+					noteRunLost(cmd.Context(), root, h)
 				}
 				return printDetachedReport(cmd.OutOrStdout(), h, state)
 			}
@@ -582,6 +596,7 @@ at most 2048 bytes; absent without a transcript) — and exits 0.`,
 				state = fmt.Sprintf("ended, exit %d", *h.ExitCode)
 			case h.SupervisorPID != 0 && !supervisorIsOurs(cmd.Context(), h):
 				state = "gone without recording an exit"
+				noteRunLost(cmd.Context(), root, h)
 			}
 			enc := json.NewEncoder(cmd.OutOrStdout())
 			enc.SetIndent("", "  ")
@@ -724,7 +739,7 @@ func supervise(ctx context.Context, path string) error {
 	}
 	if err := child.Start(); err != nil {
 		releaseLocks()
-		return recordExit(path, h, ExitRunFailed, err.Error())
+		return recordExitAndEmit(path, h, ExitRunFailed, err.Error())
 	}
 	h.ChildPID = child.Process.Pid
 	_ = recordChildPID(path, os.Getpid(), h.ChildPID)
@@ -780,7 +795,15 @@ wait:
 	if waitErr != nil {
 		msg = waitErr.Error()
 	}
-	return recordExit(path, h, code, msg)
+	return recordExitAndEmit(path, h, code, msg)
+}
+
+// recordExitAndEmit records the exit, then logs the run's run-end (W3):
+// after the handle has it, so a waiter woken by the event reads the exit.
+func recordExitAndEmit(path string, h *detachedHandle, code int, msg string) error {
+	err := recordExit(path, h, code, msg)
+	emitDetachedRunEnd(h, code)
+	return err
 }
 
 // markParentGone records termination parent_gone in the stopped run's

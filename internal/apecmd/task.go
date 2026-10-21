@@ -225,12 +225,20 @@ parsed; ` + "`ape status`" + ` shows it as the latest run ("stopped: usage-limit
 resets <ts>"). Run again after the reset. Matched against Claude Code
 2.1.302's text, unmeasured live.
 
-Notifier: in an APEX v1 project, _apex/config.yaml's optional
+Events and the notifier (H20, W3): in an APEX v1 project every run logs
+"run-end" in _apex/state/events.jsonl when it ends, attached or detached
+(a detached run's supervisor logs it with the exit it records), and a run
+stopped on a limit (usage limit, budget) logs "stop" first. Each line is
+{seq, at, event, milestone, change, run, exit, reason, action, skill}:
+the milestone and change --args names, the run's id, its exit code, the
+termination kind as the reason. After the line, _apex/config.yaml's
+optional
   notify: <shell command>
 runs (sh -c, 10 s timeout, output dropped, a failure only warned about)
-when a run stops on a limit (usage limit, budget) — and, from ape change,
-when a change becomes blocked — with APE_EVENT=stop|block, APE_CHANGE
-(the change --args names, if any) and APE_REASON in its environment.
+with APE_EVENT, APE_SEQ, APE_MILESTONE, APE_CHANGE, APE_RUN, APE_EXIT,
+APE_SKILL, APE_REASON and APE_ACTION in its environment. The other
+events (person, gate-green, milestone-done, block, run-lost) and the wait
+on them: ape status --help.
 
 Sessions and the nesting rule (D61, D62): every skill of the v1 loop runs
 as its own ape task session, and depth counts only the model sessions ape
@@ -878,12 +886,17 @@ func dispatchTaskOnce(ctx context.Context, o taskOptions, cfg runConfig) (taskRu
 	recordCommitContract(o.projectRoot, o.skill, manifestDir, contract)
 	// After the assertion: the stop's commit is ape's, not the skill's.
 	recordBudgetStop(o.projectRoot, o.skill, manifestDir, cfg.budgetWatch)
-	// H20: a run stopped on a limit runs the project's notifier.
+	// H20: a run stopped on a limit logs `stop` and runs the project's
+	// notifier; W3: every run logs `run-end` after it.
 	if lse, ok := errors.AsType[*pipeline.LimitStopError](runErr); ok && v1Launch != nil {
 		if p, ok := v1ProjectAt(o.projectRoot); ok {
 			nctx := context.WithoutCancel(ctx)
-			p.Notify(nctx, apexv1.NotifyStop, p.ChangeIDIn(nctx, o.args), lse.Message, os.Stderr)
+			milestone, change := p.EventScope(nctx, o.args)
+			p.Emit(nctx, apexv1.Event{Event: apexv1.EventStop, Milestone: milestone, Change: change, Run: runID, Reason: lse.Message, Skill: o.skill}, os.Stderr)
 		}
+	}
+	if v1Launch != nil {
+		emitTaskRunEnd(ctx, o.projectRoot, o.skill, o.args, runID, exitCode, runErr)
 	}
 
 	return taskRun{
