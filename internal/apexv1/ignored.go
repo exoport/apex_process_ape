@@ -95,8 +95,9 @@ func (p *Project) SettingsIgnored(ctx context.Context) string {
 var stateTracked = []string{".gitignore", "milestones.json", "decisions.json"}
 
 // stateIgnoredProbes are paths ape writes under _apex/state/ that must be
-// ignored: run records, logs, hook verdicts and the limit counters.
-var stateIgnoredProbes = []string{"runs/x", "logs/x", "hooks/x", "attempts.json", "limit-stops.json", "project.json"}
+// ignored: run records, logs, hook verdicts, the limit counters and the
+// event log (W3).
+var stateIgnoredProbes = []string{"runs/x", "logs/x", "hooks/x", "attempts.json", "limit-stops.json", "project.json", "events.jsonl"}
 
 // StateIgnoreProblems checks _apex/state/'s whitelist (H27): milestones.json
 // and decisions.json tracked (never ignored), everything else ape writes

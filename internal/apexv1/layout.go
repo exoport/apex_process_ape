@@ -78,10 +78,11 @@ type Config struct {
 	// Commit shapes the archive's squash commit (H15): its subject
 	// template and whether the project's git hooks run on it.
 	Commit CommitConfig `yaml:"commit"`
-	// Notify is a shell command ape runs, best effort, when an ape task
-	// run stops on a limit (usage limit, budget, …) or a change becomes
-	// blocked, with APE_EVENT (stop|block), APE_CHANGE and APE_REASON in
-	// its environment (H20). Its failure never changes the outcome.
+	// Notify is a shell command ape runs, best effort, on every event it
+	// logs in _apex/state/events.jsonl (H20, W3; events.go), after the
+	// line is written, with APE_EVENT, APE_SEQ, APE_MILESTONE, APE_CHANGE,
+	// APE_RUN, APE_EXIT, APE_SKILL, APE_REASON and APE_ACTION in its
+	// environment. Its failure never changes the outcome.
 	Notify string `yaml:"notify"`
 	// Tools are the skills the design and review steps may call (D59 Q4,
 	// tools.go); they join the orchestrator's child allow-list.
