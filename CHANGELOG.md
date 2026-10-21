@@ -158,6 +158,9 @@ eval's E-R7-1 and E2 residual (D219).
   yet"; `status --json` carries `approval_self_check`.
 - Tests: `make test` (and test-portable, test-cover) run with a 20-minute timeout
   (`TEST_TIMEOUT`); `check-task-subagents` logs each sub-agent's start and end.
+- **Built with Go 1.27.3** (`go.mod`), for GO-2026-6809: crypto/x509 distrusts compromised
+  intermediate certificates (reached through `x509.Certificate.Verify`). Published after rc.7i was
+  built; earlier candidates carry Go 1.27.2.
 
 ### rc.7i: every binding-rule candidate stays in the committed disposition (D274, D276)
 
