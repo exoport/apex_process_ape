@@ -55,13 +55,16 @@ func TestSupervise_StopsTheChildWhenItsParentIsGone(t *testing.T) {
 	path := handlePath(root, "child-1")
 	require.NoError(t, writeHandle(path, h))
 
+	opened := childOpened(t, handlePath(root, "forever"))
 	done := make(chan error, 1)
 	go func() { done <- supervise(context.Background(), path) }()
 	require.Eventually(t, func() bool {
 		cur, err := readHandle(path)
 		return err == nil && cur.ChildPID != 0
 	}, 20*time.Second, 20*time.Millisecond, "the child never started")
-	time.Sleep(300 * time.Millisecond)
+	// RK-1 (Q143): stop it only once it waits on its run, its SIGTERM
+	// handler in; a fixed 300 ms was not always enough under load.
+	require.True(t, opened(20*time.Second), "the child never read its run's handle")
 	select {
 	case err := <-done:
 		t.Fatalf("the child ended while its parent lived: %v", err)
