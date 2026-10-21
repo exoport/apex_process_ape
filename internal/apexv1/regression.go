@@ -30,6 +30,10 @@ const KindRegression = "regression"
 // regressionRef is the regression command's ref (and log name).
 const regressionRef = "regression"
 
+// RegressionSkippedGateRed is a gate's regression verdict skipped because
+// its Gate: command was red (W2 Part 2): the gate is red already.
+const RegressionSkippedGateRed = "gate-red"
+
 // milestoneRegressionRef is the milestone tier's baseline as pre_existing_red
 // lists it (W2 Part 1).
 const milestoneRegressionRef = "milestone-regression"
@@ -97,7 +101,8 @@ type RegressionVerdict struct {
 	// ShellNote: exit 127 on a bash/zsh builtin (RN-1).
 	ShellNote string `json:"shell_note,omitempty"`
 	// Skipped: verify did not run the command (Q87) — "docs-only", every
-	// path the change touched is docs or the development folder. Paths
+	// path the change touched is docs or the development folder — or a
+	// gate did not, "gate-red": its Gate: command was red (W2). Paths
 	// are the docs paths it touched (the development folder not listed;
 	// the first regressionPathsShown, paths_total counts them); exit 0,
 	// failed false.

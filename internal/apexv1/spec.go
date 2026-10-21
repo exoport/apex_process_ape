@@ -18,7 +18,16 @@ type Scenario struct {
 	Name   string
 	Line   int
 	Checks []string
+	// Kinds are each check line's kind (W2): "" for `check:`, else the
+	// word in `check (<kind>):`; KindLines where each sits.
+	Kinds     []string
+	KindLines []int
+	// tagged marks the lines written `check (…):`, kind "" included.
+	tagged []bool
 }
+
+// Live reports a scenario whose check is `check (live):`.
+func (s *Scenario) Live() bool { return len(s.Kinds) > 0 && s.Kinds[0] == CheckKindLive }
 
 // Requirement is one `### Requirement:` block. Text is the block verbatim,
 // heading included, with trailing blank lines trimmed: it is what a delta
@@ -139,12 +148,20 @@ func buildRequirement(r Requirement, lines []mdLine) Requirement {
 		if l.InCode {
 			continue
 		}
-		if m := checkLineRe.FindStringSubmatch(l.Text); m != nil {
+		if m := checkLineRe.FindStringSubmatchIndex(l.Text); m != nil {
 			if sc < 0 {
 				r.Stray = append(r.Stray, l.N)
 				continue
 			}
-			r.Scenarios[sc].Checks = append(r.Scenarios[sc].Checks, strings.TrimSpace(m[1]))
+			s := &r.Scenarios[sc]
+			kind := ""
+			if m[2] >= 0 {
+				kind = strings.TrimSpace(l.Text[m[2]:m[3]])
+			}
+			s.Checks = append(s.Checks, strings.TrimSpace(l.Text[m[4]:m[5]]))
+			s.Kinds = append(s.Kinds, kind)
+			s.KindLines = append(s.KindLines, l.N)
+			s.tagged = append(s.tagged, m[2] >= 0)
 		}
 	}
 	return r
@@ -189,6 +206,11 @@ func validateRequirementBody(file string, r Requirement) []Finding {
 		})
 	}
 	for _, sc := range r.Scenarios {
+		for i := range sc.Kinds {
+			if why := badCheckKind("scenario \""+sc.Name+"\"'s check", sc.Kinds[i], sc.Checks[i], sc.tagged[i]); why != "" {
+				out = append(out, Finding{File: file, Line: sc.KindLines[i], Message: why})
+			}
+		}
 		switch len(sc.Checks) {
 		case 1:
 			if sc.Checks[0] == "" {

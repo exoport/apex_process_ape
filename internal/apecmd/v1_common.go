@@ -226,6 +226,10 @@ func printRegression(w io.Writer, v *apexv1.RegressionVerdict) {
 	if v == nil {
 		return
 	}
+	if v.Skipped == apexv1.RegressionSkippedGateRed {
+		fmt.Fprintf(w, "  regression skipped: the Gate: command is red (close runs it): %s\n", v.Cmd)
+		return
+	}
 	base := "no baseline for it in this milestone"
 	if v.BaselineExit != nil {
 		base = fmt.Sprintf("baseline exit %d (%s)", *v.BaselineExit, v.BaselineChange)

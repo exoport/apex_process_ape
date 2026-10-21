@@ -2179,7 +2179,12 @@ change does not MODIFY or REMOVE (regression), plus the scenarios of its own ADD
 MODIFIED blocks — of the capabilities the change touches (frontmatter touches:), plus any
 other scenario whose check command is identical to a task's (H10). The rest of the spec
 is the milestone gate's to run (`ape milestone gate` runs all of it). human-review checks
-are not run. A command shared by several checks runs once. A check, regression or gate
+are not run. Live checks (W2): a check written `- check (live): <command>` (a scenario's,
+or a task's `— check (live): <command>`) needs something live — a service, a network, a
+long end-to-end run. Verify runs the change's own (its tasks', its delta's scenarios') and a
+live scenario red at the last gate of any milestone; the others it leaves to the gate (JSON
+live_skipped: how many, also in state.json and ape status). Any other kind, `check (x):`, is
+the finding check.bad-kind. A command shared by several checks runs once. A check, regression or gate
 command that is one ( … ) block of several lines, each a simple command (a first line of
 set -e, as the lift writes, is dropped), runs as its lines joined by && — each line's exit counts, as under set -e (a line that is itself a ;, & or
 || list goes in { …; }) — and its log opens with "split into N commands". A line's
@@ -4253,7 +4258,11 @@ now that did not at that baseline: red, the names in run.regression.new_failures
 For a milestone tier that differs from the change tier, the baseline is the one the
 milestone's first change to start recorded for that tier (milestone_regression_baseline,
 W2). When no change of the milestone has a baseline for the command, a red regression fails
-the gate: nothing shows it was red before the milestone's work. Timeouts:
+the gate: nothing shows it was red before the milestone's work. The
+Gate: command runs first; when it is red the gate is red already, and it skips the live
+scenario checks (`- check (live):`, W2) and the regression command (JSON run.live_skipped: N,
+run.regression.skipped: "gate-red"); `ape milestone close` runs everything. Each run's
+per-scenario times go to logs/gate-<M>.json (scenario_secs), for project check. Timeouts:
 the Gate: command runs under timeouts.gate (default idle 30m, max 4h), each scenario check
 under timeouts.check (idle 15m, max 2h), the regression command under timeouts.regression
 (idle 30m, max 2h) — killed at idle without progress (output or CPU time) or at max: exit
@@ -4274,7 +4283,7 @@ On a done milestone, refused (milestone.done) before anything runs: its gate was
 the close, which archived its gate folder; nothing is run, written or committed.
 
 --spec-only (W2): runs the spec's scenario checks alone, as the gate runs them — no Gate:
-command, no regression command — and records nothing: no milestones.json, no gate-<M>.json,
+command, no regression command, no live check (JSON live_skipped) — and records nothing: no milestones.json, no gate-<M>.json,
 no commit. It runs in this process (no detached worker, so never exit 75) under the
 milestone's run lock (run.busy beside a gate or close of it), with the same refusals as
 the gate, and is allowed on a proposed milestone: apex-plan runs it before the approval to
@@ -4947,6 +4956,19 @@ line}; [] when none, beside the findings on a failure too), they never change th
                            `ape decision standard` removed (D232; see its --help), so it
                            can never pass: a change retires it with a REMOVED delta
                            citing v1.0.0_seq-08 — never a new supersede of ADR-0001
+  regression.slow          (action replan) regression: is one command and its last
+                           recorded run took over checks.slow_regression (default 5m),
+                           so every start and verify runs the whole suite: split it,
+                           regression: {change: <fast>, milestone: <the suite>} (W2)
+  checks.duplicate-run     (action replan) two or more scenario checks start with the same
+                           command (to the first top-level && or |) and differ after it,
+                           and one is live or each ran over a minute at the last gate: a
+                           gate runs that command once per check (ape memoizes nothing);
+                           names the scenarios and their time per gate (W2)
+  check.live-suggested     (action replan) a scenario check that is not live ran over a
+                           minute at the last gate: mark it `- check (live): <cmd>` if it
+                           needs something live (W2; see ape change verify --help)
+The gate's per-scenario run times these read are in _apex/state/logs/gate-<M>.json.
 
 Exit codes: 0 green · 1 findings (listed on stderr, or under "findings" with --json) · 2 usage.
 

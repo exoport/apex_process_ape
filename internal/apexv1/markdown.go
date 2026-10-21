@@ -149,11 +149,36 @@ func joinBody(body []mdLine) string {
 	return b.String()
 }
 
-// checkLineRe matches a scenario or task check line's value.
-var checkLineRe = regexp.MustCompile(`^\s*(?:[-*]\s+)?check:\s*(.*)$`)
+// checkLineRe matches a scenario's check line: its kind, the word in
+// `check (<kind>):` ("" for a plain `check:`), and its value.
+var checkLineRe = regexp.MustCompile(`^\s*(?:[-*]\s+)?check(?:\s*\(([^)]*)\))?:\s*(.*)$`)
 
 // HumanReview is the check value that says no command can prove it.
 const HumanReview = "human-review"
+
+// CheckKindLive is the one kind a check line takes (W2 Part 2):
+// `- check (live): <command>`, a check that needs something live — a
+// service, a network, a long end-to-end run. Verify runs a live scenario
+// only when it is the change's own or was red at the last gate, and a gate
+// whose Gate: command is red skips every live check.
+const CheckKindLive = "live"
+
+// badCheckKind is the finding for a check line's kind other than live,
+// or live on what runs no command; "" when the kind is fine. what names
+// the line ("scenario \"x\"'s check", "task T1's check").
+func badCheckKind(what, kind, value string, hasKind bool) string {
+	switch {
+	case !hasKind:
+		return ""
+	case kind != CheckKindLive:
+		return what + " kind `(" + kind + ")` is not `check (live):`, the one kind a check takes, so ape cannot tell how to run it" +
+			" — write `check (live): <command>` for a check that needs something live, else a plain `check: <command>`"
+	case value == HumanReview || value == "":
+		return what + " is `check (live):` on " + map[bool]string{true: "human-review", false: "nothing"}[value == HumanReview] +
+			", but only a command is live — write `check (live): <command>`, or a plain `check: " + HumanReview + "`"
+	}
+	return ""
+}
 
 // slugRe is a capability or ADR slug: kebab-case.
 var slugRe = regexp.MustCompile(`^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$`)

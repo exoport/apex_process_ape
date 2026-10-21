@@ -43,6 +43,10 @@ type GateRun struct {
 	// Flaky lists what passed only on a retry (H12): the gate command
 	// ("gate-<M>"), scenarios, the regression command.
 	Flaky []string `json:"flaky,omitempty"`
+	// LiveSkipped counts the live scenarios not run because the Gate:
+	// command was red (W2 Part 2); Regression is then skipped "gate-red".
+	// A close runs them all.
+	LiveSkipped int `json:"live_skipped,omitempty"`
 	// ScenarioSecs is each scenario check's run time, by ref (W2): what
 	// project check's test-cost notices read. Kept only in the gitignored
 	// logs/gate-<M>.json (gateTimings); never in milestones.json, the
@@ -464,7 +468,7 @@ func (p *Project) RunGate(ctx context.Context, id string, opt RunOptions) (*Gate
 	// Only milestones.json is the run's own edit: the gate may run long,
 	// and roadmap.md is a person's to edit meanwhile.
 	own := p.beforeOwnEdit(ctx, p.Rel(p.MilestonesJSON()))
-	g, err := p.runGate(ctx, id, opt)
+	g, err := p.runGate(ctx, id, opt, false)
 	if err != nil || !g.ResultChanged {
 		return g, err
 	}
@@ -486,8 +490,11 @@ func gateResult(run *GateRun) string {
 	return GateRed
 }
 
-// runGate runs the gate and writes the records, committing nothing.
-func (p *Project) runGate(ctx context.Context, id string, opt RunOptions) (*GateResult, error) {
+// runGate runs the gate and writes the records, committing nothing. A
+// Gate: command that is red already fails the gate, so the gate skips the
+// live scenarios and the regression command (W2 Part 2) — unless full, as
+// close runs it: everything runs.
+func (p *Project) runGate(ctx context.Context, id string, opt RunOptions, full bool) (*GateResult, error) {
 	_, rm, err := p.loadRoadmapDoc()
 	if err != nil {
 		return nil, err
@@ -518,9 +525,17 @@ func (p *Project) runGate(ctx context.Context, id string, opt RunOptions) (*Gate
 	// the project's own regression command with it (backlog 32), judged
 	// by the milestone's earliest baseline for that command.
 	spec := p.EffectiveSpecChecks(nil)
+	skip := gate.Exit != 0 && !full
+	if skip {
+		spec, run.LiveSkipped = withoutLive(spec)
+	}
 	run.SpecChecks = len(spec)
 	checks := spec
 	regressionCmd := p.milestoneRegressionCmd()
+	if regressionCmd != "" && skip {
+		run.Regression = &RegressionVerdict{Cmd: regressionCmd, Skipped: RegressionSkippedGateRed}
+		regressionCmd = ""
+	}
 	if regressionCmd != "" {
 		checks = append(append([]PlannedCheck(nil), spec...), PlannedCheck{Ref: regressionRef, Kind: KindRegression, Cmd: regressionCmd})
 	}
@@ -583,6 +598,19 @@ func (p *Project) runGate(ctx context.Context, id string, opt RunOptions) (*Gate
 	return g, nil
 }
 
+// withoutLive is checks without the live ones, and how many there were.
+func withoutLive(checks []PlannedCheck) (kept []PlannedCheck, live int) {
+	kept = make([]PlannedCheck, 0, len(checks))
+	for i := range checks {
+		if checks[i].Live {
+			live++
+			continue
+		}
+		kept = append(kept, checks[i])
+	}
+	return kept, live
+}
+
 // SpecOnlyResult is what `ape milestone gate <M> --spec-only` reports
 // (W2 Part 4): the spec's scenario checks run alone, recording nothing.
 type SpecOnlyResult struct {
@@ -591,9 +619,11 @@ type SpecOnlyResult struct {
 	// W2 build brief's "mode").
 	SpecOnly bool   `json:"spec_only"`
 	Mode     string `json:"mode"`
-	// SpecChecks is how many scenario checks ran.
-	SpecChecks int           `json:"spec_checks"`
-	SpecFailed []CheckResult `json:"spec_failed"`
+	// SpecChecks is how many scenario checks ran, LiveSkipped how many
+	// live ones did not: a spec-only run runs no live check (W2 Part 2).
+	SpecChecks  int           `json:"spec_checks"`
+	LiveSkipped int           `json:"live_skipped"`
+	SpecFailed  []CheckResult `json:"spec_failed"`
 	// Log is the folder the checks' output went to.
 	Log string `json:"log"`
 	At  string `json:"at"`
@@ -650,9 +680,9 @@ func (p *Project) RunSpecOnly(ctx context.Context, id string, opt RunOptions) (*
 		}
 	}
 	dir := filepath.Join(p.LogsDir(), "gate-"+id+"-spec")
-	spec := p.EffectiveSpecChecks(nil)
+	spec, live := withoutLive(p.EffectiveSpecChecks(nil))
 	res := &SpecOnlyResult{
-		Milestone: id, SpecOnly: true, Mode: "spec-only", SpecChecks: len(spec), Log: p.Rel(dir),
+		Milestone: id, SpecOnly: true, Mode: "spec-only", SpecChecks: len(spec), LiveSkipped: live, Log: p.Rel(dir),
 		At: Stamp(), SHA: HeadSHA(ctx, p.Root), SpecFailed: []CheckResult{},
 	}
 	results := p.RunChecks(ctx, dir, "", spec, opt)
@@ -797,7 +827,7 @@ func (p *Project) closeMilestone(ctx context.Context, id string, opt RunOptions,
 	// Only milestones.json is the run's own edit: the gate may run long,
 	// and roadmap.md is a person's to edit meanwhile.
 	own := p.beforeOwnEdit(ctx, p.Rel(p.MilestonesJSON()))
-	g, err := p.runGate(ctx, id, opt)
+	g, err := p.runGate(ctx, id, opt, true)
 	if err != nil {
 		return nil, err
 	}

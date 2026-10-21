@@ -134,6 +134,8 @@ type Verify struct {
 	// (Q87): skipped "docs-only" and the docs paths the change touched.
 	// A verify that ran it has it in Results (kind regression).
 	Regression *RegressionVerdict `json:"regression,omitempty"`
+	// LiveSkipped counts the live scenarios it did not run (W2 Part 2).
+	LiveSkipped int `json:"live_skipped,omitempty"`
 }
 
 // Approval records a person approving a tweak — a change with

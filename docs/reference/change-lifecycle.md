@@ -185,6 +185,24 @@ blocks the change and the loop re-plans it.
 Checks run from the project root with `sh -c`, output under `_apex/state/logs/<id>/`.
 `human-review` checks never run: they wait for an acceptance.
 
+### Live checks
+
+A check that needs something live, such as a service, a network or a long end-to-end run, is
+written `- check (live): <command>` on a scenario, or `— check (live): <command>` on a task.
+`live` is the only kind. Any other, live on `human-review`, or a kind on `regression:` is the
+finding `check.bad-kind` (action replan).
+
+| Run | Live checks it runs |
+| --- | --- |
+| `verify` (and the baseline at `start`) | The change's own: its live tasks and the live scenarios of its delta. Also a live scenario red at the last gate of any milestone. The rest are counted as `live_skipped`. |
+| `milestone gate`, `Gate:` command green | All of them. |
+| `milestone gate`, `Gate:` command red | None, and no regression command: the gate is red already. JSON `run.live_skipped: N` and `run.regression.skipped: "gate-red"`. |
+| `milestone close` | All of them, whatever the `Gate:` command did. |
+| `milestone gate --spec-only` | None (`live_skipped`). |
+
+`ape status` lists what was skipped and why. A live check's evidence written under `development/`
+is never undone as a stray file.
+
 ### Green before the work: vacuous checks
 
 At `start` ape runs every check once as the baseline. When the change has an ADDED or MODIFIED
@@ -254,7 +272,11 @@ The gate records each scenario check's run time in `_apex/state/logs/gate-<M>.js
   the last gate. ape runs a shared command once only when the whole check is the same, so the gate
   runs that command once per check. The notice names the scenarios and their time per gate. Give
   the command one scenario and have the others check what it leaves under `development/`, or merge
-  the scenarios. ape memoizes nothing.
+  the scenarios. ape memoizes nothing. A shared command in a live check is noticed whatever its
+  time.
+- `check.live-suggested` (notice, action replan): a scenario check that is not live ran over a
+  minute at the last gate. Every verify touching its capability runs it, so mark it
+  `check (live):` if it needs something live.
 
 ### Flaky checks
 

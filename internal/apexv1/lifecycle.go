@@ -426,6 +426,10 @@ type VerifyResult struct {
 	// change's says skipped: "docs-only" with the docs paths it touched
 	// (Q87); not_skipped says why a change otherwise docs-only ran it.
 	Regression *RegressionVerdict `json:"regression,omitempty"`
+	// LiveSkipped counts the live scenarios of the touched capabilities
+	// verify did not run (W2 Part 2): neither the change's own nor red at
+	// the last gate.
+	LiveSkipped int `json:"live_skipped,omitempty"`
 	// Attempts is the change's red verifies since it started, this one
 	// included, AttemptsTotal every red verify of it, and AttemptsCap
 	// limits.attempts (backlog 30). Kept in _apex/state/attempts.json.
@@ -542,7 +546,7 @@ func (p *Project) verify(ctx context.Context, ci ChangeInfo, opt RunOptions, kee
 		return nil, err
 	}
 	sha := HeadSHA(ctx, p.Root)
-	checks := p.ChangeChecks(ci.Doc)
+	checks, liveSkipped := p.changeChecks(ci.Doc)
 	regressionCmd := p.regressionCmd()
 	// A docs-only change skips the regression command (Q87, docsonly.go).
 	var skipped *RegressionVerdict
@@ -584,9 +588,9 @@ func (p *Project) verify(ctx context.Context, ci ChangeInfo, opt RunOptions, kee
 	gab := p.greenAtBaseline(ci.Doc, st)
 	p.saveLastVerify(id, st, sha, green, results)
 	if !green {
-		return p.redAttempt(ctx, ci, &VerifyResult{ID: id, Status: st.Status, SHA: sha, Green: false, Results: results, PendingHuman: pending, GreenAtBaseline: gab, StrayFiles: StrayFiles(results), StraysKept: StraysKept(results), Regression: regression})
+		return p.redAttempt(ctx, ci, &VerifyResult{ID: id, Status: st.Status, SHA: sha, Green: false, Results: results, PendingHuman: pending, GreenAtBaseline: gab, StrayFiles: StrayFiles(results), StraysKept: StraysKept(results), Regression: regression, LiveSkipped: liveSkipped})
 	}
-	st.Verify = &Verify{SHA: sha, At: Stamp(), Results: results, PendingHuman: pending, Green: green, GreenAtBaseline: gab, Regression: skipped}
+	st.Verify = &Verify{SHA: sha, At: Stamp(), Results: results, PendingHuman: pending, Green: green, GreenAtBaseline: gab, Regression: skipped, LiveSkipped: liveSkipped}
 	switch {
 	case st.Status == StatusReviewed && st.Review != nil && st.Review.Verdict == "pass":
 		if moved, _, _ := p.codeMovedSince(ctx, st.Review.SHA); moved && !keepReview {
@@ -601,7 +605,7 @@ func (p *Project) verify(ctx context.Context, ci ChangeInfo, opt RunOptions, kee
 	a := p.attempts(id)
 	return &VerifyResult{
 		ID: id, Status: st.Status, SHA: sha, Green: green, Results: results, PendingHuman: pending, GreenAtBaseline: gab, StrayFiles: StrayFiles(results), StraysKept: StraysKept(results), Regression: regression,
-		Attempts: a.Since, AttemptsTotal: a.Total, AttemptsCap: p.limits().AttemptsCap(),
+		LiveSkipped: liveSkipped, Attempts: a.Since, AttemptsTotal: a.Total, AttemptsCap: p.limits().AttemptsCap(),
 	}, nil
 }
 

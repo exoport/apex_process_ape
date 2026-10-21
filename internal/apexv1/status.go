@@ -57,7 +57,10 @@ type ChangeStatus struct {
 	PendingHuman  []string `json:"pending_human,omitempty"`
 	Failing       []string `json:"failing,omitempty"`
 	VerifySHA     string   `json:"verify_sha,omitempty"`
-	Error         string   `json:"error,omitempty"`
+	// LiveSkipped: the live scenarios the last green verify did not run,
+	// neither the change's own nor red at the last gate (W2 Part 2).
+	LiveSkipped int    `json:"live_skipped,omitempty"`
+	Error       string `json:"error,omitempty"`
 	// Attempts / AttemptsCap: red verifies since the change started, and
 	// limits.attempts (backlog 30). Set for a started change.
 	// AttemptsTotal is every red verify of the change, never reset. All
@@ -471,7 +474,7 @@ func (p *Project) Status() *StatusReport {
 		}
 		cs.Tools, cs.ReviewTools = changeTools(cfg.Tools, c.Doc, c.State, p.currentLastVerify(c.ID, c.State), pendingHuman)
 		if v := c.State.Verify; v != nil {
-			cs.VerifySHA = v.SHA
+			cs.VerifySHA, cs.LiveSkipped = v.SHA, v.LiveSkipped
 			for i := range v.Results {
 				if v.Results[i].Red() {
 					cs.Failing = append(cs.Failing, fmt.Sprintf("%s (%s)", v.Results[i].Task, v.Results[i].Outcome()))

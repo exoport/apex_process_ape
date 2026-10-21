@@ -230,6 +230,8 @@ var findingRules = []findingRule{
 	// v1.1 follow-ups (Q154).
 	rule("", `^limits\.\S+ is not a key of limits:`, CodeConfigUnknownKey),
 	rule("", `^(models\.\S+\.)?effort: .* is not a level`, CodeConfigInvalid),
+	// v1.1 W2.
+	rule("", "(kind `\\(.*\\)` is not `check \\(live\\):`|is `check \\(live\\):` on )", CodeCheckBadKind),
 }
 
 // UnclassifiedFinding is the code of a finding no rule matches — a

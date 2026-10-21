@@ -85,7 +85,7 @@ A fresh project with one approved milestone gives, in part:
 | `id`, `title`, `status`, `status_text` | From the roadmap. `status` is `proposed`, `approved` or `done`; `status_text` is the whole `Status:` value. |
 | `gate` | The `Gate:` command. |
 | `budget` | The budget in USD, when the roadmap gives one. |
-| `gate_last` | The latest gate run: `exit`, `at`, `sha`, `secs`, `output_sha256`, `cmd`, `log`, `tail`, `spec_checks`, `spec_failed`, `stray_files`, `strays_kept`, `regression`, `reason`, `detail`, `shell_note`, `flaky`. Absent before the gate ran. |
+| `gate_last` | The latest gate run: `exit`, `at`, `sha`, `secs`, `output_sha256`, `cmd`, `log`, `tail`, `spec_checks`, `spec_failed`, `stray_files`, `strays_kept`, `regression`, `reason`, `detail`, `shell_note`, `flaky`, `live_skipped`. A red `Gate:` command skips the live scenario checks (`live_skipped`: how many) and the regression command (`regression.skipped: "gate-red"`). Absent before the gate ran. |
 | `approval_self_check` | The approval's gate run: `{sha, exit, at, log}`. |
 | `base_sha` | The milestone's start, HEAD at its first approval: what every gate run gets as `APE_MILESTONE_BASE`. |
 | `spent_usd` | The spend of runs started since it was approved. |
@@ -118,6 +118,7 @@ A fresh project with one approved milestone gives, in part:
 | `failing` | The red checks of its last verify, for example `"T1 (exit 1)"`, `"T2 (vacuous: …)"`, `"S (unrun: $X is unset …)"`. |
 | `flaky` | Checks that passed only on a retry at its last verify. |
 | `verify_sha` | The sha its last verify ran at. |
+| `live_skipped` | The live scenario checks its last green verify did not run: neither the change's own nor red at the last gate. Absent when none. |
 | `attempts`, `attempts_total`, `attempts_cap` | Red verifies since its last start, ever, and `limits.attempts`. This checkout's counts. |
 | `pending_human` | Its human-review tasks not yet accepted. |
 | `awaiting_human` | The same tasks, once only a person is left (the change is reviewed or archived). Always present, `[]` when none. The loop skips such a change. |

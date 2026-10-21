@@ -113,6 +113,11 @@ const (
 	// CodeChecksDuplicateRun: project check's notice for scenario checks
 	// that start with the same slow command (checkcost.go).
 	CodeChecksDuplicateRun = "checks.duplicate-run"
+	// CodeCheckBadKind: a check line's kind is not live, or live on
+	// human-review (W2 Part 2). CodeCheckLiveSuggested: project check's
+	// notice for a slow check not marked live.
+	CodeCheckBadKind       = "check.bad-kind"
+	CodeCheckLiveSuggested = "check.live-suggested"
 )
 
 // CodeDoc documents one diagnostic code.
@@ -455,5 +460,7 @@ var DiagnosticCodes = []CodeDoc{
 	{CodeGateSpecRed, 1, "replan", "`ape milestone gate <M> --spec-only` (W2): a scenario check of the effective spec is red now (JSON spec_failed) — apex-plan fixes the plan's scenarios or their checks before the milestone is approved; nothing was recorded"},
 	{CodeRegressionSlow, 0, "replan", "a notice, never a finding (project check's notices; the exit is unchanged): regression: is a single command, so every change's start and verify runs the whole suite, and its last recorded run (a change's baseline or verify, or a milestone's last gate) took longer than checks.slow_regression (default 5m; W2) — apex-plan splits it into tiers, regression: {change: <a fast subset>, milestone: <the suite>}, whose milestone tier is baselined once per milestone"},
 	{CodeChecksDuplicateRun, 0, "replan", "a notice, never a finding (project check's notices; the exit is unchanged): two or more scenario checks of the spec start with the same command (up to the first top-level && or |) and differ after it, and each ran over a minute at the last gate (W2) — so every gate runs that command once per check, which ape does not memoize; the notice names the scenarios and their time per gate: apex-plan gives the command one scenario and has the others check what it leaves under development/, or merges them"},
+	{CodeCheckBadKind, 1, "replan", "a check line's kind is not `live` — `check (<kind>):` takes one kind, `- check (live): <command>` (W2) — or is live on human-review or on nothing, or sits on a `regression:` task: ape cannot tell how to run it; write `check (live): <command>` for a check that needs something live, else a plain `check:`"},
+	{CodeCheckLiveSuggested, 0, "replan", "a notice, never a finding (project check's notices; the exit is unchanged): a scenario check of the spec, not live, ran over a minute at the last gate (W2), and every verify of a change touching its capability runs it — if it needs something live (a service, a network, a long end-to-end run), apex-plan writes it `- check (live): <command>`: verify then runs it only for the change's own scenarios or when it was red at the last gate, and a gate whose Gate: command is red skips it"},
 	{UnclassifiedFinding, 1, "stop", "a finding no rule classifies (a bug: report it)"},
 }

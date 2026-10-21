@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/exoport/apex_process_ape/internal/apexv1"
 	"github.com/stretchr/testify/require"
 )
 
@@ -31,12 +32,12 @@ func TestV1Commands_GateSpecOnly(t *testing.T) {
 			Action string `json:"action"`
 		} `json:"diagnostics"`
 		Result struct {
-			SpecOnly   bool   `json:"spec_only"`
+			SpecOnly   bool   `json:"spec_only"` //nolint:tagliatelle // the v1 --json payloads are snake_case by contract
 			Mode       string `json:"mode"`
-			SpecChecks int    `json:"spec_checks"`
+			SpecChecks int    `json:"spec_checks"` //nolint:tagliatelle // the v1 --json payloads are snake_case by contract
 			SpecFailed []struct {
 				Task string `json:"task"`
-			} `json:"spec_failed"`
+			} `json:"spec_failed"` //nolint:tagliatelle // the v1 --json payloads are snake_case by contract
 		} `json:"result"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(stdout), &red), stdout)
@@ -53,4 +54,20 @@ func TestV1Commands_GateSpecOnly(t *testing.T) {
 	stdout, _, err = v1Exec(t, newMilestoneCmd, "gate", "M1", "--spec-only", "--cwd", root)
 	require.NoError(t, err, stdout)
 	require.Contains(t, stdout, "M1 spec-only: 1 scenario check(s), 0 red — nothing recorded")
+}
+
+// W2 Part 2: ape status says how many live checks were not run, and why.
+func TestStatus_LiveSkippedLines(t *testing.T) {
+	require.Empty(t, liveSkippedLines(&apexv1.StatusReport{}))
+	r := &apexv1.StatusReport{
+		Milestone: &apexv1.MilestoneStatus{ID: "M2", GateLast: &apexv1.GateRun{
+			SHA: "abcdef1234", Exit: 1, LiveSkipped: 3,
+			Regression: &apexv1.RegressionVerdict{Cmd: "make test-all", Skipped: apexv1.RegressionSkippedGateRed},
+		}},
+		Changes: []apexv1.ChangeStatus{{ID: "add-svc", VerifySHA: "1234567890", LiveSkipped: 2}, {ID: "add-wave"}},
+	}
+	require.Equal(t, "\nLive checks not run:\n"+
+		"  M2 gate abcdef1: 3 live scenario check(s) and the regression command, as its Gate: command was red (close runs everything)\n"+
+		"  add-svc verify 1234567: 2 live scenario check(s), neither its own nor red at the last gate\n", liveSkippedLines(r))
+	require.Contains(t, statusLong(r), "Live checks not run:")
 }

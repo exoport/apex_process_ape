@@ -549,7 +549,12 @@ change does not MODIFY or REMOVE (regression), plus the scenarios of its own ADD
 MODIFIED blocks — of the capabilities the change touches (frontmatter touches:), plus any
 other scenario whose check command is identical to a task's (H10). The rest of the spec
 is the milestone gate's to run (`+"`ape milestone gate`"+` runs all of it). human-review checks
-are not run. A command shared by several checks runs once. A check, regression or gate
+are not run. Live checks (W2): a check written `+"`- check (live): <command>`"+` (a scenario's,
+or a task's `+"`— check (live): <command>`"+`) needs something live — a service, a network, a
+long end-to-end run. Verify runs the change's own (its tasks', its delta's scenarios') and a
+live scenario red at the last gate of any milestone; the others it leaves to the gate (JSON
+live_skipped: how many, also in state.json and ape status). Any other kind, `+"`check (x):`"+`, is
+the finding check.bad-kind. A command shared by several checks runs once. A check, regression or gate
 command that is one ( … ) block of several lines, each a simple command (a first line of
 set -e, as the lift writes, is dropped), runs as its lines joined by && — each line's exit counts, as under set -e (a line that is itself a ;, & or
 || list goes in { …; }) — and its log opens with "split into N commands". A line's
@@ -684,6 +689,9 @@ func renderVerify(cmd *cobra.Command, f *v1Flags, id string, res *apexv1.VerifyR
 		printChecks(w, res.Results, true)
 		printNewFailures(w, res.Regression)
 		printDocsOnly(w, res.Regression)
+		if n := res.LiveSkipped; n > 0 {
+			fmt.Fprintf(w, "%d live scenario check(s) not run: not the change's own, and not red at the last gate (the gate runs them)\n", n)
+		}
 		if len(res.PendingHuman) > 0 {
 			fmt.Fprintf(w, "human-review pending: %s\n", strings.Join(res.PendingHuman, ", "))
 		}
