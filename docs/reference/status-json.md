@@ -13,10 +13,13 @@ ape status            # the report
 ape status --brief    # at most 25 lines (what the SessionStart hook injects)
 ape status --json     # the fields below, on stdout
 ape status --board    # also refresh the project's board tab now (JSON "board")
+ape status --wait 9m --until person,stopped --since 41 --json   # wait (below)
 ```
 
-Status reads the records ape keeps and changes nothing. Exit 0, or 2 on a usage error. `--board`
-exits 0 whatever the board did.
+Status reads the records ape keeps and changes nothing, but for one line of its event log: a
+detached run it finds lost is logged `run-lost`, once. Exit 0, or 2 on a usage error. `--board`
+exits 0 whatever the board did. With `--until` it waits, and exits 75 when `--wait` runs out
+([below](#ape-status---wait)).
 
 A fresh project with one approved milestone gives, in part:
 
@@ -147,6 +150,72 @@ it. The loop's run also carries `relay`:
 | `context_relay` | The threshold, `limits.context_relay`. |
 | `relays`, `relays_cap` | Relays so far, and `limits.relays`. |
 | `relay_of` | The run this one relays. |
+
+## `ape status --wait`
+
+```bash
+ape status --wait <dur> --until <condition>[,<condition>…] [--since <seq>] [--json]
+```
+
+It waits, at most `--wait` (default `9m`, at most `9m30s`, else `usage.wait`), until one of the
+conditions holds. The comma means any. The conditions are read from ape's records only: the
+[event log](project-events.md), the run handles and locks, and the session registry. No process
+is matched.
+
+| Condition | Holds (its level) | Events that make it hold (its edge) |
+| --- | --- | --- |
+| `person` | The project waits on a person act (`wait.person_actions` is not empty). | `person`, `block` |
+| `stopped` | No run of the project is live: no detached run going, no long-run lock held, no session ape launched running there. A detached run whose supervisor is gone counts as stopped, and is logged `run-lost`. | `run-end`, `run-lost`, `stop`, once the level holds |
+| `done` | Every milestone of the roadmap is done. A roadmap with none is not. | `milestone-done`, once the level holds |
+| `blocked` | A change is blocked. | `block` |
+| `event` | (no level) | any event |
+
+The order:
+
+1. **Level first.** When a condition holds on the state now, the call returns at once (`how:
+   "level"`). The first condition of `--until` that holds is the one reported.
+2. **The events after `--since`.** An event logged after `--since` that makes a condition hold
+   returns it (`how: "edge"`), so nothing logged between two calls is missed. Without `--since`,
+   only events after the call started count.
+3. **The wait.** The log is read every second until `--wait` runs out. Then the call exits 75
+   (`how: "timeout"`).
+
+Every exit prints the seq to pass as the next `--since`: `seq: <n>` as the last line, and in JSON
+both top-level `seq` and `wait.last_seq`. On an edge it is the returned event's seq, so the events
+after it are the next call's. Otherwise it is the newest seq logged. Usage errors (`usage.until`,
+`usage.wait`) exit 2.
+
+With `--json` the output is the status object above, plus:
+
+| Field | What it is |
+| --- | --- |
+| `seq` | The `--since` to pass next. |
+| `wait.until` | The conditions, as given. |
+| `wait.since` | `--since`, `null` without it. |
+| `wait.condition` | The condition that holds; `null` on 75. |
+| `wait.how` | `level`, `edge` or `timeout`. |
+| `wait.event` | The event line that made it hold (an edge), or the newest event after `--since` that bears on it (a level); `null` when none. |
+| `wait.last_seq` | The same as `seq`. |
+| `wait.person_actions` | The person acts the project waits on: `[{kind, ref, task, milestone, change, action, reason}]`, `[]` when none. `action` is the phrase the person types. |
+| `wait.running` | The live runs' ids (detached runs, `long-run lock`, ape-launched sessions), when `stopped` is waited for; else `[]`. |
+| `wait.waited_secs` | How long the call waited. |
+
+The person acts, in this order:
+
+| `kind` | When | `action` |
+| --- | --- | --- |
+| `milestone approve` | A milestone is proposed. | `approve M2` |
+| `change approve` | A tweak awaits approval. | `approve <tweak-id>` |
+| `change answer` | A change is blocked. | `answer <id>: <answer>` |
+| `change accept` | A human-review task awaits a person, and no delegate may take it now. | `accept T2 of <id>` |
+| `project accept-config` | A guarded config block changed with no person accepting it (`config.changed`). | `accept the config` |
+
+From another machine, run ape by its absolute path, since a non-interactive ssh shell may not
+have it on `PATH`:
+
+```bash
+ssh host 'cd /srv/proj && /home/me/.local/bin/ape status --wait 9m --until person,stopped --since 41 --json'
+```
 
 ## `ape project check`
 

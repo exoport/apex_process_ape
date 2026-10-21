@@ -10,7 +10,8 @@ For ape, reference is the surface area: every command, every flag, every config 
 - [change-lifecycle.md](change-lifecycle.md) — the states of a change and every `ape change` verb, the squash archive, checks and limits.
 - [config-yaml.md](config-yaml.md) — `_apex/config.yaml` in an APEX v1 project: every key, its default, and the guarded blocks.
 - [hooks.md](hooks.md) — the Claude Code and git hooks `ape project init` registers, and what each decides.
-- [status-json.md](status-json.md) — `ape status --json` and `ape project check --json`.
+- [status-json.md](status-json.md) — `ape status --json`, `ape status --wait` and `ape project check --json`.
+- [project-events.md](project-events.md) — `_apex/state/events.jsonl`, the APEX v1 project event log: every event, its fields, and the `notify:` environment.
 - [pipeline-run-manifest.md](pipeline-run-manifest.md) — the run manifest (`manifest.yaml`) an `ape task` run writes.
 - [step-contract.md](step-contract.md) — the line `ape task` types and the contract the bridge verifier enforces on it.
 - [framework-yaml.md](framework-yaml.md) — `_apex/framework.yaml`, including the migrations ledger.

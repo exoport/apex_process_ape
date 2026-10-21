@@ -1,5 +1,8 @@
 # NATS subjects & event payloads
 
+Not the APEX v1 project event log (`_apex/state/events.jsonl`, what `notify:` and
+`ape status --wait` read): that is [project-events.md](project-events.md).
+
 > **Status: PARTIALLY IMPLEMENTED.** This is the single, authoritative,
 > **additive-only** taxonomy for the NATS work in PLAN-13 (eventing + transcript
 > blobs), PLAN-14 (`ape service`), PLAN-17 (reporting CLI + identity), and

@@ -306,16 +306,22 @@ commit:
 
 ## `notify`
 
-A shell command ape runs when an `ape task` run stops on a limit (a usage limit, the budget), and
-when a change becomes blocked:
+A shell command ape runs on every event it logs in the project's event log,
+`_apex/state/events.jsonl`, after the event's line is written:
 
 ```yaml
 notify: ./scripts/notify.sh
 ```
 
-It runs under `sh -c` from the project root, with `APE_EVENT` (`stop` or `block`), `APE_CHANGE` and
-`APE_REASON` in its environment. The timeout is 10 s, its output is dropped, and a failure is one
-warning line that never changes the outcome. Not guarded.
+The events are `person` (the project starts waiting on a person act), `gate-green`,
+`milestone-done`, `run-end` (every `ape task` run), `run-lost`, `stop` (a run stopped on a limit)
+and `block` (a change became blocked). It runs under `sh -c` from the project root, with
+`APE_EVENT`, `APE_SEQ`, `APE_MILESTONE`, `APE_CHANGE`, `APE_RUN`, `APE_EXIT`, `APE_SKILL`,
+`APE_REASON` and `APE_ACTION` (for `person`, the phrase the person types, such as `approve M3`) in
+its environment. The timeout is 10 s, its output is dropped, and a failure is one warning line that
+never changes the outcome. Not guarded. Every event and field:
+[project-events.md](project-events.md); recipes (a desktop notification, the board, a webhook):
+[How to hear from a project](../how-to/hear-from-a-project.md).
 
 ## `human_review`
 

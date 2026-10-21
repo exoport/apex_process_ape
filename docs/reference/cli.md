@@ -1169,10 +1169,12 @@ development/specs/** outside an archive squash (a "Change: <id>" trailer of an a
 change) or a state.json outside an "apex: …" commit or a squash. A person reverts the
 commit (git revert), which clears it.
 
-Notifier (H20): a subcommand that leaves the change blocked (block, verify at its attempts
-limit, a rebase conflict) runs _apex/config.yaml's optional notify: command with
-APE_EVENT=block, APE_CHANGE=<id> and APE_REASON=<the blocked reason>; best effort, it never
-changes the outcome (see ape task --help).
+Events (H20, W3): a subcommand that leaves the change blocked (block, verify at its attempts
+limit, a rebase conflict) logs "block" in _apex/state/events.jsonl, then runs
+_apex/config.yaml's optional notify: command with APE_EVENT=block, APE_CHANGE=<id>,
+APE_MILESTONE and APE_REASON=<the blocked reason>; best effort, it never changes the outcome
+(see ape task --help). Every subcommand that changes what ape status reports also logs a
+"person" event for each person act the project newly waits on (see ape status --help).
 
 Exit codes for every subcommand: 0 ok · 1 check failed (one-line remediation) · 2 usage ·
 3 conflict (another change claims the same requirement or the delta no longer applies:
@@ -5069,8 +5071,9 @@ for setup while no .claude/skills/apex-* exists; JSON "next" carries the same li
                                      is written: the subject defaults to
                                      "{type}: {title}", D193), and evidence:
                                      archive|off (default off) — see ape change archive
-                                     --help; notify: <command>, run on a limit stop or a
-                                     blocked change — see ape task --help); see "Check
+                                     --help; notify: <command>, run on every event ape
+                                     logs in _apex/state/events.jsonl — see ape status
+                                     --help); see "Check
                                      settings" below
   AGENTS.md                          the project map (skeleton). Right under its title:
                                      Project context: read @development/project.md before
@@ -7299,7 +7302,49 @@ when ape creates the tab (or first refreshes one an older ape made). ape sets qu
 that once: if a person turns it off from the tab's menu, it stays off, and ape's changed
 views raise the dot again.
 
-Exit codes: 0 ok · 2 usage. --board exits 0 whatever the board did.
+
+Waiting (W3): --until <conditions> waits, at most --wait (default 9m, at most 9m30s;
+usage.wait), until one of the comma-separated conditions holds:
+
+  person   the project waits on a person act: a proposed milestone ("approve M2"), a tweak
+           awaiting approval ("approve <id>"), a blocked change ("answer <id>: <answer>"),
+           a human-review task no delegate may take now ("accept T2 of <id>"), an
+           unaccepted config change ("accept the config")
+  stopped  no run of the project is live: no detached run going (a run whose supervisor
+           is gone counts as stopped, and is logged run-lost), no long-run lock held, no
+           session ape launched running here
+  done     every milestone of the roadmap is done (a roadmap with none is not)
+  blocked  a change is blocked
+  event    any event is logged after --since
+
+Level first: when a condition already holds, the call returns at once. Then the events: an
+event after --since that makes a condition hold returns it — person on a person or block
+event, blocked on block, event on any; stopped and done on run-end, run-lost, stop and
+milestone-done, once their level holds — so nothing logged between two calls is missed.
+Without --since, only events after the call started count. ape status (with or without
+--until), ape run wait and ape run status log run-lost for a detached run whose supervisor
+is gone without recording an exit, once per run. The log is
+_apex/state/events.jsonl, one line per event: {seq, at, event, milestone, change, run, exit,
+reason, action} (skill too, for an ape task run), seq strictly increasing; it rolls at 10 MB
+into events.1.jsonl (one kept), seq carrying on. The events: person (action is the phrase
+the person types), gate-green, milestone-done, run-end (exit is the run's exit code),
+run-lost, stop and block. _apex/config.yaml's notify: runs after each line is written, with
+APE_EVENT, APE_SEQ, APE_MILESTONE, APE_CHANGE, APE_RUN, APE_EXIT, APE_SKILL, APE_REASON and
+APE_ACTION in its environment.
+
+Every exit prints "seq: <n>" last (JSON "seq", and wait.last_seq): the --since to pass next.
+It is the returned event's seq when an event made the condition hold — the events after it
+are the next call's — else the newest seq logged. Exit 0: a condition holds; the status is
+printed with "Waited: <condition> …" and the event. Exit 75: --wait ran out; run the same
+command again with --since <n>. --json prints the status object with "seq" and "wait":
+{until, since (null without --since), condition (null on 75), how ("level", "edge" or
+"timeout"), event (the line, or null), last_seq, person_actions [{kind, ref, task,
+milestone, change, action, reason}], running (the live runs' ids), waited_secs}. From
+another machine, run ape by its absolute path:
+  ssh host 'cd /path/to/project && /abs/path/to/ape status --wait 9m --until person,stopped --since 41 --json'
+
+Exit codes: 0 ok (with --until: a condition holds) · 75 --until: --wait ran out, run it again
+with --since <seq> · 2 usage (usage.until, usage.wait). --board exits 0 whatever the board did.
 
 Examples:
 
@@ -7308,6 +7353,7 @@ Examples:
   ape status --brief
   ape status --json
   ape status --board
+  ape status --wait 9m --until person,stopped --since 41 --json
 ```
 
 Flags:
@@ -7318,6 +7364,9 @@ Flags:
 | `--brief` | bool | `false` | at most 25 lines |
 | `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
 | `--json` | bool | `false` | machine output (JSON on stdout) |
+| `--since` | int64 | `0` | with --until: the seq the last wait printed; the events after it count, so none is missed between two calls |
+| `--until` | string | `—` | wait until one of these holds: person, stopped, done, blocked, event (comma = any); returns at once when one already does |
+| `--wait` | duration | `9m0s` | with --until: how long this call waits (at most 9m30s); exit 75 when it runs out — run it again with --since <seq> |
 
 ## ape task
 
@@ -7477,12 +7526,20 @@ parsed; `ape status` shows it as the latest run ("stopped: usage-limit,
 resets <ts>"). Run again after the reset. Matched against Claude Code
 2.1.302's text, unmeasured live.
 
-Notifier: in an APEX v1 project, _apex/config.yaml's optional
+Events and the notifier (H20, W3): in an APEX v1 project every run logs
+"run-end" in _apex/state/events.jsonl when it ends, attached or detached
+(a detached run's supervisor logs it with the exit it records), and a run
+stopped on a limit (usage limit, budget) logs "stop" first. Each line is
+{seq, at, event, milestone, change, run, exit, reason, action, skill}:
+the milestone and change --args names, the run's id, its exit code, the
+termination kind as the reason. After the line, _apex/config.yaml's
+optional
   notify: <shell command>
 runs (sh -c, 10 s timeout, output dropped, a failure only warned about)
-when a run stops on a limit (usage limit, budget) — and, from ape change,
-when a change becomes blocked — with APE_EVENT=stop|block, APE_CHANGE
-(the change --args names, if any) and APE_REASON in its environment.
+with APE_EVENT, APE_SEQ, APE_MILESTONE, APE_CHANGE, APE_RUN, APE_EXIT,
+APE_SKILL, APE_REASON and APE_ACTION in its environment. The other
+events (person, gate-green, milestone-done, block, run-lost) and the wait
+on them: ape status --help.
 
 Sessions and the nesting rule (D61, D62): every skill of the v1 loop runs
 as its own ape task session, and depth counts only the model sessions ape

@@ -306,8 +306,10 @@ attempt is counted in the ignored `attempts.json`. `retries:` is not a limit: it
 within one verify.
 
 A verb that leaves the change blocked (`block`, verify at its attempts limit, a rebase conflict)
-runs the optional `notify:` command with `APE_EVENT=block`, `APE_CHANGE=<id>` and
-`APE_REASON=<reason>`, best effort.
+logs `block` in the [project event log](project-events.md), then runs the optional `notify:`
+command with `APE_EVENT=block`, `APE_CHANGE=<id>`, `APE_MILESTONE` and `APE_REASON=<reason>`, best
+effort. Every verb that changes what `ape status` reports also logs a `person` event for each
+person act the project newly waits on, such as `answer <id>: <answer>` for a blocked change.
 
 ## Refusals that protect the records
 

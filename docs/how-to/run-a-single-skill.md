@@ -173,9 +173,12 @@ same line on two reads with no hook between them ends the run (exit 14) with
 termination kind `usage_limit`, `resets` as printed and `resets_at` parsed.
 Run again after the reset.
 
-In an APEX v1 project, an optional `notify:` command in `_apex/config.yaml`
-runs (`sh -c`, 10-second timeout, output dropped) when a run stops on a limit,
-with `APE_EVENT`, `APE_CHANGE` and `APE_REASON` in its environment.
+In an APEX v1 project, every run logs `run-end` in `_apex/state/events.jsonl`
+when it ends (and `stop` first when it stopped on a limit), and the optional
+`notify:` command in `_apex/config.yaml` then runs (`sh -c`, 10-second timeout,
+output dropped) with `APE_EVENT`, `APE_RUN`, `APE_EXIT`, `APE_SKILL`,
+`APE_CHANGE`, `APE_REASON` and the rest in its environment. See
+[How to hear from a project](hear-from-a-project.md).
 
 ## Commit control
 

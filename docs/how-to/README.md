@@ -23,6 +23,7 @@ How-to guides are **recipes** — they answer "how do I X?" for a reader who alr
 - [How to record a decision](record-a-decision.md)
 - [How to run a single skill with `ape task`](run-a-single-skill.md)
 - [How to run ape in the background](detach-a-run.md)
+- [How to hear from a project: notify recipes and `ape status --wait`](hear-from-a-project.md)
 - [How to run an unattended session with `ape prompt`](run-a-prompt-session.md)
 - [How to tune long-running sessions](tune-long-running-steps.md)
 - [How to write and run an `ape script`](write-ape-scripts.md)
