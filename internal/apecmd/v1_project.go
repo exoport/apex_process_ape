@@ -130,7 +130,8 @@ Hooks merged into .claude/settings.json (existing keys and hooks are kept):
   PreToolUse            ape hook pre-tool      (matcher Edit|Write|MultiEdit|NotebookEdit|Bash:
                                                 the edit guard, and the Bash guards:
                                                 git tag writes, git push, pkill/killall,
-                                                rebase/merge on a change branch)
+                                                rebase/merge/cherry-pick on a change
+                                                branch)
   UserPromptSubmit      ape hook user-prompt   (records the person's own prompts, for
                                                 person acts typed in Claude Code (E2))
 A hook that was altered (another matcher, async, a shorter stop timeout) is replaced

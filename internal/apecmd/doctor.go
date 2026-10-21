@@ -224,7 +224,9 @@ the project (H27):
                       from or altered in .claude/settings.json (project
                       check's notice hooks.prompt-absent): WARN — without it a
                       person act from a Claude Code session is refused (E2)
-  None of v0's rows run there: --strict is green on a healthy v1 project.
+  None of v0's rows run there. The host rows still do: on a host without
+  Node, node.binary and npx.binary WARN, so --strict exits 1 there (no APEX
+  v1 skill needs Node; --skip node.binary,npx.binary).
 
   Anywhere else: the rows below, v0's included, plus apex.v0, which WARNs
   in an APEX v0 project: this ape retired the v0 commands its skills

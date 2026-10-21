@@ -33,7 +33,7 @@ the hook payload (JSON) on stdin.
                   development/specs/**, changes/*/state.json, archive/**, _apex/state/**,
                   an existing development/briefs/** file, and Bash commands that create,
                   delete or push a git tag, push at all, stop processes by name (pkill,
-                  killall), or rebase or merge on a change branch; while ape runs a
+                  killall), or rebase, merge or cherry-pick on a change branch; while ape runs a
                   check in the checkout, denies an edit outside development/ that its
                   cleanup would undo; grants a person act on the person's own words
                   (E2), and denies one without them
@@ -225,7 +225,7 @@ func newHookPreToolCmd() *cobra.Command {
 	var inline bool
 	cmd := &cobra.Command{
 		Use:   "pre-tool",
-		Short: "PreToolUse hook: deny edits to specs, state.json, the archive, _apex/state and briefs, git tag writes, git push, pkill/killall, and rebases on a change branch",
+		Short: "PreToolUse hook: deny edits to specs, state.json, the archive, _apex/state and briefs, git tag writes, git push, pkill/killall, and rebase/merge/cherry-pick on a change branch",
 		Long: `PreToolUse hook for Edit|Write|MultiEdit|NotebookEdit|Bash. Denies, with
 {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny",
 "permissionDecisionReason":"… specs change only through ape change archive"}}, an edit
@@ -277,12 +277,12 @@ which the hook inherits. Set inside a command the model runs — APE_ALLOW_PUSH=
 push, env APE_ALLOW_PUSH=1 …, export APE_ALLOW_PUSH=1; … — it does not count: the
 command is denied as if it were not there (D47 Q6).
 
-Bash, too (trial decision D40, the model never rebases): denies git rebase and git merge
-while the repository the command runs in has a change branch, change/<id>, checked out —
+Bash, too (trial decision D40, the model never rebases): denies git rebase, git merge and
+git cherry-pick while the repository the command runs in has a change branch, change/<id>, checked out —
 ape catches a change up with its moved base itself (` + "`ape change start|verify|archive <id>`" + `
-rebase it and re-take the baseline at the base tip). Allowed: rebase/merge --abort and
---quit, git merge-base, merge-file and merge-tree, and rebase or merge on any other
-branch. Parsed like the tag rule, with the same limits.
+rebase it and re-take the baseline at the base tip). Allowed: rebase/merge/cherry-pick
+--abort and --quit, git merge-base, merge-file and merge-tree, and any of the three on
+another branch. Parsed like the tag rule, with the same limits.
 
 Bash, too (E2, T6): denies a command that names _apex/state/prompts or
 _apex/state/grants, or runs ` + "`ape hook user-prompt`" + `, ` + "`ape hook pre-tool`" + ` or ` + "`ape __run`" + `:

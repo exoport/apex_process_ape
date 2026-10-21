@@ -63,8 +63,8 @@ func checkGitBinary(_ context.Context, _ doctorEnv) CheckResult {
 	return CheckResult{Status: StatusOK, Message: path}
 }
 
-// checkNodeBinary is WARN-on-missing — node is only required by
-// apex-create-event-storming, which renders Excalidraw. Other skills use
+// checkNodeBinary is WARN-on-missing — no APEX v1 skill needs node; in v0
+// it is only required by apex-create-event-storming, which renders Excalidraw. Other skills use
 // it only for `npx prettier`, which is cosmetic. Without it, those skills
 // log a skip-reason and the rest of the pipeline keeps running.
 func checkNodeBinary(_ context.Context, _ doctorEnv) CheckResult {
@@ -73,9 +73,10 @@ func checkNodeBinary(_ context.Context, _ doctorEnv) CheckResult {
 		return CheckResult{
 			Status:  StatusWarn,
 			Message: "not found on PATH",
-			Remediation: "apex-create-event-storming renders its Excalidraw diagrams with Node 18+, " +
-				"which also needs network access for npm and Playwright's Chromium (see playwright.cache). " +
-				"Other skills use Node only for `npx prettier` formatting, which is cosmetic. " +
+			Remediation: "No APEX v1 skill needs Node: --skip node.binary,npx.binary in a v1 project. " +
+				"APEX v0's apex-create-event-storming renders its Excalidraw diagrams with Node 18+, " +
+				"which also needs network access for npm and Playwright's Chromium (see playwright.cache); " +
+				"other v0 skills use Node only for `npx prettier` formatting, which is cosmetic. " +
 				"Install via your package manager or volta.sh.",
 		}
 	}
