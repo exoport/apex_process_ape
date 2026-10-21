@@ -37,6 +37,8 @@ type GateRun struct {
 	// Reason and Detail: the gate command was vacuous or unrun (H11).
 	Reason string `json:"reason,omitempty"`
 	Detail string `json:"detail,omitempty"`
+	// ShellNote: the gate command exited 127 on a bash/zsh builtin (RN-1).
+	ShellNote string `json:"shell_note,omitempty"`
 	// Flaky lists what passed only on a retry (H12): the gate command
 	// ("gate-<M>"), scenarios, the regression command.
 	Flaky []string `json:"flaky,omitempty"`
@@ -453,7 +455,7 @@ func (p *Project) runGate(ctx context.Context, id string, opt RunOptions) (*Gate
 	run := GateRun{
 		Exit: r.Exit, At: Stamp(), SHA: HeadSHA(ctx, p.Root), Secs: r.Secs,
 		OutputSHA256: r.OutputSHA256, Cmd: m.Gate, Log: r.Log, Tail: lastN(r.Tail, 15),
-		Reason: r.Reason, Detail: r.Detail,
+		Reason: r.Reason, Detail: r.Detail, ShellNote: r.ShellNote,
 	}
 	// The whole spec runs as the regression suite beside the gate, and
 	// the project's own regression command with it (backlog 32), judged

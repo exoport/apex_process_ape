@@ -191,8 +191,12 @@ func runCheck(ctx context.Context, dir, cmd, logPath, logNote string, lim TierTi
 			_, _ = io.WriteString(w, "\n[ape] vacuous: "+detail+" (checks.vacuous_output)\n")
 		}
 	}
-	// Closed only now: the timeout, start-failure and vacuous notes above
-	// belong in the log too.
+	shellNote := shellBuiltinNote(exit, buf.String())
+	if shellNote != "" {
+		_, _ = io.WriteString(w, "\n[ape] note: "+shellNote+"\n")
+	}
+	// Closed only now: the timeout, start-failure, vacuous and shell notes
+	// above belong in the log too.
 	if logFile != nil {
 		_ = logFile.Close()
 	}
@@ -204,6 +208,7 @@ func runCheck(ctx context.Context, dir, cmd, logPath, logNote string, lim TierTi
 		Tail:         lastLines(buf.String(), tailLines),
 		Reason:       reason,
 		Detail:       detail,
+		ShellNote:    shellNote,
 	}
 }
 

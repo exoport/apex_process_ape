@@ -761,6 +761,9 @@ func (lf *lifter) dispositionWith(lim dispLimits) string {
 		for _, c := range r.Gates.NotRunnable {
 			p("- not in `regression:` (it has a placeholder): `%s`\n", c)
 		}
+		for _, rw := range r.Gates.Rewrites {
+			p("- written for /bin/sh (RN-1): %s — ape runs checks with sh, which has no `source` where it is dash\n", rw)
+		}
 		p("\n")
 	}
 

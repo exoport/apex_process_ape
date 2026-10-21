@@ -143,7 +143,10 @@ The commit:
                  A code block whose lines hold a construct (for … done) is one
                  command, ( set -e ⏎ its lines ⏎ ), so it fails on its first
                  red line wherever it runs as written; its AGENTS.md bullet
-                 reads "The Code Validation block, as one command:"
+                 reads "The Code Validation block, as one command:". A block
+                 line that is exactly "source <file>" is written ". <file>"
+                 (RN-1: ape runs checks with sh, which has no source where it
+                 is dash), each listed in gates.rewrites, the .md and the output
   lays down      the v1 skeleton, as ` + "`ape project init --brownfield`" + ` (CLAUDE.md keeps its
                  content, loses the v0 apex:managed block and gains @AGENTS.md;
                  AGENTS.md gains "Talk to APEX: type ` + "`/apex-orchestrator`" + ` in Claude
@@ -244,7 +247,9 @@ regression_new_failures) · red-after-lift (green at the tag: the LIFT broke it 
 in a commit, or reset to the tag and lift with --exclude) · cannot-run (exit 126/127, or
 an output saying a command was not found — "command not found", "No such file or
 directory" — with make's "Error 127", and no failing test named: a tool it runs is
-missing here, which is not a red; read the same at both points) · red-no-baseline ·
+missing here, which is not a red; read the same at both points; when the output says a
+bash/zsh builtin was not found — "sh: 2: source: not found" — the note names it instead:
+/bin/sh here has no such builtin, so write it in POSIX sh, "." for source, RN-1) · red-no-baseline ·
 flaky (RG-1: a red-after-lift or red-at-tag-new-failures command is run once more at the
 lift commit, and passed that time: a flake, not the lift's; record it, plan no fix; a
 red-at-tag-new-failures command whose re-run fails only as at the tag is red-at-tag, its
@@ -457,6 +462,9 @@ func printLift(w io.Writer, r *apexv1.LiftResult, regression bool) {
 	}
 	if r.Gates.Source != "" {
 		fmt.Fprintf(w, "gates     %d command(s) from %s; regression: %s\n", len(r.Gates.Commands), r.Gates.Source, r.Gates.Regression)
+		for _, rw := range r.Gates.Rewrites {
+			fmt.Fprintf(w, "gates     written for /bin/sh: %s (ape runs checks with sh, which has no source where it is dash)\n", rw)
+		}
 	} else {
 		fmt.Fprintln(w, "gates     no ## Code Validation found: no commands, no regression")
 	}

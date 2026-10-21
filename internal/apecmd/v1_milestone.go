@@ -217,6 +217,9 @@ func gateHuman(g *apexv1.GateResult) func(io.Writer) {
 				fmt.Fprintln(w, "  | "+l)
 			}
 			fmt.Fprintln(w, "  full output: "+g.Run.Log)
+			if g.Run.ShellNote != "" {
+				fmt.Fprintln(w, "  note: "+g.Run.ShellNote)
+			}
 		}
 		printChecks(w, g.Run.SpecFailed, true)
 		printRegression(w, g.Run.Regression)

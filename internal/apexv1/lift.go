@@ -1693,6 +1693,10 @@ func judgeLiftRegression(before, after *CheckResult, beforeOut, afterOut string)
 		}
 		return LiftRegressionGreen, "green at the lift commit, as at " + LiftTag, nil
 	case afterCannot && (before == nil || beforeRed):
+		if note := shellBuiltinNote(after.Exit, afterOut); note != "" {
+			// RN-1: a bash/zsh builtin under dash, not a missing tool.
+			return LiftRegressionCannotRun, fmt.Sprintf("cannot run here (exit %d at the lift commit, %s at %s): %s; fix it in `regression:` (_apex/config.yaml) and AGENTS.md, and its red or green can be judged; output in %s", after.Exit, tag, LiftTag, note, after.Log), nil
+		}
 		return LiftRegressionCannotRun, fmt.Sprintf("cannot run here (exit %d at the lift commit%s, %s at %s): a command it runs is missing or not executable on this machine — not a red; run it where its tools are, or set `regression:` to what can run; output in %s", after.Exit, why, tag, LiftTag, after.Log), nil
 	case before == nil:
 		return LiftRegressionNoBaseline, fmt.Sprintf("red at the lift commit (%s), with no run at %s to compare: output in %s", exit, LiftTag, after.Log), nil

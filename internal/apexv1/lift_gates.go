@@ -23,6 +23,29 @@ type LiftGates struct {
 	// NotRunnable are commands with a placeholder (<board>, {name}, a lone
 	// …): listed in AGENTS.md, left out of the regression command.
 	NotRunnable []string `json:"not_runnable,omitempty"`
+	// Rewrites are the block lines written for /bin/sh (RN-1): each
+	// `source <file>` line as `. <file>`, "<was> → <is>".
+	Rewrites []string `json:"rewrites,omitempty"`
+}
+
+// RN-1 (D312): radix's Code Validation block opens `source
+// .bingo/variables.env`. ape runs checks with sh, which is dash on Debian
+// and Ubuntu and has no source: the block exited 127 at the tag and after,
+// and the lift called it cannot-run, hiding the guard failure the lift had
+// caused. A block line that is exactly `source <file>` is written as its
+// POSIX form, `. <file>`, and the lift says so.
+var sourceLineRe = regexp.MustCompile(`^source\s+(\S+)$`)
+
+// forSh is line as the lift writes it for sh: a `source <file>` line in
+// its POSIX form, recorded in Rewrites; any other line as it is.
+func (g *LiftGates) forSh(line string) string {
+	m := sourceLineRe.FindStringSubmatch(line)
+	if m == nil {
+		return line
+	}
+	is := ". " + m[1]
+	g.Rewrites = append(g.Rewrites, "`"+line+"` → `"+is+"`")
+	return is
 }
 
 var (
@@ -86,6 +109,7 @@ func extractGates(file, doc string) LiftGates {
 			if compoundLineRe.MatchString(t) {
 				compound = true
 			}
+			t = g.forSh(t)
 			if head, ok := strings.CutSuffix(t, "\\"); ok {
 				cont += head + " "
 				continue

@@ -82,6 +82,8 @@ type RegressionVerdict struct {
 	// command always fails: nothing shows it would pass.
 	Reason string `json:"reason,omitempty"`
 	Detail string `json:"detail,omitempty"`
+	// ShellNote: exit 127 on a bash/zsh builtin (RN-1).
+	ShellNote string `json:"shell_note,omitempty"`
 	// Skipped: verify did not run the command (Q87) — "docs-only", every
 	// path the change touched is docs or the development folder. Paths
 	// are the docs paths it touched (the development folder not listed;
@@ -155,7 +157,7 @@ func (p *Project) runRegression(ctx context.Context, cmd, logDir, prefix string,
 // codes decide, as before rc.5. An unrun command is never pre-existing
 // red: it is red for want of a requirement, not by its tests.
 func judgeRegression(r *CheckResult, base *RegressionBaseline, out string) *RegressionVerdict {
-	v := &RegressionVerdict{Cmd: r.Cmd, Exit: r.Exit, OutputSHA256: r.OutputSHA256, Log: r.Log, Reason: r.Reason, Detail: r.Detail}
+	v := &RegressionVerdict{Cmd: r.Cmd, Exit: r.Exit, OutputSHA256: r.OutputSHA256, Log: r.Log, Reason: r.Reason, Detail: r.Detail, ShellNote: r.ShellNote}
 	if base != nil && base.Cmd == r.Cmd {
 		exit := base.Exit
 		v.BaselineExit, v.BaselineSHA = &exit, base.SHA

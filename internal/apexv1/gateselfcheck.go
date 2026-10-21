@@ -125,6 +125,9 @@ func (p *Project) gateSelfCheck(ctx context.Context, m *Milestone, base string, 
 	case exitNotExecutable, exitNotFound:
 		fmt.Fprintf(progress, "%s: the gate exited %d — refused\n", m.ID, r.Exit)
 		why := "it exited 127 (a command it runs was not found)"
+		if r.ShellNote != "" {
+			why = "it exited 127: " + r.ShellNote // RN-1
+		}
 		if r.Exit == exitNotExecutable {
 			why = "it exited 126 (a command it runs is not executable)"
 		}

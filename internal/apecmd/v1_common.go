@@ -199,6 +199,9 @@ func printChecks(w io.Writer, rs []apexv1.CheckResult, tails bool) {
 		if r.Reason != "" {
 			fmt.Fprintln(w, "       "+r.Reason+": "+r.Detail)
 		}
+		if r.ShellNote != "" && r.Red() {
+			fmt.Fprintln(w, "       note: "+r.ShellNote)
+		}
 		// rc.7d (rc7d-std): D232 Q131.
 		if s := r.StalePointer(); s != "" && r.Red() {
 			fmt.Fprintln(w, "       stale ("+apexv1.CodeSpecCheckNamesRemoved+"): "+s)
@@ -237,6 +240,9 @@ func printRegression(w io.Writer, v *apexv1.RegressionVerdict) {
 		verdict = fmt.Sprintf("red (exit %d), red at baseline too: not a failure", v.Exit)
 	}
 	fmt.Fprintf(w, "  regression %s — %s: %s\n", verdict, base, v.Cmd)
+	if v.ShellNote != "" && v.Exit != 0 {
+		fmt.Fprintln(w, "    note: "+v.ShellNote)
+	}
 	printNewFailures(w, v)
 	if v.Exit != 0 && v.Log != "" {
 		fmt.Fprintln(w, "       full output: "+v.Log)
