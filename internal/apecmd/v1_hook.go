@@ -123,7 +123,13 @@ func newHookSessionStartCmd() *cobra.Command {
 		Use:   "session-start",
 		Short: "SessionStart hook: inject `ape status --brief` as additional context",
 		Long: `SessionStart hook. Prints {"hookSpecificOutput":{"hookEventName":"SessionStart",
-"additionalContext":"<ape status --brief>"}}. Prints nothing outside a v1 project.`,
+"additionalContext":"<ape status --brief>"}}. Prints nothing outside a v1 project.
+
+When the session's shell is zsh ($CLAUDE_CODE_SHELL when set, else $SHELL; Claude Code
+runs the model's Bash commands in it), a paragraph follows the brief after a blank line:
+quote globs and variable expansions, never an unquoted word starting with =, file names
+from find, never from ls (apex-v0's operating rules said it; the lift drops them). ape's own
+checks run under sh -c and need none of it.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			payload := readHookPayload(cmd)
@@ -131,7 +137,7 @@ func newHookSessionStartCmd() *cobra.Command {
 				return nil
 			}
 			if p, err := apexv1.Open(apexv1.FindRoot(hookDir(cwd, payload))); err == nil && p.IsV1() {
-				emitHook(cmd)(apexv1.SessionStartOutput(p.Status().Brief()))
+				emitHook(cmd)(apexv1.SessionStartOutput(apexv1.SessionStartContext(p.Status().Brief(), apexv1.SessionShellIsZsh(os.Getenv))))
 			}
 			return nil
 		},

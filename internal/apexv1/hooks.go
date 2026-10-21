@@ -44,6 +44,38 @@ func ParseHookPayload(data []byte) (HookPayload, error) {
 	return p, err
 }
 
+// ZshNote is the paragraph the SessionStart hook adds on a zsh host (RK-3a,
+// D297): apex-v0's operating rules said it (their L19), the lift drops
+// them, and nothing in apex-v1 said it again — while Claude Code runs the
+// model's Bash commands in the user's own shell, and zsh aborts on what sh
+// lets pass. ape's own checks run under sh -c and are not affected.
+const ZshNote = "Your Bash commands run in zsh. Quote every glob you pass as an argument (`--include='*.md'`, `-name 'epic-*'`): " +
+	"zsh fails on a glob that matches nothing (`no matches found`, which `2>/dev/null` does not hide). Quote variable expansions. " +
+	"Never write an unquoted word starting with `=`: `echo ===` aborts the rest of the line, so write `echo '==='`. " +
+	"Take file names for a later command from `find`, never from `ls`, whose alias can add colour codes."
+
+// SessionShellIsZsh reports whether a session's Bash commands run in zsh:
+// the shell Claude Code uses is CLAUDE_CODE_SHELL when it is set, else
+// SHELL. ape scrubs CLAUDE_CODE_* from the sessions it starts, so there it
+// is SHELL; in the person's own session their override wins, as it does
+// for their Bash tool.
+func SessionShellIsZsh(getenv func(string) string) bool {
+	sh := getenv("CLAUDE_CODE_SHELL")
+	if sh == "" {
+		sh = getenv("SHELL")
+	}
+	return sh != "" && filepath.Base(sh) == "zsh"
+}
+
+// SessionStartContext is the SessionStart hook's additionalContext: the
+// status brief, then ZshNote after a blank line on a zsh host.
+func SessionStartContext(brief string, zsh bool) string {
+	if !zsh {
+		return brief
+	}
+	return strings.TrimRight(brief, "\n") + "\n\n" + ZshNote + "\n"
+}
+
 // SessionStartOutput is the SessionStart hook's JSON answer.
 func SessionStartOutput(text string) ([]byte, error) {
 	return json.Marshal(map[string]any{

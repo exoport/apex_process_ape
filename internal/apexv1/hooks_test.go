@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -373,4 +374,29 @@ func TestPreTool_ClaudeSettingsArePersons(t *testing.T) {
 		require.Contains(t, d.Reason, "a person edits it")
 	}
 	require.False(t, PreTool(editPayload(t, p.Root, "Write", ".claude/agents/x.md")).Deny)
+}
+
+// RK-3a (D297): the zsh paragraph, by the shell Claude Code runs Bash in.
+func TestSessionShellIsZsh(t *testing.T) {
+	env := func(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
+	for sh, want := range map[string]bool{
+		"/usr/bin/zsh": true, "/bin/zsh": true, "zsh": true,
+		"/bin/bash": false, "/bin/sh": false, "": false, "/usr/bin/zsh-wrapper": false,
+	} {
+		require.Equal(t, want, SessionShellIsZsh(env(map[string]string{"SHELL": sh})), sh)
+	}
+	require.False(t, SessionShellIsZsh(env(map[string]string{"SHELL": "/usr/bin/zsh", "CLAUDE_CODE_SHELL": "/bin/bash"})), "Claude Code's override wins")
+	require.True(t, SessionShellIsZsh(env(map[string]string{"SHELL": "/bin/bash", "CLAUDE_CODE_SHELL": "/bin/zsh"})))
+
+	require.Equal(t, "APEX status — x\n", SessionStartContext("APEX status — x\n", false), "bash: the brief, unchanged")
+	require.Equal(t, "APEX status — x\n\n"+ZshNote+"\n", SessionStartContext("APEX status — x\n", true))
+	out, err := SessionStartOutput(SessionStartContext("APEX status — x\n", true))
+	require.NoError(t, err)
+	var got struct {
+		HookSpecificOutput struct {
+			AdditionalContext string `json:"additionalContext"`
+		} `json:"hookSpecificOutput"`
+	}
+	require.NoError(t, json.Unmarshal(out, &got), "valid JSON with the note's backticks and quotes")
+	require.True(t, strings.HasSuffix(got.HookSpecificOutput.AdditionalContext, "`ls`, whose alias can add colour codes.\n"))
 }

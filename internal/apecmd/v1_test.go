@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -250,6 +251,30 @@ func TestV1Commands_RefuseOutsideAProject(t *testing.T) {
 	stdout, _, err := v1Exec(t, newStatusCmd, "--cwd", dir)
 	require.NoError(t, err)
 	require.Contains(t, stdout, "run `ape project init`")
+}
+
+// RK-3a (D297): under zsh the session-start context ends with the zsh
+// paragraph, as valid JSON; under bash it is the brief alone.
+func TestHookSessionStart_ZshParagraph(t *testing.T) {
+	root := v1Repo(t)
+	in := `{"session_id":"s","hook_event_name":"SessionStart","cwd":` + strconv.Quote(root) + `}`
+	ctxOf := func(shell string) string {
+		t.Setenv("CLAUDE_CODE_SHELL", "")
+		t.Setenv("SHELL", shell)
+		stdout, _, err := v1ExecIn(t, newHookCmd, in, "session-start")
+		require.NoError(t, err)
+		var got struct {
+			HookSpecificOutput struct {
+				AdditionalContext string `json:"additionalContext"`
+			} `json:"hookSpecificOutput"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(stdout), &got), stdout)
+		return got.HookSpecificOutput.AdditionalContext
+	}
+	bash, zsh := ctxOf("/bin/bash"), ctxOf("/usr/bin/zsh")
+	require.Contains(t, bash, "Milestone M1")
+	require.NotContains(t, bash, "run in zsh")
+	require.Equal(t, strings.TrimRight(bash, "\n")+"\n\n"+apexv1.ZshNote+"\n", zsh)
 }
 
 func TestHookCommands(t *testing.T) {
