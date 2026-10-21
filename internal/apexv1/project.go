@@ -160,6 +160,7 @@ func (p *Project) Check() []Finding {
 	add(p.docsFindings()...)
 	add(p.humanReviewFindings()...)
 	add(p.modelsFindings()...)
+	add(p.configKeyFindings()...)
 	add(p.settingsIgnoredFindings(context.Background())...)
 	add(p.hotFindings(context.Background())...)
 	add(p.provenanceFindings(context.Background())...)

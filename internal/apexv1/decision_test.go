@@ -124,3 +124,42 @@ func TestDecision_SupersedesMustNameAnADR(t *testing.T) {
 	write(t, p, d.Path, strings.Replace(read(t, p, d.Path), "Date:", "Supersedes: ADR-0042\nDate:", 1))
 	require.Contains(t, findingMessages(p.Check()), "Supersedes: ADR-0042 names no decision")
 }
+
+// Q155: decision accept refuses the skeleton `decision new` wrote, and
+// project check notices an ADR accepted with it before that refusal — its
+// text is fixed, so the remedy is a new ADR.
+func TestDecision_PlaceholdersAreNotADecision(t *testing.T) {
+	p := fixture(t, baseFiles())
+	d, err := p.NewDecision(ctx(), "use-sh", "", "")
+	require.NoError(t, err)
+	require.NotContains(t, noticeCodesOf(p.Notices()), CodeDecisionPlaceholderAccepted, "a proposed skeleton is a draft")
+
+	_, err = p.AcceptDecision(ctx(), "ADR-0001", "ann")
+	var fe *FailError
+	require.ErrorAs(t, err, &fe)
+	require.Equal(t, CodeDecisionPlaceholder, fe.Code)
+	require.Contains(t, fe.Msg, "ADR-0001 still holds the skeleton's placeholder <!-- the forces at play -->, <!-- what we decided -->, <!-- what becomes easier or harder -->")
+	require.Contains(t, read(t, p, d.Path), "Status: proposed", "nothing written")
+
+	// One section left as the skeleton is still refused.
+	doc := read(t, p, d.Path)
+	write(t, p, d.Path, strings.Replace(strings.Replace(doc, "<!-- the forces at play -->", "Prose.", 1), "<!-- what we decided -->", "Prose.", 1))
+	commitAll(t, p, "docs: two of three")
+	_, err = p.AcceptDecision(ctx(), "ADR-0001", "ann")
+	require.ErrorContains(t, err, "placeholder <!-- what becomes easier or harder -->")
+
+	// Accepted by hand before the refusal: a notice, never a finding.
+	write(t, p, d.Path, strings.Replace(doc, "Status: proposed", "Status: accepted", 1))
+	commitAll(t, p, "docs: accepted by hand")
+	var got []Diagnostic
+	for _, n := range p.Notices() {
+		if n.Code == CodeDecisionPlaceholderAccepted {
+			got = append(got, n)
+		}
+	}
+	require.Len(t, got, 1)
+	require.Equal(t, SeverityNotice, got[0].Severity)
+	require.Contains(t, got[0].Message, "ADR-0001 was accepted with the skeleton's placeholder")
+	require.Contains(t, got[0].Fix, "ape decision new <slug> --supersedes ADR-0001")
+	require.NotContains(t, findingMessages(p.Check()), "placeholder")
+}

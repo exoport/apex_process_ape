@@ -38,7 +38,11 @@ leaves an existing `models:` alone, warning for each default skill it lacks.
   problem in it is the finding `tools.invalid`, and only its valid entries are used. A wrong
   `marketplaces:` or `plugins:` entry (a bad source, a `ref:` on a directory marketplace, a duplicate, an unknown `allow:` value) is the
   finding `plugins.config`.
-- **Unknown top-level keys are ignored.**
+- **`limits:` and the top level report instead of failing too.** An unknown key in `limits:` is
+  the finding `config.unknown-key`; a top-level key no ape reader knows (neither a key on this
+  page nor a framework folder variable) is the notice `config.unknown-top-key`, and is otherwise
+  ignored. A top-level `effort:` or `models.<skill>.effort` that is not a level is the finding
+  `config.invalid`, so `ape project check` reports it before a launch refuses it.
 - **Guarded** blocks can loosen what ape enforces. Since the project's v1 epoch, a commit that
   changes one and is not ape's own (`apex: …`) is the finding `config.changed` until a person runs
   `ape project accept-config --by <who>` or reverts it. Meanwhile `ape change start`, `verify` and
@@ -122,12 +126,14 @@ Not guarded: a model choice loosens nothing.
 
 The default effort of an ape-launched session that no flag, `models.<skill>` entry or parent
 session decides: one of `low`, `medium`, `high`, `xhigh`, `max`. Absent, ape passes no effort and
-Claude Code's own setting applies. A value outside the list fails the session's launch.
+Claude Code's own setting applies. A value outside the list fails the session's launch, and
+`ape project check` reports it as `config.invalid`.
 `_apex/effort-defaults.yaml` is not used in a v1 project.
 
 ## `limits`
 
-The loop's limits, enforced by ape. Guarded: a change to them that no person accepted stops the
+The loop's limits, enforced by ape. A key not in the table below limits nothing, and
+`ape project check` reports it as `config.unknown-key`. Guarded: a change to them that no person accepted stops the
 loop's next start, verify or archive ([what the guard reads](../explanation/person-acts.md#what-the-guard-reads)).
 
 ```yaml

@@ -51,8 +51,9 @@ with the change's squash commit at archive, and can be accepted only once it is 
 
 ## Accept it
 
-Accepting is a person's act, and it fixes the text. ape accepts an ADR whose sections still hold
-the skeleton's placeholders, so fill them in and commit first. Then:
+Accepting is a person's act, and it fixes the text. An ADR that still holds one of the skeleton's
+placeholder comments records no decision yet, and accept refuses it (`decision.placeholder`), so
+fill the sections in and commit first. Then:
 
 ```bash
 ape decision accept ADR-0002 --by "$(git config user.name)"
@@ -71,6 +72,9 @@ From then on the text is fixed. `ape project check` fails when anything but the 
 an accepted ADR changes (`decision.accepted-edited`). An ADR whose `Status:` says accepted but has
 no record (accepted by hand) is `decision.accepted-unrecorded`: `ape decision accept` records it
 as it is, unless its text changed since the commit that first accepted it.
+An ADR accepted while it still held the skeleton's placeholders (before ape refused that) is the
+`ape project check` notice `decision.placeholder-accepted`: its text is fixed, so write the decision
+as a new ADR that supersedes it.
 
 ## Replace it
 

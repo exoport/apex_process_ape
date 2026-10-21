@@ -6,10 +6,15 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"reflect"
 	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/exoport/apex_process_ape/internal/apexcfg"
+	"github.com/exoport/apex_process_ape/internal/effort"
 	"gopkg.in/yaml.v3"
 )
 
@@ -535,3 +540,107 @@ func (p *Project) modelsFindings() []Finding {
 	}
 	return out
 }
+
+// Q154: what parsing lets through. limits: and the top level predate the
+// refuse-on-parse rule above, so a typo there was silently ignored, and a
+// top-level effort: that is not a level parsed and failed only at launch.
+// They are project check's to report, not Open's to refuse: a config an
+// older ape accepted keeps opening.
+
+// configKeyFindings are project check's findings for _apex/config.yaml: a
+// limits: key ape does not know (config.unknown-key), and an effort that
+// is not a level (config.invalid).
+func (p *Project) configKeyFindings() []Finding {
+	root := configRoot(p.Root)
+	if root == nil {
+		return nil
+	}
+	var out []Finding
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		k, v := root.Content[i], root.Content[i+1]
+		switch k.Value {
+		case "limits":
+			if v.Kind != yaml.MappingNode {
+				continue
+			}
+			known := yamlKeys(Limits{})
+			for j := 0; j+1 < len(v.Content); j += 2 {
+				if f := v.Content[j]; !slices.Contains(known, f.Value) {
+					out = append(out, Finding{File: configYAML, Line: f.Line, Message: "limits." + f.Value +
+						" is not a key of limits:, so it limits nothing — the keys are " + strings.Join(known, ", ") + ": fix the name, or drop it"})
+				}
+			}
+		case "effort":
+			if v.Kind == yaml.ScalarNode && checkEffortLevel(v.Value) != nil {
+				out = append(out, Finding{File: configYAML, Line: v.Line, Message: "effort: " + strconv.Quote(v.Value) +
+					" is not a level, and every session ape launches would refuse it — use one of " + strings.Join(effort.Levels, ", ") + ", or drop it for Claude Code's own default"})
+			}
+		case "models":
+			if v.Kind != yaml.MappingNode {
+				continue
+			}
+			for j := 0; j+1 < len(v.Content); j += 2 {
+				skill, entry := v.Content[j].Value, v.Content[j+1]
+				if entry.Kind != yaml.MappingNode {
+					continue
+				}
+				for n := 0; n+1 < len(entry.Content); n += 2 {
+					if f, val := entry.Content[n], entry.Content[n+1]; f.Value == "effort" && val.Kind == yaml.ScalarNode && checkEffortLevel(val.Value) != nil {
+						out = append(out, Finding{File: configYAML, Line: val.Line, Message: "models." + skill + ".effort: " + strconv.Quote(val.Value) +
+							" is not a level, and " + skill + "'s session would refuse to launch — use one of " + strings.Join(effort.Levels, ", ") + ", or drop it"})
+					}
+				}
+			}
+		}
+	}
+	return out
+}
+
+// configKeyNotices are project check's notices for a top-level
+// _apex/config.yaml key no ape reader knows (config.unknown-top-key): it
+// does nothing, but it may be a person's own note, so it never fails the
+// check.
+func (p *Project) configKeyNotices() []Diagnostic {
+	root := configRoot(p.Root)
+	if root == nil {
+		return nil
+	}
+	known := append(yamlKeys(Config{}), yamlKeys(apexcfg.Config{})...)
+	var out []Diagnostic
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		if k := root.Content[i]; !slices.Contains(known, k.Value) {
+			out = append(out, notice(Diagnostic{Code: CodeConfigUnknownTopKey, File: configYAML, Line: k.Line, Message: k.Value +
+				" is not a key ape reads in _apex/config.yaml, so it does nothing — fix the name if it is a typo (config-yaml reference), or drop it"}))
+		}
+	}
+	return out
+}
+
+// configRoot is _apex/config.yaml's top-level mapping, nil when the file
+// is absent, unparseable or not a mapping.
+func configRoot(root string) *yaml.Node {
+	data, err := os.ReadFile(ConfigPath(root))
+	if err != nil {
+		return nil
+	}
+	var doc yaml.Node
+	if yaml.Unmarshal(data, &doc) != nil || doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
+		return nil
+	}
+	return doc.Content[0]
+}
+
+// yamlKeys are a struct's yaml keys, in field order.
+func yamlKeys(v any) []string {
+	t := reflect.TypeOf(v)
+	out := make([]string, 0, t.NumField())
+	for i := range t.NumField() {
+		name, _, _ := strings.Cut(t.Field(i).Tag.Get("yaml"), ",")
+		if name != "" && name != "-" {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+func checkEffortLevel(v string) error { return effort.CheckLevel(strings.TrimSpace(v)) }

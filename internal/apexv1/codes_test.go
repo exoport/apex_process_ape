@@ -25,6 +25,8 @@ var noticeCodes = []string{
 	CodeLiftParentClaude,
 	// rc.7q (D340): F-2.
 	CodeHooksFailOpen,
+	// v1.1 follow-ups (Q154, Q155).
+	CodeConfigUnknownTopKey, CodeDecisionPlaceholderAccepted,
 }
 
 // The published list and the code agree: every code the source sets or a
@@ -95,6 +97,9 @@ func TestDiagnosticCodes_PublishedListMatchesTheCode(t *testing.T) {
 		"CodeSpecCheckNamesRemoved": CodeSpecCheckNamesRemoved,
 		// rc.7q (D340): F-2.
 		"CodeHooksFailOpen": CodeHooksFailOpen,
+		// v1.1 follow-ups (Q154, Q155).
+		"CodeConfigUnknownTopKey": CodeConfigUnknownTopKey, "CodeDecisionPlaceholder": CodeDecisionPlaceholder,
+		"CodeDecisionPlaceholderAccepted": CodeDecisionPlaceholderAccepted,
 	}
 	for _, glob := range []string{"*.go", filepath.Join("..", "apecmd", "v1_*.go")} {
 		files, err := filepath.Glob(glob)

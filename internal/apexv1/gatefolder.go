@@ -196,5 +196,8 @@ func (p *Project) Notices() []Diagnostic {
 	// rc.7d (rc7d-std).
 	out = append(out, p.staleScenarioNotices()...)
 	// rc.7q (D340): F-2.
-	return append(out, p.failOpenNotices()...)
+	out = append(out, p.failOpenNotices()...)
+	// v1.1 follow-ups (Q154, Q155).
+	out = append(out, p.configKeyNotices()...)
+	return append(out, p.decisionPlaceholderNotices()...)
 }

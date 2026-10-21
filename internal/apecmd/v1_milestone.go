@@ -511,6 +511,11 @@ _apex/state/decisions.json; both are committed as "apex: ADR-NNNN accepted". Fro
 then on ` + "`ape project check`" + ` fails if the ADR's text (everything but its Status line)
 changes: supersede it instead.
 
+An ADR that still holds a placeholder comment of the skeleton ` + "`ape decision new`" + ` wrote
+(<!-- the forces at play --> and the other two) records no decision yet, and is refused
+(decision.placeholder): write its sections first. One accepted with them before this
+refusal is a ` + "`project check`" + ` notice (decision.placeholder-accepted).
+
 An ADR whose Status says accepted with no record in decisions.json — accepted by hand, or
 before ape recorded acceptances — is reported by ` + "`ape project check`" + `
 (decision.accepted-unrecorded) and held to the text git first committed it accepted with.
@@ -527,8 +532,8 @@ another --by is session.by-mismatch, exit 1).
 A person's acceptance is recorded on the base branch (D11, D38): refused on a change's
 branch, change/<id> (code branch.change-branch; ` + "`git switch <base>`" + ` first).
 
-Exit codes: 0 accepted · 1 no such ADR, not proposed, malformed, HEAD on a change
-branch, or session.by-mismatch · 2 usage, or a model session with no grant.`,
+Exit codes: 0 accepted · 1 no such ADR, not proposed, malformed, still the skeleton,
+HEAD on a change branch, or session.by-mismatch · 2 usage, or a model session with no grant.`,
 		Example: "  ape decision accept ADR-0003 --by diego",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

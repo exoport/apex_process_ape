@@ -227,6 +227,9 @@ var findingRules = []findingRule{
 	rule("", `^hot/ is not ignored by git`, CodeHotNotIgnored),
 	// rc.7b (rc7b-next).
 	rule("", `^next item .* is malformed: `, "next.bad-item"),
+	// v1.1 follow-ups (Q154).
+	rule("", `^limits\.\S+ is not a key of limits:`, CodeConfigUnknownKey),
+	rule("", `^(models\.\S+\.)?effort: .* is not a level`, CodeConfigInvalid),
 }
 
 // UnclassifiedFinding is the code of a finding no rule matches — a

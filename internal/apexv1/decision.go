@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -145,9 +146,9 @@ func (p *Project) NewDecision(ctx context.Context, slug, title, supersedes strin
 		head += "Supersedes: " + supersedes + "\n"
 	}
 	body := head + "\n" +
-		"## Context\n<!-- the forces at play -->\n\n" +
-		"## Decision\n<!-- what we decided -->\n\n" +
-		"## Consequences\n<!-- what becomes easier or harder -->\n\n" +
+		"## Context\n" + adrPlaceholders[0] + "\n\n" +
+		"## Decision\n" + adrPlaceholders[1] + "\n\n" +
+		"## Consequences\n" + adrPlaceholders[2] + "\n\n" +
 		"Enforced by: review\n"
 	ownRels := []string{p.Rel(path)}
 	if oldPath != "" {
@@ -186,6 +187,57 @@ func (p *Project) NewDecision(ctx context.Context, slug, title, supersedes strin
 	return res, nil
 }
 
+// adrPlaceholders are the comments `ape decision new` writes under each
+// section of its skeleton, for a person to replace.
+var adrPlaceholders = [...]string{"<!-- the forces at play -->", "<!-- what we decided -->", "<!-- what becomes easier or harder -->"}
+
+// adrPlaceholdersIn are the skeleton's placeholders an ADR still holds,
+// outside code blocks.
+func adrPlaceholdersIn(doc string) []string {
+	var out []string
+	for _, l := range splitLines(doc) {
+		if l.InCode {
+			continue
+		}
+		for _, ph := range adrPlaceholders {
+			if strings.Contains(l.Text, ph) && !slices.Contains(out, ph) {
+				out = append(out, ph)
+			}
+		}
+	}
+	return out
+}
+
+// decisionPlaceholderNotices are project check's notices for an accepted
+// ADR that still holds the skeleton's placeholders (Q155): accepted before
+// decision accept refused one. Its accepted text is fixed, so the remedy
+// is a new ADR, and the notice never fails the check.
+func (p *Project) decisionPlaceholderNotices() []Diagnostic {
+	entries, err := os.ReadDir(p.DecisionsDir())
+	if err != nil {
+		return nil
+	}
+	var out []Diagnostic
+	for _, e := range entries {
+		m := adrFileRe.FindStringSubmatch(e.Name())
+		if e.IsDir() || m == nil {
+			continue
+		}
+		path := filepath.Join(p.DecisionsDir(), e.Name())
+		doc, err := readFileString(path)
+		if err != nil || adrStatus(doc) != ADRAccepted {
+			continue
+		}
+		if ph := adrPlaceholdersIn(doc); len(ph) > 0 {
+			id := "ADR-" + m[1]
+			out = append(out, notice(Diagnostic{Code: CodeDecisionPlaceholderAccepted, File: p.Rel(path), Message: id +
+				" was accepted with the skeleton's placeholder " + strings.Join(ph, ", ") + ", so it records no decision" +
+				" — write the decision as a new ADR, `ape decision new <slug> --supersedes " + id + "`, and accept that"}))
+		}
+	}
+	return out
+}
+
 // AcceptDecision sets a proposed ADR's Status to accepted and records the
 // body it was accepted with; from then on `ape project check` refuses an
 // edit to it (supersede it instead).
@@ -220,6 +272,11 @@ func (p *Project) AcceptDecision(ctx context.Context, id, by string) (*DecisionR
 	}
 	if fs := ValidateDecision(p.Rel(path), filepath.Base(path), doc); len(fs) > 0 {
 		return nil, &FailError{Code: "decision.malformed", Msg: id + " is not well-formed — fix it before accepting", Findings: fs}
+	}
+	// Q155: the skeleton `ape decision new` wrote records no decision.
+	if ph := adrPlaceholdersIn(doc); len(ph) > 0 {
+		return nil, &FailError{Code: CodeDecisionPlaceholder, Msg: id + " still holds the skeleton's placeholder " + strings.Join(ph, ", ") +
+			" — write its Context, Decision and Consequences, then accept it"}
 	}
 	accepted := withADRStatus(doc, ADRAccepted)
 	own := p.beforeOwnEdit(ctx, p.Rel(path), p.Rel(p.decisionsJSON()))
