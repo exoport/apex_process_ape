@@ -106,7 +106,9 @@ refuse a `--wait` above 9m30s (`usage.wait`); `tool` and `accept --delegate` tak
 The commit's subject comes from `commit.subject` in `_apex/config.yaml`. The default is
 `{type}: {title}`, from the change's `type:` and `# title`; `{id}` is also available. The body
 lists the branch commits' own subjects (not ape's `apex:` ones), their trailers but `Change:`, and
-then `Change: <id>`. For example:
+then `Change: <id>`. A subject that would start `apex:` is refused at `change check`, `start` and
+`archive` (`change.subject-reserved`): that prefix marks ape's own records
+([What the guard reads](../explanation/person-acts.md#what-the-guard-reads)). For example:
 
 ```text
 feat: Add farewell

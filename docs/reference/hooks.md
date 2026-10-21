@@ -128,6 +128,7 @@ lives (its pid and start time), so a check that crashed never blocks an edit.
 | `pkill`, `killall`, `killall5` and `skill`, in any form: `sudo`, `env`, `timeout`, `xargs`, `sh -c`, a chain, an absolute path | `APE_ALLOW_KILL=1` |
 | `git rebase`, `git merge` and `git cherry-pick` while the repository has a change branch, `change/<id>`, checked out | none |
 | A command that names `_apex/state/prompts` or `_apex/state/grants`, or runs `ape hook user-prompt`, `ape hook pre-tool` or `ape __run` | none |
+| A commit whose subject would start `apex:`, the mark of ape's own records: `git commit` with such a message from `-m` (`-am` and other clusters too), `-F <file>` (ape reads it; `-F -` is denied), `-C`/`-c <commit>`, `--amend` keeping such a subject, or `-t`; `git merge -m`; `git cherry-pick` of such a commit (`-n` allowed); `git commit-tree -m`; `git am` of such a patch (stdin denied). A `"$(cat <<'EOF' … EOF)"` message is read from its here-doc | none |
 
 Some commands stay allowed:
 

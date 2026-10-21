@@ -146,6 +146,14 @@ again to repair:
 ape project init
 ```
 
+Run the repair from a terminal. In a model session (`APE_SESSION` or `CLAUDECODE` set) on a
+project that is already v1, init repairs the same way but commits nothing: an
+`apex: project init` commit restarts the project's v1 epoch and would hide every finding before
+it, so only a person's init makes one after the first. It prints a warning, and `--json` lists the
+files in `commit_withheld`. The session's own commit takes them, under its own subject. A
+project's first init commits from a session as from a terminal, which is how apex-plan starts
+a new project. See [What the guard reads](../explanation/person-acts.md#what-the-guard-reads).
+
 With `--json`, the output is one object on stdout. Two fields tell you what to do next:
 
 - `next`: the next step, the same line the human output ends with.

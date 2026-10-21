@@ -186,14 +186,28 @@ A person clears the finding in one of two ways:
 
 ### What the guard reads
 
-The guard reads git history: who made a commit is told by its subject, and the project's v1
+The guard reads git history. Who made a commit is told by its subject, and the project's v1
 epoch is the newest `apex: project init` or `apex: lift` commit. A commit whose subject starts
 `apex:` counts as ape's own, and an `apex: config accepted` commit counts as a person's
-acceptance. So the guard catches an edit that went through the normal flow, but not a session
-that writes such a subject itself (`git commit -m "apex: …"`), and a session that runs
-`ape project init` again, which commits a new epoch, clears the findings from before it. The
-loop's own skills never do either. What remains is the change's review, which reads the
-diff of a change, and a person reading the project's history.
+acceptance. So only ape may write such a subject, and three rules keep it that way:
+
+- **No session commits one.** The pre-tool hook denies a commit whose subject would start
+  `apex:`, however the message is given: `git commit -m`, `-F`, `-C`/`-c`, `--amend` keeping such
+  a subject, `-t`, `git merge -m`, a cherry-pick of such a commit (so an old acceptance cannot be
+  copied), `git commit-tree` and `git am`. ape's own commits never go through a session's Bash
+  call, so there is no override. See [Hooks](../reference/hooks.md#bash-commands-it-denies).
+- **Re-running init from a session starts no new epoch.** In a model session, on a project that
+  is already v1, `ape project init` repairs but commits nothing (`commit_withheld`). The files stay
+  for the session's own commit, under its own subject.
+- **No change archives as one.** A change whose squash subject would start `apex:` (its title,
+  under the default template with no `type:`) is refused at `change check`, `start` and
+  `archive`, and by `project check` (`change.subject-reserved`).
+
+What the hook cannot see is the limit of every Bash guard: a script or program the session writes
+and runs, a git alias, a command substitution ape cannot read, a `rebase --exec` string, and
+history plumbing (`git fast-import`, `filter-branch`, `replace`). A session that writes a
+program to forge a commit is past any guard that parses commands. What catches that is the
+change's review, which reads the change's diff, and a person reading the project's history.
 
 Two blocks depend on that acceptance directly:
 
