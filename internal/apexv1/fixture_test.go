@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/exoport/apex_process_ape/internal/runlog"
@@ -205,7 +206,64 @@ func ctx() context.Context { return context.Background() }
 // findingMessages renders findings for substring assertions. Every
 // validator test goes through it, so it is also where item 13's promise is
 // kept: no finding any test produces may lack a published code.
+// fixContractCodes are the finding codes v1.1 W5–W8 added or extended:
+// each of their messages has a fix (V11RC1-F1).
+var fixContractCodes = map[string]bool{
+	"tools.unknown": true, CodeToolsTooBig: true, "tools.not-installed": true, CodePluginsUserScope: true,
+	CodeFenceMissing: true, CodeFenceAltered: true, CodePackageLeak: true,
+	"brief.bad-name": true, "brief.uncommitted": true, "brief.edited": true,
+	"roadmap.delivery-link": true, "roadmap.delivery-unlinked": true,
+}
+
+var (
+	fixContractMu   sync.Mutex
+	fixContractSeen = map[string]bool{}
+)
+
+// fixContractUnseen lists the fixContractCodes no test has checked.
+func fixContractUnseen() []string {
+	fixContractMu.Lock()
+	defer fixContractMu.Unlock()
+	var out []string
+	for c := range fixContractCodes {
+		if !fixContractSeen[c] {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// checkFixContract panics when a finding breaks the diagnostic contract
+// (V11RC1-F1): in --json, message is the text before the first " — " and
+// fix the text after it — classified, and as Diagnostics gives it to a
+// failure's JSON — and a W5–W8 code's finding has a fix. Every helper that
+// classifies findings runs it, so each test that produces a code checks it.
+func checkFixContract(fs []Finding) {
+	cls := ClassifyFindings(fs)
+	fixContractMu.Lock()
+	for _, f := range cls {
+		fixContractSeen[f.Code] = true
+	}
+	fixContractMu.Unlock()
+	ds := Diagnostics(&FailError{Code: "change.check", Msg: "check failed", Findings: fs})[1:]
+	for i, f := range cls {
+		if strings.Contains(f.Message, " — ") {
+			panic("finding message holds its fix (V11RC1-F1): " + f.Code + ": " + f.Message)
+		}
+		if fixContractCodes[f.Code] && f.Fix == "" {
+			panic("a W5–W8 finding has no fix (V11RC1-F1): " + f.Code + ": " + f.Message)
+		}
+		if f.Text() != fs[i].Text() {
+			panic("Text() does not give the finding back: " + f.Text() + " != " + fs[i].Text())
+		}
+		if d := ds[i]; d.Message != f.Message || d.Fix != f.Fix {
+			panic("Diagnostics splits a finding unlike ClassifyFindings: " + d.Message + " | " + d.Fix)
+		}
+	}
+}
+
 func findingMessages(fs []Finding) string {
+	checkFixContract(fs)
 	for _, f := range ClassifyFindings(fs) {
 		if f.Code == UnclassifiedFinding {
 			panic("finding has no diagnostic code (add a rule to findingRules): " + f.File + ": " + f.Message)

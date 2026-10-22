@@ -23,6 +23,7 @@ func settingsProject(t *testing.T, settings string) *Project {
 }
 
 func codesOf(fs []Finding) []string {
+	checkFixContract(fs)
 	out := make([]string, 0, len(fs))
 	for _, f := range ClassifyFindings(fs) {
 		out = append(out, f.Code)

@@ -19,9 +19,18 @@ type Finding struct {
 
 func (f Finding) String() string {
 	if f.Line > 0 {
-		return f.File + ":" + strconv.Itoa(f.Line) + ": " + f.Message
+		return f.File + ":" + strconv.Itoa(f.Line) + ": " + f.Text()
 	}
-	return f.File + ": " + f.Message
+	return f.File + ": " + f.Text()
+}
+
+// Text is the finding's whole sentence: its message, and its fix after
+// " — " once ClassifyFindings has split them.
+func (f Finding) Text() string {
+	if f.Fix != "" {
+		return f.Message + " — " + f.Fix
+	}
+	return f.Message
 }
 
 // mdLine is one line of a Markdown document with the facts the parsers

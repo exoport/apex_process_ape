@@ -400,6 +400,19 @@ The APEX v1.1 work (D327, D330, D333, D337), built on v1.0.0's docs.
   v1 install tests (`v1Env`) run on Windows, as migration commands run under `sh -c` there since
   rc.7t.
 
+### rc.2 (V11RC1-F1, V11RC1-F2)
+
+- **A finding's `--json` `message` stops at its fix (V11RC1-F1, class C).** Every diagnostic's
+  `message` is the sentence up to its first ` — ` and `fix` the rest, as notices always were. A
+  finding (`change check`, `project check`, `plugins status`, any failure's `diagnostics`) carried
+  the whole sentence in `message` and repeated its tail in `fix`, since v1.0.0. 84 codes' messages
+  change shape; the human lines are unchanged (they join the two). `findings[]` follows the same
+  rule.
+- **Tests and tooling:** the `internal/service` test rigs wait for the server to hold the daemon's
+  subscriptions before they send a request, as `ape service` itself does before it prints its
+  ready line (V11RC1-F2: "nats: no responders" under load; the product was right). A new test
+  starts the real service behind a 400 ms lagging proxy and asks right after the ready line.
+
 ## v1.0.0 (2026-10-22)
 
 APEX v1: ape runs the framework's v1 loop and owns every record in it.

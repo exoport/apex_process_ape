@@ -404,7 +404,7 @@ func TestProjectCheck_AgentsProjectContext(t *testing.T) {
 	require.Equal(t, "agents.no-project-context", fs[0].Code)
 	require.Equal(t, ActionPerson, ActionFor(fs[0].Code))
 	require.Equal(t, "AGENTS.md", fs[0].File)
-	require.Contains(t, fs[0].Message, `add the line "Project context: read @development/project.md before planning or changing anything."`)
+	require.Contains(t, fs[0].Text(), `add the line "Project context: read @development/project.md before planning or changing anything."`)
 	require.Contains(t, fs[0].Fix, "`ape project init` adds it")
 
 	res, err := Init(ctx(), p.Root, false)

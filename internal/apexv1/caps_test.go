@@ -162,7 +162,7 @@ func TestCaps_ChangeMDMeasuresThePlan(t *testing.T) {
 		fs := ClassifyFindings(p.CheckChange("add-wave"))
 		require.Len(t, fs, 1)
 		require.Equal(t, CodeChangeOverCeiling, fs[0].Code)
-		require.Contains(t, fs[0].Message, "in all, over the 48 KB file ceiling — ## Notes is for working notes only: move bulk to the change's assets/")
+		require.Contains(t, fs[0].Text(), "in all, over the 48 KB file ceiling — ## Notes is for working notes only: move bulk to the change's assets/")
 		_, err := p.Start(ctx(), "add-wave", RunOptions{})
 		require.Equal(t, CodeCheckFailed, failCode(t, err))
 		fe, ok := errors.AsType[*FailError](err)
@@ -236,7 +236,7 @@ func TestCaps_ArchitectureMD(t *testing.T) {
 	require.Equal(t, "architecture.too-big", got[0].Code)
 	require.Equal(t, ActionPerson, ActionFor(got[0].Code))
 	require.Equal(t, "development/architecture.md", got[0].File)
-	require.Equal(t, "architecture.md is 16.0 KB, over the 16 KB cap (caps.architecture_md) — move detail to specs/, decisions/ or docs/explanation/", got[0].Message)
+	require.Equal(t, "architecture.md is 16.0 KB, over the 16 KB cap (caps.architecture_md) — move detail to specs/, decisions/ or docs/explanation/", got[0].Text())
 
 	write(t, p, "_apex/config.yaml", "caps:\n  architecture_md: 20KB\n")
 	require.Empty(t, p.Check(), "a configured cap is the one measured")

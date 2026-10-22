@@ -62,5 +62,5 @@ func TestProjectCheck_UsageUnknownKey(t *testing.T) {
 		}
 	}
 	require.Len(t, got, 1, "%v", got)
-	require.Contains(t, got[0].Message, "limits.usage.seven_days is not a key of limits: usage, so it limits nothing — the keys are seven_day, five_hour, ceiling, share, max_age, off")
+	require.Contains(t, got[0].Text(), "limits.usage.seven_days is not a key of limits: usage, so it limits nothing — the keys are seven_day, five_hour, ceiling, share, max_age, off")
 }

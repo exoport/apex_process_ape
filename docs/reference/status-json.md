@@ -301,7 +301,7 @@ diagnostic is:
 | --- | --- |
 | `severity` | Always `error` in a failure (there is no warning tier). Notices are `notice`. |
 | `code` | Which rule. Stable: a new rule gets a new code, and a code's meaning never changes. |
-| `message`, `fix` | For people. |
+| `message`, `fix` | For people. `message` is the sentence up to its first ` — `, `fix` the rest (empty when it has none); the human line joins them with ` — `. Findings and notices alike, since v1.1 (until then a finding's `message` also carried its fix). |
 | `action` | What to do next (below). |
 | `file`, `line` | Where, when it is about a file. |
 

@@ -5158,7 +5158,8 @@ re-start), review (review again), replan (apex-change re-plans), stop (the run s
 (a person must act: list it, go on with other work). A code's action is the one listed here;
 where its meaning names a case that changes it (milestone.changes-in-flight), the diagnostic
 carries the action of the case (D49). "code" says which rule; "message" and
-"fix" are for people. Codes are stable: a new rule gets a new
+"fix" are for people: message is the sentence up to its first " — ", fix the rest
+(the human line joins them). Codes are stable: a new rule gets a new
 code, and a code's meaning never changes. severity is always "error" (no warning tier);
 project check's notices, severity "notice", are no failure's diagnostics (exit 0 here).
 Exit: 1 check failed · 2 usage · 3 conflict (nothing written).

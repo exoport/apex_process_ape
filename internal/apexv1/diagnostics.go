@@ -271,7 +271,11 @@ func fileKind(file string) string {
 	return ""
 }
 
-// ClassifyFindings returns fs with Code and Fix filled in.
+// ClassifyFindings returns fs with Code filled in and each message split
+// at its first " — " into Message and Fix, the contract every diagnostic
+// keeps (v1.1 V11RC1-F1: until then a finding's JSON message carried its
+// fix too, and fix repeated it). Finding.String joins them back, so a
+// human line reads as before.
 func ClassifyFindings(fs []Finding) []Finding {
 	out := make([]Finding, len(fs))
 	for i, f := range fs {
@@ -283,7 +287,9 @@ func ClassifyFindings(fs []Finding) []Finding {
 				break
 			}
 		}
-		_, f.Fix = splitFix(f.Message)
+		if f.Fix == "" {
+			f.Message, f.Fix = splitFix(f.Message)
+		}
 		out[i] = f
 	}
 	return out

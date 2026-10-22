@@ -32,6 +32,7 @@ func fenceStates(res *FenceResult) map[string]string {
 }
 
 func fenceCodes(fs []Finding) []string {
+	checkFixContract(fs)
 	var out []string
 	for _, f := range ClassifyFindings(fs) {
 		if strings.HasPrefix(f.Code, "fence.") {

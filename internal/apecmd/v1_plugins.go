@@ -397,6 +397,6 @@ func pluginCarries(pl *apexv1.PluginStatus) string {
 // printPluginFindings lists findings with their codes.
 func printPluginFindings(w io.Writer, fs []apexv1.Finding) {
 	for _, fd := range fs {
-		fmt.Fprintf(w, "finding %s: %s\n", fd.Code, fd.Message)
+		fmt.Fprintf(w, "finding %s: %s\n", fd.Code, fd.Text())
 	}
 }

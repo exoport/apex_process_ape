@@ -268,15 +268,15 @@ func TestProjectCheck_BriefFolders(t *testing.T) {
 		fs := ClassifyFindings(p.Check())
 		require.Len(t, fs, 1, findingMessages(fs))
 		require.Equal(t, "roadmap.delivery-unlinked", fs[0].Code)
-		require.Contains(t, fs[0].Message, "development/briefs/ holds 2 —")
-		require.Contains(t, fs[0].Message, "[2026-10-21-greeter/brief.md](briefs/2026-10-21-greeter/brief.md)")
+		require.Contains(t, fs[0].Text(), "development/briefs/ holds 2 —")
+		require.Contains(t, fs[0].Text(), "[2026-10-21-greeter/brief.md](briefs/2026-10-21-greeter/brief.md)")
 	})
 	t.Run("a newer single-file brief is the current one over an older folder", func(t *testing.T) {
 		files := withFolder(`Delivery: Phase 1 — "greet"`)
 		files["development/briefs/2026-10-22-later.md"] = briefText
 		fs := ClassifyFindings(fixture(t, files).Check())
 		require.Len(t, fs, 1, findingMessages(fs))
-		require.Contains(t, fs[0].Message, "[2026-10-22-later.md](briefs/2026-10-22-later.md)")
+		require.Contains(t, fs[0].Text(), "[2026-10-22-later.md](briefs/2026-10-22-later.md)")
 	})
 	t.Run("a link to a missing brief.md names the folder's", func(t *testing.T) {
 		fs := ClassifyFindings(fixture(t, withFolder("Delivery: [b](briefs/2026-10-21-gone/brief.md)")).Check())

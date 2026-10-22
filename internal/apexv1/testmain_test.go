@@ -1,7 +1,10 @@
 package apexv1
 
 import (
+	"flag"
+	"fmt"
 	"os"
+	"sort"
 	"testing"
 
 	"github.com/exoport/apex_process_ape/internal/usercachetest"
@@ -32,5 +35,14 @@ func TestMain(m *testing.M) {
 	cleanup := usercachetest.Isolate("ape-apexv1-cache-")
 	code := m.Run()
 	cleanup()
+	// V11RC1-F1: on a whole-package run, each W5–W8 code's finding was
+	// produced by some test and passed checkFixContract.
+	if f := flag.Lookup("test.run"); code == 0 && f != nil && f.Value.String() == "" {
+		if missing := fixContractUnseen(); len(missing) > 0 {
+			sort.Strings(missing)
+			fmt.Fprintf(os.Stderr, "V11RC1-F1: no test produced a finding of %v, so its message/fix split is unchecked\n", missing)
+			code = 1
+		}
+	}
 	os.Exit(code)
 }
