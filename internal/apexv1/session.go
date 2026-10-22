@@ -60,6 +60,6 @@ func RequirePersonFlag(flag string) error {
 	if k == "" {
 		return nil
 	}
-	return &UsageError{Code: CodePersonOnly, Msg: flag + " is for a person, and this runs in a model session (" + k +
+	return &UsageError{Code: CodePersonOnly, Action: ActionPerson, Msg: flag + " is for a person, and this runs in a model session (" + k +
 		" is set) — a person runs the command from a terminal outside Claude Code"}
 }

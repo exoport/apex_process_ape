@@ -95,6 +95,7 @@ func TestUsageGuard_HoldsOnTheFiveHourWindow(t *testing.T) {
 	require.Contains(t, lines[0], "(31m0s left")
 	require.Contains(t, lines[4], "usage unknown (no reading in 10 min) — launching")
 
+	*clock = clock.Add(20 * time.Minute) // the session runs; its time is not the hold's
 	rec := g.record()
 	require.Equal(t, "unknown", rec.Decision)
 	require.True(t, reset.Add(time.Minute).Equal(*rec.HeldUntil))
