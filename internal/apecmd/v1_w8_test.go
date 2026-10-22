@@ -99,3 +99,32 @@ func TestAcceptConfig_ContextRelayLowNotice(t *testing.T) {
 	require.NoError(t, err, stdout+stderr)
 	require.Contains(t, stderr, "notice: _apex/config.yaml: limits.context_relay 0.05 relays the loop at 50000 tokens")
 }
+
+// Q134 through the hooks: the person's typed words back a person act in
+// their own turn and the one notification turn right after — two
+// notification turns on, pre-tool denies and the command refuses; the
+// person typing again grants it.
+func TestE2_Q134_GrantNarrowedToItsTurn(t *testing.T) {
+	root := e2Repo(t, "exit 1")
+	s := newE2Session(t, root, "q134")
+	cmdline := "ape milestone approve M2 --wait 9m --json"
+	notification := "<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n" +
+		"<summary>Background command \"run the tests\" completed (exit code 0)</summary>\n</task-notification>"
+
+	s.say(t, "p1", "Run the tests in the background; when they pass, approve M2.")
+	s.notify(t, "n1", notification)
+	s.notify(t, "n2", notification)
+	reason := s.preTool(t, "n2", cmdline)
+	require.Contains(t, reason, "it is not the turn right after the person's latest typed prompt")
+	require.Contains(t, reason, "never later (Q134)")
+	require.Contains(t, reason, "**approve M2**")
+	stdout, _, err := v1Exec(t, newMilestoneCmd, "approve", "M2", "--json", "--cwd", root)
+	require.Equal(t, ExitUsage, exitCodeOf(t, err), stdout)
+	require.Contains(t, stdout, `"code": "session.person-only"`)
+
+	s.say(t, "p2", "approve M2")
+	require.Empty(t, s.preTool(t, "p2", cmdline))
+	stdout, _, err = v1Exec(t, newMilestoneCmd, "approve", "M2", "--cwd", root)
+	require.NoError(t, err, stdout)
+	require.Contains(t, stdout, `: "approve M2")`)
+}

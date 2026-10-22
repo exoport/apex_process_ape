@@ -35,9 +35,11 @@ import (
 //     "human", D238) and holds the same words, and the matcher (OI-5)
 //     finds the act's words and its exact target there with no negation.
 //     A turn a notification opened is judged on the person's latest typed
-//     prompt instead (D238). The grant is _apex/state/grants/<sha256 of the
-//     command line>.json, single-use, for GrantTTL; a prompt grants each
-//     act and target once.
+//     prompt instead (D238), and only when it is the turn right after that
+//     prompt's (Q134, v1.1): a typed prompt grants in its own turn and the
+//     one notification turn that follows. The grant is
+//     _apex/state/grants/<sha256 of the command line>.json, single-use,
+//     for GrantTTL; a prompt grants each act and target once.
 //  3. The command consumes the grant (ConsumeGrant) and records
 //     `by: <git config user.name> (prompt <ts>: "<quote>")`. No grant is
 //     session.person-only, as before: it fails closed — no hook, no
@@ -443,6 +445,30 @@ func latestTyped(recs []PromptRecord, skip, transcript string, origins map[strin
 	return nil
 }
 
+// turnRightAfter reports whether the turn prompt opened is the one right
+// after typed's in recs (oldest first; Q134): typed's record comes first,
+// and nothing but either prompt's own records stands between them. False
+// when the turn's prompt has no record — its place cannot be known.
+func turnRightAfter(recs []PromptRecord, typed, prompt string) bool {
+	at := -1
+	for i := len(recs) - 1; i >= 0; i-- {
+		if recs[i].PromptID == prompt {
+			at = i
+			break
+		}
+	}
+	for i := at - 1; i >= 0; i-- {
+		switch recs[i].PromptID {
+		case prompt:
+		case typed:
+			return true
+		default:
+			return false
+		}
+	}
+	return false
+}
+
 // grant is _apex/state/grants/<argv sha256>.json.
 type grant struct {
 	SessionID  string `json:"session_id"`
@@ -700,7 +726,9 @@ func RunBusyPersonAct(l *RunLock, c PersonCall) error {
 // (a background command's or Agent's task-notification, a Monitor event,
 // anything Claude Code injects) — grants nothing of its own: the person's
 // latest typed prompt in the session is judged instead, under the same
-// rules (D238).
+// rules (D238), when that notification turn is the one right after the
+// typed prompt's own (Q134): two notification turns on, or past a turn
+// in between, the person types again.
 func (p *Project) grantVerdict(ctx context.Context, payload HookPayload, c PersonCall) PreToolDecision {
 	if payload.PromptID == "" || payload.SessionID == "" {
 		return personActDenied(c, "this tool call names no prompt (no prompt_id in the hook payload), so no prompt can grant it")
@@ -729,6 +757,10 @@ func (p *Project) grantVerdict(ctx context.Context, payload HookPayload, c Perso
 		rec = latestTyped(recs, payload.PromptID, transcript, origins)
 		if rec == nil {
 			return personActDenied(c, "this turn was opened by "+opener+", not by the person, and the person has typed no prompt in this session that could grant it")
+		}
+		if !turnRightAfter(recs, rec.PromptID, payload.PromptID) {
+			return personActDenied(c, "this turn was opened by "+opener+", not by the person, and it is not the turn right after the person's latest typed prompt ("+rec.TS+
+				"): a typed prompt grants in its own turn and in the one notification turn that follows it, never later (Q134)")
 		}
 		why = "this turn was opened by " + opener + ", not by the person, and the person's latest typed prompt (" + rec.TS + ") does not ask for it"
 	}

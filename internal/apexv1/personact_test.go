@@ -127,6 +127,24 @@ func e2Turn(t *testing.T, p *Project, session, promptID, prompt, command string)
 	return bashPayload(t, p, session, promptID, transcript, command)
 }
 
+// typedIn is e2Turn in session s1's existing transcript: the person types
+// prompt there; the payload runs command (true when none is given).
+func typedIn(t *testing.T, p *Project, transcript, promptID, prompt string, command ...string) HookPayload {
+	t.Helper()
+	appendTranscript(t, transcript, map[string]any{
+		"type": "user", "isSidechain": false, "userType": "external", "promptId": promptID, "sessionId": "s1",
+		"origin": human, "message": map[string]any{"role": "user", "content": prompt},
+	})
+	require.NoError(t, RecordPrompt(HookPayload{
+		SessionID: "s1", TranscriptPath: transcript, Cwd: p.Root, HookEventName: "UserPromptSubmit", Prompt: prompt, PromptID: promptID,
+	}))
+	cmd := "true"
+	if len(command) > 0 {
+		cmd = command[0]
+	}
+	return bashPayload(t, p, "s1", promptID, transcript, cmd)
+}
+
 func bashPayload(t *testing.T, p *Project, session, promptID, transcript, command string) HookPayload {
 	t.Helper()
 	in, err := json.Marshal(map[string]string{"command": command, "description": "run it"})
@@ -718,19 +736,65 @@ func TestE2_D238_NotificationTurnUsesTheLatestTypedPrompt(t *testing.T) {
 	require.NotNil(t, a)
 	require.Equal(t, "Approve M2", a.Quote)
 
-	later := notificationTurn(t, p, typed.TranscriptPath, "n2", replayNotification, taskNotification, c.Line)
-	d := PersonActGate(ctx(), later, []PersonCall{c})
-	require.True(t, d.Deny)
+	d := PersonActGate(ctx(), typed, []PersonCall{c})
+	require.True(t, d.Deny, "nor again in its own turn")
 	require.Contains(t, d.Reason, "granted it once already", "a typed prompt grants each act and target once, whichever turn uses it")
-	require.True(t, PersonActGate(ctx(), typed, []PersonCall{c}).Deny, "nor again in its own turn")
+	later := notificationTurn(t, p, typed.TranscriptPath, "n2", replayNotification, taskNotification, c.Line)
+	require.True(t, PersonActGate(ctx(), later, []PersonCall{c}).Deny, "and two notification turns on, not at all (Q134)")
 
 	// The person's latest typed prompt is the one that counts: a newer one
 	// that does not ask for it ends the older one's say.
-	e2Turn(t, p, "s1", "p2", "what is next?", c.Line)
+	typedIn(t, p, typed.TranscriptPath, "p2", "what is next?")
 	d = PersonActGate(ctx(), notificationTurn(t, p, typed.TranscriptPath, "n3", replayNotification, taskNotification, approveCall("M1").Line), []PersonCall{approveCall("M1")})
 	require.True(t, d.Deny)
 	require.Contains(t, d.Reason, "the person's latest typed prompt (")
 	require.Contains(t, d.Reason, ") does not ask for it")
+}
+
+// Q134 (v1.1 W8): a typed prompt grants in its own turn and in the one
+// notification turn right after it — not two notification turns on, and
+// not when the notification turn's place is unknown (no record of it).
+func TestE2_Q134_GrantNarrowedToItsTurn(t *testing.T) {
+	p := e2Project(t)
+	asClaudeCode(t)
+	c := replayCall()
+	typed := e2Turn(t, p, "s1", "p1", "Approve M2 once the tests finish.", "true")
+	notificationTurn(t, p, typed.TranscriptPath, "n1", replayNotification, taskNotification, "true")
+	d := PersonActGate(ctx(), notificationTurn(t, p, typed.TranscriptPath, "n2", replayNotification, taskNotification, c.Line), []PersonCall{c})
+	require.True(t, d.Deny, "the second notification turn after the typed prompt")
+	require.Contains(t, d.Reason, `this turn was opened by a notification (its transcript message's origin.kind is "task-notification"), not by the person, `+
+		`and it is not the turn right after the person's latest typed prompt (`)
+	require.Contains(t, d.Reason, "): a typed prompt grants in its own turn and in the one notification turn that follows it, never later (Q134) — ask the person to type **approve M2**")
+	require.NoFileExists(t, p.grantPath(c.ArgvSHA256))
+
+	// The person types again: its own turn grants, as always.
+	require.False(t, PersonActGate(ctx(), typedIn(t, p, typed.TranscriptPath, "p2", "approve M2", c.Line), []PersonCall{c}).Deny)
+
+	// A notification turn whose prompt was never recorded (the hook did
+	// not run) has no known place: refused.
+	q := e2Project(t)
+	first := e2Turn(t, q, "s1", "p1", "approve M2", "true")
+	appendTranscript(t, first.TranscriptPath, map[string]any{"type": "user", "promptId": "n1", "origin": taskNotification, "message": map[string]any{"role": "user", "content": replayNotification}})
+	d = PersonActGate(ctx(), bashPayload(t, q, "s1", "n1", first.TranscriptPath, c.Line), []PersonCall{c})
+	require.True(t, d.Deny)
+	require.Contains(t, d.Reason, "it is not the turn right after the person's latest typed prompt")
+}
+
+func TestTurnRightAfter(t *testing.T) {
+	recs := func(ids ...string) []PromptRecord {
+		out := make([]PromptRecord, 0, len(ids))
+		for _, id := range ids {
+			out = append(out, PromptRecord{PromptID: id})
+		}
+		return out
+	}
+	require.True(t, turnRightAfter(recs("p1", "n1"), "p1", "n1"))
+	require.True(t, turnRightAfter(recs("p0", "p1", "p1", "n1", "n1"), "p1", "n1"), "a prompt's records twice")
+	require.False(t, turnRightAfter(recs("p1", "n1", "n2"), "p1", "n2"))
+	require.False(t, turnRightAfter(recs("p1", "p2", "n1"), "p1", "n1"))
+	require.False(t, turnRightAfter(recs("n1", "p1"), "p1", "n1"), "the typed prompt after the turn")
+	require.False(t, turnRightAfter(recs("p1"), "p1", "n1"), "no record of the turn")
+	require.False(t, turnRightAfter(nil, "p1", "n1"))
 }
 
 // D238: background Agent results, Monitor events, a <system-reminder>-only

@@ -314,7 +314,9 @@ A Bash command that runs one is allowed only when the prompt that opened this tu
 tool call's prompt_id is the prompt's — is recorded by ` + "`ape hook user-prompt`" + `, the
 session's transcript holds the person's user message with that promptId and the same
 words (its origin.kind "human": a turn a notification opened is judged on the person's
-latest typed prompt, D238), and the phrase is there: its words in order, the target exact (M2, T3, the change
+latest typed prompt, D238 — only when it is the turn right after that prompt's: a typed
+prompt grants in its own turn and the one notification turn that follows, never later,
+Q134), and the phrase is there: its words in order, the target exact (M2, T3, the change
 id, ADR-0012; case aside), no negation word (not, no, never, don't and every n't, wait,
 hold, stop, cannot, nope) before them in their sentence nor among the three words after the
 target, and the sentence not a question; for an answer, the --text itself after the target.
