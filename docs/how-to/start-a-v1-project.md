@@ -63,6 +63,9 @@ without the flag:
   wrote or amended: modified and untracked files of yours are not in it.
 - The history before the `apex: project init` commit is not judged. `ape project check` and
   `ape status` read the project's history from that commit on.
+- A Go module with no `main` package gets a `suggest:` line: add `library: true` to
+  `_apex/config.yaml` if others download it. init never sets the key; see
+  [How to publish a library](publish-a-library.md).
 
 Then adopt the project with `apex-plan`, giving it a request rather than a brief. Open Claude Code
 in the project and type `/apex-orchestrator`, and ask it to plan; or type `/apex-plan <request>`

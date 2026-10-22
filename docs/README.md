@@ -47,6 +47,7 @@ New to APEX v1? Start with [What APEX v1.0 promises](explanation/apex-v1-scope.m
 - [How to write and run an `ape script`](how-to/write-ape-scripts.md)
 - [How to find and read run artefacts](how-to/run-artefacts.md)
 - [How to use plugins and tool skills](how-to/use-plugins-and-tools.md) — `plugins:`, `tools:`, `ape plugins status|sync`
+- [How to publish a library from an APEX project](how-to/publish-a-library.md) — `library: true`, `ape project fence`, `ape project package-check`
 
 **Integrate**
 

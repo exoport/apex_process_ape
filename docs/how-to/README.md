@@ -29,6 +29,7 @@ How-to guides are **recipes** — they answer "how do I X?" for a reader who alr
 - [How to write and run an `ape script`](write-ape-scripts.md)
 - [How to find and read run artefacts](run-artefacts.md)
 - [How to use plugins and tool skills](use-plugins-and-tools.md)
+- [How to publish a library from an APEX project](publish-a-library.md)
 
 **Integrate**
 

@@ -74,6 +74,7 @@ leaves an existing `models:` alone, warning for each default skill it lacks.
 | [`marketplaces`](#marketplaces-and-plugins) | map: name → source | none | yes |
 | [`plugins`](#marketplaces-and-plugins) | list | none | yes |
 | [`tools`](#tools) | `{design: [...], review: [...], advise: [...]}` | none | yes |
+| [`library`](#library) | `true` or `false` | `false` (absent: not a library) | no |
 
 ## `project_name`
 
@@ -515,14 +516,35 @@ A change names the entries whose `when:` it matches in its `advise:` frontmatter
 
 ape resolves, sizes and hashes the files, and never reads them for meaning.
 
+## `library`
+
+`true` marks a project whose package others download (W7). Absent, or `false`, it is not a
+library. ape never writes the key: `ape project init` and `ape project lift` print a suggestion
+for a Go module with no `main` package, and the person decides. Not guarded.
+
+With `library: true`:
+
+- a Go library with a `go.mod` at the root keeps one fence `go.mod` in each APEX folder that
+  exists (`.claude/`, `_apex/`, the development folder, a root `evidence/`): `ape project fence`
+  writes them, `ape project init` and the lift write the missing ones, and `ape project check`
+  reports `fence.missing` and `fence.altered`;
+- `ape project package-check` packs the library (the Go module zip, npm, Python, Cargo) and fails
+  on any file under an APEX folder (`library.package-leak`); apex-release runs it;
+- `ape project check` gives the notice `gate.root-module-change` for a gate program that imports
+  what its module does not provide.
+
+See [How to publish a library](../how-to/publish-a-library.md).
+
 ## Commands that act on the config
 
 | Command | What it does with the config |
 | ------- | ---------------------------- |
 | [`ape project init`](cli.md#ape-project-init) | Writes the file, or appends `models:` to one without it; installs the listed plugins |
-| [`ape project check`](cli.md#ape-project-check) | Reports `config.changed`, `caps.over-ceiling`, `models.*`, `docs.missing`, `tools.*`, `plugins.*` |
+| [`ape project check`](cli.md#ape-project-check) | Reports `config.changed`, `caps.over-ceiling`, `models.*`, `docs.missing`, `tools.*`, `plugins.*`, and for `library: true` `fence.*` |
 | [`ape project accept-config --by <who>`](cli.md#ape-project-accept-config) | A person accepts the guarded blocks as committed |
 | [`ape project operator-interface`](cli.md#ape-project-operator-interface) | Renames a `models.apex-orchestrator` row to `apex-loop` (migration `v1.0.0_seq-07`) |
+| [`ape project fence`](cli.md#ape-project-fence) | With `library: true` and a root `go.mod`, writes and commits the module fences |
+| [`ape project package-check`](cli.md#ape-project-package-check) | With `library: true`, packs the library and fails on an APEX folder in it |
 | [`ape plugins status`](cli.md#ape-plugins-status) | Reports each listed plugin's install, version against `ref`, enablement and `allow:`, and each `tools:` entry's state and advise files; `--outdated` lists each marketplace's newer tags |
 | [`ape plugins sync`](cli.md#ape-plugins-sync) | Makes the installs and `.claude/settings.json` what the config says, committing a changed `settings.json` as `apex: plugins` |
 | [`ape doctor --fix`](cli.md#ape-doctor) | Does what `plugins sync` does before the checks run (row `plugins.project`). It fixes nothing else |

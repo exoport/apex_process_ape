@@ -266,6 +266,60 @@ The APEX v1.1 work (D327, D330, D333, D337), built on v1.0.0's docs.
   `ape plugins --help`, `ape plugins status --help`, `ape change check|verify|tool --help`,
   `ape status --help`, `ape project check --help` and `ape project codes`.
 
+### W7: module fences (D207, D208, D337, D339; Q160)
+
+- **`library: true` in `_apex/config.yaml` (class C):** marks a project whose package others
+  download; absent is not a library. Not guarded. ape never writes it: `ape project init` and
+  `ape project lift` (a dry run too) print `suggest: add "library: true" to _apex/config.yaml …`
+  (JSON `suggest_library: {line, file, reason}`) for a Go module with no `main` package
+  (`examples/`, `testdata/`, `//go:build ignore` generators and the development folder's gate
+  programs do not count) and no `library:` key.
+- **`ape project fence [--check]` (class C):** for a library with a `go.mod` at the root, one
+  fence `go.mod` in each APEX folder that exists — `.claude/`, `_apex/`, the development folder,
+  and a root `evidence/` only when present (a lifted project's; v1 keeps evidence inside the
+  development folder) — so 3 in a new v1 library and 4 in a lifted one with `evidence/`. Each is
+  `module apex.invalid/fence/<folder>`, the root's `go` line, and a two-line `//` comment linking
+  [How to publish a library](docs/how-to/publish-a-library.md). One commit,
+  `apex: module fences`, of the fences written, those whose `module`/`go` line it restored
+  (every other line kept: a gate's `require` and `replace`), and those git did not track
+  (staged with `git add -f`: the `.claude/` shape ignores `.claude/go.mod`). Idempotent;
+  nothing to fence without the key or a root `go.mod`. Refused on a change branch, outside git,
+  with an uncommitted fence it would rewrite (`tree.dirty`), and for a fence that does not parse.
+  `--check` exits 0 applied, 1 not applied (`fence.missing` or `fence.altered`, a finding per
+  fence), 2 the check failed (`fence.unreadable`, usage), judging the folders present. JSON
+  `{library, go_mod, go, fences: [{folder, path, state: ok|missing|uncommitted|altered,
+  detail}], written, commit}`.
+  - `ape project init` writes a library's missing fences into its commit; the lift keeps a v0
+    config's `library: true` and writes them into the lift commit (JSON `fences`, a dry run
+    lists them). A framework migration runs `ape project fence` (check `ape project fence
+    --check`).
+  - `ape project check` reports **`fence.missing`** (absent, or not tracked by git, as the zip
+    is built from git) and **`fence.altered`** (exit 1, action replan), only for
+    `library: true` with a root `go.mod`.
+- **`ape project package-check` (Q160, class C):** the release gate apex-release runs. For a
+  library, the Go module zip at HEAD (built with `golang.org/x/mod/zip` from the files git
+  holds, with no `.gitattributes` applied, as cmd/go turns `export-ignore` off; the root module,
+  or each subfolder module when there is no root `go.mod`), `npm pack --dry-run --json
+  --ignore-scripts`, `python3 -m build --no-isolation` on a copy of HEAD (sdist and wheel) and
+  `cargo package --list --allow-dirty`. Any file under an APEX folder is
+  **`library.package-leak`** (exit 1, action replan), a finding per package naming the first 20
+  paths and the count. A package it could not pack (the tool absent or failing, no commit, no
+  manifest) is the notice **`library.package-unchecked`**, never a silent pass. JSON `{ok,
+  library, head, packages: [{ecosystem, dir, manifest, tool, checked, files, leaks,
+  leaks_total, unchecked, zip_error}], findings, notices}`. Without the key it packs nothing
+  (exit 0).
+- **The gate dependency rule (D207):** `ape project check`'s notice **`gate.root-module-change`**
+  (action replan), for a library, when a gate program under `development/gates/` imports a
+  package its module (the root's, or the development fence's) does not provide; its fix names
+  the fence's `require` + `replace <root> => ../` lines and
+  `GOWORK=off go -C development run ./gates/<x>`.
+- **The W7 experiment is a test fixture:** three tags (nothing excluded, `export-ignore`, the
+  four fences) with the module-zip file lists measured with `go mod download`.
+- **Docs:** [How to publish a library](docs/how-to/publish-a-library.md) (fences, the 1,207 →
+  154 zip, the subfolder module as the zero-file alternative, the gate rule, the `go.work.sum`
+  note, npm/Python/Cargo), [`library`](docs/reference/config-yaml.md#library);
+  `ape project fence|package-check|check|init|lift --help` and `ape project codes`.
+
 ## v1.0.0 (2026-10-22)
 
 APEX v1: ape runs the framework's v1 loop and owns every record in it.
