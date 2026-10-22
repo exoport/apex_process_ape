@@ -120,6 +120,16 @@ const (
 	CodeCheckLiveSuggested = "check.live-suggested"
 )
 
+// v1.1 W6.
+const (
+	// CodeToolsTooBig: an advise entry's files over caps.advise, or what
+	// one session of a change reads over caps.advise_session (Q-E1).
+	CodeToolsTooBig = "tools.too-big"
+	// CodePluginsUserScope: a listed plugin, or a tools: skill, is also
+	// installed at user scope, which wins over the project's (Q-E8).
+	CodePluginsUserScope = "plugins.user-scope"
+)
+
 // CodeDoc documents one diagnostic code.
 type CodeDoc struct {
 	Code string `json:"code"`
@@ -315,7 +325,7 @@ var DiagnosticCodes = []CodeDoc{
 	{"project.missing-section", 1, "person", "project.md lacks a required ## section"},
 	{"project.empty-section", 1, "person", "a required project.md section is empty"},
 	{"agents.too-big", 1, "person", "AGENTS.md over its caps.agents_md cap (default 16 KB, ceiling 48 KB; its lines are not measured, D69)"},
-	{CodeCapsOverCeiling, 1, "person", "_apex/config.yaml caps: holds a value above its hard ceiling (project_md, agents_md, change_md, design_md, architecture_md 48 KB; spec 64 KB; evidence_log 16 MiB): a project check finding, and change check, start and archive refuse until a person fixes it (D69; abandon does not, D89 Q40)"},
+	{CodeCapsOverCeiling, 1, "person", "_apex/config.yaml caps: holds a value above its hard ceiling (project_md, agents_md, change_md, design_md, architecture_md 48 KB; spec 64 KB; evidence_log 16 MiB; advise 16 KB; advise_session 32 KB): a project check finding, and change check, start and archive refuse until a person fixes it (D69; abandon does not, D89 Q40)"},
 	{"claude-md.no-import", 1, "person", "CLAUDE.md lacks the line @AGENTS.md"},
 	{"roadmap.title", 1, "person", "roadmap.md does not start with # Roadmap"},
 	{"roadmap.no-milestones", 1, "person", "roadmap.md has no milestone"},
@@ -398,10 +408,13 @@ var DiagnosticCodes = []CodeDoc{
 	{"plugins.config", 1, "person", "_apex/config.yaml marketplaces/plugins are malformed (unknown source, missing repo/url/path, a plugin listed twice)"},
 	{"plugins.drift", 1, "person", "settings.json's extraKnownMarketplaces/enabledPlugins differ from _apex/config.yaml, or a listed plugin is not installed or not at its ref: `ape doctor --fix`"},
 	{"plugin.hooks-or-mcp", 1, "person", "a plugin _apex/config.yaml lists carries hooks (hooks/hooks.json, plugin.json hooks) or MCP servers (.mcp.json, plugin.json mcpServers) its entry does not allow (D59 Q5): a person reviews them and adds allow: [hooks, mcp] to the entry, or drops the plugin"},
-	{"tools.invalid", 1, "person", "_apex/config.yaml tools: is malformed (D59 Q4): an unknown slot (the slots are design and review), an entry that is not {name, skill, when} or misses one, a skill that is not <skill> or <plugin>:<skill>, a name used twice"},
-	{"tools.not-installed", 1, "person", "a skill tools: names is not installed: a plugin skill whose plugin is not listed in plugins: or not installed or has no such skill, or no project or user skill of that name"},
-	{"tools.unknown", 1, "replan", "a change.md design-tool task (`— tool: <name>`) or review_tools: entry names no tools.design / tools.review entry of _apex/config.yaml (D74): re-plan with a declared tool"},
+	{"tools.invalid", 1, "person", "_apex/config.yaml tools: is malformed (D59 Q4): an unknown slot (the slots are design, review and advise), an entry that is not {name, skill, when} or misses one, a skill that is not <skill> or <plugin>:<skill>, a name used twice; a paths: entry that is not a relative glob or a touches: entry that is not a kebab-case slug (W6); an advise entry with no load:, a load: path outside the skill's folder, a for: value other than change, apply and review, or a key of a session slot (args, model, effort)"},
+	{"tools.not-installed", 1, "person", "a skill tools: names is not installed: a plugin skill whose plugin is not listed in plugins: or not installed or has no such skill, or no project or user skill of that name; or an advise entry's load: file is not in the folder of its skill as installed (W6)"},
+	{"tools.unknown", 1, "replan", "a change.md design-tool task (`— tool: <name>`), review_tools: entry or advise: entry (W6) names no tools.design / tools.review / tools.advise entry of _apex/config.yaml (D74): re-plan with a declared tool"},
 	{"tools.not-invocable", 1, "person", "a skill tools: names has user-invocable: false, so ape task cannot type it as a slash command: drop the flag, or name another skill"},
+	{CodeToolsTooBig, 1, "replan", "an advise entry's load: files together are over caps.advise (default 8 KB, ceiling 16 KB; project check and plugins status, on _apex/config.yaml; change check for an entry the change names), or the advise files one session of a change reads — change, apply or review, by each entry's for: — are over caps.advise_session (default 16 KB, ceiling 32 KB; change check, start; W6, Q-E1): apex-change lists fewer advise entries; a person shortens the expert's file, narrows for:, or raises the cap"},
+	{CodePluginsUserScope, 1, "person", "a plugin _apex/config.yaml lists is also installed at user scope (`claude plugin list`: a user-scope plugin of the same name, or enabledPlugins in <config dir>/settings.json), or a tools: skill is a user skill (<config dir>/skills/<name>/ or commands/<name>.md), which wins over the project's copy and is on this machine only (W6, Q-E8): a person removes the user copy, or moves the skill into the project"},
+	{CodeToolsUnmatched, 0, "replan", "a notice, never a finding (change check's and verify's notices; the exit is unchanged): a tools: entry's paths: or touches: (W6, Q-E2) match the change — a touches: slug of the change, a paths: glob that meets one of its planned paths: (change check), or a file its commits changed since base_sha (verify) — and the change does not list it (design: a task's `— tool: <name>`; review: review_tools:; advise: advise:): apex-change lists it when its when: applies, else leaves it; apex-review may read the entry's advise files anyway"},
 
 	// D89 (rc.4).
 	{CodeChangeOverCeiling, 1, "apply", "change.md as a whole, ## Notes included, over the 48 KB change_md file ceiling, whatever caps.change_md says (D89): ## Notes is for working notes only — move bulk to the change's assets/; reported at change check and start, refused at archive"},

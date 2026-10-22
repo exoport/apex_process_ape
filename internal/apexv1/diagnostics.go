@@ -164,7 +164,7 @@ var findingRules = []findingRule{
 	rule("", `^change.md is .* over the .* cap \(caps.change_md\)`, "change.too-big"),
 	rule("", `^design.md is`, "change.design-too-big"),
 	rule("", `^no state.json beside it`, "change.no-state"),
-	rule("", `^(task \S+'s tool: |review_tools: ).* is not declared in tools\.(design|review)`, "tools.unknown"),
+	rule("", `^(task \S+'s tool: |review_tools: |advise: ).* is not declared in tools\.(design|review|advise)`, "tools.unknown"),
 	rule("", `^frontmatter key .* is not one of`, "change.unknown-key"),
 	rule("", "^frontmatter has no `type:`", "change.no-type"),
 	rule("", "^the archive subject would be .* which starts `apex:`", "change.subject-reserved"),
@@ -234,6 +234,9 @@ var findingRules = []findingRule{
 	rule("", `^(models\.\S+\.)?effort: .* is not a level`, CodeConfigInvalid),
 	// v1.1 W2.
 	rule("", "(kind `\\(.*\\)` is not `check \\(live\\):`|is `check \\(live\\):` on )", CodeCheckBadKind),
+	// v1.1 W6.
+	rule("", `^(tool advise/\S+: skill \S+ loads |advise: ).* over the .* cap \(caps\.advise(_session)?\)`, CodeToolsTooBig),
+	rule("", `^(plugin \S+ is also installed at user scope|skill \S+ of tool \S+ is (also )?installed at user scope)`, CodePluginsUserScope),
 }
 
 // UnclassifiedFinding is the code of a finding no rule matches — a

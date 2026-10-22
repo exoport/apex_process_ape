@@ -31,10 +31,11 @@ func (p *Project) ChildSkillAllowList(cfg Config) []string {
 		out = append(out, d)
 	}
 	for _, slot := range ToolSlots {
-		for _, t := range cfg.Tools.Slot(slot) {
-			if !seen[t.Skill] {
-				seen[t.Skill] = true
-				out = append(out, t.Skill)
+		ts := cfg.Tools.Slot(slot)
+		for i := range ts {
+			if s := ts[i].Skill; !seen[s] {
+				seen[s] = true
+				out = append(out, s)
 			}
 		}
 	}

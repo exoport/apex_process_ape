@@ -493,6 +493,8 @@ func newProjectCheckCmd() *cobra.Command {
                              spec         24 KB / 64 KB    (per capability)
                              evidence_log  1 MiB / 16 MiB  (per check, evidence: archive)
                              architecture_md 16 KB / 48 KB (development/architecture.md, optional)
+                             advise        8 KB / 16 KB   (one tools.advise entry's files, W6)
+                             advise_session 16 KB / 32 KB (the advise files one session reads)
                            A value above its ceiling is caps.over-ceiling (action person):
                            reported here, and change check, start and archive refuse
                            until a person fixes it (abandon measures nothing, D89)
@@ -535,15 +537,24 @@ func newProjectCheckCmd() *cobra.Command {
                            at its ref (plugins.drift; plugins.config for a bad config);
                            ` + "`ape plugins sync`" + ` (or ` + "`ape doctor --fix`" + `) puts them right;
                            an installed one that carries hooks or MCP servers its entry
-                           does not allow (allow: [hooks, mcp]) is plugin.hooks-or-mcp
+                           does not allow (allow: [hooks, mcp]) is plugin.hooks-or-mcp;
+                           a listed plugin also installed or enabled at user scope, or a
+                           tools: skill that is a user skill, is plugins.user-scope
+                           (action person, W6): the user copy wins on this machine
   tools                    _apex/config.yaml tools: {design: [{name, skill, when, args?,
-                           model?, effort?}], review: [...]}: well-formed — args:
-                           placeholders only {id} {task} {assets} {change}, effort: a
-                           level — (tools.invalid), each skill
+                           model?, effort?, paths?, touches?}], review: [...], advise:
+                           [{name, skill, when, load, for?, paths?, touches?}]}:
+                           well-formed — args: placeholders only {id} {task} {assets}
+                           {change}, effort: a level, paths: relative globs, touches:
+                           kebab slugs, load: paths inside the skill's folder, for:
+                           change, apply, review — (tools.invalid), each skill
                            installed — <plugin>:<skill> of a listed plugin, or a project
-                           or user skill — (tools.not-installed) and not
-                           user-invocable: false (tools.not-invocable); a plugin skill
-                           is judged only when claude is on PATH. See ape plugins --help
+                           or user skill — (tools.not-installed) and, for design and
+                           review, not user-invocable: false (tools.not-invocable); an
+                           advise entry's load: files in its skill's folder
+                           (tools.not-installed) and within caps.advise together
+                           (tools.too-big, W6); a plugin skill is judged only when
+                           claude is on PATH. See ape plugins --help
 
 Notices (D155 Q73) are not findings: listed as "notice: <file>:<line>: …" lines on stderr
 and under "notices" with --json ({severity: "notice", code, message, fix, action, file,
@@ -969,6 +980,13 @@ func newStatusCmd() *cobra.Command {
     latest verify of the current plan, or a human-review one accepted — and
     review_tools, its review_tools: frontmatter, as [{name, skill}]; skill is what
     _apex/config.yaml tools: names ("" when it names none). Both always present ([])
+  - advise (W6, Q-E1): every change lists advise, one row per file of each tools.advise
+    entry its advise: frontmatter names, as [{name, skill, for, file, path, bytes,
+    sha256}] — path absolute (a plugin skill's in its install, else the project's or
+    the user's .claude/skills/<skill>/), for the sessions that read it (change, apply,
+    review), file the load: entry; a row that cannot be read has error instead (not
+    declared, skill not installed, file missing) and no sha256. Always present ([]).
+    Resolved when ape status runs: a plugin skill through the claude plugin CLI
   - acceptances (JSON changes[].accepted: [{task, by, at, evidence, run}]): by a person,
     or by "delegate:<skill>" with its run when _apex/config.yaml human_review delegates
     them (D75; "Accepted by a delegate" in the long output); and each human-review task's
@@ -1090,6 +1108,7 @@ with --since <seq> · 2 usage (usage.until, usage.wait). --board exits 0 whateve
 			// W3: a detached run found lost is logged (run-lost, once).
 			_ = detachedRuns(cmd.Context(), p.Root)
 			r := p.Status()
+			p.AttachAdvise(cmd.Context(), r)
 			if board {
 				o := refreshBoardNow(cmd.Context(), p, r, cmd.ErrOrStderr())
 				return v1Emit(cmd.OutOrStdout(), &f, statusWithBoard{StatusReport: r, Board: &o}, func(w io.Writer) {

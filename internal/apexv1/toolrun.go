@@ -50,6 +50,10 @@ func (p *Project) PrepareTool(ctx context.Context, id, name, task string) (*Tool
 	if entry == nil {
 		slot, entry = "review", tools.Find("review", name)
 	}
+	if entry == nil && tools.Find("advise", name) != nil {
+		return nil, &FailError{Code: "tool.unknown", Msg: "tools.advise entry " + name + " starts no session (W6): the change, apply and review sessions Read its files, which `ape status --json` lists under changes[].advise" +
+			" — run a design or review tool, or none"}
+	}
 	if entry == nil {
 		return nil, &FailError{Code: "tool.unknown", Msg: "no tools.design or tools.review entry in _apex/config.yaml is named " + name +
 			" — name a declared tool (`ape plugins status` lists them), or re-plan without it"}

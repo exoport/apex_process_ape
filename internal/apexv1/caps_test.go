@@ -28,7 +28,7 @@ func TestParseByteSize(t *testing.T) {
 }
 
 func TestCaps_DefaultsCeilingsAndParse(t *testing.T) {
-	require.Equal(t, Caps{ProjectMD: 16 << 10, AgentsMD: 16 << 10, ChangeMD: 16 << 10, DesignMD: 16 << 10, Spec: 24 << 10, EvidenceLog: 1 << 20, ArchitectureMD: 16 << 10}, DefaultCaps())
+	require.Equal(t, Caps{ProjectMD: 16 << 10, AgentsMD: 16 << 10, ChangeMD: 16 << 10, DesignMD: 16 << 10, Spec: 24 << 10, EvidenceLog: 1 << 20, ArchitectureMD: 16 << 10, Advise: 8 << 10, AdviseSession: 16 << 10}, DefaultCaps())
 
 	var cfg Config
 	require.NoError(t, yaml.Unmarshal([]byte("caps:\n  project_md: 32KB\n  spec: 40960\n  evidence_log: 4MiB\n"), &cfg))

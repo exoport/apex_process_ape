@@ -154,3 +154,116 @@ func mustRead(t *testing.T, path string) []byte {
 	require.NoError(t, err)
 	return data
 }
+
+// W6: plugins status --outdated reads a marketplace's tags (a local bare
+// repository, no network); an advise entry's files are listed; change
+// check carries tools.unmatched under "notices", failing or not; ape
+// status --json lists a change's advise files.
+func TestPluginsCmd_AdviseOutdatedAndNotices(t *testing.T) {
+	root := seedV1Fixture(t)
+	fakeClaudePlugins(t, "[]")
+	work, bare := t.TempDir(), filepath.Join(t.TempDir(), "mkt.git")
+	v1Git(t, work, "init", "-q", "-b", "main")
+	require.NoError(t, os.WriteFile(filepath.Join(work, "README.md"), []byte("m\n"), 0o644))
+	v1Git(t, work, "add", "-A")
+	v1Git(t, work, "commit", "-qm", "catalog")
+	for _, tag := range []string{"v0.1.0", "v0.2.0", "v0.3.0-rc.1"} {
+		v1Git(t, work, "tag", tag)
+	}
+	v1Git(t, t.TempDir(), "clone", "-q", "--bare", work, bare)
+
+	skill := filepath.Join(root, ".claude", "skills", "nats")
+	require.NoError(t, os.MkdirAll(skill, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(skill, "SKILL.md"), []byte("---\nname: nats\ndescription: n\ndisable-model-invocation: true\n---\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(skill, "advise.md"), []byte("N1 NEVER.\n"), 0o644))
+	cfg := filepath.Join(root, "_apex", "config.yaml")
+	base, err := os.ReadFile(cfg)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(cfg, append(base, []byte(`marketplaces:
+  experts: {source: git, url: `+bare+`, ref: v0.1.0}
+tools:
+  advise:
+    - {name: nats, skill: nats, when: "NATS", paths: ["src/bus/**"], load: [advise.md], for: [apply]}
+`)...), 0o644))
+	v1Git(t, root, "add", "-A")
+	v1Git(t, root, "commit", "-qm", "config")
+	_, _, err = v1Exec(t, newProjectCmd, "accept-config", "--by", "ann", "--cwd", root)
+	require.NoError(t, err)
+
+	stdout, stderr, err := v1Exec(t, newPluginsCmd, "status", "--outdated", "--cwd", root, "--json")
+	require.NoError(t, err, stderr)
+	var rep struct {
+		Tools []struct {
+			Slot  string `json:"slot"`
+			Files []struct {
+				File   string `json:"file"`
+				Bytes  int    `json:"bytes"`
+				SHA256 string `json:"sha256"`
+			} `json:"files"`
+		} `json:"tools"`
+		Outdated []struct {
+			Marketplace string   `json:"marketplace"`
+			Newer       []string `json:"newer"`
+			Latest      string   `json:"latest"`
+		} `json:"outdated"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &rep), stdout)
+	require.Len(t, rep.Outdated, 1)
+	require.Equal(t, "experts", rep.Outdated[0].Marketplace)
+	require.Equal(t, []string{"v0.2.0"}, rep.Outdated[0].Newer)
+	require.Equal(t, "v0.2.0", rep.Outdated[0].Latest)
+	require.Len(t, rep.Tools, 1)
+	require.Equal(t, "advise", rep.Tools[0].Slot)
+	require.Equal(t, 10, rep.Tools[0].Files[0].Bytes)
+	require.Len(t, rep.Tools[0].Files[0].SHA256, 64)
+	stdout, _, err = v1Exec(t, newPluginsCmd, "status", "--outdated", "--cwd", root)
+	require.NoError(t, err)
+	require.Contains(t, stdout, "market  experts  ref v0.1.0  newer: v0.2.0\n")
+	require.Contains(t, stdout, "        load advise.md  10 bytes  sha256 ")
+
+	_, _, err = v1Exec(t, newChangeCmd, "new", "add-bus", "--milestone", "M1", "--touches", "greeting", "--paths", "src/bus/*.go", "--cwd", root)
+	require.NoError(t, err)
+	stdout, stderr, err = v1Exec(t, newChangeCmd, "check", "add-bus", "--cwd", root, "--json")
+	require.Error(t, err, "a skeleton has findings")
+	var chk struct {
+		Notices []struct {
+			Severity string `json:"severity"`
+			Code     string `json:"code"`
+			Message  string `json:"message"`
+			Fix      string `json:"fix"`
+		} `json:"notices"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &chk), stdout)
+	require.Len(t, chk.Notices, 1, stdout)
+	require.Equal(t, "notice", chk.Notices[0].Severity)
+	require.Equal(t, "tools.unmatched", chk.Notices[0].Code)
+	require.Equal(t, "tools.advise entry nats matches this change (paths: src/bus/*.go ~ src/bus/**) and the change does not list it", chk.Notices[0].Message)
+	require.Empty(t, stderr)
+	_, stderr, _ = v1Exec(t, newChangeCmd, "check", "add-bus", "--cwd", root)
+	require.Contains(t, stderr, "notice: development/changes/add-bus/change.md:1: tools.advise entry nats matches this change")
+
+	md := filepath.Join(root, "development", "changes", "add-bus", "change.md")
+	doc, err := os.ReadFile(md)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(md, []byte(strings.Replace(string(doc), "touches: [greeting]", "touches: [greeting]\nadvise: [nats]", 1)), 0o644))
+	stdout, _, err = v1Exec(t, newStatusCmd, "--cwd", root, "--json")
+	require.NoError(t, err)
+	var st struct {
+		Changes []struct {
+			ID     string `json:"id"`
+			Advise []struct {
+				Name   string   `json:"name"`
+				For    []string `json:"for"`
+				Path   string   `json:"path"`
+				Bytes  int      `json:"bytes"`
+				SHA256 string   `json:"sha256"`
+			} `json:"advise"`
+		} `json:"changes"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &st), stdout)
+	require.Len(t, st.Changes, 1)
+	require.Len(t, st.Changes[0].Advise, 1)
+	require.Equal(t, filepath.Join(skill, "advise.md"), st.Changes[0].Advise[0].Path)
+	require.Equal(t, []string{"apply"}, st.Changes[0].Advise[0].For)
+	require.Equal(t, 10, st.Changes[0].Advise[0].Bytes)
+}

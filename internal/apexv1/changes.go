@@ -118,13 +118,17 @@ func (p *Project) ActiveChanges(ctx context.Context) []ChangeInfo {
 // CheckChange validates change.md against its shape, its caps, the
 // roadmap and the current specs (`ape change check`). One flat list of
 // rules, each a few lines: splitting it would scatter the contract.
-func (p *Project) CheckChange(id string) []Finding { return p.checkChange(id, true) }
+func (p *Project) CheckChange(id string) []Finding {
+	return p.checkChange(context.Background(), id, true)
+}
 
-// checkChange is CheckChange; withCaps adds caps.over-ceiling, which
-// `project check` reports once for the project rather than per change.
+// checkChange is CheckChange under a caller's context (an advise entry's
+// plugin skill asks the claude plugin CLI); withCaps adds
+// caps.over-ceiling and the per-entry caps.advise, which `project check`
+// reports once for the project rather than per change.
 //
 //nolint:gocyclo // a checklist, not branching logic
-func (p *Project) checkChange(id string, withCaps bool) []Finding {
+func (p *Project) checkChange(ctx context.Context, id string, withCaps bool) []Finding {
 	file := p.Rel(p.ChangeMD(id))
 	doc, err := readFileString(p.ChangeMD(id))
 	if err != nil {
@@ -166,7 +170,7 @@ func (p *Project) checkChange(id string, withCaps bool) []Finding {
 		add(1, c.MetaErr.Error())
 	}
 	for _, k := range c.UnknownKeys {
-		add(1, "frontmatter key \""+k+"\" is not one of id, milestone, touches, paths, decisions, retire, type, review_tools, docs — fix the name, or prefix your own keys with x-")
+		add(1, "frontmatter key \""+k+"\" is not one of id, milestone, touches, paths, decisions, retire, type, review_tools, advise, docs — fix the name, or prefix your own keys with x-")
 	}
 	if c.BadDocs != "" {
 		add(1, "frontmatter docs: is "+c.BadDocs+", not true or false — docs: true marks the milestone's docs change (D152); drop the key on any other change")
@@ -253,7 +257,9 @@ func (p *Project) checkChange(id string, withCaps bool) []Finding {
 				" — write the task as `- "+t.ID+" <what> — check: "+HumanReview+"`, the artefact and the criteria in <what>, before ` — check:`")
 		}
 	}
-	return append(out, p.toolFindings(file, c)...)
+	out = append(out, p.toolFindings(file, c)...)
+	// v1.1 W6: advise: names declared entries, within caps.
+	return append(out, p.adviseFindings(ctx, file, c, withCaps)...)
 }
 
 // toolFindings refuses a design-tool task or a review_tools: entry that
@@ -285,8 +291,8 @@ func toolNames(ts []Tool) string {
 		return "none declared"
 	}
 	names := make([]string, 0, len(ts))
-	for _, t := range ts {
-		names = append(names, t.Name)
+	for i := range ts {
+		names = append(names, ts[i].Name)
 	}
 	return strings.Join(names, ", ")
 }

@@ -208,7 +208,7 @@ func (p *Project) start(ctx context.Context, id string, opt RunOptions, enter fu
 	default:
 		return nil, &FailError{Code: CodeWrongStatus, Msg: "change " + id + " is " + st.Status + "; start applies to draft, blocked or answered changes, or re-baselines a changed plan"}
 	}
-	if fs := p.CheckChange(id); len(fs) > 0 {
+	if fs := p.checkChange(ctx, id, true); len(fs) > 0 {
 		return nil, &FailError{Code: CodeCheckFailed, Msg: "change " + id + " does not pass `ape change check` — fix change.md first", Findings: fs}
 	}
 	if err := p.requireApproved(ci); err != nil {
@@ -439,6 +439,12 @@ type VerifyResult struct {
 	// CatchUp: verify found the base branch moved and caught the change
 	// up first (D40).
 	CatchUp *CatchUp `json:"catch_up,omitempty"`
+	// Advise is the change's advise files, hashed at this verify (W6), as
+	// ape status lists them; state.json records them without the path.
+	// Notices are tools.unmatched against the change's diff (W6, Q-E2):
+	// they never change the outcome.
+	Advise  []AdviseFile `json:"advise"`
+	Notices []Diagnostic `json:"notices"`
 }
 
 // greenAtBaseline lists the change's own checks — tasks and the scenarios
@@ -586,11 +592,22 @@ func (p *Project) verify(ctx context.Context, ci ChangeInfo, opt RunOptions, kee
 		pending = []string{}
 	}
 	gab := p.greenAtBaseline(ci.Doc, st)
+	// v1.1 W6: the advise files hashed, and tools.unmatched on the diff.
+	advise, notices := p.verifyAdvise(ctx, ci)
+	if advise == nil {
+		advise = []AdviseFile{}
+	}
+	if notices == nil {
+		notices = []Diagnostic{}
+	}
 	p.saveLastVerify(id, st, sha, green, results)
 	if !green {
-		return p.redAttempt(ctx, ci, &VerifyResult{ID: id, Status: st.Status, SHA: sha, Green: false, Results: results, PendingHuman: pending, GreenAtBaseline: gab, StrayFiles: StrayFiles(results), StraysKept: StraysKept(results), Regression: regression, LiveSkipped: liveSkipped})
+		return p.redAttempt(ctx, ci, &VerifyResult{
+			ID: id, Status: st.Status, SHA: sha, Green: false, Results: results, PendingHuman: pending, GreenAtBaseline: gab, StrayFiles: StrayFiles(results), StraysKept: StraysKept(results), Regression: regression, LiveSkipped: liveSkipped,
+			Advise: advise, Notices: notices,
+		})
 	}
-	st.Verify = &Verify{SHA: sha, At: Stamp(), Results: results, PendingHuman: pending, Green: green, GreenAtBaseline: gab, Regression: skipped, LiveSkipped: liveSkipped}
+	st.Verify = &Verify{SHA: sha, At: Stamp(), Results: results, PendingHuman: pending, Green: green, GreenAtBaseline: gab, Regression: skipped, LiveSkipped: liveSkipped, Advise: adviseRecord(advise)}
 	switch {
 	case st.Status == StatusReviewed && st.Review != nil && st.Review.Verdict == "pass":
 		if moved, _, _ := p.codeMovedSince(ctx, st.Review.SHA); moved && !keepReview {
@@ -605,7 +622,7 @@ func (p *Project) verify(ctx context.Context, ci ChangeInfo, opt RunOptions, kee
 	a := p.attempts(id)
 	return &VerifyResult{
 		ID: id, Status: st.Status, SHA: sha, Green: green, Results: results, PendingHuman: pending, GreenAtBaseline: gab, StrayFiles: StrayFiles(results), StraysKept: StraysKept(results), Regression: regression,
-		LiveSkipped: liveSkipped, Attempts: a.Since, AttemptsTotal: a.Total, AttemptsCap: p.limits().AttemptsCap(),
+		LiveSkipped: liveSkipped, Attempts: a.Since, AttemptsTotal: a.Total, AttemptsCap: p.limits().AttemptsCap(), Advise: advise, Notices: notices,
 	}, nil
 }
 
@@ -635,7 +652,7 @@ func (p *Project) redAttempt(ctx context.Context, ci ChangeInfo, res *VerifyResu
 	}
 	if a.Since < capN {
 		if st.Status != StatusInProgress {
-			st.Verify = &Verify{SHA: res.SHA, At: Stamp(), Results: res.Results, PendingHuman: res.PendingHuman, Green: false, GreenAtBaseline: res.GreenAtBaseline, Regression: res.Regression.skip()}
+			st.Verify = &Verify{SHA: res.SHA, At: Stamp(), Results: res.Results, PendingHuman: res.PendingHuman, Green: false, GreenAtBaseline: res.GreenAtBaseline, Regression: res.Regression.skip(), Advise: adviseRecord(res.Advise)}
 			st.Status = StatusInProgress
 			if err := p.saveAndCommit(ctx, id, st); err != nil {
 				return nil, err
@@ -660,7 +677,7 @@ func (p *Project) redBlock(ctx context.Context, ci ChangeInfo, res *VerifyResult
 		failing = append(failing, fmt.Sprintf("%s (%s)", red[i].Task, red[i].Outcome()))
 	}
 	if st.Status != StatusInProgress {
-		st.Verify = &Verify{SHA: res.SHA, At: Stamp(), Results: res.Results, PendingHuman: res.PendingHuman, Green: false, GreenAtBaseline: res.GreenAtBaseline, Regression: res.Regression.skip()}
+		st.Verify = &Verify{SHA: res.SHA, At: Stamp(), Results: res.Results, PendingHuman: res.PendingHuman, Green: false, GreenAtBaseline: res.GreenAtBaseline, Regression: res.Regression.skip(), Advise: adviseRecord(res.Advise)}
 	}
 	if err := p.blockAndCount(ctx, ci, what+" — "+strings.Join(limit(failing, 5), ", ")); err != nil {
 		return nil, err

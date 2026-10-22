@@ -333,6 +333,7 @@ func printStatusWait(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, o *statu
 	if r == nil {
 		r = p.Status()
 	}
+	p.AttachAdvise(cmd.Context(), r)
 	out := cmd.OutOrStdout()
 	err := v1Emit(out, f, statusWithWait{StatusReport: r, Seq: last, Wait: rep}, func(w io.Writer) {
 		if o.brief {

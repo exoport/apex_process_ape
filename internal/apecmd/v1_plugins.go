@@ -114,7 +114,11 @@ guard: a commit that changes them and is not ape's is a person's to accept):
       - {name: ui-mockup, skill: frontend-design:mockup, when: "the change adds or changes a screen",
          args: "{change} --out {assets}", model: sonnet, effort: high}
     review:
-      - {name: security, skill: security-lens, when: "the change touches auth, secrets or input parsing"}
+      - {name: security, skill: security-lens, when: "the change touches auth, secrets or input parsing",
+         paths: ["internal/auth/**"], touches: [auth]}
+    advise:
+      - {name: nats, skill: nats-expert:nats-expert, when: "the change publishes, consumes or configures NATS",
+         paths: ["internal/bus/**"], load: [advise.md], for: [change, apply, review]}
 
 allow: lists what a plugin may carry besides skills — hooks, mcp. A listed plugin
 that carries hooks (hooks/hooks.json, or hooks in .claude-plugin/plugin.json) or MCP
@@ -122,17 +126,42 @@ servers (.mcp.json, or mcpServers in plugin.json) its entry does not allow is th
 finding plugin.hooks-or-mcp (action person): a tool is a skill only. Another allow:
 value is a config error (plugins.config).
 
-tools: has two slots, design and review; each entry is {name, skill, when}, names
-unique, plus optional args: (the template ape fills into ape task <skill> --args;
-placeholders {id}, {task}, {assets}, {change}, no other), model: and effort: (low,
-medium, high, xhigh, max; unset: the D65 defaults). A skill is <plugin>:<skill> (the plugin listed in plugins:), or a project
+tools: has three slots, design, review and advise; each entry is {name, skill, when},
+names unique across the slots. A design or review entry may add args: (the template
+ape fills into ape task <skill> --args; placeholders {id}, {task}, {assets}, {change},
+no other), model: and effort: (low, medium, high, xhigh, max; unset: the D65 defaults).
+A skill is <plugin>:<skill> (the plugin listed in plugins:), or a project
 skill (.claude/skills/<skill>/SKILL.md) or user skill ($CLAUDE_CONFIG_DIR, else
 ~/.claude, /skills/<skill>/SKILL.md; a user skill wins over a project one). Each must
-be installed (tools.not-installed) and slash-invocable — not user-invocable: false
-(tools.not-invocable) — because ape task types it as a slash command; a malformed
-block is tools.invalid. The loop may start these skills as children, beside
-apex-plan, apex-change, apex-apply, apex-review, apex-release and apex-accept (D62,
-D76); apex-handoff, apex-loop and the operator's apex-orchestrator never.
+be installed (tools.not-installed); a design or review skill must be slash-invocable
+— not user-invocable: false (tools.not-invocable) — because ape task types it as a
+slash command; a malformed block is tools.invalid. The loop may start the design and
+review skills as children, beside apex-plan, apex-change, apex-apply, apex-review,
+apex-release and apex-accept (D62, D76); apex-handoff, apex-loop and the operator's
+apex-orchestrator never.
+
+An advise entry (W6, Q-E1) starts no session and gives no verdict: load: names files
+under its skill's folder (the folder holding its SKILL.md: in the plugin's install for
+a plugin skill, else the user's or the project's .claude/skills/<skill>/), and for:
+the sessions that read them, change, apply and/or review (default all three; never a
+delegate). A change names the entries whose when: it matches in change.md's advise:
+frontmatter (ape change check --help); ape status --json lists each file of them under
+changes[].advise with its absolute path, bytes and sha256, and every verify records
+the sha256s. ape resolves, sizes and hashes the files; it never reads them for meaning.
+caps.advise (default 8 KB, ceiling 16 KB) bounds one entry's files together and
+caps.advise_session (default 16 KB, ceiling 32 KB) what one session of a change reads
+(tools.too-big). The skill need not be slash-invocable; disable-model-invocation: true
+keeps it out of every session's skill listing.
+
+paths: (globs) and touches: (capability slugs), optional on every entry (W6, Q-E2),
+make when: checkable: a change whose planned paths: or touches: (ape change check) or
+whose diff (ape change verify) match an entry it does not list gets the notice
+tools.unmatched — a warning, never a refusal: when: stays the planner's call.
+
+A listed plugin also installed or enabled at user scope (claude plugin list scope
+user; enabledPlugins in $CLAUDE_CONFIG_DIR/settings.json, else ~/.claude/settings.json),
+or a tools: skill that is a user skill, is plugins.user-scope (action person, W6,
+Q-E8): the user copy wins over the project's pinned one on that machine.
 
 ape project check reports the same findings (exit 1).`,
 	}
@@ -200,6 +229,7 @@ failed · 2 usage.`,
 
 func newPluginsStatusCmd() *cobra.Command {
 	var f v1Flags
+	var outdated bool
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Report each listed plugin and tools: skill, and their findings",
@@ -212,17 +242,33 @@ each tools: entry: where its skill was found (plugin, project, user) and its sta
 ok, not-installed, not-invocable, or unchecked (a plugin skill while claude is not on
 PATH, so the installs cannot be read).
 
+An advise entry's row lists its load: files ("load <file>  <bytes> bytes  sha256
+<first 12>  for <sessions>").
+
 Findings: plugins.config, plugins.drift (ape plugins sync puts it right),
-plugin.hooks-or-mcp, tools.invalid, tools.not-installed, tools.not-invocable — see
-ape plugins --help. They are reported, not failed on: ape project check is the gate.
+plugin.hooks-or-mcp, plugins.user-scope, tools.invalid, tools.not-installed,
+tools.not-invocable, tools.too-big — see ape plugins --help. They are reported, not
+failed on: ape project check is the gate.
+
+--outdated (W6, Q-E7) also lists, for each marketplace _apex/config.yaml lists, the
+release tags of its repository newer than its ref (git ls-remote --tags; a github
+marketplace is read from https://github.com/<repo>.git, a git one from its url; a tag
+counts when it is a version, v1.2.0 or 1.2.0, pre-releases left out), newest first:
+"market  <name>  ref <ref>  newer: <tags>", or "up to date (latest <tag>)". A ref that
+is not a version (a branch, none) has a note naming the latest tag instead; a
+directory marketplace has no tags; a repository that cannot be read says why. Nothing
+is fetched, installed or written: bumping ref: is a person's change to the config.
 
 JSON: {"installs_checked", "plugins": [{"id", "ref", "installed", "version", "at_ref",
 "enabled", "install_path", "skills", "model_invocable", "hooks", "mcp", "allow",
-"allowed"}], "tools": [{"slot", "name", "skill", "source", "path", "state"}],
-"findings": [{"file", "message", "code", "fix"}]}.
+"allowed"}], "tools": [{"slot", "name", "skill", "source", "path", "state", "for",
+"files": [{"name", "skill", "for", "file", "path", "bytes", "sha256", "error"}]}],
+"findings": [{"file", "message", "code", "fix"}]}; with --outdated, "outdated":
+[{"marketplace", "source", "ref", "latest", "newer": [tags], "note", "error"}].
 
-Exit codes: 0 reported (findings or not) · 1 the config cannot be read · 2 usage.`,
-		Example: "  ape plugins status\n  ape plugins status --json",
+Exit codes: 0 reported (findings, or newer tags, or not) · 1 the config cannot be read ·
+2 usage.`,
+		Example: "  ape plugins status\n  ape plugins status --json\n  ape plugins status --outdated",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			p, err := v1Project(&f)
@@ -237,11 +283,49 @@ Exit codes: 0 reported (findings or not) · 1 the config cannot be read · 2 usa
 				return v1Fail(cmd, &f, err, nil)
 			}
 			rep.Findings = apexv1.ClassifyFindings(rep.Findings)
-			return v1Emit(cmd.OutOrStdout(), &f, rep, func(w io.Writer) { printPluginsReport(w, rep) })
+			if outdated {
+				if rep.Outdated, err = p.OutdatedMarketplaces(cmd.Context()); err != nil {
+					return v1Fail(cmd, &f, err, nil)
+				}
+				if rep.Outdated == nil {
+					rep.Outdated = []apexv1.MarketplaceTags{}
+				}
+			}
+			return v1Emit(cmd.OutOrStdout(), &f, rep, func(w io.Writer) {
+				printPluginsReport(w, rep)
+				if outdated {
+					printOutdated(w, rep.Outdated)
+				}
+			})
 		},
 	}
 	addV1Flags(cmd, &f)
+	cmd.Flags().BoolVar(&outdated, "outdated", false, "also list each listed marketplace's version tags newer than its ref (git ls-remote --tags)")
 	return cmd
+}
+
+// printOutdated is plugins status --outdated's human lines, one per
+// marketplace.
+func printOutdated(w io.Writer, rows []apexv1.MarketplaceTags) {
+	if len(rows) == 0 {
+		fmt.Fprintln(w, "marketplaces: none listed")
+	}
+	for _, m := range rows {
+		ref := m.Ref
+		if ref == "" {
+			ref = "(no ref)"
+		}
+		switch {
+		case m.Error != "":
+			fmt.Fprintf(w, "market  %s  ref %s  tags not read: %s\n", m.Marketplace, ref, m.Error)
+		case len(m.Newer) > 0:
+			fmt.Fprintf(w, "market  %s  ref %s  newer: %s\n", m.Marketplace, ref, strings.Join(m.Newer, ", "))
+		case m.Note != "":
+			fmt.Fprintf(w, "market  %s  ref %s  %s\n", m.Marketplace, ref, m.Note)
+		default:
+			fmt.Fprintf(w, "market  %s  ref %s  up to date (latest %s)\n", m.Marketplace, ref, m.Latest)
+		}
+	}
 }
 
 // printPluginsReport is plugins status's human output.
@@ -276,6 +360,14 @@ func printPluginsReport(w io.Writer, rep *apexv1.PluginsReport) {
 			where += " " + t.Path
 		}
 		fmt.Fprintf(w, "tool    %s/%s  %s  %s  %s\n", t.Slot, t.Name, t.Skill, t.State, strings.TrimSpace(where))
+		for j := range t.Files {
+			af := &t.Files[j]
+			if af.Error != "" {
+				fmt.Fprintf(w, "        load %s: %s\n", af.File, af.Error)
+				continue
+			}
+			fmt.Fprintf(w, "        load %s  %d bytes  sha256 %.12s  for %s\n", af.File, af.Bytes, af.SHA256, strings.Join(af.For, ", "))
+		}
 	}
 	printPluginFindings(w, rep.Findings)
 }

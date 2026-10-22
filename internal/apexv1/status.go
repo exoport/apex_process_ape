@@ -95,6 +95,12 @@ type ChangeStatus struct {
 	// present.
 	Tools       []ChangeTool `json:"tools"`
 	ReviewTools []ChangeTool `json:"review_tools"`
+	// Advise is the files of the tools.advise entries its advise: names
+	// (W6, Q-E1), one row per file, path absolute: the change, apply and
+	// review sessions its for: names Read them before they work. Filled
+	// by AttachAdvise (`ape status`); always present.
+	Advise      []AdviseFile `json:"advise"`
+	adviseNames []string
 	// Accepted is the change's human-review acceptances, the base's
 	// included (D52 Q18): {task, by, at, evidence}, and for one a delegate
 	// recorded (D75) by "delegate:<skill>", its run.
@@ -431,7 +437,7 @@ func (p *Project) Status() *StatusReport {
 	attempts := p.loadAttempts()
 	r.PreExistingRed = p.preExistingRed(changes)
 	for _, c := range changes {
-		cs := ChangeStatus{ID: c.ID, Lane: LaneMilestone}
+		cs := ChangeStatus{ID: c.ID, Lane: LaneMilestone, Advise: []AdviseFile{}}
 		if c.Doc != nil {
 			cs.Title, cs.Milestone = c.Doc.Title, c.Doc.Meta.Milestone
 			if c.Doc.IsTweak() {
@@ -474,6 +480,7 @@ func (p *Project) Status() *StatusReport {
 			cs.Accepted = acc.Accepted
 			cs.Delegate = p.delegateStatuses(c.ID, c.State)
 			cs.DelegateReturns, cs.returned = c.State.DelegateReturns, pendingReturn(acc)
+			cs.adviseNames = c.Doc.Meta.Advise
 			if cfgErr == nil {
 				cs.Delegable = p.delegableTasks(ctx, cfg, c, &cs)
 			}
@@ -511,6 +518,7 @@ func (p *Project) Status() *StatusReport {
 		}
 		if r.Changes[i].Tools == nil {
 			r.Changes[i].Tools, r.Changes[i].ReviewTools = changeTools(cfg.Tools, nil, nil, nil, nil)
+			r.Changes[i].Advise = []AdviseFile{}
 		}
 	}
 	for i := range r.Changes {

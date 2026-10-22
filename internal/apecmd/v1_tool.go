@@ -52,7 +52,8 @@ Code session: ape starts `+"`ape task <skill> --args \"<args filled>\"`"+` detac
       review:
         - {name: security, skill: security-lens, when: "…"}
 
-  - <name> is a tools.design or tools.review entry (else tool.unknown, action replan).
+  - <name> is a tools.design or tools.review entry (else tool.unknown, action replan;
+    a tools.advise entry is refused too: it starts no session, W6).
     A design tool runs for the task whose line names it (`+"`- T<n> <what> — tool: <name> —\ncheck: …`"+`), given with --task; a review tool, for a change whose review_tools:
     name it, before the review
   - args (D77): the entry's args: template, else "--change {id}" (plus " --task {task}"

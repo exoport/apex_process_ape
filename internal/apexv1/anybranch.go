@@ -130,6 +130,9 @@ func (p *Project) viewAt(ctx context.Context, branch string) (view *Project, don
 	if err == nil {
 		view, err = Open(tmp)
 	}
+	if err == nil {
+		view.live = p.liveRoot()
+	}
 	if err != nil {
 		done()
 		return nil, nil, &FailError{Code: CodeBranchFailed, Msg: "cannot read the project as " + branch + " holds it: " + err.Error() + " — run the command on " + branch}
@@ -189,8 +192,8 @@ func (p *Project) changeBranchOf(ctx context.Context, id string) string {
 func (p *Project) CheckChangeAnywhere(ctx context.Context, id string) []Finding {
 	view, done, err := p.viewAt(ctx, p.changeBranchOf(ctx, id))
 	if err != nil {
-		return p.CheckChange(id)
+		return p.checkChange(ctx, id, true)
 	}
 	defer done()
-	return view.CheckChange(id)
+	return view.checkChange(ctx, id, true)
 }

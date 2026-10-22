@@ -277,6 +277,9 @@ type PluginsReport struct {
 	Plugins         []PluginStatus `json:"plugins"`
 	Tools           []ToolStatus   `json:"tools"`
 	Findings        []Finding      `json:"findings"`
+	// Outdated is each listed marketplace's newer tags, with --outdated
+	// only (W6, Q-E7).
+	Outdated []MarketplaceTags `json:"outdated,omitempty"`
 }
 
 // listOnce memoizes Installed for one command, so a command that reads the
@@ -423,5 +426,7 @@ func (p *Project) pluginsReport(ctx context.Context, cli PluginCLI) (*PluginsRep
 	tools, fs := p.toolStatuses(cfg, rows, rep.InstallsChecked)
 	rep.Tools = tools
 	rep.Findings = append(rep.Findings, fs...)
+	// v1.1 W6 (Q-E8): a user-scope copy stands in for the project's.
+	rep.Findings = append(rep.Findings, p.userScopeFindings(ctx, cli, cfg, rep.InstallsChecked)...)
 	return rep, nil
 }

@@ -36,6 +36,10 @@ type ChangeMeta struct {
 	// ReviewTools names the tools.review entries whose when: this change
 	// matches (D59 Q4, D74): the orchestrator runs each before the review.
 	ReviewTools []string `yaml:"review_tools"`
+	// Advise names the tools.advise entries whose when: this change
+	// matches (W6, Q-E1): the change, apply and review sessions read their
+	// files (ape status --json, changes[].advise).
+	Advise []string `yaml:"advise"`
 	// Docs marks the milestone's docs change (D130), which apex-change
 	// writes as `docs: true` (D152 Q69): its human-review tasks are the
 	// docs-accuracy check, a delegate's by default (PrepareDelegate). Read
@@ -133,7 +137,7 @@ func unknownKeys(fm []byte) []string {
 // keys are the team's own (a tracker id, say) and are ignored.
 var knownChangeKeys = map[string]bool{
 	"id": true, "milestone": true, "touches": true, "paths": true, "decisions": true, "retire": true, "type": true,
-	"review_tools": true, "docs": true,
+	"review_tools": true, "docs": true, "advise": true,
 }
 
 // docsFlag reads the frontmatter's docs: (D152): a YAML boolean, else bad

@@ -266,7 +266,12 @@ func newChangeCheckCmd() *cobra.Command {
     records (change.subject-reserved, Q156);
     review_tools: [<name>, …] names tools.review entries of _apex/config.yaml whose
     when: the change matches (the loop runs each before the review; else
-    tools.unknown, D74); docs: true marks the milestone's docs change (D130, D152: its
+    tools.unknown, D74); advise: [<name>, …] names tools.advise entries whose when:
+    the change matches (W6: the change, apply and review sessions Read their files,
+    which `+"`ape status --json`"+` lists under changes[].advise; else tools.unknown), each
+    entry's files within caps.advise (default 8 KB) and what each session reads —
+    the entries whose for: names it — within caps.advise_session (default 16 KB; else
+    tools.too-big); docs: true marks the milestone's docs change (D130, D152: its
     human-review tasks are the docs check, a delegate's by default — `+"`ape change accept --help`"+`),
     a YAML boolean only (else change.frontmatter); any other key must start with x-
   - # title; ## Why and ## Out of scope non-empty; ## Delta; ## Tasks
@@ -310,19 +315,34 @@ func newChangeCheckCmd() *cobra.Command {
 The change is checked as the branch holding its records has it, against that branch's
 specs and roadmap (D51 Q17; `+"`ape change --help`"+`): HEAD needs to be on no particular branch.
 
+Notices (W6) are not findings: they never change the exit. tools.unmatched (action
+replan) is a tools: entry with paths: or touches: (`+"`ape plugins --help`"+`) that the change
+matches and does not list — one of its touches: slugs names the entry's, or one of its
+planned paths: globs meets the entry's (either glob matches the other read as a path)
+— where "lists" is a task's `+"`— tool: <name>`"+` (design), review_tools: (review) or
+advise: (advise). If the entry's when: applies, apex-change lists it; if not, it leaves
+it. Printed as "notice: <file>:1: …" lines on stderr; JSON "notices": [{severity:
+"notice", code, message, fix, action, file, line}] ([] when none), beside the findings
+on a failure too.
+
 Exit codes: 0 green · 1 findings · 2 usage.`,
 		"  ape change check add-tenant-delete",
 		&f,
 		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
 			fs := p.CheckChangeAnywhere(cmd.Context(), id)
+			// v1.1 W6: tools.unmatched never changes the exit.
+			notices := p.ChangeNotices(cmd.Context(), id)
+			if !f.json {
+				printNotices(cmd.ErrOrStderr(), notices)
+			}
 			if len(fs) > 0 {
-				return v1Fail(cmd, &f, &apexv1.FailError{
+				return v1FailWith(cmd, &f, &apexv1.FailError{
 					Code:     "change.check-failed",
 					Msg:      fmt.Sprintf("change %s: %d finding(s) — fix change.md and run `ape change check %s` again", id, len(fs), id),
 					Findings: fs,
-				}, nil)
+				}, nil, map[string]any{"notices": notices})
 			}
-			return v1Emit(cmd.OutOrStdout(), &f, map[string]any{"id": id, "ok": true, "findings": []apexv1.Finding{}}, func(w io.Writer) {
+			return v1Emit(cmd.OutOrStdout(), &f, map[string]any{"id": id, "ok": true, "findings": []apexv1.Finding{}, "notices": notices}, func(w io.Writer) {
 				fmt.Fprintf(w, "change %s: green\n", id)
 			})
 		})
@@ -630,6 +650,15 @@ caught up here needs a new review. Refused while a conflicted catch-up is unreso
 unmerged paths, or conflict markers in a file the rebase conflicted in (exit 1,
 change.unresolved-conflict: resolve, `+"`git add`"+`, commit).
 
+Advise (W6): verify hashes the files of the tools.advise entries change.md's advise:
+names, as `+"`ape status --json`"+` resolves them, lists them (JSON "advise": [{name, skill, for,
+file, path, bytes, sha256}], or error for one it cannot read) and records them in
+state.json's verify (without path and for), so an expert updated in the middle of a
+change shows in the record. JSON "notices" ([] when none): tools.unmatched for a tools:
+entry the change does not list whose paths: a file the change's commits touched since
+base_sha matches (the development folder and _apex/state left out), or whose touches:
+the change's names (`+"`ape change check --help`"+`); a notice never changes the outcome.
+
 All checks exit 0 → status verified (a reviewed change whose work has not moved
 since its review stays reviewed), state.json committed. Any red → the failing checks' last
 lines are printed. Green at baseline: the change's own checks (tasks, delta scenarios) that
@@ -699,6 +728,8 @@ func renderVerify(cmd *cobra.Command, f *v1Flags, id string, res *apexv1.VerifyR
 		}
 		printGreenAtBaseline(w, res.GreenAtBaseline)
 		printStrays(w, res.StrayFiles, res.StraysKept)
+		printAdvise(w, res.Advise)
+		printNotices(cmd.ErrOrStderr(), res.Notices)
 	}
 	if err != nil {
 		// The attempts cap blocked the change: the red results first.
@@ -720,6 +751,19 @@ func renderVerify(cmd *cobra.Command, f *v1Flags, id string, res *apexv1.VerifyR
 		return v1Fail(cmd, f, &apexv1.FailError{Code: "verify.red", Msg: msg}, res)
 	}
 	return v1Emit(cmd.OutOrStdout(), f, res, human)
+}
+
+// printAdvise lists the advise files a verify hashed (W6): what the
+// change was built under, as state.json records it.
+func printAdvise(w io.Writer, files []apexv1.AdviseFile) {
+	for i := range files {
+		af := &files[i]
+		if af.Error != "" {
+			fmt.Fprintf(w, "advise %s: %s\n", af.Name, af.Error)
+			continue
+		}
+		fmt.Fprintf(w, "advise %s: %s  %d bytes  sha256 %.12s\n", af.Name, af.File, af.Bytes, af.SHA256)
+	}
 }
 
 // printDocsOnly says verify skipped the regression command for a

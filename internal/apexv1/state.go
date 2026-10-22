@@ -136,6 +136,10 @@ type Verify struct {
 	Regression *RegressionVerdict `json:"regression,omitempty"`
 	// LiveSkipped counts the live scenarios it did not run (W2 Part 2).
 	LiveSkipped int `json:"live_skipped,omitempty"`
+	// Advise is the change's advise files as this verify found them (W6,
+	// Q-E11): {name, skill, file, bytes, sha256}, so an expert updated in
+	// the middle of a change shows in the record.
+	Advise []AdviseFile `json:"advise,omitempty"`
 }
 
 // Approval records a person approving a tweak — a change with

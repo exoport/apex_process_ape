@@ -47,6 +47,10 @@ const (
 	// CapArchitectureMD caps development/architecture.md (D84), which is
 	// optional: absent, nothing is measured.
 	CapArchitectureMD = "architecture_md"
+	// CapAdvise caps one tools.advise entry's files, CapAdviseSession the
+	// advise files one session of a change reads (W6, Q-E1, Q-E5).
+	CapAdvise        = "advise"
+	CapAdviseSession = "advise_session"
 )
 
 // CodeCapsOverCeiling: a caps: value above its hard ceiling.
@@ -68,6 +72,8 @@ var capDefs = []capDef{
 	{CapSpec, "a capability's spec.md", 24 << 10, 64 << 10, func(c *Caps) *int { return &c.Spec }},
 	{CapEvidenceLog, "one check's output in its evidence file", 1 << 20, 16 << 20, func(c *Caps) *int { return &c.EvidenceLog }},
 	{CapArchitectureMD, "architecture.md", 16 << 10, 48 << 10, func(c *Caps) *int { return &c.ArchitectureMD }},
+	{CapAdvise, "one tools.advise entry's load: files", 8 << 10, 16 << 10, func(c *Caps) *int { return &c.Advise }},
+	{CapAdviseSession, "the advise files one session reads", 16 << 10, 32 << 10, func(c *Caps) *int { return &c.AdviseSession }},
 }
 
 // Caps is caps:, in bytes: as configured (0 is unset), or, from Limits,
@@ -80,6 +86,8 @@ type Caps struct {
 	Spec           int `json:"spec"`
 	EvidenceLog    int `json:"evidence_log"`
 	ArchitectureMD int `json:"architecture_md"`
+	Advise         int `json:"advise"`
+	AdviseSession  int `json:"advise_session"`
 }
 
 // UnmarshalYAML parses and validates the block: a key ape does not know,

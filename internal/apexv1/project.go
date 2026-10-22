@@ -236,7 +236,7 @@ func (p *Project) Check() []Finding {
 		// The tree checked out is what is checked: a change held only
 		// by its branch (D38) is checked there.
 		if dirExists(p.ChangeDir(c.ID)) {
-			add(p.checkChange(c.ID, false)...)
+			add(p.checkChange(context.Background(), c.ID, false)...)
 		}
 	}
 	return out

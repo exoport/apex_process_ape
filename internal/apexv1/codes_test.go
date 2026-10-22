@@ -29,6 +29,8 @@ var noticeCodes = []string{
 	CodeConfigUnknownTopKey, CodeDecisionPlaceholderAccepted,
 	// v1.1 W2.
 	CodeRegressionSlow, CodeChecksDuplicateRun, CodeCheckLiveSuggested,
+	// v1.1 W6: change check's and verify's notice.
+	CodeToolsUnmatched,
 }
 
 // The published list and the code agree: every code the source sets or a
@@ -105,6 +107,8 @@ func TestDiagnosticCodes_PublishedListMatchesTheCode(t *testing.T) {
 		// v1.1 W2.
 		"CodeGateSpecRed": CodeGateSpecRed, "CodeRegressionSlow": CodeRegressionSlow,
 		"CodeChecksDuplicateRun": CodeChecksDuplicateRun, "CodeCheckLiveSuggested": CodeCheckLiveSuggested,
+		// v1.1 W6.
+		"CodeToolsUnmatched": CodeToolsUnmatched, "CodeToolsTooBig": CodeToolsTooBig, "CodePluginsUserScope": CodePluginsUserScope,
 	}
 	for _, glob := range []string{"*.go", filepath.Join("..", "apecmd", "v1_*.go")} {
 		files, err := filepath.Glob(glob)

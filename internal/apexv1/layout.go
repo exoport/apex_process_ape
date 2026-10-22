@@ -28,6 +28,20 @@ type Project struct {
 	Root string
 	// DevRel is the development folder relative to Root, slash-separated.
 	DevRel string
+	// live is the checkout a view (viewAt) was read from: its .claude/
+	// skills and its plugin installs are the ones a session meets, and a
+	// view holds only the development folder and _apex/. "" for the
+	// checkout itself.
+	live string
+}
+
+// liveRoot is the checkout whose .claude/ and plugin installs count:
+// the project's own root, or, for a view, the checkout it was read from.
+func (p *Project) liveRoot() string {
+	if p.live != "" {
+		return p.live
+	}
+	return p.Root
 }
 
 // Config is the minimal _apex/config.yaml v1 reads.
