@@ -162,7 +162,7 @@ limits:
 | `attempts_total` | integer ≥ 1 | 15 | Red verifies across the change's re-starts, since a person last answered it |
 | `replans` | integer ≥ 0 | 3 | Re-plans since a person last answered the change. The re-start past it blocks the change |
 | `consecutive_blocks` | integer ≥ 1 | 2 | Changes of a milestone blocked in a row. Past it no change of the milestone is planned or started, and `ape task apex-loop` is refused (`milestone.blocks-exceeded`) until a person re-approves the milestone |
-| `context_relay` | number, above 0 and at most 0.95 | 0.6 | The loop session's context fill at which its next child launch is refused and ape relays the loop to a fresh session (`session.relay`) |
+| `context_relay` | number, above 0 and at most 0.95 | 0.6 | The loop session's context fill at which its next child launch is refused and ape relays the loop to a fresh session (`session.relay`). Under 100,000 tokens of the loop's window it is the notice `limits.context-relay-low`: a fresh apex-loop session starts at about 46,000 tokens, so it would relay at once |
 | `relays` | integer ≥ 0 | 5 | Relays per loop run. The relay past it stops the run (`limits.relays`, exit 1, action person) |
 | `usage` | mapping | see below | The usage guard: what `ape task` does before it starts a session, given the plan's usage as the sessions ape launches last read it ([`ape usage`](cli.md#ape-usage)) |
 
@@ -315,6 +315,13 @@ configured path that does not exist (`docs.missing`), and `ape status --json` ca
 
 `tested` lists docs the project executes (doc-tests, tested examples). A change touching one is
 never docs-only, so verify runs its regression command. Not guarded.
+
+The block is not guarded, but it bounds what the default docs delegate may accept (see
+[`human_review`](#human_review)). So while no configured delegate exists and `human_review.docs`
+is not `person`, a `docs` block that a commit other than ape's changed and no person accepted, or
+that differs uncommitted from HEAD's, is the `ape project check` notice `docs.unaccepted` (action
+person): `ape change accept --delegate` refuses a docs change's task until a person runs
+`ape project accept-config --by <who>`.
 
 ## `evidence`
 

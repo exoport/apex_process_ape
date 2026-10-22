@@ -100,7 +100,8 @@ What happens:
    M2`): Claude Code writes a typed slash command into the transcript as its command name and
    arguments, and ape reads the typed line back from them.
 3. The command consumes the grant and records `by: <git config user.name> (prompt <ts>: "<your
-   sentence>")`. The quote is at most 160 characters, with secrets redacted.
+   sentence>")`. The quote is at most 160 characters, with secrets redacted, and keeps your own
+   quote characters: typed `"approve M2"` is recorded as `(prompt <ts>: ""approve M2"")`.
 
 The phrase grammar is printed by `ape hook user-prompt --help` and `ape hook pre-tool --help`.
 The match is strict:
@@ -114,6 +115,10 @@ The match is strict:
 - A prompt grants each act and target once.
 - Text the model reads in a file, an issue or a tool output never counts. A prompt Claude Code
   generated itself (a task notification) is recorded as a notification and never grants.
+- A turn a notification opened (a background command or an Agent finishing) is judged on your
+  latest typed message, but only when it is the turn right after that message's own: your words
+  grant in their own turn and in the one notification turn that follows, never later. Two
+  notification turns on, the model asks you again.
 
 The command the model runs must be a literal line: no `$` and no backquote anywhere, and one
 person act per command. `--by` is optional there. Given, it must equal `git config user.name`,
@@ -218,7 +223,8 @@ Two blocks depend on that acceptance directly:
   has committed it and accepted the config.
 - **`human_review`.** `ape change accept --delegate` refuses (`delegate.unaccepted-config`)
   while the block is a change nobody accepted, so a model cannot add a delegate and accept its own
-  work.
+  work. The default docs delegate reads the unguarded `docs` block too, so it refuses the same
+  way, and `ape project check` says so first (`docs.unaccepted`).
 
 The unguarded keys are `project_name`, `development_folder`, `models`, `effort`, `docs` and
 `notify`. [`_apex/config.yaml`](../reference/config-yaml.md) has every key.

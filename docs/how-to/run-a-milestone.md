@@ -102,6 +102,10 @@ never the `Status:` line alone. The record holds:
 | `base_sha` | HEAD at the first approval, the milestone's start. A re-approval keeps it. It is `APE_MILESTONE_BASE` for every gate run. |
 | `self_check` | The approval's red run: `at`, `sha`, `exit`, `secs`, `log`, `output_sha256`. |
 
+`ape milestone approve <M> --json` prints the milestone and this `self_check` beside it, so
+`"exit": 1` there shows the gate was recorded red without opening `milestones.json`. After a
+no-op approve it is the earlier approval's.
+
 `gate_own_files` freezes the files a gate reads, one level deep:
 
 - every file under the milestone's gate folders, `development/gates/<M>-*/`;
@@ -113,6 +117,13 @@ never the `Status:` line alone. The record holds:
   `scripts/m4.sh`).
 
 Never the files a gate checks elsewhere (`README.md`, `docs/`): those are the milestone's work.
+
+So a check list the gate reads must live with the gate. When an open milestone's gate script
+reads a file by an input redirection (`while read -r c; do …; done < scripts/checks/m1.checks`)
+and the file is none of the gate's own, `ape project check` gives the notice `gate.data-outside`:
+the approval does not record it, so an edit to it is no drift and no `change.touches-gate`. Move a
+check list into `development/gates/<M>-<slug>/` before the approval (for an approved milestone,
+with its next re-approval). A work product the gate only reads to check stays where it is.
 
 From approval on, a change that edits a recorded gate file or own file is refused at verify and
 archive with `change.touches-gate` (action `replan`). Only a person or apex-plan changes a gate.
@@ -148,7 +159,9 @@ The gate is green only when all of these pass:
 
 Each runs under its timeout tier (`timeouts.gate`, `timeouts.check`, `timeouts.regression`), and
 `--timeout` sets the max for all three. Files a run leaves outside `development/` are undone and
-reported as `stray_files`, with a copy under `_apex/state/strays/`.
+reported as `stray_files`, with a copy under `_apex/state/strays/`. Every check run, whether it
+undid anything or not, adds one line to `_apex/state/logs/strays.jsonl` (see
+[The guard while a check runs](../reference/hooks.md#while-a-check-runs)).
 
 The run goes to `_apex/state/logs/gate-<M>.json`, which git ignores and `ape status` shows. When
 the result differs from the recorded one (green or red), or is the first, `milestones.json` is

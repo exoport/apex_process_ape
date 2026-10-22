@@ -128,6 +128,18 @@ that window is not seen by the hook: it may be undone, and its copy is under `_a
 The check's marker, `_apex/state/runs/checking-*.json`, counts only while the process that wrote it
 lives (its pid and start time), so a check that crashed never blocks an edit.
 
+Every check run appends one line to `_apex/state/logs/strays.jsonl`, ignored by git, whether it
+undid anything or not:
+
+```json
+{"start":"2026-10-22T10:00:00Z","end":"2026-10-22T10:00:04Z","pid":4242,"verb":"change verify","scope":"add-wave","run_id":"…","check":"T1","cmd":"make test","log":"_apex/state/logs/add-wave/T1.log","exit":0,"dirty_before":1,"undone":["coverage.out"],"kept":"_apex/state/strays/20261022-100004-4242-a1b2c3"}
+```
+
+`undone` is `[]` when the cleanup undid nothing, and `dirty_before` counts the paths outside
+`development/` that were already dirty (and left alone). When an edit vanishes, the log says
+whether a check's cleanup ran then and what it undid. Past 1 MiB the log moves to
+`strays.jsonl.1`.
+
 ### Bash commands it denies
 
 | Command | Override |

@@ -320,6 +320,59 @@ The APEX v1.1 work (D327, D330, D333, D337), built on v1.0.0's docs.
   note, npm/Python/Cargo), [`library`](docs/reference/config-yaml.md#library);
   `ape project fence|package-check|check|init|lift --help` and `ape project codes`.
 
+### W8: the smalls (D224, D226, D234, A18, Q134, D319, RK-4, D392)
+
+- **`ape milestone approve --json` carries `self_check` (D224, class C):** beside the milestone,
+  the approval's gate run as `milestones.json` records it, `{at, sha, exit, secs, log,
+  output_sha256}`, so `"exit": 1` shows the gate was recorded red. After a no-op approve it is the
+  earlier approval's.
+- **The notice `limits.context-relay-low` (D226, class C):** from `ape project check`, and from
+  `ape project accept-config` (a `notice:` line on stderr; JSON `notices`, `[]` when none), when
+  `limits.context_relay` times the loop's context window is under 100,000 tokens. A fresh
+  apex-loop session starts at about 46,000, so such a loop relays at its first or second child
+  launch. The window is `models.apex-loop`'s model's, else the smallest window of the models the
+  family words name; an unknown window, which never relays, gives none. Exit 0, action person.
+- **A person act's record keeps the person's own quote characters (D234, class B):** typed
+  `"approve M2"` is recorded `(prompt <ts>: ""approve M2"")`, not `"'approve M2'"`. Found on the
+  way: a sentence holding a curly single quote (`It’s right: approve M2`, `‘approve M2’`) was
+  refused (`the session's transcript does not show the person typing it`), because the matcher
+  read it with straight quotes and looked for that in the transcript. It now grants.
+- **The notice `docs.unaccepted` (A18, class C):** from `ape project check` while the `docs`
+  block of `_apex/config.yaml` was changed by a commit that is not ape's and no person accepted,
+  or differs uncommitted from HEAD's, and the docs default delegate is on (no configured
+  delegate, `human_review.docs` not `person`). `docs` stays unguarded (no `config.changed`), but
+  the delegate refuses a docs change's task on it (`delegate.unaccepted-config`); the notice says
+  so before the task waits. Exit 0, action person.
+- **The E2 grant narrowed to its turn (Q134, class B):** a turn a notification opened is judged
+  on the person's latest typed prompt only when it is the turn right after that prompt's (by the
+  order `ape hook user-prompt` recorded them). A typed prompt grants in its own turn and the one
+  notification turn after it, never later; otherwise pre-tool denies, `… it is not the turn right
+  after the person's latest typed prompt (<ts>): a typed prompt grants in its own turn and in the
+  one notification turn that follows it, never later (Q134)`. A notification turn with no record
+  of its own is refused the same way. Unchanged: a typed slash command (Claude Code 2.1.299+
+  records the typed line before expanding it) grants in its own turn, and the long acts' attach
+  needs no grant.
+- **The notice `gate.data-outside` (D319, the D313a residual, class C):** from `ape project
+  check` when an open milestone's gate script reads a file by an input redirection
+  (`while read …; done < scripts/checks/m1.checks`) that is none of the gate's own files, so the
+  approval does not record it and an edit to it is no drift and no `change.touches-gate`. One
+  notice per file, on the script's line. A gate's check list moves into
+  `development/gates/<M>-<slug>/`. Exit 0, action person.
+- **`_apex/state/logs/strays.jsonl` (RK-4 watch, D298, class D):** every check run appends
+  `{start, end, pid, verb, scope, run_id, check, cmd, log, exit, dirty_before, undone, kept}`,
+  `undone: []` when the cleanup undid nothing, so a vanished edit can be traced to a check's
+  cleanup or cleared of one. Past 1 MiB it moves to `strays.jsonl.1`.
+- **`ape plugins status --outdated` names the latest tag for a branch `ref` (W6-F1, D392):** the
+  note, and so the human line, is `ref main is not a version tag; pin a tag to compare (latest
+  v0.2.0)`, as `--help` promised.
+- **Docs:** [person-acts.md](docs/explanation/person-acts.md) (the quote, the turn rule, the docs
+  delegate), [run-a-milestone.md](docs/how-to/run-a-milestone.md) (approve's `self_check`,
+  `gate.data-outside`), [hooks.md](docs/reference/hooks.md#while-a-check-runs) (`strays.jsonl`),
+  [config-yaml.md](docs/reference/config-yaml.md) (`context_relay`, `docs`),
+  [use-plugins-and-tools.md](docs/how-to/use-plugins-and-tools.md#see-what-is-newer);
+  `ape milestone approve|project check|project accept-config|change verify|hook pre-tool|plugins
+  status --help` and `ape project codes`.
+
 ## v1.0.0 (2026-10-22)
 
 APEX v1: ape runs the framework's v1 loop and owns every record in it.

@@ -2234,7 +2234,10 @@ changed — is undone after it and reported (JSON "stray_files"); files that wer
 before it ran are never touched. A copy of each undone file, as it was when the check
 ended, is kept under _apex/state/strays/ (JSON "strays_kept"): git cannot tell a check's
 litter from another writer's edit made while it ran. While a check runs, ape hook pre-tool
-denies an Edit/Write that its cleanup would undo (Q144). A red scenario of the lasting spec whose check names
+denies an Edit/Write that its cleanup would undo (Q144). Every check run appends one line
+to _apex/state/logs/strays.jsonl — {start, end, pid, verb, scope, run_id, check, cmd, log,
+exit, dirty_before, undone, kept}, undone [] when nothing — so an edit that vanishes can be
+traced to a cleanup, or cleared of one (RK-4; strays.jsonl.1 past 1 MiB). A red scenario of the lasting spec whose check names
 what `ape decision standard` removed says so on its line and in results[].stale_names
 (D232; see `ape decision standard --help`).
 With "regression: <cmd>" in _apex/config.yaml (with tiers, its change tier), the
@@ -3756,7 +3759,9 @@ A Bash command that runs one is allowed only when the prompt that opened this tu
 tool call's prompt_id is the prompt's — is recorded by `ape hook user-prompt`, the
 session's transcript holds the person's user message with that promptId and the same
 words (its origin.kind "human": a turn a notification opened is judged on the person's
-latest typed prompt, D238), and the phrase is there: its words in order, the target exact (M2, T3, the change
+latest typed prompt, D238 — only when it is the turn right after that prompt's: a typed
+prompt grants in its own turn and the one notification turn that follows, never later,
+Q134), and the phrase is there: its words in order, the target exact (M2, T3, the change
 id, ADR-0012; case aside), no negation word (not, no, never, don't and every n't, wait,
 hold, stop, cannot, nope) before them in their sentence nor among the three words after the
 target, and the sentence not a question; for an answer, the --text itself after the target.
@@ -3766,7 +3771,8 @@ each act and target once. The command line is normalised — the verb, its argum
 every flag set but --cwd, --json, --wait and --no-detach, as --name=value, sorted — and
 must be literal (no $ or backquote anywhere), one person act per command. The command
 consumes the grant and records by: <git config user.name> (prompt <ts>: "<the sentence,
-at most 160 characters, secrets redacted>"); a --by there must be git config user.name
+at most 160 characters, secrets redacted, with the person's own quote characters: typed
+"approve M2" is recorded ""approve M2"">"); a --by there must be git config user.name
 (else session.by-mismatch). Without a grant it is refused, session.person-only, naming the
 phrase; pre-tool denies it first, saying why. A `!` line fires no hook, so it can never be
 granted. In a session ape launched (APE_SESSION) nothing is recorded or granted.
@@ -4120,6 +4126,11 @@ git config user.name (else session.by-mismatch, exit 1), and the record's by is
 "<user.name> (prompt <ts>: \"<the person's words>\")". The run lock records the act
 (person_act): running the same command again while it runs (exit 75), or before its result
 is printed, attaches with no new grant; another run on the milestone is run.busy.
+
+JSON: the milestone {id, title, line, status, status_text, gate, budget, goal,
+out_of_scope, approved_at}, and self_check — the gate's run at the approval on record, as
+_apex/state/milestones.json holds it ({at, sha, exit, secs, log, output_sha256}; D224), so
+"exit": 1 shows the gate was recorded red; on a no-op it is the earlier approval's.
 
 Exit codes: 0 ok · 1 no such milestone, done, malformed (Gate/Goal missing), the gate green
 or broken, HEAD on a change branch, or session.by-mismatch · 2 usage, or a model session
@@ -4650,9 +4661,11 @@ release tags of its repository newer than its ref (git ls-remote --tags; a githu
 marketplace is read from https://github.com/<repo>.git, a git one from its url; a tag
 counts when it is a version, v1.2.0 or 1.2.0, pre-releases left out), newest first:
 "market  <name>  ref <ref>  newer: <tags>", or "up to date (latest <tag>)". A ref that
-is not a version (a branch, none) has a note naming the latest tag instead; a
-directory marketplace has no tags; a repository that cannot be read says why. Nothing
-is fetched, installed or written: bumping ref: is a person's change to the config.
+is not a version has a note naming the latest tag instead: a branch "ref <ref> is not a
+version tag; pin a tag to compare (latest <tag>)", none "no ref: the marketplace
+follows its default branch; pin a tag (ref: <tag>) to compare"; a directory
+marketplace has no tags; a repository that cannot be read says why. Nothing is
+fetched, installed or written: bumping ref: is a person's change to the config.
 
 JSON: {"installs_checked", "plugins": [{"id", "ref", "installed", "version", "at_ref",
 "enabled", "install_path", "skills", "model_invocable", "hooks", "mcp", "allow",
@@ -4778,6 +4791,11 @@ unless, in the person's own Claude Code session, the person typed "accept the co
 this turn (E2: `ape hook pre-tool --help`; --by is then git config user.name, recorded with
 the prompt; another --by is session.by-mismatch, exit 1).
 Refused on a change branch, and with staged changes in the index.
+
+A limits.context_relay that relays the loop under 100000 tokens of its window — a fresh
+apex-loop session starts at about 46000, so it would relay at once (D226) — is accepted
+all the same, with the notice limits.context-relay-low ("notice: …" on stderr; JSON
+"notices", [] when none), as `ape project check` gives it.
 
 Exit codes: 0 accepted (prints the commit) · 1 HEAD on a change branch, staged changes, or
 git failed · 2 usage, or a model session.
@@ -5081,6 +5099,28 @@ line}; [] when none, beside the findings on a failure too), they never change th
                            (`require <root> v0.0.0` + `replace <root> => ../` for the root
                            module's packages) and go.sum, run as
                            `GOWORK=off go -C development run ./gates/<x>` (W7)
+  docs.unaccepted          _apex/config.yaml's docs block was changed by a commit that is
+                           not ape's and no person accepted, or differs uncommitted from
+                           HEAD's, while the docs delegate is on (no configured delegate,
+                           human_review.docs not person): docs is not guarded, but it
+                           bounds that delegate, which refuses a docs change's human-review
+                           task until a person accepts it (delegate.unaccepted-config):
+                           `ape project accept-config --by <who>`, or revert it (A18, W8)
+  limits.context-relay-low limits.context_relay times the loop's context window
+                           (models.apex-loop's model, else the smallest window of the
+                           models the family words name) is under 100000 tokens: a fresh
+                           apex-loop session starts at about 46000, so the loop would
+                           relay at its first or second child launch and spend
+                           limits.relays without work (D226, W8); a person raises it
+  gate.data-outside        an open milestone's gate script reads a file by an input
+                           redirection (`while read …; done < scripts/checks/m1.checks`)
+                           that is none of the gate's own files (its gate folders,
+                           development/gates/lib/, what it sources, a literal path under
+                           its own non-root, non-development folder), so the approval
+                           does not record it: an edit to it is no gate drift and no
+                           change.touches-gate (D313a). A gate's own check list moves
+                           into development/gates/<M>-<slug>/ (approved: with its next
+                           re-approval); a work product the gate checks stays (D319, W8)
 The gate's per-scenario run times these read are in _apex/state/logs/gate-<M>.json.
 
 Exit codes: 0 green · 1 findings (listed on stderr, or under "findings" with --json) · 2 usage.

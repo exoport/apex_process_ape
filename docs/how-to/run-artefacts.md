@@ -18,7 +18,7 @@ touches it. `ape project init` creates it.
 ├── project.json          ← ignored: init's record (initialized_at, brownfield, base_sha)
 ├── attempts.json         ← ignored: red verifies per change
 ├── limit-stops.json      ← ignored: sessions stopped at a limit, per milestone
-├── logs/                 ← ignored: check output (logs/<change-id>/, gate-<M>-approve.log)
+├── logs/                 ← ignored: check output (logs/<change-id>/, gate-<M>-approve.log), strays.jsonl
 ├── hooks/                ← ignored: the Stop hook's per-session verdicts and logs
 ├── strays/               ← ignored: copies of files a check left behind and ape undid
 ├── prompts/              ← ignored: the person's typed prompts, which person acts typed in Claude Code (E2) are granted on
