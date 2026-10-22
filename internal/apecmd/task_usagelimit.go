@@ -6,8 +6,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/exoport/apex_process_ape/internal/claudeprobe"
 	"github.com/exoport/apex_process_ape/internal/pipeline"
 	"github.com/exoport/apex_process_ape/internal/repl"
+	"github.com/exoport/apex_process_ape/internal/usage"
 )
 
 // usageLimitWatch ends an `ape task` session that a claude.ai plan's usage
@@ -19,8 +21,13 @@ import (
 // termination usage_limit with the reset).
 //
 // Unmeasured live: the line is Claude Code 2.1.302's template
-// (repl.ParseUsageLimit), not a captured screen.
+// (repl.ParseUsageLimit), not a captured screen — which is why the first
+// real one per Claude Code version is kept (keepScreen, W4-A3).
 type usageLimitWatch struct {
+	// claudeBin is the claude the session runs ("" is claude on PATH):
+	// its version names the kept limit screen (W4-A3).
+	claudeBin string
+
 	mu  sync.Mutex
 	hit *repl.UsageLimit
 }
@@ -32,6 +39,13 @@ var usageLimitPoll = 15 * time.Second
 
 // usageLimitPane reads a session's pane (a test seam).
 var usageLimitPane = repl.CapturePane
+
+// usageLimitRaw reads a session's last raw PTY bytes, and
+// usageLimitVersion the installed claude's version (test seams).
+var (
+	usageLimitRaw     = repl.RecentOutput
+	usageLimitVersion = claudeprobe.InstalledVersion
+)
 
 // run polls until ctx ends. session names the step's PTY session ("" before
 // one starts), lastHook is when the last hook arrived, stop fails the step.
@@ -68,7 +82,9 @@ func (w *usageLimitWatch) run(ctx context.Context, session func() string, lastHo
 		w.mu.Lock()
 		w.hit = &ul
 		w.mu.Unlock()
-		err = usageLimitStop(ul)
+		lse := usageLimitStop(ul)
+		lse.Message += w.keepScreen(ctx, name)
+		err = lse
 		for {
 			stop(err)
 			select {
@@ -90,6 +106,32 @@ func usageLimitStop(ul repl.UsageLimit) *pipeline.LimitStopError {
 		msg += " — run it again after the limit resets"
 	}
 	return &pipeline.LimitStopError{Kind: pipeline.TerminationUsageLimit, Message: msg, Resets: ul.Resets, ResetsAt: ul.ResetsAt}
+}
+
+// keepScreen keeps the session's raw limit screen and the last usage
+// reading in the user cache (W4-A3: the first per Claude Code version), and
+// says where, for the stop's message; "" when nothing is kept.
+func (w *usageLimitWatch) keepScreen(ctx context.Context, session string) string {
+	raw := usageLimitRaw(session)
+	if len(raw) == 0 {
+		return ""
+	}
+	bin := w.claudeBin
+	if bin == "" {
+		bin = "claude"
+	}
+	path, reading, wrote, err := usage.SaveLimitScreen(usageLimitVersion(ctx, bin), raw, usage.Load())
+	if err != nil || path == "" {
+		return ""
+	}
+	msg := "; Claude Code's limit screen (raw PTY bytes): " + path
+	if !wrote {
+		msg += " (kept from the first limit on this Claude Code version)"
+	}
+	if reading != "" {
+		msg += ", the last usage reading before it: " + reading
+	}
+	return msg
 }
 
 // stopped is the limit line that stopped the session, or nil.

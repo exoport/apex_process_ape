@@ -224,7 +224,10 @@ reads with no hook between them ends the run (exit 14) with termination
 kind "usage_limit" in the run manifest, resets as printed and resets_at
 parsed; ` + "`ape status`" + ` shows it as the latest run ("stopped: usage-limit,
 resets <ts>"). Run again after the reset. Matched against Claude Code
-2.1.302's text, unmeasured live.
+2.1.302's text, unmeasured live: so the first limit screen per Claude Code
+version is kept, the raw PTY bytes in <user cache>/ape/claude-limit-<version>.bin
+and the last usage reading (ape usage) beside them in .json, and the stop's
+message names both (W4).
 
 Events and the notifier (H20, W3): in an APEX v1 project every run logs
 "run-end" in _apex/state/events.jsonl when it ends, attached or detached
@@ -803,7 +806,7 @@ func dispatchTaskOnce(ctx context.Context, o taskOptions, cfg runConfig) (taskRu
 	cfg.stopGate = newStopGateRecorder(o.projectRoot)
 	cfg.stopGate.inline = v1Launch != nil
 	// H20: a claude.ai usage limit ends the run when Claude Code draws it.
-	cfg.usageLimit = &usageLimitWatch{}
+	cfg.usageLimit = &usageLimitWatch{claudeBin: cfg.claudeBin}
 	// W4: the session's status line keeps this run's usage readings.
 	cfg.spawnSettings.usageKey = usage.NewKey()
 

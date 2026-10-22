@@ -159,3 +159,43 @@ func TestAgo(t *testing.T) {
 	require.Equal(t, "10 min", Minutes(10*time.Minute))
 	require.Equal(t, "1m30s", Minutes(90*time.Second))
 }
+
+// W4-A3: the first limit screen of a Claude Code version is kept, with the
+// last reading beside it; a second limit on the same version does not
+// overwrite it, and a new version gets its own.
+func TestSaveLimitScreen_FirstPerVersion(t *testing.T) {
+	TempCache(t)
+	last := &Reading{At: now, SevenDay: ptr(0.97)}
+	bin, js, wrote, err := SaveLimitScreen("2.1.306", []byte("\x1b[2Jfirst"), last)
+	require.NoError(t, err)
+	require.True(t, wrote)
+	require.Equal(t, filepath.Join(Dir(), "claude-limit-2.1.306.bin"), bin)
+	require.Equal(t, filepath.Join(Dir(), "claude-limit-2.1.306.json"), js)
+	data, err := os.ReadFile(js)
+	require.NoError(t, err)
+	require.Contains(t, string(data), `"seven_day": 0.97`)
+
+	bin2, js2, wrote, err := SaveLimitScreen("2.1.306", []byte("second"), &Reading{At: now.Add(time.Hour)})
+	require.NoError(t, err)
+	require.False(t, wrote)
+	require.Equal(t, bin, bin2)
+	require.Equal(t, js, js2)
+	got, err := os.ReadFile(bin)
+	require.NoError(t, err)
+	require.Equal(t, "\x1b[2Jfirst", string(got))
+
+	bin3, js3, wrote, err := SaveLimitScreen("2.1.307", []byte("third"), nil)
+	require.NoError(t, err)
+	require.True(t, wrote)
+	require.FileExists(t, bin3)
+	require.Empty(t, js3, "no reading, no .json")
+
+	bin4, _, wrote, err := SaveLimitScreen("", nil, nil)
+	require.NoError(t, err)
+	require.False(t, wrote)
+	require.Empty(t, bin4, "no bytes, nothing kept")
+	b, _ := LimitScreenPaths("../x")
+	require.Equal(t, Dir(), filepath.Dir(b))
+}
+
+func ptr(v float64) *float64 { return &v }

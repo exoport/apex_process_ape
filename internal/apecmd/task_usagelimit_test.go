@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/exoport/apex_process_ape/internal/apexv1"
 	"github.com/exoport/apex_process_ape/internal/pipeline"
 	"github.com/exoport/apex_process_ape/internal/runlog"
+	"github.com/exoport/apex_process_ape/internal/usage"
 	"github.com/stretchr/testify/require"
 )
 
@@ -59,6 +61,66 @@ func TestUsageLimitWatch_StopsOnTheLimitLine(t *testing.T) {
 	require.Contains(t, lse.Message, "run it again after the limit resets")
 	require.Equal(t, ExitUsageLimit, taskExitCode(fmt.Errorf("stage x: %w", err)))
 	require.NotNil(t, w.stopped())
+}
+
+// stopOnce runs a usage-limit watch on limitPane until its first stop.
+func stopOnce(t *testing.T) *pipeline.LimitStopError {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	got := make(chan error, 1)
+	w := &usageLimitWatch{claudeBin: "/stub/claude"}
+	go w.run(ctx, func() string { return "s" }, func() time.Time { return time.Time{} }, func(err error) {
+		select {
+		case got <- err:
+		default:
+		}
+	})
+	select {
+	case err := <-got:
+		cancel()
+		lse, ok := errors.AsType[*pipeline.LimitStopError](err)
+		require.True(t, ok)
+		return lse
+	case <-ctx.Done():
+		t.Fatal("no stop")
+		return nil
+	}
+}
+
+// W4-A3: the first limit screen per Claude Code version is kept in the
+// user cache — the raw PTY bytes, and the last usage reading beside them —
+// and the stop's message says where; a second limit on the same version
+// keeps the first.
+func TestUsageLimitWatch_KeepsTheFirstScreenPerVersion(t *testing.T) {
+	usageTempCache(t)
+	fastUsageLimitPoll(t, func() string { return limitPane })
+	raw, ver := usageLimitRaw, usageLimitVersion
+	screen := []byte("\x1b[?2026h\x1b[2J  ⎿  You've hit your usage limit · resets 11pm (Europe/Madrid)\r\n")
+	usageLimitRaw = func(string) []byte { return screen }
+	var asked string
+	usageLimitVersion = func(_ context.Context, bin string) string { asked = bin; return "2.1.306" }
+	t.Cleanup(func() { usageLimitRaw, usageLimitVersion = raw, ver })
+	runUsageRecord(strings.NewReader(statuslineJSON(97, 80)), &strings.Builder{}, "")
+
+	lse := stopOnce(t)
+	require.Equal(t, "/stub/claude", asked)
+	bin, js := usage.LimitScreenPaths("2.1.306")
+	require.Contains(t, lse.Message, "Claude Code's limit screen (raw PTY bytes): "+bin)
+	require.Contains(t, lse.Message, "the last usage reading before it: "+js)
+	got, err := os.ReadFile(bin)
+	require.NoError(t, err)
+	require.Equal(t, screen, got)
+	reading, err := os.ReadFile(js)
+	require.NoError(t, err)
+	require.Contains(t, string(reading), `"five_hour": 0.97`)
+
+	usageLimitRaw = func(string) []byte { return []byte("a later screen") }
+	lse = stopOnce(t)
+	require.Contains(t, lse.Message, "(kept from the first limit on this Claude Code version)")
+	got, err = os.ReadFile(bin)
+	require.NoError(t, err)
+	require.Equal(t, screen, got, "the first screen per version stays")
 }
 
 // A session still sending hooks is not stopped, whatever its pane shows;
