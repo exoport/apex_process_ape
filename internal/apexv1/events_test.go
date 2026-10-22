@@ -189,3 +189,18 @@ func TestEmit_TornLineIsSkipped(t *testing.T) {
 	require.EqualValues(t, 2, ev.Seq)
 	requireGapless(t, eventsOf(t, p), 2)
 }
+
+// An event line is written without HTML escaping: the action a person
+// types keeps its <, > and & as they are.
+func TestEmit_LineIsNotHTMLEscaped(t *testing.T) {
+	p := fixture(t, baseFiles())
+	p.Emit(ctx(), Event{Event: EventPerson, Change: "c-w3", Action: "ape answer c-w3: <answer>", Reason: "a & b"}, nil)
+	raw := read(t, p, "_apex/state/events.jsonl")
+	require.Contains(t, raw, `"action":"ape answer c-w3: <answer>"`)
+	require.Contains(t, raw, `"reason":"a & b"`)
+	require.NotContains(t, raw, `\u003c`)
+	require.True(t, strings.HasSuffix(raw, "}\n"), "one line, one newline: %q", raw)
+	evs := eventsOf(t, p)
+	requireGapless(t, evs, 1)
+	require.Equal(t, "ape answer c-w3: <answer>", evs[0].Action)
+}

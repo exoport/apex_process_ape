@@ -145,18 +145,31 @@ func (p *Project) appendEventsLocked(evs []Event) ([]Event, error) {
 		ev := evs[i]
 		seq++
 		ev.Seq, ev.At = seq, Stamp()
-		line, err := json.Marshal(ev)
+		line, err := marshalEventLine(ev)
 		if err != nil {
 			return nil, err
 		}
 		buf.Write(line)
-		buf.WriteByte('\n')
 		out[i] = ev
 	}
 	if _, err := f.Write(buf.Bytes()); err != nil {
 		return nil, err
 	}
 	return out, nil
+}
+
+// marshalEventLine is ev as one log line, newline included. json.Marshal
+// escapes <, > and & for HTML, which turned the action a person types
+// ("ape answer c-w3: <answer>") into \u003canswer\u003e for every reader of
+// the log and every notifier that prints the line.
+func marshalEventLine(ev Event) ([]byte, error) {
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(ev); err != nil {
+		return nil, err
+	}
+	return b.Bytes(), nil
 }
 
 func endsWithNewline(path string, size int64) bool {
