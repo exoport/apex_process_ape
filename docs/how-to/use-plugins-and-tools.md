@@ -369,6 +369,12 @@ market  experts  ref v0.1.0  up to date (latest v0.1.0)
 
 A newer tag shows as `newer: v0.2.0`. A tag counts when it is a version (`v1.2.0` or `1.2.0`);
 pre-releases are left out. A marketplace with no `ref`, or one on a branch, gets a note naming its
-latest tag instead, and a directory marketplace has none. With `--json` they are under `outdated`:
-`[{marketplace, source, ref, latest, newer, note, error}]`. Bumping `ref` is a guarded change to
-[accept](#accept-the-change).
+latest tag instead, and a directory marketplace has none:
+
+```text
+market  experts  ref main  ref main is not a version tag; pin a tag to compare (latest v0.2.0)
+market  tools  ref (no ref)  no ref: the marketplace follows its default branch; pin a tag (ref: v0.2.0) to compare
+```
+
+With `--json` they are under `outdated`: `[{marketplace, source, ref, latest, newer, note,
+error}]`. Bumping `ref` is a guarded change to [accept](#accept-the-change).

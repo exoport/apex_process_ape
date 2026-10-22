@@ -255,9 +255,11 @@ release tags of its repository newer than its ref (git ls-remote --tags; a githu
 marketplace is read from https://github.com/<repo>.git, a git one from its url; a tag
 counts when it is a version, v1.2.0 or 1.2.0, pre-releases left out), newest first:
 "market  <name>  ref <ref>  newer: <tags>", or "up to date (latest <tag>)". A ref that
-is not a version (a branch, none) has a note naming the latest tag instead; a
-directory marketplace has no tags; a repository that cannot be read says why. Nothing
-is fetched, installed or written: bumping ref: is a person's change to the config.
+is not a version has a note naming the latest tag instead: a branch "ref <ref> is not a
+version tag; pin a tag to compare (latest <tag>)", none "no ref: the marketplace
+follows its default branch; pin a tag (ref: <tag>) to compare"; a directory
+marketplace has no tags; a repository that cannot be read says why. Nothing is
+fetched, installed or written: bumping ref: is a person's change to the config.
 
 JSON: {"installs_checked", "plugins": [{"id", "ref", "installed", "version", "at_ref",
 "enabled", "install_path", "skills", "model_invocable", "hooks", "mcp", "allow",

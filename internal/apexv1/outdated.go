@@ -145,7 +145,9 @@ func newerTags(tags []string, ref string) (latest string, newer []string, note s
 		if ref == "" {
 			return latest, newer, "no ref: the marketplace follows its default branch; pin a tag (ref: " + latest + ") to compare"
 		}
-		return latest, newer, "ref " + ref + " is not a version tag; pin a tag to compare"
+		// W6-F1 (D392): the note names the latest tag, as the no-ref one
+		// does — the human line shows the note instead of "latest".
+		return latest, newer, "ref " + ref + " is not a version tag; pin a tag to compare (latest " + latest + ")"
 	}
 	for _, x := range vs {
 		if semver.Compare(x.v, refV) > 0 {

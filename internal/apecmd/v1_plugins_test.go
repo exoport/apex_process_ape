@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/exoport/apex_process_ape/internal/apexv1"
 	"github.com/stretchr/testify/require"
 )
 
@@ -266,4 +267,15 @@ tools:
 	require.Equal(t, filepath.Join(skill, "advise.md"), st.Changes[0].Advise[0].Path)
 	require.Equal(t, []string{"apply"}, st.Changes[0].Advise[0].For)
 	require.Equal(t, 10, st.Changes[0].Advise[0].Bytes)
+}
+
+// W6-F1 (D392): a marketplace on a branch shows the note, which names the
+// latest tag, on its human line.
+func TestPrintOutdated_BranchRefNamesTheLatestTag(t *testing.T) {
+	var b strings.Builder
+	printOutdated(&b, []apexv1.MarketplaceTags{{
+		Marketplace: "experts", Source: "github", Ref: "main", Latest: "v0.2.0", Newer: []string{},
+		Note: "ref main is not a version tag; pin a tag to compare (latest v0.2.0)",
+	}})
+	require.Equal(t, "market  experts  ref main  ref main is not a version tag; pin a tag to compare (latest v0.2.0)\n", b.String())
 }

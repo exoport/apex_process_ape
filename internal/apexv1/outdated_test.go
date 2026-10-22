@@ -59,7 +59,7 @@ func TestOutdatedMarketplaces(t *testing.T) {
 	require.Equal(t, MarketplaceTags{Marketplace: "pinned", Source: "git", Ref: "v0.1.0", Latest: "0.10.0", Newer: []string{"0.10.0", "v0.2.0"}}, byName["pinned"])
 	require.Equal(t, []string{}, byName["latest"].Newer)
 	require.Empty(t, byName["latest"].Note)
-	require.Equal(t, "ref main is not a version tag; pin a tag to compare", byName["branch"].Note)
+	require.Equal(t, "ref main is not a version tag; pin a tag to compare (latest 0.10.0)", byName["branch"].Note)
 	require.Equal(t, "no ref: the marketplace follows its default branch; pin a tag (ref: 0.10.0) to compare", byName["free"].Note)
 	require.Equal(t, "a directory marketplace has no tags", byName["local"].Note)
 	require.True(t, strings.HasPrefix(byName["gone"].Error, "git ls-remote "), byName["gone"].Error)
