@@ -106,7 +106,11 @@ func TestTask_V1BudgetStopsTheSession(t *testing.T) {
 	ape := buildApe(t)
 	project, fake, env := budgetProject(t, ape)
 	setConfig(t, project, "limits:\n  budget: enforce\n")
-	require.NoError(t, exec.Command("git", "-C", project, "commit", "-qam", "enforce the budget").Run())
+	// The project's env carries the git identity: a runner has none of its own.
+	commit := exec.Command("git", "-C", project, "commit", "-qam", "enforce the budget")
+	commit.Env = env
+	commitOut, err := commit.CombinedOutput()
+	require.NoError(t, err, "%s", commitOut)
 
 	args := []string{"task", "apex-foo", "--idle-timeout", "60s", "--output-format", "json", "--cwd", project}
 	_, code := runApe(t, ape, project, env, args...)
