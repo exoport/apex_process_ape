@@ -23,6 +23,8 @@ func newProjectCmd() *cobra.Command {
 		newProjectArchiveLayoutCmd())
 	// rc.7 (rc7-rename).
 	cmd.AddCommand(newProjectOperatorInterfaceCmd())
+	// v1.1 W7.
+	cmd.AddCommand(newProjectFenceCmd(), newProjectPackageCheckCmd())
 	return cmd
 }
 
@@ -265,6 +267,16 @@ Scope (D45): v1.0: one operator per checkout, on a local trunk; PR mode comes la
 says so (JSON "scope"); change start and archive refuse while the base branch is behind its
 upstream (base.behind-upstream).
 
+A library (W7, D208): with a go.mod at the root and no main package (examples/, testdata/,
+generators built only with //go:build ignore and the development folder's gate programs
+do not count), and no library: key in _apex/config.yaml, init prints
+  suggest: add "library: true" to _apex/config.yaml if this is a library others download — …
+(JSON "suggest_library": {line, file, reason}) and never writes the key: a person decides.
+With library: true already in the config and a go.mod at the root, init writes the
+missing module fences (one go.mod in .claude/, _apex/ and the development folder, and a
+root evidence/ when there is one; JSON "fences") into its commit — see ape project fence
+--help.
+
 --brownfield adds nothing; it records in _apex/state/project.json (ignored) that the
 project existed before APEX.
 
@@ -336,6 +348,10 @@ func newProjectInitCmd() *cobra.Command {
 					fmt.Fprintln(w, "amended  "+a+" ("+note+")")
 				}
 				printInitHooks(w, res)
+				// W7: init never sets library: true; it suggests it.
+				if sl := res.SuggestLibrary; sl != nil {
+					fmt.Fprintln(w, "suggest: "+sl.Text())
+				}
 				fmt.Fprint(w, pluginOut.String())
 				for _, warn := range res.Warnings {
 					fmt.Fprintln(cmd.ErrOrStderr(), "warning: "+warn)
@@ -555,6 +571,15 @@ func newProjectCheckCmd() *cobra.Command {
                            (tools.not-installed) and within caps.advise together
                            (tools.too-big, W6); a plugin skill is judged only when
                            claude is on PATH. See ape plugins --help
+  module fences            a library (_apex/config.yaml library: true) with a go.mod at
+                           the root has a go.mod fence in each APEX folder that exists —
+                           .claude/, _apex/, the development folder, a root evidence/ —
+                           committed (fence.missing: absent, or git does not track it),
+                           with the module line apex.invalid/fence/<folder> and the root
+                           go.mod's go line (fence.altered; its other lines are the
+                           project's); both action replan: ` + "`ape project fence`" + ` writes them
+                           (W7; see its --help). No library: true, or no root go.mod (a
+                           module in a subfolder), is no finding
 
 Notices (D155 Q73) are not findings: listed as "notice: <file>:<line>: …" lines on stderr
 and under "notices" with --json ({severity: "notice", code, message, fix, action, file,
@@ -616,6 +641,16 @@ line}; [] when none, beside the findings on a failure too), they never change th
   check.live-suggested     (action replan) a scenario check that is not live ran over a
                            minute at the last gate: mark it ` + "`- check (live): <cmd>`" + ` if it
                            needs something live (W2; see ape change verify --help)
+  gate.root-module-change  (action replan) a library's gate program (Go files under
+                           development/gates/) imports a package its module does not
+                           provide — not the standard library's, the module's own, or a
+                           required module's: from the root module, running it changes
+                           the root go.mod and go.sum, which never change for a gate
+                           (D207); from the development fence, the fence lacks the
+                           require. Its module is the fence with its own require lines
+                           (` + "`require <root> v0.0.0`" + ` + ` + "`replace <root> => ../`" + ` for the root
+                           module's packages) and go.sum, run as
+                           ` + "`GOWORK=off go -C development run ./gates/<x>`" + ` (W7)
 The gate's per-scenario run times these read are in _apex/state/logs/gate-<M>.json.
 
 Exit codes: 0 green · 1 findings (listed on stderr, or under "findings" with --json) · 2 usage.`,

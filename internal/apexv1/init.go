@@ -70,6 +70,13 @@ type InitResult struct {
 	// would hide every finding before it, so only a person makes one
 	// after the first. The session's own commit may take them.
 	CommitWithheld []string `json:"commit_withheld,omitempty"`
+	// SuggestLibrary suggests library: true for a Go module with no main
+	// package and no library: key (W7, D208); init never sets it.
+	SuggestLibrary *LibrarySuggestion `json:"suggest_library,omitempty"`
+	// Fences are the module fences init wrote (W7): with library: true
+	// and a go.mod at the root, one per APEX folder that lacked it. Also
+	// in Created; committed with the rest.
+	Fences []string `json:"fences,omitempty"`
 }
 
 // initCommitWithheld is the warning init prints when it withholds its
@@ -435,7 +442,20 @@ func initSkeleton(ctx context.Context, root string, brownfield bool) (*InitResul
 	if err := p.initHooks(ctx, res); err != nil {
 		return nil, nil, err
 	}
-	return res, p, nil
+	err = p.initLibrary(ctx, res)
+	return res, p, err
+}
+
+// initLibrary is init's part of W7: with library: true, the missing
+// module fences (after the hooks, which make .claude/; staged, as the
+// .claude/ shape ignores .claude/go.mod); without the key, the
+// suggestion when the project looks like a Go library.
+func (p *Project) initLibrary(ctx context.Context, res *InitResult) error {
+	res.SuggestLibrary = SuggestLibrary(p.Root, p.DevRel)
+	fences, err := p.writeMissingFences(ctx)
+	res.Fences = fences
+	res.Created = append(res.Created, fences...)
+	return err
 }
 
 // initClaudeIgnore puts the .claude/ shape in the root .gitignore (D203):

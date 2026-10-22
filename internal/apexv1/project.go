@@ -165,6 +165,8 @@ func (p *Project) Check() []Finding {
 	add(p.hotFindings(context.Background())...)
 	add(p.provenanceFindings(context.Background())...)
 	add(p.capsConfig().OverCeiling()...)
+	// v1.1 W7: a library's module fences.
+	add(p.fenceFindings(context.Background())...)
 	caps := p.caps()
 
 	if doc, err := readFileString(p.ProjectMD()); err != nil {

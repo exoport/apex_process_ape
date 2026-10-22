@@ -130,6 +130,26 @@ const (
 	CodePluginsUserScope = "plugins.user-scope"
 )
 
+// v1.1 W7.
+const (
+	// CodeFenceMissing, CodeFenceAltered: project check's findings and
+	// `ape project fence --check`'s failure for a library's module fences
+	// (fence.go). CodeFenceUnreadable: the root go.mod (or a fence) cannot
+	// be read or parsed, so fence and its --check judge nothing (exit 2).
+	CodeFenceMissing    = "fence.missing"
+	CodeFenceAltered    = "fence.altered"
+	CodeFenceUnreadable = "fence.unreadable"
+	// CodePackageLeak: `ape project package-check` found APEX folders in
+	// a library's packed files; CodePackageUnchecked is its notice for a
+	// package it could not pack (packagecheck.go).
+	CodePackageLeak      = "library.package-leak"
+	CodePackageUnchecked = "library.package-unchecked"
+	// CodeGateRootModuleChange: project check's notice for a library's
+	// gate program that imports outside its module's requires
+	// (gaterule.go).
+	CodeGateRootModuleChange = "gate.root-module-change"
+)
+
 // CodeDoc documents one diagnostic code.
 type CodeDoc struct {
 	Code string `json:"code"`
@@ -476,5 +496,12 @@ var DiagnosticCodes = []CodeDoc{
 	{CodeChecksDuplicateRun, 0, "replan", "a notice, never a finding (project check's notices; the exit is unchanged): two or more scenario checks of the spec start with the same command (up to the first top-level && or |) and differ after it, and each ran over a minute at the last gate (W2) — so every gate runs that command once per check, which ape does not memoize; the notice names the scenarios and their time per gate: apex-plan gives the command one scenario and has the others check what it leaves under development/, or merges them"},
 	{CodeCheckBadKind, 1, "replan", "a check line's kind is not `live` — `check (<kind>):` takes one kind, `- check (live): <command>` (W2) — or is live on human-review or on nothing, or sits on a `regression:` task: ape cannot tell how to run it; write `check (live): <command>` for a check that needs something live, else a plain `check:`"},
 	{CodeCheckLiveSuggested, 0, "replan", "a notice, never a finding (project check's notices; the exit is unchanged): a scenario check of the spec, not live, ran over a minute at the last gate (W2), and every verify of a change touching its capability runs it — if it needs something live (a service, a network, a long end-to-end run), apex-plan writes it `- check (live): <command>`: verify then runs it only for the change's own scenarios or when it was red at the last gate, and a gate whose Gate: command is red skips it"},
+	// v1.1 W7.
+	{CodeFenceMissing, 1, "replan", "a library (_apex/config.yaml library: true) with a go.mod at the root lacks a module fence (W7, D207): an APEX folder that exists — .claude/, _apex/, the development folder, a root evidence/ — has no go.mod, or git does not track it (the module zip is built from git), so the library's module zip carries the folder (project check, and `ape project fence --check`, the check of a framework migration that runs it: exit 1, not applied) — `ape project fence` writes and commits it"},
+	{CodeFenceAltered, 1, "replan", "a library's module fence (<folder>/go.mod) has a module line other than apex.invalid/fence/<folder>, or a go line other than the root go.mod's (W7), or does not parse — `ape project fence` restores the module and go lines and keeps every other line (a gate's require and replace); one that does not parse a person fixes or deletes (ape does not overwrite it)"},
+	{CodeFenceUnreadable, 2, "person", "`ape project fence` (and --check): the root go.mod, or a fence, cannot be read or does not parse, so nothing can be judged — exit 2, which a migration's check reads as the check itself failing (W7); fix the file"},
+	{CodePackageLeak, 1, "replan", "`ape project package-check` (W7): a library's packed files hold paths under an APEX folder (.claude/, _apex/, the development folder, evidence/) — the Go module zip at HEAD (built with golang.org/x/mod/zip; at the root, or a subfolder module's), npm pack --dry-run, the Python sdist and wheel, or cargo package --list; the finding names the first 20 and counts them: a Go library runs `ape project fence` and commits (or moves its module into a subfolder), the others exclude the folders in their manifest (package.json files, MANIFEST.in or the build backend's excludes, Cargo.toml exclude); apex-release refuses to release on it"},
+	{CodePackageUnchecked, 0, "person", "a notice, never a finding (`ape project package-check`'s notices; the exit is unchanged): a library's package was not checked (W7) — the packaging tool is not on PATH (npm, python3 with the build module, cargo) or failed, HEAD has no commit for the Go module zip, or the project has no manifest ape knows (go.mod, package.json, pyproject.toml or setup.py, Cargo.toml); never a silent pass: install the tool and run it again, or check the package by hand; apex-release states it in its reply"},
+	{CodeGateRootModuleChange, 0, "replan", "a notice, never a finding (project check's notices; the exit is unchanged): a library's gate program (Go files under <dev>/gates/) imports a package its module does not provide (W7, D207) — not the standard library, not that module's own, and not a module its go.mod requires: run from the root module, it needs the root go.mod and go.sum changed, which never change for a gate; from a fence, the fence lacks the require — the gate's module is its fence (<dev>/go.mod) with `require` lines, `require <root module> v0.0.0` + `replace <root module> => ../` for the root module's packages, and its own go.sum, run as `GOWORK=off go -C <dev> run ./gates/<x>`"},
 	{UnclassifiedFinding, 1, "stop", "a finding no rule classifies (a bug: report it)"},
 }

@@ -206,6 +206,15 @@ type LiftResult struct {
 	// "apex: lift regression verdict". Absent when no regression ran: the
 	// lift commit's disposition file says why.
 	RegressionCommit string `json:"regression_commit,omitempty"`
+	// SuggestLibrary suggests library: true when the v0 config has no
+	// library: key and the project looks like a Go library (W7, D208);
+	// the lift never sets it.
+	SuggestLibrary *LibrarySuggestion `json:"suggest_library,omitempty"`
+	// Fences are the module fences the lift writes into its commit (a dry
+	// run: would write) when the v0 config says library: true, which the
+	// v1 config keeps (W7): one per APEX folder, a root evidence/
+	// included.
+	Fences []string `json:"fences,omitempty"`
 }
 
 // LiftRegressionRecord is the lift's regression verdict as recorded
@@ -332,6 +341,9 @@ type lifter struct {
 	rw           *adrRewriter
 	// std is the standard ADR-0001 the lift writes (D205 Q119).
 	std installedStandard
+	// library is the v0 config's library: true (W7), kept in the v1
+	// config.
+	library bool
 	// tagRuns are the regression command's runs at the tag, one per
 	// command of a split chain (R12), and tagLogs their logs, outside the
 	// tree until the lift's state folder exists.
@@ -386,6 +398,7 @@ func Lift(ctx context.Context, root string, opt LiftOptions) (*LiftResult, error
 	if r := lf.rel(lf.layout.Cfg.Paths.Development); r != "" {
 		lf.devRel = r
 	}
+	lf.library = configLibraryTrue(abs)
 	lf.res.Version, lf.res.VersionSource = lf.layout.Version, lf.layout.VersionSource
 	for _, fe := range lf.preflight() {
 		if !opt.DryRun {
@@ -915,6 +928,7 @@ func (lf *lifter) plan() error {
 		}
 	}
 	lf.writes[configYAML] = lf.v1Config()
+	lf.planFences()
 	lf.res.Candidates = lf.candidates()
 	lf.res.Readings = lf.readings()
 	lf.res.DanglingRefs = lf.dangling()
@@ -1087,7 +1101,45 @@ func (lf *lifter) v1Config() string {
 	if r := lf.res.Gates.Regression; r != "" {
 		out += "regression: " + yamlString(r) + "\n"
 	}
+	// W7: a library stays one (D208); ape never adds the key.
+	if lf.library {
+		out += LibraryKey + "\n"
+	}
 	return out + modelDefaultsYAML
+}
+
+// planFences reads the v0 config's library: key (W7): true is kept in the
+// v1 config and the lift writes the module fences (Fences, the would-be
+// list in a dry run: .claude/, _apex/ and the development folder, which
+// the lift makes, and a root evidence/ when the tag has one); absent, a
+// project that looks like a Go library gets the suggestion. Fences need a
+// go.mod at the root.
+func (lf *lifter) planFences() {
+	lf.res.SuggestLibrary = SuggestLibrary(lf.root, lf.devRel)
+	if !lf.library || !fileExists(filepath.Join(lf.root, "go.mod")) {
+		return
+	}
+	for _, f := range (&Project{Root: lf.root, DevRel: lf.devRel}).ApexFolders() {
+		if f != EvidenceFolder || dirExists(filepath.Join(lf.root, f)) {
+			lf.res.Fences = append(lf.res.Fences, f+"/go.mod")
+		}
+	}
+}
+
+// configLibraryTrue reports a top-level library: true in the config at
+// root, read as YAML whatever else the file holds (a v0 config).
+func configLibraryTrue(root string) bool {
+	n := configRoot(root)
+	if n == nil {
+		return false
+	}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if n.Content[i].Value == "library" {
+			var v bool
+			return n.Content[i+1].Decode(&v) == nil && v
+		}
+	}
+	return false
 }
 
 // yamlString renders s as a YAML scalar, quoted only when it must be.
@@ -1227,6 +1279,9 @@ func (lf *lifter) apply() error {
 		lf.res.GitIgnore = gi
 	}
 	commit = append(commit, p.initCommitPaths(ctx, initRes)...)
+	// W7: the module fences initSkeleton wrote (library: true), staged
+	// already (-f: the .claude/ shape ignores .claude/go.mod).
+	lf.res.Fences = initRes.Fences
 	if doc, err := readFileString(p.AgentsMD()); err == nil {
 		// A13: the lifted project's AGENTS.md names the operator's
 		// interface, as init's skeleton does, so nothing of seq-07 is left.

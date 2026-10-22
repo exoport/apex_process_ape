@@ -156,6 +156,13 @@ The commit:
                  the secret scan, when the repository has none (an existing one is
                  kept; the output's "git hook" line says which; see ape hook
                  pre-commit --help)
+  fences         a library's module fences (W7): when the v0 _apex/config.yaml says
+                 library: true, the v1 config keeps the line and, with a go.mod at the
+                 root, the lift commit holds a go.mod fence in .claude/, _apex/, the
+                 development folder and v0's root evidence/ (JSON "fences"; a dry run
+                 lists them) — see ape project fence --help. Without the key, a Go
+                 module with no main package gets the suggestion (a "suggest" line,
+                 JSON "suggest_library"); the lift never sets it
   shapes         the root .gitignore's .claude/ rules (D203), as ape project init does:
                  .claude/*, !.claude/settings.json, !.claude/skills/, CLAUDE.local.md —
                  a whole-folder .claude ignore (pdfa's .claude/) rewritten in place, else
@@ -469,6 +476,13 @@ func printLift(w io.Writer, r *apexv1.LiftResult, regression bool) {
 		fmt.Fprintln(w, "gates     no ## Code Validation found: no commands, no regression")
 	}
 	fmt.Fprintf(w, "rules     %d binding-rule candidate(s) in %s\n", len(r.Candidates), r.Disposition)
+	// W7: a library's module fences, or the suggestion of the key.
+	for _, f := range r.Fences {
+		fmt.Fprintf(w, "%-9s %s  (module fence: the v0 config says library: true)\n", verb("fenced", "fence"), f)
+	}
+	if s := r.SuggestLibrary; s != nil {
+		fmt.Fprintln(w, "suggest   "+s.Text())
+	}
 	printLiftGitIgnore(w, r)
 	fmt.Fprintf(w, "report    %s: every list whole, ignored by git (the disposition file summarises them)\n", r.Report)
 	if r.DryRun {

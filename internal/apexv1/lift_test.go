@@ -750,3 +750,39 @@ func TestLift_DroppedImportsAreCandidates(t *testing.T) {
 		{"`@_apex/commit-owners.csv`: a file (1 line, 1 KB), imported by CLAUDE.md; the lift removes the import and the file. Read it at the tag: `git show apex-v0-final:_apex/commit-owners.csv`.", "CLAUDE.md:9", "Notes"},
 	}, got, "the kept @AGENTS.md import has no row")
 }
+
+// W7: a v0 config's library: true is kept, and the lift writes the
+// module fences into its commit — four with v0's root evidence/ (a dry
+// run lists them); without the key, a Go library gets the suggestion.
+func TestLift_LibraryFences(t *testing.T) {
+	root := liftFixture(t, false)
+	cfg := filepath.Join(root, "_apex", "config.yaml")
+	data, err := os.ReadFile(cfg)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(cfg, append(data, []byte("library: true\n")...), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/lib\n\ngo 1.27\n"), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "evidence"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "evidence", "run.json"), []byte("{}\n"), 0o644))
+	run(t, root, "add", "-A")
+	run(t, root, "commit", "-q", "-m", "a library")
+	run(t, root, "push", "-q", "origin", "main")
+	run(t, root, "tag", "-a", LiftTag, "-m", "APEX v0 final")
+	run(t, root, "push", "-q", "origin", LiftTag)
+	want := []string{".claude/go.mod", "_apex/go.mod", "development/go.mod", "evidence/go.mod"}
+
+	dry, err := Lift(ctx(), root, LiftOptions{DryRun: true})
+	require.NoError(t, err)
+	require.Equal(t, want, dry.Fences)
+	require.Nil(t, dry.SuggestLibrary, "the key is there")
+
+	res, err := Lift(ctx(), root, LiftOptions{})
+	require.NoError(t, err)
+	require.Equal(t, want, res.Fences)
+	p, err := Open(root)
+	require.NoError(t, err)
+	require.True(t, p.IsLibrary())
+	lifted := strings.Split(run(t, root, "show", "--name-only", "--format=", res.Commit), "\n")
+	require.Subset(t, lifted, want)
+	_, err = p.FenceCheck(ctx())
+	require.NoError(t, err)
+}

@@ -237,6 +237,10 @@ var findingRules = []findingRule{
 	// v1.1 W6.
 	rule("", `^(tool advise/\S+: skill \S+ loads |advise: ).* over the .* cap \(caps\.advise(_session)?\)`, CodeToolsTooBig),
 	rule("", `^(plugin \S+ is also installed at user scope|skill \S+ of tool \S+ is (also )?installed at user scope)`, CodePluginsUserScope),
+	// v1.1 W7.
+	rule("", `^module fence \S+ is (missing|not committed)`, CodeFenceMissing),
+	rule("", `^module fence \S+ is altered`, CodeFenceAltered),
+	rule("", `^(the Go module zip|npm pack|the Python sdist or wheel|cargo package) .* holds .* under APEX folders`, CodePackageLeak),
 }
 
 // UnclassifiedFinding is the code of a finding no rule matches — a

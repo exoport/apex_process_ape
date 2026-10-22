@@ -113,6 +113,13 @@ type Config struct {
 	// Secrets lets values through the commit secret scan by fingerprint
 	// (D155; secrets.go): absent, none.
 	Secrets SecretsConfig `yaml:"secrets"`
+	// Library marks a project whose package others download (W7, D208):
+	// a Go library's module zip must not carry APEX's folders, so ape
+	// fences them (fence.go) and `ape project package-check` checks the
+	// packed files (packagecheck.go). Absent is false; init and the lift
+	// only suggest it (SuggestLibrary), never write it. Not guarded: it
+	// loosens nothing.
+	Library bool `yaml:"library"`
 }
 
 // SkillModel is one models.<skill> entry.
