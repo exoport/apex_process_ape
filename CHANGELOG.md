@@ -2,6 +2,19 @@
 
 ## v1.0.0-rc.7 (draft)
 
+### rc.7s: Windows (D353, D355)
+
+- **A refusing commit hook is `archive.hook-failed` on Windows too (class C).** `ape change archive`
+  told a commit hook's refusal from other commit failures by the hook file's execute bit,
+  which Windows does not have, so there a refusing hook came back as a generic error. It now
+  asks what git asks: on Windows any hook file, elsewhere one with an execute bit.
+- **Windows needs an `sh`:** checks, gate commands and `notify:` run under `sh -c`, so on
+  Windows ape runs from Git Bash or with Git's `usr\bin` on `PATH`; without an `sh` every check
+  exits 127 (`docs/how-to/install.md`).
+- Tests that could not pass on a Windows runner: the hosted aboard skill is kept byte for byte
+  (`.gitattributes` `-text`), the migration-ledger test skips there (`cmd /c`'s `echo` writes
+  `run \r\n`), and the stop-gate order test feeds its Stops 30 ms apart (Windows' clock tick).
+
 ### rc.7r: a done milestone's gate is refused (Q162, D350)
 
 - **Q162, `ape milestone gate` on a done milestone recorded it red (class C).** Seen by eval in

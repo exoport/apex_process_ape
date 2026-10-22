@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -318,6 +319,9 @@ func migrationEntry(id, version, name string) string {
 // the ledger keeps every row and appends the new one, and _apex/state/ is
 // untouched.
 func TestFrameworkUpdate_V1ProjectKeepsTheMigrationLedger(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip(`migration commands run with cmd /c, whose echo writes "run \r\n"`)
+	}
 	withApeVersion(t, "0.4.0")
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
 	fw := t.TempDir()

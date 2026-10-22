@@ -255,7 +255,7 @@ func (p *Project) hasCommitHooks(ctx context.Context) bool {
 		if !filepath.IsAbs(path) {
 			path = filepath.Join(p.Root, path)
 		}
-		if st, err := os.Stat(path); err == nil && !st.IsDir() && st.Mode()&0o111 != 0 {
+		if st, err := os.Stat(path); err == nil && !st.IsDir() && executable(st) {
 			return true
 		}
 	}

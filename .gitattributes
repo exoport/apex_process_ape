@@ -16,3 +16,8 @@ internal/repl/testdata/** -text
 # it with the framework payload's copy. A CRLF checkout would make every one
 # of those differ.
 internal/apexv1/standards/** -text
+
+# The aboard skill ape hosts is the pinned aboard module's skill, byte for
+# byte (TestContract_AboardSkillIsThePinnedModulesSkill compares it with the
+# module cache's LF copy). A CRLF checkout would differ in every line.
+.claude/skills/aboard/** -text

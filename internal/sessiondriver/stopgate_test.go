@@ -92,10 +92,12 @@ func TestDriver_StopGateDecidesStopsInArrivalOrder(t *testing.T) {
 		return n < 3, true // calls 1 and 2 block, call 3 allows
 	})
 	deferred := json.RawMessage(`{"session_id":"s","background_tasks":[{"id":"a1","type":"subagent","status":"running"}]}`)
+	// 30 ms apart: Windows' clock can advance once per ~15.6 ms tick, so
+	// Stops fed closer together could carry the same arrival time.
 	d.FeedHook(stopEvent("s"))
-	time.Sleep(5 * time.Millisecond)
+	time.Sleep(30 * time.Millisecond)
 	d.FeedHook(orchestrator.HookEvent{Event: ipc.HookStop, Payload: deferred})
-	time.Sleep(5 * time.Millisecond)
+	time.Sleep(30 * time.Millisecond)
 	d.FeedHook(stopEvent("s"))
 	require.NoError(t, d.WaitStepDone(t.Context()))
 	mu.Lock()

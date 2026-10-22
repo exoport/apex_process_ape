@@ -17,6 +17,8 @@ To pin a specific version, set `VERSION` directly: `VERSION=v1.0.0`.
 
 The Linux asset is `ape_linux_amd64.tar.gz`. Replace with `ape_darwin_amd64.tar.gz`, `ape_darwin_arm64.tar.gz`, or `ape_windows_amd64.zip` as needed (Windows uses zip, not tar.gz).
 
+On Windows, an APEX v1 project's checks, gate commands and `notify:` command run under `sh -c`, so ape needs an `sh` on `PATH`: run it from Git Bash (Git for Windows), or put Git's `usr\bin` on `PATH`. Without one, every check exits 127.
+
 ## Option 2 — Pin via `bingo` (recommended for project repos)
 
 If you want a specific ape version checked into a project's own tooling (so every contributor and CI run gets the same binary), use [bingo](https://github.com/bwplotka/bingo):
