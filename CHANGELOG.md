@@ -181,6 +181,38 @@ The APEX v1.1 work (D327, D330, D333, D337), built on v1.0.0's docs.
   [claude-spawn-modes.md](docs/reference/claude-spawn-modes.md), and
   [run-a-single-skill.md](docs/how-to/run-a-single-skill.md#usage-limits-and-the-notifier).
 
+### W5: brief folders (Q-S1)
+
+- **A brief may be a dated folder (class C):** `development/briefs/YYYY-MM-DD-<slug>/`, whose
+  `brief.md` is the brief and whose other files (`assets/**`, `source.txt`, at any depth) are part
+  of it, the layout apex-spike's import writes. Single-file briefs work exactly as in v1.0. A
+  folder is a brief folder when its name starts with a date or it holds a `brief.md`; any other
+  folder under `briefs/` is walked as before.
+  - **`brief.bad-name`** applies to the folder, not its files: one finding on the folder for a
+    name that is not `YYYY-MM-DD-<slug>` with a real date ("brief folder name is not …"), or for
+    a dated folder with no `brief.md` ("brief folder holds no brief.md"). v1.0 reported every
+    file in it.
+  - **Every file in it is history,** as a single-file brief is: pre-tool denies an edit to any
+    existing one (it always did, at any depth), `brief.edited` holds each to the commit that
+    added it, and `brief.uncommitted` reports each uncommitted one. A new file may still be
+    written there.
+  - **It counts as one brief** for `roadmap.delivery-unlinked` ("holds N"), and the current brief
+    the Delivery findings name is the newest by date and name across files and folders: a
+    folder's is linked as `[<folder>/brief.md](briefs/<folder>/brief.md)`. `Delivery:` links
+    `briefs/<folder>/brief.md`; a link to the folder itself is not a brief link.
+- **Text:** `ape project check --help`, `ape project init --help` and `ape hook pre-tool --help`,
+  `ape project codes`' `brief.bad-name`, and [hooks.md](docs/reference/hooks.md#edits-it-denies).
+
+### D380
+
+- **The long-run worker writes its `[ape] … ended, exit N — result:` lines before it releases
+  the run lock,** so a call that sees the run end reads a log that already says so. It wrote them
+  after the release.
+- **Tests:** the detached long-run tests wait for the worker process to exit, and their cleanup
+  waits for (then kills) any process still in the test repo, before `t.TempDir` removes it.
+- **Docs:** `<user cache>/ape/usage.json`'s fields, `usage-runs/` and `usage-history.json` in
+  [pipeline-run-manifest.md](docs/reference/pipeline-run-manifest.md#the-usage-files-user-cacheapeusagejson).
+
 ## v1.0.0 (2026-10-22)
 
 APEX v1: ape runs the framework's v1 loop and owns every record in it.
