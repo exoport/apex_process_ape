@@ -80,6 +80,13 @@ func openCheckLog(logPath, note string) *os.File {
 	return f
 }
 
+// checkElapsed is how long a check ran, from its start. A variable so a
+// test can give a check a duration: a fixture's `echo` takes a few
+// milliseconds, which CheckResult.Secs rounds to 0.0 — and 0 reads as "no
+// duration recorded" (lastRegressionRun), so a test asserting on a
+// recorded duration passed only on a machine slow enough to take 50 ms.
+var checkElapsed = time.Since
+
 // runCheck is RunCheck under lim that also judges a zero exit against the
 // vacuous phrases (H11): an output vacuousPhrase finds one in records
 // ExitVacuous.
@@ -154,7 +161,7 @@ func runCheck(ctx context.Context, dir, cmd, logPath, logNote string, lim TierTi
 		<-watched
 	}
 	runtime.UnlockOSThread()
-	secs := time.Since(start).Seconds()
+	secs := checkElapsed(start).Seconds()
 	g.done(runCtx.Err() == nil)
 
 	exit := 0

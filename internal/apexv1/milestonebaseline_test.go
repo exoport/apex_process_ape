@@ -3,6 +3,7 @@ package apexv1
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -11,6 +12,7 @@ import (
 // records the milestone tier's baseline once; the gate judges that tier
 // against it, so a suite red before the milestone's work is pre-existing.
 func TestMilestoneRegressionBaseline_TakenOncePerMilestone(t *testing.T) {
+	checksTake(t, 1500*time.Millisecond) // the gate's recorded duration is asserted below
 	files := suiteFiles()
 	files["_apex/config.yaml"] = "project_name: greeter\nregression: {change: ./suite.sh, milestone: ./suite-all.sh}\n"
 	files["suite-all.sh"] = "#!/bin/sh\necho all\n[ -z \"$ALL_RED\" ]\n"
@@ -69,6 +71,17 @@ func TestMilestoneRegressionBaseline_TakenOncePerMilestone(t *testing.T) {
 	require.True(t, g.Run.Regression.Failed, "green then, red now")
 	require.False(t, g.Run.Regression.PreExistingRed)
 	require.Contains(t, g.Run.Why(), "green at baseline (add-wave)")
+}
+
+// checksTake makes every check this test runs take d by ape's clock
+// (checkElapsed). A fixture's suite takes milliseconds, which Secs rounds
+// to 0.0, and 0 is "no duration recorded": an assertion on a duration held
+// only when the machine was loaded enough to take 50 ms (W8b).
+func checksTake(t *testing.T, d time.Duration) {
+	t.Helper()
+	prev := checkElapsed
+	checkElapsed = func(time.Time) time.Duration { return d }
+	t.Cleanup(func() { checkElapsed = prev })
 }
 
 // Equal tiers take no second run, and a tweak never records one (D40).
@@ -131,7 +144,8 @@ func TestRegressionSlowNotice(t *testing.T) {
 	lastGate(t, p, "./suite-all.sh", 3600)
 	require.Empty(t, slow(p), "tiers: the change tier is the fast one")
 
-	// A change's baseline counts as a run.
+	// A change's baseline counts as a run: one with a recorded duration.
+	checksTake(t, 1500*time.Millisecond)
 	q := fixture(t, suiteFiles())
 	write(t, q, "_apex/config.yaml", "project_name: greeter\nregression: ./suite.sh\nchecks: {slow_regression: 1ns}\n")
 	addChange(t, q, "add-wave", waveChange("add-wave"))

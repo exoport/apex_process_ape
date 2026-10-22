@@ -542,10 +542,17 @@ func TestV1Commands_RegressionRedAtBaseline(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal([]byte(stdout), &v))
 	require.True(t, v.Green)
+	// secs is omitempty and rounds to 0.1 s: the suite's echo is present
+	// as "secs" only when the machine took 50 ms to run it. Its value is
+	// the clock's, not this test's subject (W8b).
+	if secs, ok := v.Regression["secs"]; ok {
+		require.IsType(t, 0.0, secs)
+		delete(v.Regression, "secs")
+	}
 	require.Equal(t, map[string]any{
 		"cmd": "./suite.sh", "exit": 1.0, "baseline_exit": 1.0, "pre_existing_red": true, "failed": false,
 		"output_sha256": v.Regression["output_sha256"], "log": "_apex/state/logs/add-wave/regression.log",
-		"baseline_sha": v.Regression["baseline_sha"], "secs": v.Regression["secs"],
+		"baseline_sha": v.Regression["baseline_sha"],
 	}, v.Regression)
 
 	stdout, _, err = v1Exec(t, newStatusCmd, "--json", "--cwd", root)
