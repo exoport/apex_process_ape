@@ -69,3 +69,33 @@ func TestMilestoneApprove_JSONCarriesSelfCheck(t *testing.T) {
 	require.NotNil(t, again.SelfCheck, "a no-op approve shows the approval's self-check on record")
 	require.Equal(t, first.SelfCheck.At, again.SelfCheck.At)
 }
+
+// D226: accept-config accepts a relay threshold under a fresh loop
+// session's fill, and gives the notice project check gives.
+func TestAcceptConfig_ContextRelayLowNotice(t *testing.T) {
+	root := v1Repo(t)
+	cfg := filepath.Join(root, "_apex", "config.yaml")
+	base, err := os.ReadFile(cfg)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(cfg, append(base, []byte("limits:\n  context_relay: 0.05\n")...), 0o644))
+	v1Git(t, root, "commit", "-qam", "chore: relay early")
+	stdout, stderr, err := v1Exec(t, newProjectCmd, "accept-config", "--by", "ann", "--json", "--cwd", root)
+	require.NoError(t, err, stderr)
+	var out struct {
+		OK      bool   `json:"ok"`
+		Commit  string `json:"commit"`
+		Notices []struct {
+			Code, Severity, Action, File, Message, Fix string
+		} `json:"notices"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &out), stdout)
+	require.True(t, out.OK)
+	require.Len(t, out.Notices, 1)
+	require.Equal(t, "limits.context-relay-low", out.Notices[0].Code)
+	require.Equal(t, "person", out.Notices[0].Action)
+	require.Contains(t, out.Notices[0].Message, "relays the loop at 50000 tokens")
+
+	stdout, stderr, err = v1Exec(t, newProjectCmd, "check", "--cwd", root)
+	require.NoError(t, err, stdout+stderr)
+	require.Contains(t, stderr, "notice: _apex/config.yaml: limits.context_relay 0.05 relays the loop at 50000 tokens")
+}

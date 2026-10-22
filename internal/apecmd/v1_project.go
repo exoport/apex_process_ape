@@ -658,6 +658,12 @@ line}; [] when none, beside the findings on a failure too), they never change th
                            bounds that delegate, which refuses a docs change's human-review
                            task until a person accepts it (delegate.unaccepted-config):
                            ` + "`ape project accept-config --by <who>`" + `, or revert it (A18, W8)
+  limits.context-relay-low limits.context_relay times the loop's context window
+                           (models.apex-loop's model, else the smallest window of the
+                           models the family words name) is under 100000 tokens: a fresh
+                           apex-loop session starts at about 46000, so the loop would
+                           relay at its first or second child launch and spend
+                           limits.relays without work (D226, W8); a person raises it
 The gate's per-scenario run times these read are in _apex/state/logs/gate-<M>.json.
 
 Exit codes: 0 green · 1 findings (listed on stderr, or under "findings" with --json) · 2 usage.`,

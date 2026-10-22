@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/exoport/apex_process_ape/internal/apexv1"
 	"github.com/spf13/cobra"
 )
 
@@ -47,6 +48,11 @@ this turn (E2: ` + "`ape hook pre-tool --help`" + `; --by is then git config use
 the prompt; another --by is session.by-mismatch, exit 1).
 Refused on a change branch, and with staged changes in the index.
 
+A limits.context_relay that relays the loop under 100000 tokens of its window — a fresh
+apex-loop session starts at about 46000, so it would relay at once (D226) — is accepted
+all the same, with the notice limits.context-relay-low ("notice: …" on stderr; JSON
+"notices", [] when none), as ` + "`ape project check`" + ` gives it.
+
 Exit codes: 0 accepted (prints the commit) · 1 HEAD on a change branch, staged changes, or
 git failed · 2 usage, or a model session.`,
 		Example: "  ape project accept-config --by diego",
@@ -66,7 +72,16 @@ git failed · 2 usage, or a model session.`,
 			if err != nil {
 				return v1Fail(cmd, &f, err, nil)
 			}
-			return v1Emit(cmd.OutOrStdout(), &f, map[string]any{"ok": true, "commit": sha}, func(w io.Writer) {
+			// D226: a relay threshold under a fresh loop session's fill
+			// is accepted, and said so — as project check says it.
+			notices := p.ContextRelayNotices()
+			if notices == nil {
+				notices = []apexv1.Diagnostic{}
+			}
+			if !f.json {
+				printNotices(cmd.ErrOrStderr(), notices)
+			}
+			return v1Emit(cmd.OutOrStdout(), &f, map[string]any{"ok": true, "commit": sha, "notices": notices}, func(w io.Writer) {
 				fmt.Fprintf(w, "config accepted: %.7s\n", sha)
 			})
 		},

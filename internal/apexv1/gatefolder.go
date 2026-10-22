@@ -207,5 +207,6 @@ func (p *Project) Notices() []Diagnostic {
 	// v1.1 W7.
 	out = append(out, p.gateRootModuleNotices()...)
 	// v1.1 W8.
-	return append(out, p.docsUnacceptedNotices()...)
+	out = append(out, p.docsUnacceptedNotices()...)
+	return append(out, p.ContextRelayNotices()...)
 }

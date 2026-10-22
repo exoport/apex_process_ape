@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/exoport/apex_process_ape/internal/atomicfile"
@@ -262,4 +263,74 @@ func (p *Project) loopRelay(run string) *LoopRelay {
 		}
 	}
 	return r
+}
+
+// D226 (v1.1 W8): a relay threshold under a fresh session's fill relays
+// forever. A fresh apex-loop session starts at about 45k tokens (44.7k–
+// 46.3k measured on rc7b: the system prompt, the skill, the project's
+// AGENTS.md and status), so eval's ledger cell at limits.context_relay
+// 0.05 of a 1M window (50k) relayed at every session's first or second
+// child launch and spent limits.relays without work. Below
+// RelayFloorTokens — about twice that fill, so a session gets roughly as
+// much again for its own work before it relays — project check (and
+// accept-config) give the notice limits.context-relay-low.
+const (
+	FreshLoopFillTokens = 46_000
+	RelayFloorTokens    = 100_000
+)
+
+// CodeContextRelayLow: the notice for a limits.context_relay whose tokens
+// on the loop's window are under RelayFloorTokens.
+const CodeContextRelayLow = "limits.context-relay-low"
+
+// loopWindow is the context window the loop's session runs in, as project
+// check can know it before any session: models.apex-loop's model when set
+// (cost.ContextWindow; an unknown model is 0, and an unknown window never
+// relays), else the smallest window of the models Claude Code's family
+// words name today — the loop runs on one of them — with model "".
+func loopWindow(models map[string]SkillModel) (window int, model string) {
+	if entry, _ := LoopModel(models); entry.Model != "" {
+		canon, _ := cost.CanonicalModelArg(entry.Model)
+		w, _ := cost.ContextWindow(canon)
+		return w, canon
+	}
+	aliases := cost.FamilyAliases()
+	names := make([]string, 0, len(aliases))
+	for a := range aliases {
+		names = append(names, a)
+	}
+	sort.Strings(names)
+	for _, a := range names {
+		if w, _ := cost.ContextWindow(aliases[a]); w > 0 && (window == 0 || w < window) {
+			window = w
+		}
+	}
+	return window, ""
+}
+
+// ContextRelayNotices is project check's limits.context-relay-low (D226):
+// limits.context_relay times the loop's window is under RelayFloorTokens.
+func (p *Project) ContextRelayNotices() []Diagnostic {
+	cfg, err := LoadConfig(p.Root)
+	if err != nil {
+		return nil
+	}
+	relay := cfg.Limits.ContextRelayAt()
+	window, model := loopWindow(cfg.Models)
+	if window <= 0 {
+		return nil
+	}
+	tokens := int(relay * float64(window))
+	if tokens >= RelayFloorTokens {
+		return nil
+	}
+	minRelay := math.Ceil(float64(RelayFloorTokens)/float64(window)*100) / 100
+	of := fmt.Sprintf("%s's %d-token window", model, window)
+	if model == "" {
+		of = fmt.Sprintf("a %d-token window (no models.%s model: the smallest window of the models Claude Code's family words name)", window, OrchestratorSkill)
+	}
+	return []Diagnostic{notice(Diagnostic{Code: CodeContextRelayLow, File: configYAML, Message: fmt.Sprintf(
+		"limits.context_relay %g relays the loop at %d tokens of %s, under %d: a fresh %s session starts at about %d tokens (D226), so the loop relays at its first or second child launch and spends limits.relays without work"+
+			" — a person raises limits.context_relay to at least %g (default %g) in _apex/config.yaml and accepts it (`ape project accept-config --by <who>`: limits: is guarded)",
+		relay, tokens, of, RelayFloorTokens, OrchestratorSkill, FreshLoopFillTokens, minRelay, DefaultContextRelay)})}
 }

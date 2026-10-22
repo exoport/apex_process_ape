@@ -147,3 +147,35 @@ func TestLiveSessions_LoopRelay(t *testing.T) {
 	require.Zero(t, r.ContextWindow)
 	require.Equal(t, "context unknown (relay at 60 %), relays 0/5", r.Describe())
 }
+
+// D226: limits.context_relay times the loop's window under 100k tokens is
+// the notice limits.context-relay-low, on the model models.apex-loop names
+// (a 200k one relays lower in tokens) or, without one, the smallest window
+// of today's family models; the default, and an unknown model's window,
+// give none.
+func TestContextRelayLowNotice(t *testing.T) {
+	notices := func(cfg string) []Diagnostic {
+		p := fixture(t, baseFiles())
+		write(t, p, "_apex/config.yaml", cfg)
+		return p.ContextRelayNotices()
+	}
+	require.Empty(t, notices(""), "the default 0.6")
+	require.Empty(t, notices("limits:\n  context_relay: 0.1\n"), "100k of a 1M window is enough")
+
+	got := notices("limits:\n  context_relay: 0.05\n")
+	require.Len(t, got, 1, "eval's ledger cell (D226): 50k of a 1M window")
+	n := got[0]
+	require.Equal(t, CodeContextRelayLow, n.Code)
+	require.Equal(t, SeverityNotice, n.Severity)
+	require.Equal(t, ActionPerson, n.Action)
+	require.Equal(t, "_apex/config.yaml", n.File)
+	require.Regexp(t, `^limits\.context_relay 0\.05 relays the loop at 50000 tokens of a 1000000-token window \(no models\.apex-loop model: the smallest window of the models Claude Code's family words name\), under 100000: a fresh apex-loop session starts at about 46000 tokens \(D226\)`, n.Message)
+	require.Equal(t, "a person raises limits.context_relay to at least 0.1 (default 0.6) in _apex/config.yaml and accepts it (`ape project accept-config --by <who>`: limits: is guarded)", n.Fix)
+
+	got = notices("limits:\n  context_relay: 0.4\nmodels:\n  apex-loop: claude-sonnet-4-5\n")
+	require.Len(t, got, 1, "0.4 of a 200k window is 80k")
+	require.Contains(t, got[0].Message, "at 80000 tokens of claude-sonnet-4-5's 200000-token window")
+	require.Contains(t, got[0].Fix, "at least 0.5 ")
+	require.Empty(t, notices("limits:\n  context_relay: 0.05\nmodels:\n  apex-loop: no-such-model\n"), "an unknown window never relays")
+	require.Empty(t, notices("limits:\n  context_relay: 0.6\nmodels:\n  apex-loop: {model: claude-sonnet-4-5}\n"))
+}
