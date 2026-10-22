@@ -50,8 +50,58 @@ func detachedRepo(t *testing.T, script string) (string, *apexv1.Project) {
 		if l := p.LoadRunLock("add-wave"); l != nil && l.PID > 0 && l.PID != os.Getpid() {
 			_ = syscall.Kill(l.PID, syscall.SIGKILL)
 		}
+		// Nor one that has released its lock but not exited yet, nor a
+		// check of it: a process still in the repo when t.TempDir removes
+		// it can write into it (D380: "_apex/state: directory not empty").
+		awaitNoProcessUnder(t, root, 10*time.Second)
 	})
 	return root, p
+}
+
+// awaitNoProcessUnder waits up to d for every process whose working
+// directory is under root to exit, then SIGKILLs the rest (Linux: it reads
+// /proc/*/cwd; elsewhere it does nothing).
+func awaitNoProcessUnder(t *testing.T, root string, d time.Duration) {
+	t.Helper()
+	if runtime.GOOS != "linux" {
+		return
+	}
+	if r, err := filepath.EvalSymlinks(root); err == nil {
+		root = r
+	}
+	under := func() []int {
+		var pids []int
+		entries, _ := os.ReadDir("/proc")
+		for _, e := range entries {
+			pid, err := strconv.Atoi(e.Name())
+			if err != nil || pid == os.Getpid() {
+				continue
+			}
+			cwd, err := os.Readlink("/proc/" + e.Name() + "/cwd")
+			if err == nil && (cwd == root || strings.HasPrefix(cwd, root+string(filepath.Separator))) {
+				pids = append(pids, pid)
+			}
+		}
+		return pids
+	}
+	deadline := time.Now().Add(d)
+	for time.Now().Before(deadline) {
+		if len(under()) == 0 {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	for _, pid := range under() {
+		t.Logf("pid %d still in %s after %s: killed", pid, root, d)
+		_ = syscall.Kill(pid, syscall.SIGKILL)
+	}
+}
+
+// awaitExit waits for the process pid to be gone (reaped).
+func awaitExit(t *testing.T, pid int) {
+	t.Helper()
+	require.Eventually(t, func() bool { return syscall.Kill(pid, 0) == syscall.ESRCH },
+		10*time.Second, 20*time.Millisecond, "worker pid %d did not exit", pid)
 }
 
 //nolint:tagliatelle // the v1 --json payloads are snake_case by contract
@@ -106,6 +156,7 @@ func TestLongRun_Exit75ThenAttach(t *testing.T) {
 	require.Equal(t, apexv1.StatusVerified, res.Status)
 	require.Nil(t, p.LoadRunLock("add-wave"), "the lock is released")
 	require.Equal(t, "apex: add-wave verified", v1Git(t, root, "log", "-1", "--format=%s"), "the worker recorded the verify")
+	awaitExit(t, lock.PID)
 
 	// A --wait past the Bash cap is a usage error.
 	_, _, err = v1Exec(t, newChangeCmd, "verify", "add-wave", "--wait", "10m", "--cwd", root)
@@ -118,8 +169,13 @@ func TestLongRun_UnprintedResultIsDelivered(t *testing.T) {
 	root, p := detachedRepo(t, "sleep 1\necho wave")
 	_, _, err := v1Exec(t, newChangeCmd, "verify", "add-wave", "--wait", "0", "--cwd", root)
 	require.Equal(t, exitCodeStillRunning, exitCodeOf(t, err))
-	id := p.LoadRunLock("add-wave").ID
+	lock := p.LoadRunLock("add-wave")
+	require.NotNil(t, lock)
+	id, worker := lock.ID, lock.PID
+	require.NotEqual(t, os.Getpid(), worker)
 	require.Eventually(t, func() bool { return p.LoadRunLock("add-wave") == nil }, 30*time.Second, 50*time.Millisecond)
+	// The lock is released before the worker exits: wait for the exit too.
+	awaitExit(t, worker)
 	commits := v1Git(t, root, "rev-list", "--count", "HEAD")
 
 	stdout, _, err := v1Exec(t, newChangeCmd, "verify", "add-wave", "--wait", "0", "--cwd", root)
