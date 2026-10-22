@@ -61,10 +61,11 @@ A folder holding a `go.mod` is another module, so the module zip, `go build ./..
 green and change no file. `.claude/go.mod` is committed with `git add -f`, because the `.claude/`
 rules `ape project init` puts in `.gitignore` ignore it.
 
-You rarely run it by hand. `ape project init` writes the missing fences of a library into its own
-commit, `ape project lift` writes them into the lift commit when the v0 config says
-`library: true`, and a framework migration runs it (command `ape project fence`, check
-`ape project fence --check`).
+`ape project init` writes the missing fences of a library into its own commit, and `ape project
+lift` writes them into the lift commit when the v0 config says `library: true`. Otherwise a
+person runs `ape project fence`: after setting `library: true` in an existing project, or when
+`ape project check` reports a fence missing or altered. No framework migration runs it: `library:`
+is new in ape v1.1, so no project is a library when it upgrades.
 
 ### Keep them in place
 

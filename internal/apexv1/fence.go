@@ -264,7 +264,7 @@ func (p *Project) fenceFindings(ctx context.Context) []Finding {
 	return out
 }
 
-// FenceCheck is `ape project fence --check`, a migration's check: nil
+// FenceCheck is `ape project fence --check`: nil
 // when every present APEX folder's fence is in place (or there is nothing
 // to fence), else fence.missing (any missing or uncommitted) or
 // fence.altered, with a finding per fence (exit 1). It writes nothing.

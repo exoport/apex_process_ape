@@ -5214,9 +5214,11 @@ included; every other line is kept: a gate's require and replace lines, see ape 
 check --help, gate.root-module-change), and those git did not track (git add -f: the
 .claude/ shape in the root .gitignore ignores .claude/go.mod, and the zip is built from
 git). Idempotent: with every fence in place it writes nothing and says so (exit 0).
-ape project init writes the missing fences of a library into its own commit, the lift
-into the lift commit (when the v0 config says library: true), and a framework migration
-runs this (command: ape project fence; check: ape project fence --check).
+ape project init writes the missing fences of a library into its own commit, and the lift
+into the lift commit (when the v0 config says library: true). Otherwise a person runs ape
+project fence: after setting library: true, or when ape project check reports
+fence.missing or fence.altered. No framework migration runs it (D395): library: is new in
+v1.1, so no project is a library when it upgrades.
 
 Nothing to fence (exit 0, nothing written): no library: true, or no go.mod at the root —
 a module in a subfolder (the publish-a-library how-to's option A) needs no fence, as the
@@ -5231,8 +5233,7 @@ cannot be read. A command any session may run (not person-only).
 --check writes nothing: exit 0 when every present APEX folder's fence is in place and
 committed (or there is nothing to fence), 1 when one is not — fence.missing (absent, or
 git does not track it) or fence.altered, a finding per fence — and 2 when the check
-itself could not judge (fence.unreadable, usage): a migration's check reads 0 applied,
-1 not applied, 2 or more the check failed. It judges the folders present, not a fixed
+itself could not judge (fence.unreadable, usage). It judges the folders present, not a fixed
 count. ape project check reports the same findings, only for library: true.
 
 JSON: {"library", "go_mod", "go" (the root's go version), "fences": [{"folder", "path",

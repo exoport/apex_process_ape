@@ -291,8 +291,8 @@ The APEX v1.1 work (D327, D330, D333, D337), built on v1.0.0's docs.
   detail}], written, commit}`.
   - `ape project init` writes a library's missing fences into its commit; the lift keeps a v0
     config's `library: true` and writes them into the lift commit (JSON `fences`, a dry run
-    lists them). A framework migration runs `ape project fence` (check `ape project fence
-    --check`).
+    lists them). Otherwise a person runs `ape project fence` (after setting `library: true`, or
+    on a `fence.missing`/`fence.altered` finding); no framework migration runs it (D395).
   - `ape project check` reports **`fence.missing`** (absent, or not tracked by git, as the zip
     is built from git) and **`fence.altered`** (exit 1, action replan), only for
     `library: true` with a root `go.mod`.
