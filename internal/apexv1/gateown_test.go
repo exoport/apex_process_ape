@@ -103,3 +103,56 @@ func TestVerify_RefusesAChangeThatEditsItsGate(t *testing.T) {
 	_, err = p.Verify(ctx(), "add-wave", RunOptions{})
 	require.NoError(t, err, "restored: the diff from base no longer touches the gate")
 }
+
+// D319, the D313a residual: a gate script that reads a check list outside
+// the gate's own files — eval's toy, `while read … < scripts/checks/m1.checks`
+// from a gate folder — is the notice gate.data-outside; an input from the
+// gate's own folder, the work products a gate only names, a here-doc, a
+// process substitution and an absolute path are not.
+func TestGateDataOutsideNotice(t *testing.T) {
+	notices := func(p *Project) []Diagnostic {
+		var out []Diagnostic
+		for _, n := range p.Notices() {
+			if n.Code == CodeGateDataOutside {
+				out = append(out, n)
+			}
+		}
+		return out
+	}
+	p := selfCheckProject(t, "sh development/gates/M1-skel/g.sh", map[string]string{
+		"development/gates/M1-skel/g.sh": "#!/bin/sh\n# reads < scripts/checks/ignored.checks in a comment\n" +
+			"while read -r c; do sh -c \"$c\" || exit 1; done < scripts/checks/m1.checks\n" +
+			"while read -r c; do :; done < \"$(dirname \"$0\")/own.checks\"\n" +
+			"grep -q wave README.md < /dev/null\ncat <<EOF\nx\nEOF\ndiff <(sort a) b\n" +
+			"while read -r c; do :; done <'scripts/checks/m1.checks'\n",
+		"development/gates/M1-skel/own.checks": "true\n",
+		"scripts/checks/m1.checks":             "grep -q wave greet.sh\n",
+		"scripts/checks/ignored.checks":        "true\n",
+		"README.md":                            "# r\n",
+	})
+	got := notices(p)
+	require.Len(t, got, 1, "one notice per file, the own check list and the work product not named")
+	n := got[0]
+	require.Equal(t, ActionPerson, n.Action)
+	require.Equal(t, "development/gates/M1-skel/g.sh", n.File)
+	require.Equal(t, 3, n.Line)
+	require.Equal(t, "M1's gate script development/gates/M1-skel/g.sh reads scripts/checks/m1.checks (`< scripts/checks/m1.checks`), which is not one of the gate's own files, "+
+		"so the approval does not record it: an edit to it is no gate drift and no change.touches-gate (D313a)", n.Message)
+	require.Equal(t, "if it is the gate's own check list, move it into development/gates/M1-<slug>/ and read it from there before it is approved; "+
+		"if it is a work product the gate checks, leave it", n.Fix)
+
+	// Moved into the gate's folder, it is the gate's own: recorded, no notice.
+	q := selfCheckProject(t, "sh development/gates/M1-skel/g.sh", map[string]string{
+		"development/gates/M1-skel/g.sh":      "#!/bin/sh\nwhile read -r c; do :; done < development/gates/M1-skel/m1.checks\n",
+		"development/gates/M1-skel/m1.checks": "true\n",
+	})
+	require.Empty(t, notices(q))
+	require.Contains(t, keysOf(q.gateOwnFiles(q.roadmap().Find("M1"))), "development/gates/M1-skel/m1.checks")
+
+	// A script in its own folder reading a list beside it is recorded (D313a
+	// (iii)).
+	r := selfCheckProject(t, "./scripts/g.sh", map[string]string{
+		"scripts/g.sh": "#!/bin/sh\nwhile read -r c; do :; done < scripts/checks/g.checks\n", "scripts/checks/g.checks": "true\n",
+	})
+	require.Empty(t, notices(r))
+}

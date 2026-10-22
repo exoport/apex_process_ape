@@ -34,7 +34,7 @@ var noticeCodes = []string{
 	// v1.1 W7: package-check's notice, project check's gate rule.
 	CodePackageUnchecked, CodeGateRootModuleChange,
 	// v1.1 W8.
-	CodeDocsUnaccepted, CodeContextRelayLow,
+	CodeDocsUnaccepted, CodeContextRelayLow, CodeGateDataOutside,
 }
 
 // The published list and the code agree: every code the source sets or a
@@ -118,6 +118,7 @@ func TestDiagnosticCodes_PublishedListMatchesTheCode(t *testing.T) {
 		"CodePackageLeak": CodePackageLeak, "CodePackageUnchecked": CodePackageUnchecked, "CodeGateRootModuleChange": CodeGateRootModuleChange,
 		// v1.1 W8.
 		"CodeDocsUnaccepted": CodeDocsUnaccepted, "CodeContextRelayLow": CodeContextRelayLow,
+		"CodeGateDataOutside": CodeGateDataOutside,
 	}
 	for _, glob := range []string{"*.go", filepath.Join("..", "apecmd", "v1_*.go")} {
 		files, err := filepath.Glob(glob)

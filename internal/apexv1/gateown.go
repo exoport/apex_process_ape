@@ -191,3 +191,91 @@ func (p *Project) refuseGateTouch(ctx context.Context, ci ChangeInfo) error {
 		" — only a person or apex-plan changes a gate, and a person approves it again: restore them on " + ChangeBranch(ci.ID) +
 		" (`git checkout " + ci.State.BaseSHA + " -- " + strings.Join(limit(files, 8), " ") + "`, committed with trailer `Change: " + ci.ID + "`); if the gate itself is wrong, say so (`gate defect: <evidence>`)"}
 }
+
+// D319 (v1.1 W8), the D313a residual: a gate script that reads a check
+// list kept outside the gate's own files — eval's toy fed
+// `while read …; done < scripts/checks/m1.checks` from a gate under
+// <dev>/gates/ — is not recorded at approval, by design (D313a records
+// only the gate's own files, never what it checks), so an edit to the list
+// is no gate drift and no change.touches-gate. project check names it, as
+// the notice gate.data-outside: a file an open milestone's gate script
+// reads as its input — an input redirection, `< <path>` — that exists and
+// is none of the gate's own files. A path the script only names (a work
+// product it greps or tests) is not read as input, and is never named.
+
+// CodeGateDataOutside: project check's notice for a gate script's input
+// file outside the gate's own files.
+const CodeGateDataOutside = "gate.data-outside"
+
+// inputRedirectRe is an input redirection in a shell script and its word:
+// `<` not part of `<<`, `<<<`, `<(`, `<&` or `<>`.
+var inputRedirectRe = regexp.MustCompile(`(?:^|[^<])<[ \t]*("[^"\n]*"|'[^'\n]*'|[^\s"'<>(&;|)][^\s<>&;|()]*)`)
+
+// gateDataNotices are project check's gate.data-outside notices: for each
+// open milestone (proposed or approved), each regular file under the
+// project one of its gate scripts reads by an input redirection that is not
+// one of the gate's own files (gateOwnFiles) nor a gate script.
+func (p *Project) gateDataNotices() []Diagnostic {
+	rm := p.roadmap()
+	if rm == nil {
+		return nil
+	}
+	gates := p.Rel(p.GatesDir()) + "/"
+	var out []Diagnostic
+	for i := range rm.Milestones {
+		m := &rm.Milestones[i]
+		if m.Status != MilestoneProposed && m.Status != MilestoneApproved {
+			continue
+		}
+		scripts := gateScripts(m.Gate)
+		if len(scripts) == 0 {
+			continue
+		}
+		own := p.gateOwnFiles(m)
+		for _, s := range scripts {
+			own[s] = ""
+		}
+		when := "with the milestone's next re-approval (the gate script changes, and a person approves it again)"
+		if m.Status == MilestoneProposed {
+			when = "before it is approved"
+		}
+		for _, s := range scripts {
+			data, err := os.ReadFile(filepath.Join(p.Root, filepath.FromSlash(s)))
+			if err != nil {
+				continue
+			}
+			seen := map[string]bool{}
+			for n, line := range strings.Split(string(data), "\n") {
+				if strings.HasPrefix(strings.TrimSpace(line), "#") {
+					continue
+				}
+				for _, mm := range inputRedirectRe.FindAllStringSubmatch(line, -1) {
+					rel, ok := scriptWordPath(s, mm[1])
+					if _, mine := own[rel]; !ok || mine || seen[rel] {
+						continue
+					}
+					if _, exists := p.fileSHA256(rel); !exists {
+						continue
+					}
+					seen[rel] = true
+					out = append(out, notice(Diagnostic{Code: CodeGateDataOutside, File: s, Line: n + 1, Message: m.ID + "'s gate script " + s + " reads " + rel +
+						" (`< " + rel + "`), which is not one of the gate's own files, so the approval does not record it: an edit to it is no gate drift and no change.touches-gate (D313a)" +
+						" — if it is the gate's own check list, move it into " + gates + m.ID + "-<slug>/ and read it from there " + when + "; if it is a work product the gate checks, leave it"}))
+				}
+			}
+		}
+	}
+	return out
+}
+
+// scriptWordPath is a redirection's word in the script at script as a
+// project-relative path: its quotes removed, the script's own folder
+// ($(dirname "$0")/x, ${0%/*}/x) joined with script's; false for any other
+// expansion or a path outside the project.
+func scriptWordPath(script, word string) (string, bool) {
+	w := strings.NewReplacer(`"`, "", `'`, "").Replace(word)
+	if loc := scriptDirRe.FindStringIndex(w); loc != nil {
+		w = path.Join(path.Dir(script), w[loc[1]:])
+	}
+	return repoPath(w)
+}

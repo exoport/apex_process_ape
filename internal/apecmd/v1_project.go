@@ -664,6 +664,15 @@ line}; [] when none, beside the findings on a failure too), they never change th
                            apex-loop session starts at about 46000, so the loop would
                            relay at its first or second child launch and spend
                            limits.relays without work (D226, W8); a person raises it
+  gate.data-outside        an open milestone's gate script reads a file by an input
+                           redirection (` + "`while read …; done < scripts/checks/m1.checks`" + `)
+                           that is none of the gate's own files (its gate folders,
+                           development/gates/lib/, what it sources, a literal path under
+                           its own non-root, non-development folder), so the approval
+                           does not record it: an edit to it is no gate drift and no
+                           change.touches-gate (D313a). A gate's own check list moves
+                           into development/gates/<M>-<slug>/ (approved: with its next
+                           re-approval); a work product the gate checks stays (D319, W8)
 The gate's per-scenario run times these read are in _apex/state/logs/gate-<M>.json.
 
 Exit codes: 0 green · 1 findings (listed on stderr, or under "findings" with --json) · 2 usage.`,
