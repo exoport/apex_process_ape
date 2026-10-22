@@ -899,15 +899,14 @@ func promptTokens(text string) []ptoken {
 
 const sentenceEnds = ".!?;\n"
 
-// matchAct finds c's phrase in prompt (OI-5): its words, in order, the
+// matchAct finds c's phrase in text, a prompt (OI-5): its words, in order, the
 // target exact (case aside), with no negation word before them in their
 // sentence nor among the three words after the target, the sentence no
 // question — and, for an answer, the --text itself after the target. It
 // returns the quote (the sentence, at most quoteMax characters) and the
 // raw sentence the transcript must hold: both as the person typed them,
 // their own quote characters included (D234).
-func matchAct(prompt string, c PersonCall) (quote, raw string, ok bool) {
-	text := prompt
+func matchAct(text string, c PersonCall) (quote, raw string, ok bool) {
 	toks := promptTokens(text)
 	want := c.words()
 	if len(want) == 0 {
