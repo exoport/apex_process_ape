@@ -207,9 +207,12 @@ func ctx() context.Context { return context.Background() }
 // validator test goes through it, so it is also where item 13's promise is
 // kept: no finding any test produces may lack a published code.
 // fixContractCodes are the finding codes v1.1 W5–W8 added or extended:
-// each of their messages has a fix (V11RC1-F1).
+// each of their messages has a fix (V11RC1-F1). The value says whether the
+// tests that produce the code need the shell fixtures (needSh, toolPath),
+// which a platform without them — Windows — skips: TestMain requires such a
+// code only where they run (D409).
 var fixContractCodes = map[string]bool{
-	"tools.unknown": true, CodeToolsTooBig: true, "tools.not-installed": true, CodePluginsUserScope: true,
+	"tools.unknown": true, CodeToolsTooBig: true, "tools.not-installed": false, CodePluginsUserScope: false,
 	CodeFenceMissing: true, CodeFenceAltered: true, CodePackageLeak: true,
 	"brief.bad-name": true, "brief.uncommitted": true, "brief.edited": true,
 	"roadmap.delivery-link": true, "roadmap.delivery-unlinked": true,
@@ -220,12 +223,17 @@ var (
 	fixContractSeen = map[string]bool{}
 )
 
-// fixContractUnseen lists the fixContractCodes no test has checked.
+// fixContractUnseen lists the fixContractCodes no test has checked, of
+// those whose producing tests run on this platform.
 func fixContractUnseen() []string {
 	fixContractMu.Lock()
 	defer fixContractMu.Unlock()
+	shOK, _ := shFixtures()
 	var out []string
-	for c := range fixContractCodes {
+	for c, needsSh := range fixContractCodes {
+		if needsSh && !shOK {
+			continue
+		}
 		if !fixContractSeen[c] {
 			out = append(out, c)
 		}
@@ -281,12 +289,25 @@ func findingMessages(fs []Finding) string {
 // shell (checks run with `sh -c`) or no git.
 func needSh(t *testing.T) {
 	t.Helper()
+	if ok, why := shFixtures(); !ok {
+		t.Skip(why)
+	}
+}
+
+// shFixtures reports whether the shell fixtures run here, and why not.
+// APEXV1_TEST_NO_SH=1 makes a run skip them as Windows does, which is how
+// TestMain's coverage guard is checked for a platform without them (D409).
+func shFixtures() (ok bool, why string) {
 	if runtime.GOOS == "windows" {
-		t.Skip("check commands and their fixtures are POSIX shell")
+		return false, "check commands and their fixtures are POSIX shell"
+	}
+	if os.Getenv("APEXV1_TEST_NO_SH") != "" {
+		return false, "APEXV1_TEST_NO_SH: the shell fixtures are skipped, as on Windows"
 	}
 	for _, bin := range []string{"sh", "git"} {
 		if _, err := exec.LookPath(bin); err != nil {
-			t.Skipf("%s not on PATH", bin)
+			return false, bin + " not on PATH"
 		}
 	}
+	return true, ""
 }

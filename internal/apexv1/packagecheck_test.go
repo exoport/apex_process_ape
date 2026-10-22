@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -161,8 +160,8 @@ func TestPackageCheck_NotALibraryAndNoManifest(t *testing.T) {
 // python stub), so a test decides which packaging tools exist.
 func toolPath(t *testing.T, stubs map[string]string) {
 	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("sh stubs")
+	if ok, why := shFixtures(); !ok {
+		t.Skip("sh stubs: " + why)
 	}
 	dir := t.TempDir()
 	for _, bin := range []string{"git", "sh", "tar", "gzip", "mkdir", "cat", "rm"} {
