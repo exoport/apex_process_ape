@@ -41,7 +41,7 @@ Source: `internal/bridge/ipc/ipc.go`.
 | `message`         | parent → bridge       | `content`                        | Wakes a pending `await_message`, or fills the FIFO if none pending.      |
 | `reply`           | bridge → parent       | `content`                        | Skill called `reply()`.                                                  |
 | `call`            | bridge → parent       | `tool`, `id`                     | Mirror of every MCP tool call. Carries `params` + `result` raw JSON.     |
-| `hook`            | `ape notify` → parent | `event`, `session_id`, `payload` | Forwarded hook envelope. `agent_id` for Subagent\* events.               |
+| `hook`            | `ape notify` → parent | `event`, `session_id`, `payload` | Forwarded hook envelope. `agent_id` for Subagent\* events. `hook_started_at` (RFC 3339) is when the `ape notify` process started: a v1 project's stop gate pairs a Stop with its verdict by it, not by the frame's arrival. |
 | `step-bind`       | parent → bridge       | `session_id`, `step`             | Tells the bridge which step a session id belongs to so calls are tagged. |
 | `stop`            | parent → bridge       | —                                | Sent before SIGTERM. The bridge can flush state if it needs to.          |
 | `buffer-overflow` | bridge → parent       | `content`                        | Buffer-5 overflow notification. `content` is the dropped message body.   |

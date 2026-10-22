@@ -105,3 +105,36 @@ func TestDriver_StopGateDecidesStopsInArrivalOrder(t *testing.T) {
 	require.Len(t, order, 3)
 	require.True(t, order[0].Before(order[1]) && order[1].Before(order[2]), "decided in arrival order: %v", order)
 }
+
+// W8b (D365 note 1): a Stop is put to the gate stamped with when its
+// hook started, not when the notification arrived. The project's stop
+// hook started with it; a notification slowed by more than the gate's
+// slack (5 s) used to look like a later Stop and take the next turn's
+// verdict. Zero, or a start after the arrival, falls back to the arrival.
+func TestDriver_StopGateIsAskedAtTheHooksStart(t *testing.T) {
+	t.Parallel()
+	got := make(chan time.Time, 3)
+	d := newTestDriver(time.Minute)
+	d.SetStopGate(func(_ string, stopAt time.Time) (bool, bool) {
+		got <- stopAt
+		return true, true // block: the step stays open for the next Stop
+	})
+
+	hookStart := time.Now().Add(-6 * time.Second)
+	slow := stopEvent("s")
+	slow.StartedAt = hookStart
+	d.FeedHook(slow)
+	require.True(t, (<-got).Equal(hookStart), "the hook's start, 6 s before it arrived")
+
+	before := time.Now()
+	d.FeedHook(stopEvent("s"))
+	require.False(t, (<-got).Before(before), "no start given: the arrival")
+
+	future := stopEvent("s")
+	future.StartedAt = time.Now().Add(time.Hour)
+	before = time.Now()
+	d.FeedHook(future)
+	at := <-got
+	require.False(t, at.Before(before))
+	require.True(t, at.Before(future.StartedAt), "a start after the arrival is not believed")
+}

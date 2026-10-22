@@ -438,7 +438,7 @@ func (c *interactiveCore) FeedHook(h orchestrator.HookEvent) {
 	// happens inside NoteHook through the Driver's channels; WaitStepDone is
 	// the only consumer, and the non-blocking buffered sends mean the bridge
 	// accept loop can never stall here.
-	c.driver.NoteHook(h.Event, h.Payload)
+	c.driver.NoteHook(h)
 }
 
 // FeedCall is the OnCall fan-out target — writes the runlog

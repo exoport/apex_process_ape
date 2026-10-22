@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"time"
 )
 
 // Frame types. Documented in PLAN-5 / C3 — IPC wire table.
@@ -74,6 +75,10 @@ type Message struct {
 	Step      string          `json:"step,omitempty"`
 	Payload   json.RawMessage `json:"payload,omitempty"`
 	ID        string          `json:"id,omitempty"` // pairs deferred await_message entries with their flush
+	// HookStartedAt is when the `ape notify` process that sent a TypeHook
+	// frame started: when Claude Code ran the hook, before anything that
+	// could delay the frame (procstart). Zero from a sender that predates it.
+	HookStartedAt time.Time `json:"hook_started_at,omitzero"`
 }
 
 // Write encodes msg as a single newline-terminated JSON line on w.

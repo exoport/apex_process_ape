@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/exoport/apex_process_ape/internal/bridge/ipc"
+	"github.com/exoport/apex_process_ape/internal/procstart"
 	"github.com/spf13/cobra"
 )
 
@@ -30,7 +31,7 @@ func newNotifyCmd() *cobra.Command {
 		Short:  "(internal) Forward a Claude Code hook envelope to the bridge.",
 		Hidden: true,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			runNotify(event, os.Stdin, os.Getenv("APE_BRIDGE_PORT"))
+			runNotify(event, os.Stdin, os.Getenv("APE_BRIDGE_PORT"), procstart.Time())
 			return nil
 		},
 	}
@@ -39,9 +40,11 @@ func newNotifyCmd() *cobra.Command {
 }
 
 // runNotify is the testable core. Reads up to 1 MB from stdin (hook
-// envelopes are small) and forwards. All error paths drop silently —
-// the hook loop must never stall on bridge unavailability.
-func runNotify(event string, stdin io.Reader, port string) {
+// envelopes are small) and forwards, stamped with started, when this
+// process started: the v1 stop gate pairs a Stop by it. All error paths
+// drop silently — the hook loop must never stall on bridge
+// unavailability.
+func runNotify(event string, stdin io.Reader, port string, started time.Time) {
 	if port == "" || event == "" {
 		return
 	}
@@ -66,6 +69,8 @@ func runNotify(event string, stdin io.Reader, port string) {
 		SessionID: sessionID,
 		AgentID:   agentID,
 		Payload:   json.RawMessage(envelope),
+
+		HookStartedAt: started.UTC(),
 	})
 }
 

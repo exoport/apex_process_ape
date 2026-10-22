@@ -38,7 +38,8 @@ func TestRunNotify_ForwardsHookFrame(t *testing.T) {
 	}()
 
 	envelope := strings.NewReader(`{"session_id":"sess-42","tool":"Bash","tool_input":{"command":"ls"}}`)
-	runNotify("PreToolUse", envelope, port)
+	started := time.Date(2026, 10, 22, 12, 0, 0, 123456789, time.UTC)
+	runNotify("PreToolUse", envelope, port, started)
 
 	select {
 	case <-done:
@@ -64,17 +65,20 @@ func TestRunNotify_ForwardsHookFrame(t *testing.T) {
 	if !strings.Contains(string(m.Payload), `"tool":"Bash"`) {
 		t.Errorf("payload should round-trip envelope: %s", string(m.Payload))
 	}
+	if !m.HookStartedAt.Equal(started) {
+		t.Errorf("hook_started_at = %v, want the notifier's start %v", m.HookStartedAt, started)
+	}
 }
 
 func TestRunNotify_SilentOnMissingPort(_ *testing.T) {
 	// Must not panic, must not error — empty port means "bridge not
 	// running", and the hook loop should keep going. PLAN-5 / C4.
-	runNotify("PreToolUse", strings.NewReader(`{}`), "")
+	runNotify("PreToolUse", strings.NewReader(`{}`), "", time.Now())
 }
 
 func TestRunNotify_SilentOnDialFailure(_ *testing.T) {
 	// Port 1 is reserved and refuses connections on Linux.
-	runNotify("PreToolUse", strings.NewReader(`{}`), "1")
+	runNotify("PreToolUse", strings.NewReader(`{}`), "1", time.Now())
 }
 
 func TestExtractIDs_HappyPath(t *testing.T) {

@@ -24,6 +24,11 @@ type HookEvent struct {
 	Step      string
 	Payload   json.RawMessage
 	At        time.Time
+	// StartedAt is when the hook's `ape notify` process started (zero when
+	// the sender did not say): the v1 stop gate pairs a Stop by it, not by
+	// At, so a notification slowed on its way does not look like a later
+	// Stop (W8b).
+	StartedAt time.Time
 }
 
 // isDeferredEntry / isFlushEntry inspect the `await_message` tool's

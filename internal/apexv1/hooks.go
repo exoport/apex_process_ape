@@ -795,8 +795,10 @@ func StopGateConfigured(root string) bool {
 // the hook is not running for this session.
 var ErrNoStopVerdict = errors.New("no stop-gate verdict")
 
-// WaitStopVerdict waits for the stop hook's verdict on the main Stop that
-// arrived at stopAt, for session sessionID: the first hook run in the
+// WaitStopVerdict waits for the stop hook's verdict on the main Stop
+// stamped stopAt — when its `ape notify` started (sessiondriver's
+// stopTime), the arrival only when the notifier did not say — for session
+// sessionID: the first hook run in the
 // session's verdict log that is not in consumed and did not start more
 // than a few seconds before stopAt. Callers pass every StartedAt they have
 // already used, and decide their Stops one at a time, in order, so the
@@ -809,6 +811,13 @@ func WaitStopVerdict(ctx context.Context, root, sessionID string, stopAt time.Ti
 		return StopRecord{}, err
 	}
 	path := p.stopLogPath(sessionID)
+	// The slack is how far a hook run may start BEFORE stopAt and still be
+	// this Stop's: Claude Code starts the stop hook and ape's notify for
+	// the same Stop together, in either order, so with stopAt the
+	// notify's own start the two lie milliseconds apart. When stopAt was
+	// the notify's arrival, the slack was also all the delay a notify
+	// could pick up on its way, and D365's 5 s terminal query used it all
+	// (W8b).
 	const slack = 5 * time.Second
 	deadline := time.Now().Add(appear)
 	tick := time.NewTicker(100 * time.Millisecond)

@@ -24,6 +24,8 @@ import (
 // writing the missing wave.sh, as a model fixing its red check would, after
 // FAKE_CONTINUE_DELAY seconds — and stops again with stop_hook_active true.
 // The turn whose Stop no hook blocked is written to $FAKE_DIR/allowed.
+// FAKE_NOTIFY_DELAY holds back the Stop payload ape's own notify reads
+// for that many seconds: its process has started, its message arrives late.
 // `ape` resolves to the running binary: ape task puts it first on the
 // session's PATH.
 const fakeClaudeV1 = `#!/bin/bash
@@ -50,7 +52,7 @@ for turn in 1 2 3 4 5; do
   : > "$FAKE_DIR/project-hook-$turn.out"
   if [ -n "$fromfile" ]; then printf '%s' "$payload" | $fromfile > "$FAKE_DIR/file-hook-$turn.out" & a=$!; fi
   if [ -n "$inline" ]; then printf '%s' "$payload" | $inline > "$FAKE_DIR/inline-hook-$turn.out" & b=$!; fi
-  printf '%s' "$payload" | sh -c "$stop" > /dev/null
+  { sleep "${FAKE_NOTIFY_DELAY:-0}"; printf '%s' "$payload"; } | sh -c "$stop" > /dev/null
   [ -n "$fromfile" ] && wait $a && cat "$FAKE_DIR/file-hook-$turn.out" >> "$FAKE_DIR/project-hook-$turn.out"
   [ -n "$inline" ] && wait $b && cat "$FAKE_DIR/inline-hook-$turn.out" >> "$FAKE_DIR/project-hook-$turn.out"
   if ! grep -q '"decision":"block"' "$FAKE_DIR/project-hook-$turn.out"; then echo "$turn" > "$FAKE_DIR/allowed"; break; fi
@@ -101,9 +103,14 @@ func TestTask_ProjectStopHookBlockKeepsTheRunAlive(t *testing.T) {
 	ape := buildApe(t)
 	t.Run("settings.json and inline", func(t *testing.T) { stopHookRun(t, ape, false) })
 	t.Run("hooks removed from settings.json", func(t *testing.T) { stopHookRun(t, ape, true) })
+	// W8b (D365 note 1): ape's notify for each Stop reaches ape task 6 s
+	// after the hooks started, past WaitStopVerdict's 5 s slack. Stamped
+	// on arrival, the first Stop skipped its own block and took turn 2's
+	// allow (deferrals 0); stamped with the notify's start, it pairs.
+	t.Run("a notify slowed past the slack", func(t *testing.T) { stopHookRun(t, ape, true, "FAKE_NOTIFY_DELAY=6") })
 }
 
-func stopHookRun(t *testing.T, ape string, dropSettingsHooks bool) {
+func stopHookRun(t *testing.T, ape string, dropSettingsHooks bool, env ...string) {
 	t.Helper()
 	project, gitEnv := redChangeProject(t, ape)
 	if dropSettingsHooks {
@@ -114,6 +121,7 @@ func stopHookRun(t *testing.T, ape string, dropSettingsHooks bool) {
 	require.NoError(t, os.WriteFile(filepath.Join(fake, "claude"), []byte(fakeClaudeV1), 0o755))
 	cmd := exec.Command(ape, "task", "apex-apply", "--output-format", "json", "--idle-timeout", "60s", "--cwd", project)
 	cmd.Env = append(slices.Clone(gitEnv), "PATH="+fake+":"+os.Getenv("PATH"), "APE_CLAUDE_PROBE=off", "FAKE_DIR="+fake)
+	cmd.Env = append(cmd.Env, env...)
 	var stdout, stderr strings.Builder
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	err := cmd.Run()

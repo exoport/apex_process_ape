@@ -265,6 +265,7 @@ func (r *BridgeRuntime) dispatch(m ipc.Message) {
 			Step:      m.Step,
 			Payload:   m.Payload,
 			At:        time.Now().UTC(),
+			StartedAt: m.HookStartedAt,
 		}
 		if r.opts.OnHook != nil {
 			r.opts.OnHook(evt)

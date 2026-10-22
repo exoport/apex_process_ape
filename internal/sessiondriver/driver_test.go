@@ -127,7 +127,7 @@ func TestDriver_PromptSubmits(t *testing.T) {
 // the FeedHook-only test above).
 func TestDriver_PromptSubmitsThroughNoteHook(t *testing.T) {
 	d := NewDriver(func() *runlog.Writer { return nil }, time.Minute)
-	d.NoteHook(ipc.HookUserPromptSubmit, mustJSON(t, map[string]string{"prompt": "/apex-x --autonomous"}))
+	d.NoteHook(orchestrator.HookEvent{Event: ipc.HookUserPromptSubmit, Payload: mustJSON(t, map[string]string{"prompt": "/apex-x --autonomous"})})
 	n, last := d.PromptSubmits()
 	require.Equal(t, uint64(1), n)
 	require.Equal(t, "/apex-x --autonomous", last)

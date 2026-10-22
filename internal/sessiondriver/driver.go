@@ -305,7 +305,7 @@ func (d *Driver) SetStepSkill(skill string) {
 }
 
 // StopGate reports whether a project hook blocked the main-session Stop
-// that reached the driver at stopAt. ok=false means the gate had no
+// whose hook started at stopAt (stopTime). ok=false means the gate had no
 // verdict (no hook ran, or none applies) and the Stop completes as
 // usual. It may block for as long as the hook runs, so the gate bounds
 // its own wait (and ends it with the run).
@@ -492,7 +492,8 @@ func (d *Driver) DrainStepDone() {
 //
 // PostToolUse catches the same defect one step earlier and with better
 // context, at the spawn that caused it.
-func (d *Driver) NoteHook(event string, payload json.RawMessage) {
+func (d *Driver) NoteHook(h orchestrator.HookEvent) {
+	event, payload := h.Event, h.Payload
 	switch event {
 	case ipc.HookUserPromptSubmit:
 		// The tally lives here, not in FeedHook, because this is the one
@@ -509,14 +510,29 @@ func (d *Driver) NoteHook(event string, payload json.RawMessage) {
 			d.SignalStepFatal(err)
 		}
 	case ipc.HookStop:
-		d.noteStop(parseHookEnvelope(payload))
+		d.noteStop(parseHookEnvelope(payload), stopTime(h, time.Now()))
 	}
+}
+
+// stopTime is the moment a Stop is paired by: when its `ape notify`
+// started, which is when Claude Code ran the Stop hooks — the project's
+// stop hook among them, whose verdict this Stop must meet. Not when the
+// notification arrived: anything that slowed `ape notify` on its way (a
+// loaded machine, a terminal query at its start, D365) would make the Stop
+// look later than its own verdict, and past apexv1.WaitStopVerdict's slack
+// it would take the next turn's (W8b). arrived is used when the sender did
+// not say, or claims a start after the arrival.
+func stopTime(h orchestrator.HookEvent, arrived time.Time) time.Time {
+	if h.StartedAt.IsZero() || h.StartedAt.After(arrived) {
+		return arrived
+	}
+	return h.StartedAt
 }
 
 // noteStop applies the Stop-time gate. Stateless by design: each Stop
 // re-decides from its own snapshot, so a dropped or reordered hook
 // cannot leave the gate stuck.
-func (d *Driver) noteStop(env hookEnvelope) {
+func (d *Driver) noteStop(env hookEnvelope, stopAt time.Time) {
 	verdict, blocking := classifyStop(env.BackgroundTasks)
 	switch verdict {
 	case stopFatal:
@@ -541,9 +557,9 @@ func (d *Driver) noteStop(env hookEnvelope) {
 		// blocks every Stop with background work, D88): its verdict is
 		// taken and changes nothing here, so that the next Stop meets its
 		// own verdict, not this one's.
-		d.gateInTurn(env.SessionID, func(bool, bool) {})
+		d.gateInTurn(env.SessionID, stopAt, func(bool, bool) {})
 	case stopComplete:
-		d.gateInTurn(env.SessionID, func(blocked, ok bool) {
+		d.gateInTurn(env.SessionID, stopAt, func(blocked, ok bool) {
 			if ok && blocked {
 				// The session continues the turn with the hook's reason;
 				// a later Stop decides again.
@@ -558,14 +574,13 @@ func (d *Driver) noteStop(env hookEnvelope) {
 	}
 }
 
-// gateInTurn asks the stop gate about the Stop that arrived now, after
+// gateInTurn asks the stop gate about the Stop stamped stopAt, after
 // every earlier Stop's gate call is done, and hands its answer to decide;
 // with no gate, decide gets ok=false at once. Off the hook-delivery
 // goroutine: the gate waits on a hook that runs the project's checks.
 // The turn is taken here, on the delivery goroutine, so the order is the
 // order the Stops arrived in.
-func (d *Driver) gateInTurn(sessionID string, decide func(blocked, ok bool)) {
-	stopAt := time.Now()
+func (d *Driver) gateInTurn(sessionID string, stopAt time.Time, decide func(blocked, ok bool)) {
 	d.stopMu.Lock()
 	gate := d.stopGate
 	if gate == nil {
@@ -673,7 +688,7 @@ func (d *Driver) FeedHook(h orchestrator.HookEvent) {
 			Payload:   h.Payload,
 		})
 	}
-	d.NoteHook(h.Event, h.Payload)
+	d.NoteHook(h)
 }
 
 // FeedCall is the OnCall fan-out target — writes bridge-calls.jsonl.

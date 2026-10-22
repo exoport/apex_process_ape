@@ -62,7 +62,7 @@ func TestSessionBoundaryHooks_DeliveredAndInert(t *testing.T) {
 	send := func(event string, envelope map[string]any) {
 		t.Helper()
 		before := delivered.Load()
-		runNotify(event, bytes.NewReader(mustJSON(t, envelope)), port)
+		runNotify(event, bytes.NewReader(mustJSON(t, envelope)), port, time.Now())
 		require.Eventually(t, func() bool { return delivered.Load() > before },
 			5*time.Second, 2*time.Millisecond, "hook %s not delivered through the bridge", event)
 	}
