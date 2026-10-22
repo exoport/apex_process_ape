@@ -1,8 +1,21 @@
 # CHANGELOG
 
-## v1.0.0-rc.7 (draft)
+## v1.0.0 (2026-10-22)
 
-### rc.7t: framework migrations run under `sh` on Windows (Q163, D367, D368)
+APEX v1: ape runs the framework's v1 loop and owns every record in it.
+
+Evaluated end to end on Claude Code 2.1.305 (v1-final6, build rc.7q). The release build, rc.7t, adds three candidates on top. rc.7r: `ape milestone gate` now refuses a done milestone and records nothing. The eval's $0 gate checks that change; the product's own sessions never gate a done milestone. rc.7s adds Windows fixes (a refusing commit hook is reported as `archive.hook-failed` on Windows; aboard skill files keep LF) and test fixes, checked by GitHub CI on Linux and Windows; no Linux behaviour changes. rc.7t runs the framework's migration checks and commands under `sh` on Windows too, as project checks already were (they ran under `cmd`, which misjudged them); no Linux behaviour changes. ape's harness gates pass on Claude Code 2.1.304 and 2.1.305. GitHub CI green on ubuntu-latest (Ubuntu 26.04, Git 2.55) and windows-latest (`make test-portable`), plus lint, docs-cli-check and govulncheck: runs 39719869487 and 39721571488 on rc.7s's tree and 39731524343 on rc.7t's tree, whose Windows job also ran the migration shell tests (4/4 passed), all on ci/v1.0.0-check, whose tree equals the release candidate's outside `.github/` at the last run.
+
+Promoted from the release build at 64c7486. Nothing compiled into the binary changed after
+that build: the release commit touches only this file. What v1.0 promises, and the shape of
+work it was built for, is in `docs/explanation/apex-v1-scope.md`.
+
+The trial built v1.0.0 as seven candidates. Their sections follow, newest first, and each one
+lists what it changed on top of those below it.
+
+### rc.7
+
+#### rc.7t: framework migrations run under `sh` on Windows (Q163, D367, D368)
 
 - **`ape framework update` on Windows judged the shipped migrations by `cmd` (class C).** Every
   migration `check:` and `command:` ran under `cmd /c` on Windows, but the framework's are POSIX
@@ -14,7 +27,7 @@
   and `notify:` do. Without an `sh` on `PATH` the check cannot run, and the update says so and
   refuses rather than guess. The three real-shell migration tests now run on Windows too.
 
-### rc.7s: Windows (D353, D355)
+#### rc.7s: Windows (D353, D355)
 
 - **A refusing commit hook is `archive.hook-failed` on Windows too (class C).** `ape change archive`
   told a commit hook's refusal from other commit failures by the hook file's execute bit,
@@ -27,7 +40,7 @@
   (`.gitattributes` `-text`), the migration-ledger test skips there (`cmd /c`'s `echo` writes
   `run \r\n`), and the stop-gate order test feeds its Stops 30 ms apart (Windows' clock tick).
 
-### rc.7r: a done milestone's gate is refused (Q162, D350)
+#### rc.7r: a done milestone's gate is refused (Q162, D350)
 
 - **Q162, `ape milestone gate` on a done milestone recorded it red (class C).** Seen by eval in
   two full runs: after `apex: M<n> done` archives the milestone's gate folder, a later
@@ -39,7 +52,7 @@
   change, no commit. The archive recovery and the change-branch refusal still come first, as in
   approve and close. `milestone.done`'s published meaning now names `gate` beside `approve`.
 
-### rc.7q: three defects measured on the rc.7p candidate (D340, D281)
+#### rc.7q: three defects measured on the rc.7p candidate (D340, D281)
 
 - **F-1, a person act typed as a slash command was refused (class B).** On Claude Code 2.1.305
   a typed `/apex-orchestrator approve M2` got `session.person-only` ("the session's transcript does
@@ -70,7 +83,7 @@ D181), the delegate's return of a change (D188), semantic archive subjects by de
 (D203), the standard ADR-0001 (D205, D206, D210), Next in `development/next.md` (D217) and
 eval's E-R7-1 and E2 residual (D219).
 
-### The loop is `apex-loop` (Q95–Q97)
+#### The loop is `apex-loop` (Q95–Q97)
 
 - **`apex-loop` is the loop skill:** its depth-1 privilege, allow list and one run per
   project moved with it. A live run an older ape recorded as `apex-orchestrator` still
@@ -90,7 +103,7 @@ eval's E-R7-1 and E2 residual (D219).
   carry the line too.
 - **`ape status --json` gains `next_why`**, one line on why `next` is next (Q100).
 
-### Person acts from the person's own words (E2; Q98, Q99, D179, OI-12)
+#### Person acts from the person's own words (E2; Q98, Q99, D179, OI-12)
 
 - **`ape hook user-prompt`** (UserPromptSubmit) records each prompt of a person's own
   Claude Code session under `_apex/state/prompts/` (git-ignored); nothing under APE_SESSION.
@@ -109,7 +122,7 @@ eval's E-R7-1 and E2 residual (D219).
 - pre-tool denies Bash that names `_apex/state/prompts` or `grants`; `ape doctor`
   `hooks.prompt` and the `project check` notice `hooks.prompt-absent` show a missing hook.
 
-### The loop's context relay (Q101; OI-11, D174, D181)
+#### The loop's context relay (Q101; OI-11, D174, D181)
 
 - `limits.context_relay` (default 0.6) and `limits.relays` (default 5), guarded.
 - At the loop's next child launch with its context at or over the threshold, the launch is
@@ -118,7 +131,7 @@ eval's E-R7-1 and E2 residual (D219).
   stops with `limits.relays`. An unknown window never relays. `ape status --json` shows
   the live loop's fill and relays (`sessions[].relay`).
 
-### The delegate returns a change (D188; Q104–Q108)
+#### The delegate returns a change (D188; Q104–Q108)
 
 - The delegate's fail can name defects: `--verdict fail --defect <path>`. A fail with a
   defect in the change's own diff, on a reviewed change, goes back to the change:
@@ -126,7 +139,7 @@ eval's E-R7-1 and E2 residual (D219).
   `delegate_returns.<T>` recorded. A second fail of the task, a fail naming no in-diff
   defect, or a fail on an archived change stays a person's (`delegate.fail`).
 
-### Commit subjects (D193, D194; Q109–Q112)
+#### Commit subjects (D193, D194; Q109–Q112)
 
 - **The default archive subject is `{type}: {title}`;** init and the lift write no
   `commit:` line, and an explicit `commit.subject` always wins. `ape status --json` gains
@@ -136,7 +149,7 @@ eval's E-R7-1 and E2 residual (D219).
 - Under the default only, a change already in flight with no `type:` archives with its
   title (`subject_fallback`). ape's own `apex:` commits are unchanged.
 
-### rc.7b: what `.claude/` commits (D203, D204; Q113–Q116)
+#### rc.7b: what `.claude/` commits (D203, D204; Q113–Q116)
 
 - **The root `.gitignore` gets the `.claude/` shape:** `.claude/*`, `!.claude/settings.json`,
   `!.claude/skills/` and `CLAUDE.local.md`, written by init, the lift, `ape framework
@@ -149,7 +162,7 @@ eval's E-R7-1 and E2 residual (D219).
   `skills/` too.
 - Fixes `ape project init` failing with `git.commit-failed` in a repo that ignores `.claude/`.
 
-### rc.7b: the standard ADR-0001 and apex-v0/apex-v1 wording (D205, D206, D210, D211, D215)
+#### rc.7b: the standard ADR-0001 and apex-v0/apex-v1 wording (D205, D206, D210, D211, D215)
 
 - **APEX's standard ADR-0001, "Record architecture decisions",** ships in the payload
   (`_apex/standards/adr-0001.md`); ape embeds the same bytes as the fallback for an init
@@ -167,7 +180,7 @@ eval's E-R7-1 and E2 residual (D219).
   apex-v0 <ver>`), the lift's disposition and report, ADR gap texts, the pre-commit hook script
   and the pin note say `apex-v0` / `apex-v1`. JSON keys, codes and tags are unchanged.
 
-### rc.7b: Next moves to `development/next.md` (D217, D218; Q124–Q128)
+#### rc.7b: Next moves to `development/next.md` (D217, D218; Q124–Q128)
 
 - **Next is its own file:** `development/next.md` holds the same dated items; the roadmap keeps
   one pointer line, `Next — not milestones: [next.md](next.md)`, and only milestones. init and
@@ -179,7 +192,7 @@ eval's E-R7-1 and E2 residual (D219).
   `project check`: the notice `roadmap.next-inline` while the roadmap still holds Next, and
   `next.bad-item` for a malformed `next.md` item.
 
-### rc.7c: R7b-1, a Next block split by a blank line (D223)
+#### rc.7c: R7b-1, a Next block split by a blank line (D223)
 
 - **apex-plan's Next list runs over blank lines** to the first milestone (or the first line
   that is not a list line): the reader counts every item, `ape next add` appends after the
@@ -190,7 +203,7 @@ eval's E-R7-1 and E2 residual (D219).
   pointer, and `project check` lists the `roadmap.next-inline` notice. A project an rc.7b move
   left that way is repaired by running `ape next move` again.
 
-### rc.7p: no forged `apex:` commits, and help text written for v1 (Q156, D323–D333)
+#### rc.7p: no forged `apex:` commits, and help text written for v1 (Q156, D323–D333)
 
 - **Only ape writes an `apex:` commit** (Q156, class B). A commit subject starting `apex:` marks
   ape's own records: the provenance checks (`config.changed`, `spec.edited`, `state.forged`)
@@ -251,7 +264,7 @@ except one `ape doctor` remediation line (below).
     skill needs Node, and `node.binary`'s remediation now says so (`--skip node.binary,npx.binary`)
     instead of naming a v0 skill. That remediation is the one output text this candidate changes.
 
-### rc.7o: a gate fixed after the work, a gate's own files, and bash in a sh check (Q145, RK-6, RN-1; D310–D313)
+#### rc.7o: a gate fixed after the work, a gate's own files, and bash in a sh check (Q145, RK-6, RN-1; D310–D313)
 
 - **`ape milestone approve <M> --accept-green "<reason>"` re-approves a gate fixed after the
   milestone's work was done.** The fixed gate is green, so a re-approval refused it
@@ -275,7 +288,7 @@ except one `ape doctor` remediation line (below).
   verify and gate output and in the lift's note), instead of "a command is missing on this
   machine".
 
-### rc.7n: a pre-existing red is never called flaky (RV-1; D308, D309)
+#### rc.7n: a pre-existing red is never called flaky (RV-1; D308, D309)
 
 - **A lift regression command red at `apex-v0-final` whose first run after the lift fails a
   test the tag's did not, and whose re-run fails only as at the tag, is now `red-at-tag`**, not
@@ -284,7 +297,7 @@ except one `ape doctor` remediation line (below).
   sends them there. `flaky` keeps one meaning: red after the lift, green when ape ran it
   again. That case's note no longer says "the same failures as at the tag".
 
-### rc.7m: a check's cleanup never loses an edit (RK-4b, Q144; D300, D301)
+#### rc.7m: a check's cleanup never loses an edit (RK-4b, Q144; D300, D301)
 
 After each check ape undoes what changed in the tree outside the development folder while it
 ran: the check's litter, but also an edit another writer made meanwhile (the person's session,
@@ -303,7 +316,7 @@ another session, the model once `ape change verify --wait` returned 75 and the c
   written is not undone. Git can't tell a check's write from another writer's, so nothing is
   thrown away.
 
-### rc.7l: zsh, and the operating rules' carriers (D297, D299)
+#### rc.7l: zsh, and the operating rules' carriers (D297, D299)
 
 - **`ape hook session-start` adds a zsh paragraph when the session's shell is zsh** (RK-3a):
   `$CLAUDE_CODE_SHELL` when set, else `$SHELL`. Claude Code runs the model's Bash commands in that
@@ -316,7 +329,7 @@ another session, the model once `ape change verify --wait` returned 75 and the c
 - Tests: the parent-gone stop test waits for the child to read its run's handle, not a fixed
   300 ms (RK-1, Q143).
 
-### rc.7k: the rehearsal findings on rc.7j (D289–D292)
+#### rc.7k: the rehearsal findings on rc.7j (D289–D292)
 
 - **Every CLAUDE.md import the lift drops is a candidate row** (RJ-1, Q139): the apex:managed
   block's `@_apex/apex-operating-rules.md`, and an `@` import of any other file the lift deletes.
@@ -341,7 +354,7 @@ another session, the model once `ape change verify --wait` returned 75 and the c
 - Tests: `check-task-subagents` judges concurrency by overlap (the last sub-agent starts before
   the first ends), with a 120 s hang ceiling (Q138).
 
-### rc.7j: the v1.0.1 list, folded into v1.0.0 (D277, D281, D282, D284)
+#### rc.7j: the v1.0.1 list, folded into v1.0.0 (D277, D281, D282, D284)
 
 - **`ape task` refuses a prompt with nowhere to go** (DR-11): `--prompt`, `--prompt-file` or
   `--handoff` without `--prompt-flag` exits 2 naming the fix, instead of starting the skill and
@@ -373,7 +386,7 @@ another session, the model once `ape change verify --wait` returned 75 and the c
   intermediate certificates (reached through `x509.Certificate.Verify`). Published after rc.7i was
   built; earlier candidates carry Go 1.27.2.
 
-### rc.7i: every binding-rule candidate stays in the committed disposition (D274, D276)
+#### rc.7i: every binding-rule candidate stays in the committed disposition (D274, D276)
 
 - **The lift never cuts a binding-rule candidate from `development/lift-disposition.md`**: past
   its 48 KB ceiling the file used to keep as many rows as fit and send the rest to
@@ -385,7 +398,7 @@ another session, the model once `ape change verify --wait` returned 75 and the c
   readers, the ADR table), whose full lists stay in the JSON; the "… and N more candidate(s)"
   line is gone.
 
-### rc.7h: the startup check on a monochrome screen (D269, D270)
+#### rc.7h: the startup check on a monochrome screen (D269, D270)
 
 - **The startup check accepts claude's placeholder hint on a monochrome screen**: with
   `NO_COLOR` set or `TERM=dumb`, claude draws its hint (`❯ Try "fix lint errors"`) in the normal
@@ -397,7 +410,7 @@ another session, the model once `ape change verify --wait` returned 75 and the c
 - `make check-claude` gains `startup_probe_monochrome_hint` (the hint forced on, `NO_COLOR`).
 - The Claude Code surface baseline is reviewed through 2.1.305.
 
-### rc.7g: no lift source is skipped (D262, D264; RG-4b, RG-4c)
+#### rc.7g: no lift source is skipped (D262, D264; RG-4b, RG-4c)
 
 - **An overview is read like every other section** (RG-4b): rc.7f skipped a project-context or
   team-memory section titled overview, introduction, about, purpose, summary or table of
@@ -414,7 +427,7 @@ another session, the model once `ape change verify --wait` returned 75 and the c
   cells, a comment in the repo-structure block). A CLAUDE.md list item now needs three words, as
   everywhere else. project-context.md and team-memory keep the rule-word test for paragraphs.
 
-### rc.7f: the final candidate's fixes (D247, D251–D259)
+#### rc.7f: the final candidate's fixes (D247, D251–D259)
 
 - **The startup check reads Claude Code's placeholder hint as an empty prompt** (E-R7e-1): a
   `❯` row holding only faint text — or claude's reverse-video cursor over the hint's first letter,
@@ -435,7 +448,7 @@ another session, the model once `ape change verify --wait` returned 75 and the c
   a `## Regression` section committed as `apex: lift regression verdict`, and the verdict lines
   on stderr under `ape framework update`.
 
-### rc.7e: the lane `milestone: none` is a **tweak** (D240, Q135)
+#### rc.7e: the lane `milestone: none` is a **tweak** (D240, Q135)
 
 - **The lane is renamed tweak** everywhere a person or a skill reads it, since "fix" collided
   with the conventional `type: fix`: `ape status --json` `tweaks` (was `fixes`) and
@@ -446,7 +459,7 @@ another session, the model once `ape change verify --wait` returned 75 and the c
 - **`ape change new --milestone none` needs `--type`** (`usage.type`, exit 2): a tweak says
   what it is (feat, fix, …); a milestone change still defaults to `feat`.
 
-### rc.7d: R7j-1, a prompt Claude Code generated never grants a person act (D238)
+#### rc.7d: R7j-1, a prompt Claude Code generated never grants a person act (D238)
 
 - **Fixes an E2 bypass (high):** `UserPromptSubmit` also fires for a background command's
   `<task-notification>`, which ape recorded as the person's prompt, so a background command
@@ -458,7 +471,7 @@ another session, the model once `ape change verify --wait` returned 75 and the c
   notification opened, the person's latest typed prompt is the one judged (same single-use
   rules). `make check-hooks` asserts that the typed seed prompt's transcript entry is `human`.
 
-### rc.7d: R7h-1, lasting scenarios that check what seq-08 removed (D232, D233; Q130–Q133)
+#### rc.7d: R7h-1, lasting scenarios that check what seq-08 removed (D232, D233; Q130–Q133)
 
 - **`ape decision standard` records what it removed** (`standard.removed: [{path, id}]` in
   decisions.json) and names every lasting spec scenario whose `check:` still reads it — a removed
@@ -472,14 +485,14 @@ another session, the model once `ape change verify --wait` returned 75 and the c
 - A project whose seq-08 ran on rc.7b (no `removed` record, pdfa) is read the same way from the
   decisions/ paths its checks name that no longer exist.
 
-### rc.7c: R7b-2, an update reports a standard opt-out (D224)
+#### rc.7c: R7b-2, an update reports a standard opt-out (D224)
 
 - **`ape framework update` says when a project opted out of the standard ADR-0001** (D206): an
   accepted ADR superseding ADR-0001 makes the standard's entry judge itself applied without a
   word, so the update now prints `ADR-0001: opted out — ADR-NNNN (accepted) supersedes APEX's
   standard, so the update leaves … alone`.
 
-### rc.7b: eval's E-R7-1 and the E2 residual (D219)
+#### rc.7b: eval's E-R7-1 and the E2 residual (D219)
 
 - **An apex-v0 → apex-v1 `ape framework update` succeeds in one run:** once an entry has
   applied, each remaining derivable migration is judged again right before it would run (seq-07
@@ -491,7 +504,7 @@ another session, the model once `ape change verify --wait` returned 75 and the c
   person's words; it is not a sandbox. `make check-claude-surface` now watches
   `CLAUDE_CODE_SESSION_ID`.
 
-### `ape project lift` and the pin (R32–R34)
+#### `ape project lift` and the pin (R32–R34)
 
 - **R32:** a quoted literal whose path is followed only by a sentence's closing
   punctuation is no reader by itself.
@@ -502,7 +515,7 @@ another session, the model once `ape change verify --wait` returned 75 and the c
   2, so the guard fails closed. The lift's pin line names every `git commit` and every
   Claude session among what needs `APE_TOOLCHAIN=local`.
 
-## v1.0.0-rc.6 (draft)
+### rc.6
 
 On top of rc.5 and the candidates below: research's rc.5 lift findings R16–R22, the v0
 state readers (D141), the docs delegate by default (D152), and gates, archive layout,
@@ -510,7 +523,7 @@ hot/ and the secret scan (D155), the changelog in the docs delegate's scope (D15
 wall-clock kill of a run that shows progress (D159), research's rc.6 lift findings R23–R28
 and E-R6b-2's refusal text (D161), the v1 framework install order (D162, D163), research's rc.6c lift probes R29–R31 (D166), and rc.6e's docs-only verify, pre-commit scan and status fields (D168, D170).
 
-### `ape project lift`
+#### `ape project lift`
 
 - **A story-first aside keeps its ADR citations** (R16, data loss since rc.3 at
   least): `(Story 42.1, ADR-0019)` → `(ADR-0019)`. A story takes only the
@@ -536,7 +549,7 @@ and E-R6b-2's refusal text (D161), the v1 framework install order (D162, D163), 
   files in `pkg/mdpdf` share a folder with `x_test.go` (folder match only)";
   the dry run and the JSON stay complete.
 
-### Gates, archive layout, hot/ and the secret scan (D155; class B/C)
+#### Gates, archive layout, hot/ and the secret scan (D155; class B/C)
 
 - **Gate folders:** `milestone close` (and `--accept-red`) moves the
   milestone's `development/gates/<M>-*/` into
@@ -567,7 +580,7 @@ and E-R6b-2's refusal text (D161), the v1 framework install order (D162, D163), 
   `.sum` files are skipped. A session's own commits are scanned when the
   archive squashes them. The binary grows by about 8 MB.
 
-### The secret scan, the guard and the refusal (D161: R23, R28, E-R6b-2; class B/C)
+#### The secret scan, the guard and the refusal (D161: R23, R28, E-R6b-2; class B/C)
 
 - **`secrets.allow` counts from the guard's baseline** (R23): the newest `apex:
   config accepted` since the v1 epoch, else the epoch. A session can no longer
@@ -589,7 +602,7 @@ and E-R6b-2's refusal text (D161), the v1 framework install order (D162, D163), 
   add`'s subject (the text cut at 60 characters) could show a token whole, or
   all but one character; any secret or secret prefix in it is now redacted.
 
-### Lift and checks (D161: R24–R27; class B/C)
+#### Lift and checks (D161: R24–R27; class B/C)
 
 - **Exit 0 with failing tests named is red in the lift's verdict** (R24a): a
   regression run whose output names failing tests counts red by those names —
@@ -611,7 +624,7 @@ and E-R6b-2's refusal text (D161), the v1 framework install order (D162, D163), 
   when nothing is left; under `--check` the folders left to move, at the top
   level beside the diagnostics.
 
-### rc.6e: docs-only verify, the pre-commit scan, status (D168, D170; class B/C)
+#### rc.6e: docs-only verify, the pre-commit scan, status (D168, D170; class B/C)
 
 - **A docs-only change's verify skips the regression command** (Q87): every
   path the change touched is in the docs default's scope (release.docs, the
@@ -645,7 +658,7 @@ and E-R6b-2's refusal text (D161), the v1 framework install order (D162, D163), 
   command.
 - betterleaks stays on v2.0.0-rc.2 (v2.0.0 is not released).
 
-### The lift's regression and readers, again (D166: R29–R31; class C)
+#### The lift's regression and readers, again (D166: R29–R31; class C)
 
 - **The lift names a red run's failing tests whatever its exit code** (R29):
   `regression_new_failures` holds the names the after-lift output gives, minus
@@ -660,7 +673,7 @@ and E-R6b-2's refusal text (D161), the v1 framework install order (D162, D163), 
   carried onto the next line included. A read on the line (`cat`, `open`,
   `os.ReadFile`, `os.listdir`, a redirection, …) still counts.
 
-### Installing a v1 framework (D162, D163; class C)
+#### Installing a v1 framework (D162, D163; class C)
 
 - **`ape framework setup`, then `ape project init`.** init's `next:` (JSON
   `next`) names `ape framework setup` while no `.claude/skills/apex-*` exists;
@@ -695,7 +708,7 @@ and E-R6b-2's refusal text (D161), the v1 framework install order (D162, D163), 
 - **The lift help says the branch needs an upstream** (D162-5): the lift
   checks the `apex-v0-final` tag there.
 
-### A working run is never killed for time (D159; class B/C)
+#### A working run is never killed for time (D159; class B/C)
 
 - **`--max-duration` is off by default** (was 3h) for `ape task`, `ape prompt`,
   apescript sessions and every detached child. A run that shows progress stops
@@ -716,7 +729,7 @@ and E-R6b-2's refusal text (D161), the v1 framework install order (D162, D163), 
   stopped; then `ape task apex-orchestrator --args M3` `` ("then, after the
   reset," for a usage limit).
 
-### The docs delegate by default (D152; class B/C)
+#### The docs delegate by default (D152; class B/C)
 
 - A change whose frontmatter says **`docs: true`** — the milestone's final
   docs change apex-plan plans under D130 — has its human-review tasks accepted
@@ -739,13 +752,13 @@ and E-R6b-2's refusal text (D161), the v1 framework install order (D162, D163), 
 - **`human_review` refuses unknown keys** (a typo such as `doc: person` would
   otherwise have enabled the delegate for every task).
 
-## v1.0.0-rc.5 (draft)
+### rc.5
 
 On top of rc.4 and the candidates below: the morning report's ape items 4–11
 (BRIEF r48), the v1.1 items moved into v1.0 (D111, D118, D120, D129), the milestone's start for its gate (D130), and aboard
 v0.4.0 (D126).
 
-### Changes and project files
+#### Changes and project files
 
 - **A multi-line `Purpose:` stays whole** (item 4, Q44): the Purpose block is
   the `Purpose:` line and every line after it up to the first blank line,
@@ -771,7 +784,7 @@ v0.4.0 (D126).
   or together, with no migration. The init skeleton's section names both and
   says that a pinned version is a decision (ADR), whichever name is used.
 
-### Commit types, release scheme and release docs (D120, D129)
+#### Commit types, release scheme and release docs (D120, D129)
 
 - **`commit.types:`** (in the guarded `commit:` block) replaces the type list
   `change check` holds change.md's `type:` to — a non-empty list of lower-case
@@ -790,7 +803,7 @@ v0.4.0 (D126).
   `config: {commit_types, release_scheme, release_docs}`, the defaults filled in (class C,
   additive).
 
-### A milestone's start, for its gate (D130, class C)
+#### A milestone's start, for its gate (D130, class C)
 
 - **`base_sha`**: milestones.json's approval records the milestone's start,
   HEAD at its first approval (a re-approval keeps it; an approval recorded
@@ -803,7 +816,7 @@ v0.4.0 (D126).
 - `ape status --json` shows `base_sha` on the milestone and on each approved
   `milestones[]` line, for a gate run by hand and for apex-release's range.
 
-### Regression judge (class C)
+#### Regression judge (class C)
 
 - **Failing test names, not only exit codes** (item 11b, Q47): a change's
   regression baseline records `failing` (the names its red run printed; at
@@ -817,7 +830,7 @@ v0.4.0 (D126).
   <Test>` lines and `✖  <pkg>` package lines, beside `--- FAIL:`, pytest,
   cargo and jest. It is shared by the lift and the regression judge.
 
-### `ape project lift`
+#### `ape project lift`
 
 - **Comment edits** (items 6 and 10, R7–R10): a mark a removal leaves at the
   start of a comment line moves to the end of the line above (no more `//.`,
@@ -841,7 +854,7 @@ v0.4.0 (D126).
   names to compare, `(re)installing` lines and durations are ignored in the
   output hash.
 
-### Sessions and the service
+#### Sessions and the service
 
 - **`ape prompt` honours a blocked Stop** (item 11a), as `ape task` does since
   D88: the session ends on the first Stop the project's hook allows, and
@@ -854,7 +867,7 @@ v0.4.0 (D126).
   Before, a job's claude (in a PTY session of its own) could outlive the
   daemon. The 5–16 s shutdown in the report did not reproduce.
 
-### Board
+#### Board
 
 - **aboard v0.4.0; the status tab is quiet** (D126, D60): ape's refreshes
   raise no notification, unread dot or banner. Going quiet is announced once,
@@ -862,15 +875,15 @@ v0.4.0 (D126).
   refresh of an older ape's tab) and leaves it alone after that, so a person
   who turns it off from the tab's menu keeps it off.
 
-### Harness
+#### Harness
 
 - The claude-surface baseline reviewed through Claude Code 2.1.302 (D109).
 
-## v1.0.0-rc.4 (draft)
+### rc.4
 
 On top of rc.3, rc.2 and rc.1 below, built in two phases (D90).
 
-### Project context and caps
+#### Project context and caps
 
 - **AGENTS.md imports project.md** (D82): `ape project init` writes
   `Project context: read @development/project.md before planning or changing
@@ -897,7 +910,7 @@ On top of rc.3, rc.2 and rc.1 below, built in two phases (D90).
   `Answer:` items are not findings. A commit touching only review.md (or
   anything in the development folder) keeps a verify and a review fresh.
 
-### Models
+#### Models
 
 - **`ape project init` writes the `models:` defaults into an existing
   config** that has none (D86), and commits it with the init when the config
@@ -906,7 +919,7 @@ On top of rc.3, rc.2 and rc.1 below, built in two phases (D90).
   nothing and warns about each default skill that has no entry. The defaults
   now cover apex-accept (opus/medium) and apex-release (sonnet/high) too (D93).
 
-### Session delivery
+#### Session delivery
 
 - **Text that would not type as written goes through the args file** (Q36,
   D92): `ape task --args`, `ape prompt` and the lines ape composes for
@@ -923,7 +936,7 @@ On top of rc.3, rc.2 and rc.1 below, built in two phases (D90).
   `--no-commit` the caller did not ask for. Since rc.3, every `ape task` with
   arguments too long to type had been told not to commit.
 
-### Background work and the Stop hook (D88)
+#### Background work and the Stop hook (D88)
 
 - **In any ape session, the Stop hook refuses a stop while background work
   runs**: whatever `background_tasks` lists, shell and monitor included,
@@ -939,7 +952,7 @@ On top of rc.3, rc.2 and rc.1 below, built in two phases (D90).
   driver deferred (a running sub-agent) used to leave its hook verdict
   unread, so a quick next Stop could read it as its own.
 
-### `ape service` and nesting (D83)
+#### `ape service` and nesting (D83)
 
 - **Service jobs obey the nesting rule.** Every `*.run` request carries the
   caller's stamp (`caller: {depth, run_id, parent_run, pid}`; wire v2), which
@@ -958,7 +971,7 @@ On top of rc.3, rc.2 and rc.1 below, built in two phases (D90).
 - **`change review --run` takes the child lock before reading the change**,
   so a busy orchestrator child is `session.child-running` (exit 3).
 
-### Lift (D87)
+#### Lift (D87)
 
 - **`edited_but_hashed` lists real hashers only**: documents and evidence
   never count, a script running `sha256sum`, `md5sum`, `shasum` or `b2sum`
@@ -975,18 +988,18 @@ On top of rc.3, rc.2 and rc.1 below, built in two phases (D90).
   `red-at-tag-new-failures` (`regression_new_failures`), never
   "pre-existing".
 
-### Wording
+#### Wording
 
 - **Domain-neutral help** (D85 A): help text says "work", "checks" and "the
   project's own check command" where it meant the change's work rather than
   code specifically. No flag, key, field or code changed.
 
-## v1.0.0-rc.3 (draft)
+### rc.3
 
 The candidate for the session-per-skill loop (D61), on top of rc.2 and rc.1
-below. At promotion the three drafts become the one dated `## v1.0.0` section.
+below.
 
-### Long-running checks (D58, D69)
+#### Long-running checks (D58, D69)
 
 - **`timeouts:` takes an idle limit and a ceiling per tier**:
   `timeouts: {check: {idle: 15m, max: 2h}, regression: {idle: 30m, max: 2h},
@@ -1011,7 +1024,7 @@ below. At promotion the three drafts become the one dated `## v1.0.0` section.
   600 s per stop. An `ape task` session whose project has a live run counts as
   making progress.
 
-### Sessions and nesting (D61, D62)
+#### Sessions and nesting (D61, D62)
 
 - **Depth replaces the blanket nesting refusal.** Outside any ape session
   (depth 0) any model session may start. Inside one, only ape's own
@@ -1032,7 +1045,7 @@ below. At promotion the three drafts become the one dated `## v1.0.0` section.
   `result` is the child's last reply (at most 2 KB). `ape task --detach
   --output-format json` prints the handle as JSON.
 
-### Human review, tools and plugins (D59, D75–D78)
+#### Human review, tools and plugins (D59, D75–D78)
 
 - **Delegated acceptance** (off by default): with `human_review: {delegate:
   <skill>}` in `_apex/config.yaml`, `ape change accept <id> T<n> --delegate`
@@ -1054,7 +1067,7 @@ below. At promotion the three drafts become the one dated `## v1.0.0` section.
   skills, hooks and MCP servers. A plugin carrying hooks or MCP servers is a
   finding unless its entry says `allow: [hooks, mcp]`.
 
-### Guard rails, caps and defaults (D65, D69, D70)
+#### Guard rails, caps and defaults (D65, D69, D70)
 
 - **`config.changed` now guards** `timeouts`, `caps`, `regression`, `commit`,
   `evidence`, `marketplaces`, `plugins`, `tools` and `human_review`, beside
@@ -1073,7 +1086,7 @@ below. At promotion the three drafts become the one dated `## v1.0.0` section.
   apex-apply and apex-orchestrator sonnet/high, apex-plan, apex-change and
   apex-review opus/medium.
 
-### Lifting a v0 project (D80)
+#### Lifting a v0 project (D80)
 
 - **`ape project lift` runs with the ape you invoke**, never the project's
   `.bingo` pin: it says which binary runs, moves the pin to it (a release
@@ -1093,7 +1106,7 @@ below. At promotion the three drafts become the one dated `## v1.0.0` section.
   summaries and `lift-disposition.json` the full lists; the dry run also lists
   edited files that a test, CI script or lock file seems to hash.
 
-### Status
+#### Status
 
 - **An aboard status tab**: in a project with `.aboard/`, every state-changing
   v1 command refreshes an "APEX status" tab (milestones, changes, what awaits
@@ -1105,10 +1118,9 @@ below. At promotion the three drafts become the one dated `## v1.0.0` section.
 - An apex-release commit (`Release:` trailer) that touches only the changelog
   is not listed as work outside the change flow.
 
-## v1.0.0-rc.2 (draft)
+### rc.2
 
-Fixes from the framework's rc.1 smoke, on top of everything in rc.1 below. At
-promotion both drafts become the one dated `## v1.0.0` section.
+Fixes from the framework's rc.1 smoke, on top of everything in rc.1 below.
 
 - **`milestone approve` freezes only the scripts a gate runs** (class B): the
   executable word of each simple command when it is a repo path
@@ -1137,7 +1149,7 @@ promotion both drafts become the one dated `## v1.0.0` section.
   a session cannot loosen its own limits. A person keeps such an edit with the
   new `ape project accept-config --by <who>` (person-only), or reverts it.
 
-## v1.0.0-rc.1 (draft)
+### rc.1
 
 APEX v1: the framework's small loop replaces v0's story ceremony, and ape owns
 every record in it. A person approves a milestone; the orchestrator plans each
