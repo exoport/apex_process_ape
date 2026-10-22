@@ -35,6 +35,8 @@ How a typed line is delivered, including the 700-character limit and the args fi
 
 Every spawn carries ape's bridge hooks in its `--settings`: `PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `SubagentStart`, `SubagentStop`, `SessionStart` and `PreCompact` asynchronously, and `Stop` synchronously. Each runs `ape notify --event <event>` (`internal/bridge/config/settings.go`). They are for observation and completion: the step contract, the `Stop` that ends a step, and the run's hook-event log.
 
+Every spawn also gets ape's status line in its `--settings`: `statusLine: {type: command, command: "<ape> usage record [--run <key>]"}` (v1.1). It records the plan's rate limits from the JSON Claude Code hands a status line, and shows `5h 14% · 7d 55%` (see [`ape usage`](cli.md#ape-usage)). In `--settings` it applies to the session ape launches only: a `statusLine` in the person's own settings files keeps working in their own sessions, and ape never writes those files.
+
 In an APEX v1 project `ape task` also passes the project's own hooks (`ape hook stop`, `ape hook pre-tool`, …) inline in `--settings`, so its sessions have them even when `.claude/settings.json` does not. See [hooks.md](hooks.md).
 
 ## tmux terminal identity is stripped on the PTY path (and only there)

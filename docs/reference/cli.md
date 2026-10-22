@@ -60,6 +60,7 @@ Subcommands:
 - `task` — Run a single framework skill through the interactive PTY runner
 - `transcript` — Work with Claude session transcripts
 - `update` — Update ape to the latest version
+- `usage` — Show the plan's usage as the sessions ape launched last saw it
 - `version` — Print version information
 
 ## ape aboard
@@ -5827,7 +5828,7 @@ Show a detached run's handle, with its state: running, "ended, exit N", or
 "gone without recording an exit".
 
 --json prints the object `ape run wait --json` does instead — id, state
-(running, ended or lost), exit_code, log, stdout, run_id, run_dir, depth,
+(running, held, ended or lost; held_until while held), exit_code, log, stdout, run_id, run_dir, depth,
 parent_run, stop_reason, and result (the session's last assistant message,
 at most 2048 bytes; absent without a transcript) — and exits 0.
 
@@ -5900,14 +5901,19 @@ code of its own, so it is never mistaken for a run that exited 1.
 The run's stdout is in its own file (the handle's "stdout"), apart from
 stderr (its "log"), so a --output-format json envelope reads clean.
 
---json prints one object instead of the lines: id, state (running, ended or
-lost), exit_code (null until it ends), log, stdout, run_id and run_dir (the
+--json prints one object instead of the lines: id, state (running, held,
+ended or lost), exit_code (null until it ends), log, stdout, run_id and run_dir (the
 run's own record, once it has one), depth and parent_run (the nesting rule:
 2 and the loop's run for a session a loop run started),
 stop_reason ("parent_gone" when ape stopped it because that loop run
 ended), and result: the session's last assistant message, read from its
 transcript, at most 2048 bytes (result_truncated: true when cut). result is
 absent when there is no transcript to read. The exit codes are the same.
+
+state "held" (with held_until) is a run whose launch ape's usage guard holds
+on the plan's 5-hour window until it resets (W4, ape task --help): the run is
+waiting, not stuck, and the wait exits 75 as for running — wait again; never
+start it a second time.
 
 Flags:
 
@@ -7272,8 +7278,13 @@ Show where the project stands, from the records ape keeps:
   - the latest ape task run (JSON "latest_run": {skill, run_id, status, stopped,
     resets, resets_at, message, depth, parent_run}): how it ended, e.g. "stopped:
     usage-limit, resets 2026-10-16T23:00:00+02:00" when a claude.ai usage limit
-    stopped it (see ape task --help, exit 14); a session a loop run started
-    names that run ("started by <run>"; depth 2, parent_run)
+    stopped it (see ape task --help, exit 14), or "stopped: usage-guard (not started:
+    the 7-day window), resets …" when ape's usage guard did not start it (W4); a
+    session a loop run started names that run ("started by <run>"; depth 2, parent_run)
+  - the plan's usage (W4, ape usage --help): "usage: 5h 0.14 · 7d 0.55 (read 2 min
+    ago)", or "usage: unknown" before the first reading; JSON "usage": {at, five_hour,
+    five_hour_resets_at, seven_day, seven_day_resets_at, run, claude_version,
+    age_seconds}, null when there is none
   - JSON "sessions": the model sessions ape launched that run in this project now
     ([{run_id, kind, skill, depth, parent_run, pid, started_at}], [] when none): an
     apex-loop run at depth 1 and its one child at depth 2 (D62). The loop's
@@ -7282,7 +7293,9 @@ Show where the project stands, from the records ape keeps:
     turn of its transcript shows it, over the model's window (context_fill null and
     context_window 0 when the window is unknown: no relay then), the threshold
     (limits.context_relay), the relays so far and their cap (limits.relays), and the
-    run it relays; the brief says "context 12 % (relay at 60 %), relays 0/5"
+    run it relays; the brief says "context 12 % (relay at 60 %), relays 0/5". A
+    session whose launch ape's usage guard holds on the 5-hour window (W4) carries
+    held_until (", held: 5-hour window, launches <ts>")
 
 --brief renders at most 25 lines (what the SessionStart hook injects).
 
@@ -7524,7 +7537,44 @@ reads with no hook between them ends the run (exit 14) with termination
 kind "usage_limit" in the run manifest, resets as printed and resets_at
 parsed; `ape status` shows it as the latest run ("stopped: usage-limit,
 resets <ts>"). Run again after the reset. Matched against Claude Code
-2.1.302's text, unmeasured live.
+2.1.302's text, unmeasured live: so the first limit screen per Claude Code
+version is kept, the raw PTY bytes in <user cache>/ape/claude-limit-<version>.bin
+and the last usage reading (ape usage) beside them in .json, and the stop's
+message names both (W4).
+
+Usage-aware launching (W4): every session ape launches records the plan's
+usage from its status line (ape usage --help). In an APEX v1 project, before
+the session starts — every ape task, the loop's children and the sessions
+ape change starts included — ape's usage guard reads the newest reading
+against _apex/config.yaml
+  limits:
+    usage:
+      seven_day: 0.85   # stop over this 7-day fill
+      five_hour: 0.95   # hold over this 5-hour fill, with the launch's share
+      ceiling: 0.95     # stop when the 7-day fill with the share is over it
+      share: auto       # the skill's median over its last 10 runs (0.05 below
+                        # 3), or a number
+      max_age: 10m      # an older reading is unknown
+      off: false        # true: no guard
+(the defaults; guarded, like every limit) and decides:
+  launch   a fresh reading under every limit
+  hold     5-hour window + share over five_hour: the launch waits until the
+           window resets + 1 min (a line every 10 min; ape status shows the
+           session held, ape run wait --json state "held" with held_until and
+           exit 75 as for running), then decides again. Nothing is logged:
+           a hold resolves itself.
+  stop     7-day window over seven_day, or + share over ceiling: the session
+           is not started — exit 14, termination usage_guard (resets,
+           resets_at) in the run manifest, events stop (reason usage-guard)
+           and person (action: the command with --usage-ok). A person's call.
+  unknown  no reading, or one older than max_age: launch, with "usage
+           unknown (no reading in 10 min)" in the output and the manifest
+A window whose reset has passed counts as 0. --usage-ok launches whatever
+the reading says; it is a person's (refused in a model session, exit 2,
+session.person-only) and recorded. The decision is the run manifest's
+usage.guard: {decision, reading, share_five_hour, share_seven_day,
+share_source, held_until, held_seconds, usage_ok, note}, beside usage.before
+and usage.after.
 
 Events and the notifier (H20, W3): in an APEX v1 project every run logs
 "run-end" in _apex/state/events.jsonl when it ends, attached or detached
@@ -7606,7 +7656,8 @@ session.not-allowed), or the loop relay refused a child launch (session.relay) �
 never became ready (last pane on stderr), or a session lock another run
 holds (session.child-running, session.orchestrator-running) · 5 upstream
 API failure · 6 the dispatch violated its declared commit ownership (the run
-itself may have succeeded) · 14 a claude.ai usage limit stopped the session.
+itself may have succeeded) · 14 a claude.ai usage limit stopped the session,
+or ape's usage guard did not start it (termination usage_guard).
 
 Examples:
 
@@ -7646,6 +7697,7 @@ Flags:
 | `--task-commit` | string | `—` | Task layer: commit the complete task at the end; bare flag derives "ape:task/<skill>" |
 | `--transcript-store` | string | `nats-object` | Transcript blob backend: nats-object\|uri-offload (env APE_TRANSCRIPT_STORE). |
 | `--upload-transcripts` | bool | `false` | At run end, upload the transcript set as content-addressed blobs (env APE_UPLOAD_TRANSCRIPTS=1). |
+| `--usage-ok` | bool | `false` | Launch whatever the plan's usage reads: the usage guard's override (a person only, from a terminal; recorded in the run manifest with the reading) |
 
 ## ape transcript
 
@@ -7735,6 +7787,44 @@ Flags:
 | ---- | ---- | ------- | ----------- |
 | `--output-format` | string | `human` | Output format: human\|json\|yaml |
 | `--pin` | bool | `false` | Also move this project's bingo pin (.bingo/ape.mod) to the latest release and commit it as chore(ape) |
+
+## ape usage
+
+Show the plan's usage as the sessions ape launched last saw it
+
+```
+ape usage [flags]
+```
+
+The claude.ai plan's usage, as the sessions ape launches last saw it.
+
+Every Claude Code session ape launches (ape task, ape prompt, ape chat, a
+loop's children) gets ape's own status line in its --settings:
+  statusLine: {type: command, command: "<ape> usage record [--run <key>]"}
+It applies to that session only; the person's own settings files and their
+status line are never written. Claude Code hands the status line a JSON
+object; from the session's first API response on it carries the plan's
+rate_limits (five_hour and seven_day: used_percentage 0–100, resets_at in
+epoch seconds; measured on Claude Code 2.1.306), and the recorder keeps the
+reading in <user cache>/ape/usage.json (os.UserCacheDir: ~/.cache/ape on
+Linux), per OS user. The session's status line shows "5h 14% · 7d 55%".
+
+An ape task run's first and last reading are its manifest's
+  usage: {before, after}
+(before is taken at the session's first API response), and the history
+limits.usage.share: auto learns from (<user cache>/ape/usage-history.json).
+
+ape usage prints the last reading and its age: the windows as fractions,
+when each resets, the run whose session recorded it and the Claude Code
+version. With none yet: "usage: unknown". ape status shows the same in one
+line. --output-format json prints {reading, age_seconds, path}, reading
+null when there is none. Exit 0 either way.
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
 
 ## ape version
 

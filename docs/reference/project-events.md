@@ -49,7 +49,7 @@ an `ape task` run.
 | `milestone-done` | ape closes a milestone, green or accepted red. | `ape milestone close`, after the close commit. |
 | `run-end` | An `ape task` run ends, attached or detached. `exit` is its exit code; `reason` its termination kind or stop reason. | The run itself, after its manifest's end. For a detached run, its supervisor, once the handle has the exit. |
 | `run-lost` | A detached run's supervisor is gone without recording an exit. Once per run. | The first of `ape status` (with or without `--until`), `ape run wait` and `ape run status` to see it. It creates `<id>.lost` beside the handle. |
-| `stop` | An `ape task` run stops on a limit (usage limit, budget). Logged before its `run-end`. | The run. |
+| `stop` | An `ape task` run stops on a limit (usage limit, budget), or ape's usage guard did not start it (`reason` `usage-guard`, then a `person` event whose `action` is the same command with `--usage-ok`). Logged before its `run-end`. A launch the guard holds logs nothing. | The run. |
 | `block` | A change becomes blocked (`ape change block`, verify at the attempts limit, a rebase conflict). | The command that blocked it. |
 
 The person acts that `person` covers are listed in

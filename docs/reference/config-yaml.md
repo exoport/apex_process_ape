@@ -57,7 +57,7 @@ leaves an existing `models:` alone, warning for each default skill it lacks.
 | [`development_folder`](#development_folder) | path | `development` | no |
 | [`models`](#models) | map: skill → model or `{model, effort}` | the seven rows above | no |
 | [`effort`](#effort) | effort level | none (Claude Code's own) | no |
-| [`limits`](#limits) | mapping | budget off, attempts 5, attempts_total 15, replans 3, consecutive_blocks 2, context_relay 0.6, relays 5 | yes |
+| [`limits`](#limits) | mapping | budget off, attempts 5, attempts_total 15, replans 3, consecutive_blocks 2, context_relay 0.6, relays 5, usage (below) | yes |
 | [`regression`](#regression) | command, or `{change, milestone}` | none: no regression net | yes |
 | [`timeouts`](#timeouts) | mapping per tier | check 15m idle / 2h max, regression 30m / 2h, gate 30m / 4h | yes |
 | [`retries`](#retries) | integer 0–5 | 0 | yes |
@@ -145,6 +145,13 @@ limits:
   consecutive_blocks: 2    # blocked changes in a row per milestone
   context_relay: 0.6       # the loop's context fill that relays it
   relays: 5                # relays per loop run
+  usage:                   # the usage guard before every ape task launch (v1.1)
+    seven_day: 0.85        # stop over this 7-day window fill
+    five_hour: 0.95        # hold over this 5-hour fill, with the launch's share
+    ceiling: 0.95          # stop when the 7-day fill with the share is over it
+    share: auto            # or a fraction
+    max_age: 10m           # an older reading is unknown
+    off: false             # true: no guard
 ```
 
 | Key | Type | Default | Effect |
@@ -156,6 +163,39 @@ limits:
 | `consecutive_blocks` | integer ≥ 1 | 2 | Changes of a milestone blocked in a row. Past it no change of the milestone is planned or started, and `ape task apex-loop` is refused (`milestone.blocks-exceeded`) until a person re-approves the milestone |
 | `context_relay` | number, above 0 and at most 0.95 | 0.6 | The loop session's context fill at which its next child launch is refused and ape relays the loop to a fresh session (`session.relay`) |
 | `relays` | integer ≥ 0 | 5 | Relays per loop run. The relay past it stops the run (`limits.relays`, exit 1, action person) |
+| `usage` | mapping | see below | The usage guard: what `ape task` does before it starts a session, given the plan's usage as the sessions ape launches last read it ([`ape usage`](cli.md#ape-usage)) |
+
+#### `limits.usage`
+
+Before every `ape task` session of an APEX v1 project starts (the loop's children, and the
+sessions `ape change` starts, included), ape reads the newest reading of the claude.ai plan's
+two windows, as fractions, and decides:
+
+| Reading | Outcome |
+| ------- | ------- |
+| fresh, under every limit | launch |
+| `five_hour` + share over `five_hour` | **hold** until the 5-hour window resets + 1 minute, a line every 10 minutes, then decide again. `ape status` shows the session held, `ape run wait --json` state `held` with `held_until` (exit 75, as for running). Nothing is logged: a hold resolves itself |
+| `seven_day` over `seven_day`, or `seven_day` + share over `ceiling` | **stop**: the session is not started. Exit 14, termination `usage_guard` in the run manifest (with `resets_at`), the events `stop` (reason `usage-guard`) and `person` (action: the same command with `--usage-ok`). A person's call |
+| no reading, or one older than `max_age` | launch, with "usage unknown (no reading in 10 min)" in the output and in the manifest's `usage.guard.note` |
+| `off: true` | launch, nothing checked |
+
+A window whose reset has passed since the reading counts as 0. `ape task --usage-ok` launches
+whatever the reading says; it is a person's (refused in a model session, `session.person-only`,
+exit 2) and is recorded with the reading. The decision is the run manifest's
+[`usage.guard`](pipeline-run-manifest.md#usage--the-plans-usage-over-the-run).
+
+| Key | Type | Default | Effect |
+| --- | ---- | ------- | ------ |
+| `seven_day` | number, above 0 and at most 1 | 0.85 | Over it, the launch stops for a person |
+| `five_hour` | number, above 0 and at most 1 | 0.95 | Over it with the launch's share, the launch holds until the window resets |
+| `ceiling` | number, above 0 and at most 1 | 0.95 | The 7-day fill with the launch's share over it stops the launch |
+| `share` | `auto`, or a number above 0 and at most 1 | `auto` | The launch's estimated use of each window. `auto`: per window, the skill's median of (last − first reading) over its last 10 recorded runs on this account (`<user cache>/ape/usage-history.json`) whose window did not reset in between; 0.05 below 3 such runs. A number is the share of both windows |
+| `max_age` | duration (`10m`, `1h`) | `10m` | A reading older than this is unknown |
+| `off` | bool | `false` | `true`: no guard; the readings are still recorded |
+
+A value outside these ranges fails the config's parse, as every limit does, and `ape project
+check` reports a key of `limits.usage` it does not know as `config.unknown-key`. Guarded, like
+the rest of `limits:`.
 
 [The operator and the loop](../explanation/operator-and-loop.md#the-loop-relay) explains the relay.
 An unknown key in this block is the `ape project check` finding `config.unknown-key`.

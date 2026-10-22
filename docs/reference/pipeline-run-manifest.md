@@ -125,6 +125,10 @@ launch:
   parent: <the APE_SESSION of the loop session>
 depth: 2
 parent_run: 20261021-090012-5be21f0
+usage:                       # v1.1: the plan's usage over the run
+  before: {at: 2026-10-21T09:01:12Z, five_hour: 0.13, five_hour_resets_at: 2026-10-21T14:00:00Z, seven_day: 0.75, seven_day_resets_at: 2026-10-23T18:00:00Z}
+  after: {at: 2026-10-21T09:41:40Z, five_hour: 0.19, five_hour_resets_at: 2026-10-21T14:00:00Z, seven_day: 0.76, seven_day_resets_at: 2026-10-23T18:00:00Z}
+  guard: {decision: launch, reading: {…}, share_five_hour: 0.05, share_seven_day: 0.05, share_source: default}
 ```
 
 ### Run fields
@@ -148,6 +152,7 @@ parent_run: 20261021-090012-5be21f0
 | `launch` | APEX v1: the model and effort the session started with, and what decided each; see [below](#launch--the-v1-model-and-effort-decision). |
 | `review_launch` | Only on a review session `ape change review --run` started: the review's own launch decision, in the same shape as `launch`. |
 | `depth`, `parent_run` | APEX v1 nesting rule: `depth` is 1 for a run a terminal, a script or the service daemon started, 2 for one an `apex-loop` run started. `parent_run` is that loop run's id. |
+| `usage` | The claude.ai plan's usage over the run, and the usage guard's decision; see [below](#usage--the-plans-usage-over-the-run). |
 | `relay_of`, `relay` | Only on a loop session ape relayed: the loop run it relays, and how many relays that loop run has had with this one (1 for the first). |
 | `children`, `tree_cost_usd` | Only on an `apex-loop` run, written when it ends; see [below](#children-and-tree_cost_usd). |
 | `transcript_blobs`, `upload_status` | Present only with `--upload-transcripts`: each uploaded transcript's content-addressed reference, and `ok`, `partial` or `failed`. |
@@ -176,6 +181,17 @@ parent_run: 20261021-090012-5be21f0
 - `failed` — the step failed, or a backstop or limit ended the run; `termination` says which.
 - `cancelled` — the run's context was cancelled (Ctrl-C, or a parent's deadline).
 
+### `usage` — the plan's usage over the run
+
+v1.1. Every session ape launches records the claude.ai plan's rate limits from its status line
+(`ape usage record`, see [`ape usage`](cli.md#ape-usage)). An `ape task` run's manifest gets, when
+it ends:
+
+| Field | Meaning |
+| --- | --- |
+| `before`, `after` | The first and the last reading the run's session recorded: `{at, five_hour, five_hour_resets_at, seven_day, seven_day_resets_at}`, the windows as fractions 0..1. `before` is taken at the session's first API response, not before the launch. Absent when the session recorded none (a plan without rate limits, a session that never reached the API). |
+| `guard` | APEX v1: the usage guard's decision before the launch: `decision` (`launch`, `unknown`, `stop`, `off`, `usage_ok`), `reading` (the reading decided on), `share_five_hour`, `share_seven_day` and `share_source` (`config`, `auto`, `default`), `held_until` and `held_seconds` when the launch was held on the 5-hour window first, `usage_ok` for a person's `--usage-ok`, and `note` ("usage unknown (no reading in 10 min)"). |
+
 ### `termination` — why a run ended
 
 Present only when a run ended for a reason other than finishing; absent on a
@@ -195,8 +211,8 @@ termination:
   spent_usd: 41.20            # budget only: the milestone's spend
   budget_usd: 40.00           # budget only: the milestone's Budget: line
   session_cost_usd: 6.10      # budget only: this session's live cost
-  resets: "11pm (Europe/Madrid)"          # usage_limit only: the reset as Claude Code printed it
-  resets_at: 2026-10-16T23:00:00+02:00    # usage_limit only: parsed; absent when it does not parse
+  resets: "11pm (Europe/Madrid)"          # usage_limit: the reset as Claude Code printed it; usage_guard: resets_at's local time
+  resets_at: 2026-10-16T23:00:00+02:00    # usage_limit: parsed, absent when it does not parse; usage_guard: the 7-day window's reset
 ```
 
 | `kind` | Meaning | `ape task` exit |
@@ -208,6 +224,7 @@ termination:
 | `repl_not_ready` | claude never came up inside the PTY within the 30-second window: an unknown blocking modal, a trust dialog ape could not get past, or a claude that drew nothing. Claude Code's Settings Warning (a settings file holds a value it skips, such as an invalid permission rule) ends the wait at once instead: ape never presses Continue, which would run without the skipped rule, and `message` carries the warning's lines. `message` carries the last pane; the raw PTY bytes are saved beside the run. `status` is `failed`. A `--max-duration` shorter than the window records `max_duration` instead, and a run you cancel while claude is still starting stays `cancelled`. | 3 |
 | `budget` | APEX v1, `limits.budget: enforce`: the milestone's spend reached its budget, and ape stopped the session. | 1 |
 | `usage_limit` | A claude.ai plan's usage limit stopped the session: the same limit line on two pane reads 15 s apart with no hook between them. `ape status` shows "stopped: usage-limit, resets <ts>". Matched against Claude Code 2.1.302's text. | 14 |
+| `usage_guard` | APEX v1: ape did not start the session. Its usage guard read the plan's 7-day window over `limits.usage.seven_day`, or with the launch's share over `limits.usage.ceiling` ([config-yaml.md](config-yaml.md#limitsusage)). `message` names the reading, the share, the reset and the `--usage-ok` override; `stages` is empty. `ape status` shows "stopped: usage-guard (not started: the 7-day window), resets <ts>". A person's call. | 14 |
 | `parent_gone` | APEX v1: the `apex-loop` run that started this session ended first (its ape process is gone), and ape stopped the session. | 1 |
 | `relays` | APEX v1: a loop session's context reached `limits.context_relay` again after `limits.relays` relays, and ape stopped the loop run instead of relaying it once more. A person's call. | 1 |
 | `cancelled` | The context was cancelled. | 1 |

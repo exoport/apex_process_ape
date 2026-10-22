@@ -78,6 +78,7 @@ A fresh project with one approved milestone gives, in part:
 | `archive_running` | bool | Present and true when that archive's process is alive. |
 | `latest_run` | object | The newest `ape task` run (below). Absent before the first. |
 | `sessions` | array | The model sessions ape launched that run in this project now (below). |
+| `usage` | object or null | The claude.ai plan's usage as the sessions ape launches last read it (v1.1): `{at, five_hour, five_hour_resets_at, seven_day, seven_day_resets_at, run, claude_version, age_seconds}`, the windows as fractions 0..1. `null` before the first reading. The human output says `usage: 5h 0.14 · 7d 0.55 (read 2 min ago)`, or `usage: unknown`. |
 | `config` | object | Effective values with defaults filled in: `commit_types`, `release_scheme`, `release_docs`, `commit_subject`. |
 | `board` | object | With `--board` only: `{action, where, detail}`, `action` one of `posted`, `wrote`, `unchanged`, `no-board`, `skipped`. |
 
@@ -136,11 +137,14 @@ A fresh project with one approved milestone gives, in part:
 
 `latest_run` is `{skill, run_id, status, stopped, resets, resets_at, message, depth, parent_run}`:
 how the newest `ape task` run ended. A claude.ai usage-limit stop carries `stopped` and its reset
-time. A session a loop run started has `depth` 2 and names that run in `parent_run`.
+time, and so does a stop of ape's usage guard (`stopped: "usage_guard"`, the 7-day window's reset).
+A session a loop run started has `depth` 2 and names that run in `parent_run`.
 
 Each `sessions[]` entry is `{run_id, kind, skill, depth, parent_run, pid, started_at}`: an
 apex-loop run at depth 1, and its one child at depth 2. `kind` is the ape command that launched
-it. The loop's run also carries `relay`:
+it. A session whose launch ape's usage guard holds on the 5-hour window also carries
+`held_until`, when it launches (the human output: "held: 5-hour window, launches <ts>"). The
+loop's run also carries `relay`:
 
 | `relay` field | What it is |
 | --- | --- |

@@ -171,7 +171,25 @@ When a claude.ai plan's usage limit stops the session, Claude Code draws its
 limit line and no hook fires again. ape reads the pane every 15 seconds; the
 same line on two reads with no hook between them ends the run (exit 14) with
 termination kind `usage_limit`, `resets` as printed and `resets_at` parsed.
-Run again after the reset.
+Run again after the reset. The first limit screen per Claude Code version is
+kept, raw, in `<user cache>/ape/claude-limit-<version>.bin`, with the last
+usage reading beside it (`.json`); the stop's message names both.
+
+Better not to reach the limit. Every session ape launches records the plan's
+usage from its status line (`ape usage` prints the last reading), and in an
+APEX v1 project ape's usage guard reads it before each `ape task` session
+starts: over `limits.usage.five_hour` with the launch's share it **holds** the
+launch until the 5-hour window resets, and over `limits.usage.seven_day` it
+**stops** (exit 14, termination `usage_guard`) and leaves the call to you. An
+unknown or stale reading launches, with a note. To launch anyway, from a
+terminal:
+
+```bash
+ape task apex-loop --args M1 --usage-ok
+```
+
+The thresholds, the share and `off` are in
+[config-yaml.md](../reference/config-yaml.md#limitsusage).
 
 In an APEX v1 project, every run logs `run-end` in `_apex/state/events.jsonl`
 when it ends (and `stop` first when it stopped on a limit), and the optional
