@@ -2,6 +2,7 @@ package apexv1
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"sort"
@@ -147,4 +148,70 @@ func (p *Project) pruneEmptyParents(dir string) {
 			return
 		}
 	}
+}
+
+// RK-4 watch (D298, v1.1 W8): an atomix edit vanished and the records could
+// not say whether a check ran at the time, nor what ape undid. So every
+// check run that takes the snapshots appends one line to
+// _apex/state/logs/strays.jsonl (ignored, as all state): when it ran, in
+// which process and long run, and what undoStrays undid — [] when nothing.
+// The next time an edit vanishes, the log says whether ape's cleanup was
+// there. Past StraysLogMax it moves to strays.jsonl.1 (one generation).
+
+// StraysLogEntry is one check run's line of strays.jsonl.
+type StraysLogEntry struct {
+	Start string `json:"start"`
+	End   string `json:"end"`
+	PID   int    `json:"pid"`
+	// Verb, Scope and RunID name the long run the check belongs to, empty
+	// outside one (a hook's re-run).
+	Verb  string `json:"verb,omitempty"`
+	Scope string `json:"scope,omitempty"`
+	RunID string `json:"run_id,omitempty"`
+	Check string `json:"check,omitempty"`
+	Cmd   string `json:"cmd"`
+	Log   string `json:"log"`
+	Exit  int    `json:"exit"`
+	// DirtyBefore counts the paths outside the development folder that
+	// were dirty before the check: never touched, but a sign of another
+	// writer at work.
+	DirtyBefore int `json:"dirty_before"`
+	// Undone is what the cleanup removed or restored, Kept the folder
+	// holding a copy of each ("" for none).
+	Undone []string `json:"undone"`
+	Kept   string   `json:"kept,omitempty"`
+}
+
+// StraysLogMax is the size past which strays.jsonl rotates.
+var StraysLogMax int64 = 1 << 20
+
+// StraysLogPath is _apex/state/logs/strays.jsonl.
+func (p *Project) StraysLogPath() string { return filepath.Join(p.LogsDir(), "strays.jsonl") }
+
+// logStrays appends e to strays.jsonl; a write that fails is dropped (the
+// log is a trace, never a reason to fail a check).
+func (p *Project) logStrays(e StraysLogEntry) {
+	if e.Undone == nil {
+		e.Undone = []string{}
+	}
+	if l := p.ownRunLock(); l != nil {
+		e.Verb, e.Scope, e.RunID = l.Verb, l.Scope, l.ID
+	}
+	data, err := json.Marshal(e)
+	if err != nil {
+		return
+	}
+	path := p.StraysLogPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return
+	}
+	if st, err := os.Stat(path); err == nil && st.Size() > StraysLogMax {
+		_ = os.Rename(path, path+".1")
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
+	if err != nil {
+		return
+	}
+	_, _ = f.Write(append(data, '\n'))
+	_ = f.Close()
 }

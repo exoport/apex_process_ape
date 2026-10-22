@@ -607,7 +607,10 @@ changed — is undone after it and reported (JSON "stray_files"); files that wer
 before it ran are never touched. A copy of each undone file, as it was when the check
 ended, is kept under _apex/state/strays/ (JSON "strays_kept"): git cannot tell a check's
 litter from another writer's edit made while it ran. While a check runs, ape hook pre-tool
-denies an Edit/Write that its cleanup would undo (Q144). A red scenario of the lasting spec whose check names
+denies an Edit/Write that its cleanup would undo (Q144). Every check run appends one line
+to _apex/state/logs/strays.jsonl — {start, end, pid, verb, scope, run_id, check, cmd, log,
+exit, dirty_before, undone, kept}, undone [] when nothing — so an edit that vanishes can be
+traced to a cleanup, or cleared of one (RK-4; strays.jsonl.1 past 1 MiB). A red scenario of the lasting spec whose check names
 what `+"`ape decision standard`"+` removed says so on its line and in results[].stale_names
 (D232; see `+"`ape decision standard --help`"+`).
 With "regression: <cmd>" in _apex/config.yaml (with tiers, its change tier), the

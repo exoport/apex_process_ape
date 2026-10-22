@@ -1,6 +1,7 @@
 package apexv1
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -119,4 +120,45 @@ func TestRunChecks_KeepsWhatItUndoes(t *testing.T) {
 	out, err := gitRaw(ctx(), p.Root, "status", "--porcelain")
 	require.NoError(t, err)
 	require.Empty(t, out, "the copies are under the ignored state folder")
+}
+
+// RK-4 watch (D298): every check run appends one line to strays.jsonl —
+// what it undid, or [] — so a vanished edit can be traced to a cleanup or
+// cleared of one; past StraysLogMax the log moves to strays.jsonl.1.
+func TestRunChecks_LogsEachRunsStrays(t *testing.T) {
+	p := fixture(t, baseFiles())
+	write(t, p, "mine.txt", "dirty before\n")
+	res := p.RunChecks(ctx(), p.LogDir("x"), "", []PlannedCheck{
+		{Ref: "T1", Kind: KindTask, Cmd: "echo y > coverage.txt"},
+		{Ref: "T2", Kind: KindTask, Cmd: "true"},
+	}, RunOptions{})
+	require.Equal(t, []string{"coverage.txt"}, res[0].StrayFiles)
+	var lines []StraysLogEntry
+	for l := range strings.SplitSeq(strings.TrimSpace(read(t, p, p.Rel(p.StraysLogPath()))), "\n") {
+		var e StraysLogEntry
+		require.NoError(t, json.Unmarshal([]byte(l), &e), l)
+		lines = append(lines, e)
+	}
+	require.Len(t, lines, 2, "one line per check run, undone or not")
+	require.Equal(t, "T1", lines[0].Check)
+	require.Equal(t, "echo y > coverage.txt", lines[0].Cmd)
+	require.Equal(t, []string{"coverage.txt"}, lines[0].Undone)
+	require.Equal(t, res[0].StraysKept[0], lines[0].Kept)
+	require.Equal(t, 1, lines[0].DirtyBefore, "mine.txt, untracked before, is counted and left")
+	require.Equal(t, os.Getpid(), lines[0].PID)
+	require.NotEmpty(t, lines[0].Start)
+	require.NotEmpty(t, lines[0].End)
+	require.Equal(t, []string{}, lines[1].Undone)
+	require.Empty(t, lines[1].Kept)
+	require.Contains(t, read(t, p, p.Rel(p.StraysLogPath())), `"undone":[]`)
+	out, err := gitRaw(ctx(), p.Root, "status", "--porcelain")
+	require.NoError(t, err)
+	require.Equal(t, "?? mine.txt\n", out, "the log is under the ignored state folder")
+
+	old := StraysLogMax
+	StraysLogMax = 10
+	t.Cleanup(func() { StraysLogMax = old })
+	p.RunChecks(ctx(), p.LogDir("x"), "", []PlannedCheck{{Ref: "T3", Kind: KindTask, Cmd: "true"}}, RunOptions{})
+	require.FileExists(t, p.StraysLogPath()+".1")
+	require.Equal(t, 1, strings.Count(read(t, p, p.Rel(p.StraysLogPath())), "\n"), "a fresh log after the move")
 }
