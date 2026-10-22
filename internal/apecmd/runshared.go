@@ -319,6 +319,10 @@ type runConfig struct {
 type spawnSettings struct {
 	hooks    []config.ExtraHook
 	settings map[string]any
+	// usageKey is the launch key the session's status line records the
+	// run's usage readings under (W4, ape usage record --run); "" records
+	// the newest reading only.
+	usageKey string
 }
 
 // ANSI color escapes for colorized output (doctor). 16-color palette only,

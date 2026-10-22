@@ -7,6 +7,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/exoport/apex_process_ape/internal/cost"
 )
@@ -348,6 +349,10 @@ type StatusReport struct {
 	// now, with their depth and parent run (D62): an apex-loop run at
 	// depth 1 and its one child at depth 2. Always present ([] when none).
 	Sessions []LiveSession `json:"sessions"`
+	// Usage is the claude.ai plan's usage as the sessions ape launches last
+	// read it from their status line (W4, `ape usage`): null before the
+	// first reading.
+	Usage *UsageStatus `json:"usage"`
 	// Config holds the effective values skills read from ape rather than
 	// restate (D120, Q55): the defaults filled in.
 	Config StatusConfig `json:"config"`
@@ -394,6 +399,7 @@ func (p *Project) Status() *StatusReport {
 	r.Spend.Note = "sum of finished ape task/pipeline run manifests; a run still in progress is not counted yet"
 	r.LatestRun = p.LatestRun()
 	r.Sessions = p.LiveSessions()
+	r.Usage = usageStatus(time.Now())
 
 	ctx := context.Background()
 	if rm := p.roadmap(); rm != nil {

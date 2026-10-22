@@ -328,3 +328,32 @@ func TestBuildSettings_EnvBlock(t *testing.T) {
 		t.Fatalf("nil Env must write no key: %s", raw)
 	}
 }
+
+// W4: StatusLineCommand is the session's statusLine; an Extra key of the
+// same name never replaces it, and without one no key is written.
+func TestBuildSettings_StatusLine(t *testing.T) {
+	raw, err := BuildSettings(SettingsOptions{
+		Mode: ModeTUI, InjectHooks: true, APEBin: "/bin/ape", BridgePort: 1,
+		StatusLineCommand: "/bin/ape usage record --run k",
+		Extra:             map[string]any{"statusLine": "theirs"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		StatusLine statusLineSpec `json:"statusLine"`
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.StatusLine != (statusLineSpec{Type: "command", Command: "/bin/ape usage record --run k"}) {
+		t.Fatalf("statusLine = %+v", got.StatusLine)
+	}
+	raw, err = BuildSettings(SettingsOptions{Mode: ModeTUI})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "statusLine") {
+		t.Fatalf("no command, no key: %s", raw)
+	}
+}

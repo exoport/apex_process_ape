@@ -23,6 +23,7 @@ import (
 	"github.com/exoport/apex_process_ape/internal/repl"
 	"github.com/exoport/apex_process_ape/internal/runlog"
 	"github.com/exoport/apex_process_ape/internal/sessiondriver"
+	"github.com/exoport/apex_process_ape/internal/usage"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -803,6 +804,8 @@ func dispatchTaskOnce(ctx context.Context, o taskOptions, cfg runConfig) (taskRu
 	cfg.stopGate.inline = v1Launch != nil
 	// H20: a claude.ai usage limit ends the run when Claude Code draws it.
 	cfg.usageLimit = &usageLimitWatch{}
+	// W4: the session's status line keeps this run's usage readings.
+	cfg.spawnSettings.usageKey = usage.NewKey()
 
 	start := time.Now()
 	runErr := runWithInteractive(ctx, spec, o.projectRoot, cfg)
@@ -823,6 +826,7 @@ func dispatchTaskOnce(ctx context.Context, o taskOptions, cfg runConfig) (taskRu
 	if runDir != "" {
 		runID = runIDFromDir(runDir)
 	}
+	endRunUsage(cfg.spawnSettings.usageKey, o.skill, runDir)
 	subjects, shared := splitSharedCommits(o.projectRoot, runID, o.launch.parentRunOrEmpty(),
 		gitCommitsSince(ctx, o.projectRoot, headBefore), time.Now())
 	recordCommitsShared(runDir, shared)

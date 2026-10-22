@@ -809,6 +809,9 @@ func buildInteractivePrepend(
 		Env:        map[string]string{repl.EnvFileReadMaxOutputTokens: strconv.Itoa(repl.FileReadMaxOutputTokens)},
 		ExtraHooks: extra.hooks,
 		Extra:      extra.settings,
+		// W4: every session ape launches records the plan's rate limits
+		// from its status line (ape usage record).
+		StatusLineCommand: usageRecordCommand(apeBin, extra.usageKey),
 	})
 	if err != nil {
 		return nil, err
@@ -980,6 +983,7 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 		// the detached run's handle when it is one (D62).
 		live = registerSession(sessionKindOf(cfg), projectRoot, runIDFromDir(dir), cfg.launch)
 		noteDetachedRun(projectRoot, dir)
+		beginRunUsage(cfg.spawnSettings.usageKey, runIDFromDir(dir), spec.Name)
 		cfg.relay.start(runIDFromDir(dir))
 		runLogMu.Lock()
 		if rl == nil {

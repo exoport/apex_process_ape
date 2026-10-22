@@ -218,6 +218,31 @@ type Manifest struct {
 	// Written when the run ends, absent when there are none. Additive
 	// under schema_version 2.
 	CommitsShared []string `yaml:"commits_shared,omitempty"`
+
+	// Usage is the claude.ai plan's rate limits over the run (W4): the
+	// first and the last reading its session's status line recorded (`ape
+	// usage record`) — Before is taken at the session's first API
+	// response, not before the launch. Written when the run ends; absent
+	// when no reading was recorded (a plan without rate limits, a session
+	// that never reached the API). Additive under schema_version 2.
+	Usage *UsageRecord `yaml:"usage,omitempty"`
+}
+
+// UsageRecord is the run's usage readings.
+type UsageRecord struct {
+	Before *UsageReading `yaml:"before,omitempty"`
+	After  *UsageReading `yaml:"after,omitempty"`
+}
+
+// UsageReading is one reading of the plan's windows: fractions 0..1, and
+// when each resets. A local shape, so the manifest's schema does not move
+// with internal/usage's Go types.
+type UsageReading struct {
+	At               time.Time  `yaml:"at"`
+	FiveHour         *float64   `yaml:"five_hour,omitempty"`
+	FiveHourResetsAt *time.Time `yaml:"five_hour_resets_at,omitempty"`
+	SevenDay         *float64   `yaml:"seven_day,omitempty"`
+	SevenDayResetsAt *time.Time `yaml:"seven_day_resets_at,omitempty"`
 }
 
 // ChildRunRecord is one child run of an orchestrator run.

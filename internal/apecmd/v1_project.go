@@ -1192,6 +1192,10 @@ func statusLong(r *apexv1.StatusReport) string {
 	if r.LatestRun != nil {
 		fmt.Fprintf(&b, "\nLatest run: %s\n", r.LatestRun.Describe())
 	}
+	if r.Initialized {
+		// W4: the plan's usage as the sessions ape launched last read it.
+		fmt.Fprintf(&b, "\n%s\n", r.Usage.Describe())
+	}
 	for i, s := range r.Sessions {
 		if i == 0 {
 			b.WriteString("\nRunning sessions:\n")

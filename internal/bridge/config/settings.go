@@ -62,6 +62,19 @@ type SettingsOptions struct {
 	// v1 project's enabledPlugins and extraKnownMarketplaces, which `ape
 	// task` passes inline (apexv1.PluginSettings).
 	Extra map[string]any
+	// StatusLineCommand, when set, is written as the session's
+	// `statusLine: {type: command, command: …}` (W4: `ape usage record`,
+	// which reads the plan's rate limits from the JSON Claude Code hands a
+	// status line). In --settings it applies to the session ape launches
+	// only, over a statusLine in the person's own settings files, which
+	// are never written; "" writes no key.
+	StatusLineCommand string
+}
+
+// statusLineSpec is Claude Code's statusLine setting.
+type statusLineSpec struct {
+	Type    string `json:"type"`
+	Command string `json:"command"`
 }
 
 // ExtraHook is one hook command for SettingsOptions.ExtraHooks. Timeout is
@@ -262,6 +275,9 @@ func BuildSettings(opts SettingsOptions) (json.RawMessage, error) {
 	}
 	if len(opts.Env) > 0 {
 		root["env"] = opts.Env
+	}
+	if opts.StatusLineCommand != "" {
+		root["statusLine"] = statusLineSpec{Type: "command", Command: opts.StatusLineCommand}
 	}
 
 	// The no-hooks path still gets the pin. It used to return `{}`, which

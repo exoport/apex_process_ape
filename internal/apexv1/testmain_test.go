@@ -9,6 +9,9 @@ import (
 // pre-commit hook, which runs whatever ape is on PATH; a test's own git
 // commit skips it, as ape's own commits do (EnvScanned). The hook's tests
 // unset it.
+//
+// And no test reads the real <user cache>/ape (W4: ape status shows the
+// usage reading kept there): the cache is a fresh directory, removed after.
 func TestMain(m *testing.M) {
 	_ = os.Setenv(EnvScanned, "1")
 	// No test repository runs git's auto-maintenance (D360): the
@@ -23,5 +26,14 @@ func TestMain(m *testing.M) {
 	} {
 		_ = os.Setenv(k, v)
 	}
-	os.Exit(m.Run())
+	cache, err := os.MkdirTemp("", "ape-apexv1-cache-")
+	if err == nil {
+		_ = os.Setenv("XDG_CACHE_HOME", cache) // os.UserCacheDir on Linux
+		_ = os.Setenv("LocalAppData", cache)   // and on Windows
+	}
+	code := m.Run()
+	if err == nil {
+		_ = os.RemoveAll(cache)
+	}
+	os.Exit(code)
 }

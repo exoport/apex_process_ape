@@ -106,6 +106,7 @@ func rootSubcommands() []*cobra.Command {
 		newChatCmd(),
 		newMCPBridgeCmd(),
 		newNotifyCmd(),
+		newUsageCmd(),
 		newSessionsCmd(),
 		newCostsCmd(),
 		newEventCmd(),
