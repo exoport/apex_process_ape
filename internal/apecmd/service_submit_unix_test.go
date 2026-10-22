@@ -41,6 +41,9 @@ func TestServiceSubmit_StampsTheCallersDepth(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, d.Register(svc))
 	t.Cleanup(func() { d.KillAll(); _ = svc.Stop() })
+	// Ready the way service.Run is: the server holds the endpoints'
+	// interest before submit's connection asks (V11RC1-F2).
+	require.NoError(t, conn.Flush())
 
 	submit := func(body string) (string, error) {
 		cmd := newServiceCmd()

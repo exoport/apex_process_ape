@@ -77,6 +77,13 @@ func startRigGate(t *testing.T, apeBin string, mutate func(*Config), gate Sessio
 		t.Fatalf("Register: %v", err)
 	}
 	t.Cleanup(func() { d.KillAll(); _ = svc.Stop() }) // reap any sleeper children
+	// Ready the way Run is (TestRunAnnouncesReadyOnlyOnceSubscribed): a
+	// Subscribe returns before the server holds the interest, and the
+	// requests below come from another connection, so without the round
+	// trip they can reach the server first and get no responders (V11RC1-F2).
+	if err := daemonConn.Flush(); err != nil {
+		t.Fatalf("daemon flush: %v", err)
+	}
 
 	cli, err := nats.Connect(url)
 	if err != nil {
@@ -530,15 +537,7 @@ func TestScriptRunPathAllowlist(t *testing.T) {
 // top-level daemon lifecycle.
 func TestRunServesAndDrains(t *testing.T) {
 	url := natstest.RunServer(t)
-
-	root := gitRepo(t, t.TempDir())
-	if err := os.MkdirAll(filepath.Join(root, "_apex"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	body := fmt.Sprintf("project_root: %s\nallow:\n  - %s\n", root, root)
-	if err := os.WriteFile(filepath.Join(root, "_apex", "service.yaml"), []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	root := serviceProject(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	errc := make(chan error, 1)
