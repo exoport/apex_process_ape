@@ -1,5 +1,186 @@
 # CHANGELOG
 
+## v1.1.0 (draft)
+
+The APEX v1.1 work (D327, D330, D333, D337), built on v1.0.0's docs.
+
+### v1.0 follow-ups (Q151–Q155, AE-9)
+
+- **Q151:** `ape framework setup` and `update` with `--output-format json|yaml` print the
+  report alone on stdout, so `| jq` parses it. The `commit:` line and the migration and plugin
+  lines go to stderr. Human output is unchanged.
+- **Q152 (class B):** `ape prompt` in an APEX v1 project follows `ape task`'s v1 effort rule:
+  `--effort`, then `_apex/config.yaml` `effort:`, else nothing, passed as `claude --effort` and
+  never as `CLAUDE_CODE_EFFORT_LEVEL`. It used to run at `xhigh` process-wide when neither was
+  set. An invalid config `effort:` now fails the prompt before the spawn.
+- **Q154:** `ape project check` reports what `_apex/config.yaml`'s parse lets through. An unknown
+  `limits:` key is the finding `config.unknown-key`. A top-level `effort:` or
+  `models.<skill>.effort` that is not a level is the finding `config.invalid`, before a launch
+  refuses it. A top-level key no ape reader knows is the notice `config.unknown-top-key`. A config
+  an older ape accepted still opens.
+- **Q155:** `ape decision accept` refuses an ADR that still holds a placeholder comment of
+  `ape decision new`'s skeleton (`decision.placeholder`). An ADR accepted with them earlier is the
+  `project check` notice `decision.placeholder-accepted`, whose remedy is a superseding ADR.
+- **AE-9:** `ape change tool` and `ape change accept --delegate` refuse a `--wait` outside 0–9m30s
+  (`usage.wait`, exit 2) as the other long verbs do, before a session starts.
+- **Text:** `ape project init --json` always emits `pre_commit.runs_ape`, as its help says: true for
+  ape's own hook (installed or present), and for a kept hook that already calls
+  `ape hook pre-commit`. `session.not-allowed`'s meaning names the whole allow-list (apex-accept,
+  the human_review delegate, the tools: skills). Two stale comments fixed (`apescript` MaxDuration,
+  the service job log's folder).
+
+### W1: Claude Code 2.1.306 (D327, D330; Q159, Q161)
+
+- **Targets Claude Code 2.1.306; `make check-harness` green on 2.1.306 and 2.1.305.** The surface
+  baseline is reviewed through 2.1.306: its two CHANGELOG entries (`claude -p` login in cloud
+  sessions, an MCP-heavy "prompt is too long") touch nothing ape drives, and its tools and model
+  ids are unchanged.
+- **Shipped in v1.0.0 as rc.7q (D340):** W1's other findings — Sonnet 5.5 cache reads at 0.05x
+  (Q161), `ape hook pre-tool` registered with `"onFailure": "block"` (Q159), and a person act
+  typed as a slash command, found by W1's live E2 gate `TestLive_E2GrantInteractive` (eval's D332
+  question). See that section.
+- **Claude Code's Settings Warning ends the ready wait at once (`repl_not_ready`, exit 3):** a
+  settings file holding a value Claude Code skips (an invalid permission rule such as
+  `Bash()`) stops it at a Continue / Fix / Exit screen before the REPL, on 2.1.294, 2.1.304,
+  2.1.305 and 2.1.306 alike. ape idled out the 30-second window and reported an unknown screen. It now ends
+  the wait at once with the warning's own lines, and never presses Continue, which would run the
+  session without the skipped rule. `make check-claude` gains `settings_warning_refused` (zero
+  tokens).
+- **Measured, no change:** 2.1.305's and 2.1.306's permission-rule warning rows under the banner (`⚠ Deny rule
+  NoSuchTool matches no tool`) leave both ready signals intact; ape never resumes a conversation,
+  so 2.1.304's 5-hour-limit resume dialog cannot appear; pre-tool returns no `updatedInput`.
+
+### W2: test-time cost
+
+- **`ape milestone gate <M> --spec-only` (class C).** Runs the spec's scenario checks alone: no
+  `Gate:` command, no regression command. It records nothing (no `milestones.json`, no
+  `gate-<M>.json`, no commit), runs in the foreground under the milestone's run lock, and is
+  allowed on a proposed milestone, for apex-plan before approval. JSON carries `spec_only: true`
+  and `mode: "spec-only"`, and `spec_failed`; the output goes to `_apex/state/logs/gate-<M>-spec/`
+  and `gate-<M>-spec.json`. A red scenario is `gate.spec-red` (exit 1, action replan). A done
+  milestone is refused as the gate refuses it (Q162, rc.7r): `milestone.done` (exit 1, action
+  `stop`), before any scenario runs, with nothing written.
+- **A milestone-tier regression baseline (class C).** With `regression: {change, milestone}` tiers
+  that differ, the milestone's first change to start also runs the milestone tier once and records
+  it in its `state.json` (`milestone_regression_baseline`; start's JSON `milestone_regression`).
+  The gate judges that tier against it, so a suite red before the milestone's work and red now is
+  `pre_existing_red` instead of failing the gate. `ape status` lists it in `pre_existing_red` as
+  `ref: "milestone-regression"`. A tweak never records one.
+- **`regression.slow`:** the `project check` notice (action replan) for a single-command
+  `regression:` whose last recorded run took longer than `checks.slow_regression` (new, default
+  `5m`). A regression verdict (verify's `regression`, the gate's `run.regression`) and a
+  regression baseline now record `secs`.
+- **`checks.duplicate-run`:** the `project check` notice (action replan) for two or more scenario
+  checks that start with the same command (up to the first top-level `&&` or `|`), differ after
+  it, and each ran over a minute at the last gate: the gate runs that command once per check. It
+  names the scenarios and their time per gate; ape memoizes nothing. The gate records each
+  scenario's run time in the gitignored `gate-<M>.json` (`scenario_secs`) only.
+- **Live checks, `- check (live): <command>` (class C).** On a spec scenario, and on a task as
+  `— check (live): <command>`. Verify (and start's baseline) runs only the change's own live
+  checks (its tasks and delta scenarios) and any live scenario red at the last gate; the others
+  are `live_skipped` in verify's JSON, `state.json` and `ape status`. A gate whose `Gate:` command
+  is red skips the live checks and the regression command (`run.live_skipped`,
+  `run.regression.skipped: "gate-red"`); a green one runs everything, and so does `close`.
+  `--spec-only` runs none. `ape status` says how many were skipped and why. Any other kind is the
+  finding `check.bad-kind`; a scenario check that ran over a minute at the last gate and is not
+  live is the notice `check.live-suggested`, and `checks.duplicate-run` also covers a shared
+  command in a live check. A live check's evidence under `development/` is never undone as a
+  stray (Q-W2c, now tested).
+
+### W3: events and waiting
+
+- **The project event log, `_apex/state/events.jsonl` (class C).** Every event ape notifies
+  about is first appended as one line, `{seq, at, event, milestone, change, run, exit, reason,
+  action}` (every field present, `""` or `null` when it does not apply; `skill` added for an
+  `ape task` run), and only then does `notify:` run. `seq` is strictly increasing per project,
+  taken under a lock on `_apex/state/events.lock`, so concurrent ape processes never share or skip
+  one. At 10 MB the log rolls into `events.1.jsonl` (one kept) and `seq` carries on. The state
+  whitelist ignores it, and `project check`'s state probe now covers it. A notifier that fails, or
+  none, still leaves the line.
+- **`notify:` gets every event (class C).** Its environment adds `APE_SEQ`, `APE_MILESTONE`,
+  `APE_RUN`, `APE_EXIT`, `APE_SKILL` and `APE_ACTION` to `APE_EVENT`, `APE_CHANGE` and
+  `APE_REASON`. `stop` now names the run, the skill and the milestone, and `block` names the
+  change's milestone.
+- **New events (class C):**
+  - `person`: the project starts waiting on a person act. `action` is the phrase the person
+    types: `approve M2` (a proposed milestone), `approve <tweak-id>`, `answer <id>: <answer>` (a
+    blocked change), `accept T2 of <id>` (a human-review task no delegate may take now), `accept
+    the config` (`config.changed`). It is read from the recorded state, not from the verb, so
+    apex-plan's own roadmap commit is heard of. It is logged after every v1 command that changes
+    what status reports, and by ape's git pre-commit hook, once per new act. The set last seen is
+    `_apex/state/person-actions.json`.
+  - `gate-green`, when a gate run turns the recorded result green, after its commit.
+  - `milestone-done`, when `milestone close` closes a milestone, green or accepted red.
+  - `run-end`, for every `ape task` run, attached or detached, with its exit code. A detached
+    run's supervisor logs it once the handle has the exit. Handles now record the project
+    `root`.
+  - `run-lost`, once per detached run whose supervisor is gone without recording an exit. It is
+    logged by the first of `ape status`, `ape run wait` or `ape run status` to see it (a
+    `<id>.lost` marker beside the handle).
+- **`ape status --wait <dur> --until person,stopped,done,blocked,event [--since <seq>]`
+  (class C).** It checks the level first and returns 0 at once when a condition holds. Then it
+  reads the log for an event after `--since` that makes one hold, polling every second until
+  `--wait` (default `9m`, at most `9m30s`, `usage.wait`) runs out, which exits 75. `stopped` is
+  read from the run handles, long-run locks and session registry, and a lost run counts. No
+  process is matched. Every exit prints `seq: <n>` (JSON `seq` and `wait.last_seq`), the
+  `--since` for the next call: the returned event's seq on an edge, else the newest logged. JSON
+  is the status object plus `wait: {until, since, condition, how, event, last_seq,
+  person_actions, running, waited_secs}`. New usage code: `usage.until`.
+- **Docs:** [the project event log](docs/reference/project-events.md), `ape status --wait` in
+  [status-json.md](docs/reference/status-json.md), and
+  [How to hear from a project](docs/how-to/hear-from-a-project.md): notify recipes (a desktop
+  notification, `ape status --board`, a webhook) and the remote wait, with ape's absolute path
+  over ssh.
+- **Event lines are written without HTML escaping.** A `person` action such as `answer c-w3:
+  <answer>` was logged as `answer c-w3: \u003canswer\u003e`.
+
+### W4: usage-aware launching
+
+- **Every unattended session ape launches records the plan's usage (class B).** The `--settings`
+  of `ape task`, `ape prompt` and the loop's children get `statusLine: {type: command, command:
+  "<ape> usage record [--run <key>]"}`, for that session only: the person's own settings files
+  are never written, and `ape chat`, the person's own interactive session, gets no status line
+  from ape. The hidden recorder
+  reads Claude Code's status-line `rate_limits` (`five_hour` and `seven_day`, `used_percentage`
+  0–100 and `resets_at` in epoch seconds, measured on 2.1.306; absent before the first API
+  response, when it records nothing), keeps the newest reading in `<user cache>/ape/usage.json`
+  (per OS user), prints `5h 14% · 7d 55%` as the status line, and exits 0 on any input.
+- **`ape usage`** prints the last reading and its age (`--output-format json`: `{reading,
+  age_seconds, path}`). `ape status` shows it in one line, `usage: 5h 0.14 · 7d 0.55 (read 2 min
+  ago)` or `usage: unknown`, and as `usage` in `--json` (class C).
+- **The run manifest's `usage: {before, after, guard}` (class C):** an `ape task` run's first and
+  last reading, and the usage guard's decision. The runs' readings are the history
+  `limits.usage.share: auto` learns from (`<user cache>/ape/usage-history.json`).
+- **The usage guard, `limits.usage` (class B).** Before every `ape task` session of an APEX v1
+  project (the loop's children and the sessions `ape change` starts included), once the run has
+  its manifest and before claude is spawned, ape decides on the newest reading against
+  `limits.usage: {seven_day: 0.85, five_hour: 0.95, ceiling: 0.95, share: auto, max_age: 10m,
+  off: false}` (the defaults; guarded with the rest of `limits:`, validated on parse, an unknown
+  key of it `config.unknown-key`):
+  - **hold** when the 5-hour window plus the launch's share is over `five_hour`: until the window
+    resets + 1 minute, a line every 10 minutes, then decide again. `ape status` shows the session
+    held (`sessions[].held_until`); `ape run wait|status --json` state `held` with `held_until`,
+    and `ape run wait` exits 75 as for running. Nothing is logged.
+  - **stop** when the 7-day window is over `seven_day`, or with the share over `ceiling`: the
+    session is not started. Exit 14, termination `usage_guard` (with `resets_at`), the events
+    `stop` (`reason` `usage-guard`) and `person` (`action`: the same command with `--usage-ok`).
+    `ape status`'s latest run says "stopped: usage-guard".
+  - **launch, with a note,** on no reading or one older than `max_age`: "usage unknown (no
+    reading in 10 min)". A window whose reset has passed counts as 0.
+  - `share: auto` is, per window, the skill's median use over its last 10 recorded runs on this
+    account, 0.05 below 3.
+- **`ape task --usage-ok` (class C):** launches whatever the reading says, recorded with it. A
+  person's: refused in a model session, `session.person-only` (exit 2), with no grant path.
+- **H20's limit screen is kept (W4-A3):** when a claude.ai usage limit stops a session (exit 14,
+  `usage_limit`), its raw PTY bytes go to `<user cache>/ape/claude-limit-<version>.bin`, with
+  the last usage reading beside them (`.json`), the first per Claude Code version; the stop's
+  message names both.
+- **Docs:** `limits.usage` in [config-yaml.md](docs/reference/config-yaml.md#limitsusage),
+  `usage` and `usage_guard` in [pipeline-run-manifest.md](docs/reference/pipeline-run-manifest.md),
+  `usage` and `held_until` in [status-json.md](docs/reference/status-json.md), the status line in
+  [claude-spawn-modes.md](docs/reference/claude-spawn-modes.md), and
+  [run-a-single-skill.md](docs/how-to/run-a-single-skill.md#usage-limits-and-the-notifier).
+
 ## v1.0.0 (2026-10-22)
 
 APEX v1: ape runs the framework's v1 loop and owns every record in it.
