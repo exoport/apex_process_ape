@@ -42,14 +42,15 @@ if grep -q '"ape hook stop"' .claude/settings.json 2>/dev/null; then fromfile="a
 printf '\n  bypass permissions on (shift+tab to cycle)\n❯ '
 IFS= read -r line
 line=${line%$'\r'}
-printf '{"session_id":"fake-1","hook_event_name":"UserPromptSubmit","cwd":"%s","prompt":"%s"}' "$PWD" "$line" | sh -c "$ups"
+# Hooks write to a pipe, as Claude Code's do: on a tty, ape's termenv OSC 11 query waits 5 s under an xterm TERM.
+printf '{"session_id":"fake-1","hook_event_name":"UserPromptSubmit","cwd":"%s","prompt":"%s"}' "$PWD" "$line" | sh -c "$ups" > /dev/null
 active=false
 for turn in 1 2 3 4 5; do
   payload=$(printf '{"session_id":"fake-1","hook_event_name":"Stop","cwd":"%s","stop_hook_active":%s,"background_tasks":[]}' "$PWD" "$active")
   : > "$FAKE_DIR/project-hook-$turn.out"
   if [ -n "$fromfile" ]; then printf '%s' "$payload" | $fromfile > "$FAKE_DIR/file-hook-$turn.out" & a=$!; fi
   if [ -n "$inline" ]; then printf '%s' "$payload" | $inline > "$FAKE_DIR/inline-hook-$turn.out" & b=$!; fi
-  printf '%s' "$payload" | sh -c "$stop"
+  printf '%s' "$payload" | sh -c "$stop" > /dev/null
   [ -n "$fromfile" ] && wait $a && cat "$FAKE_DIR/file-hook-$turn.out" >> "$FAKE_DIR/project-hook-$turn.out"
   [ -n "$inline" ] && wait $b && cat "$FAKE_DIR/inline-hook-$turn.out" >> "$FAKE_DIR/project-hook-$turn.out"
   if ! grep -q '"decision":"block"' "$FAKE_DIR/project-hook-$turn.out"; then echo "$turn" > "$FAKE_DIR/allowed"; break; fi
