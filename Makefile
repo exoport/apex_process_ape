@@ -141,6 +141,19 @@ docs-cli-check:  ## Verify docs/reference/cli.md still matches the command tree.
 		exit 1; \
 	fi
 
+.PHONY: docs-commands-check
+docs-commands-check:  ## Verify every `ape …` command line in README.md and docs/ resolves on the command tree.
+	@# Q150. docs-cli-check keeps the GENERATED reference in step with the
+	@# cobra tree; nothing kept the hand-written pages in step with it, so a
+	@# renamed verb or flag lived on in a how-to until a reader typed it.
+	@# This walks each `ape …` in a code block or inline code span down the
+	@# tree — hidden commands included — and checks its --flags. Hermetic
+	@# (the tree is built in-process, no binary, no claude), so it also runs
+	@# as part of `make test`, here and in GitHub CI. The rules, and the two
+	@# kinds of line allowed to name what the tree lacks, are in
+	@# internal/apecmd/docscommands_test.go.
+	go test -count=1 -run '^TestDocsCommands' ./internal/apecmd
+
 .PHONY: apescript-symbols
 apescript-symbols:  ## Regenerate the yaegi symbol table for the public apescript package (PLAN-15).
 	go generate ./internal/apescriptsym/
@@ -433,7 +446,7 @@ check-harness: check-prices check-output-styles check-hooks check-claude check-t
 	@echo "Read the output above: any gate that reported a SKIP was NOT verified — it found no evidence to judge."
 
 .PHONY: ci-local
-ci-local: test lint govulncheck docs-check docs-cli-check check-prices xcompile-windows snapshot ## Run every gate CI + release would run (Linux + Windows cross-compile + snapshot).
+ci-local: test lint govulncheck docs-check docs-cli-check docs-commands-check check-prices xcompile-windows snapshot ## Run every gate CI + release would run (Linux + Windows cross-compile + snapshot).
 	@echo
 	@echo "Local CI gates green. Safe to push + tag."
 	@echo "Catches: Linux test failures, lint, vuln, Windows compile-time portability bugs, release-config regressions."

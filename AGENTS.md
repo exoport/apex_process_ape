@@ -92,7 +92,12 @@ make govulncheck   # scan for known vulnerabilities (pinned via bingo)
 make xcompile-windows  # cross-compile + cross-vet for Windows; catches portability compile errors
 make docs-cli      # regenerate docs/reference/cli.md from the cobra command tree
 make docs-cli-check # verify that generated reference is still in sync (also runs in GitHub CI)
-make ci-local      # full pre-push gate: test + lint + vuln + docs + prices + xcompile-windows + snapshot
+make docs-commands-check # verify every `ape …` in README.md and docs/ resolves on the command tree,
+                   #   flags included, hidden commands counted (Q150; a go test, so `make test` and
+                   #   GitHub CI run it too). A retired v0 command may be named only where its
+                   #   paragraph or heading says "retired"/"v0"; a fenced command may fail only
+                   #   where the block shows cobra's "Error: unknown …"
+make ci-local      # full pre-push gate: test + lint + vuln + docs (links, cli.md, commands) + prices + xcompile-windows + snapshot
 make check-prices  # verify the price table covers the models the local Claude Code emits
 make check-output-styles # verify ape's built-in output-style table matches the local Claude Code
                    #   (ape folds a built-in's case before writing `outputStyle`, so a stale
@@ -161,7 +166,7 @@ make clean         # remove build artifacts
 
 Two-step verification flow — see `docs/how-to/pre-tag-release.md` for the full guide. The automated walkthrough lives in `.claude/skills/release/SKILL.md` (`/release vX.Y.Z-rc.N`, `/release vX.Y.Z`).
 
-1. **Local gate** — run `make ci-local`. Runs test + lint + vuln + docs-check + generated-CLI-reference sync + price-table coverage + Windows cross-compile + goreleaser snapshot. ~30–60 s. Catches per-platform compile errors, release-config regressions, and a model price table that has gone stale against the locally-installed Claude Code.
+1. **Local gate** — run `make ci-local`. Runs test + lint + vuln + docs-check + generated-CLI-reference sync + docs command lines + price-table coverage + Windows cross-compile + goreleaser snapshot. ~30–60 s. Catches per-platform compile errors, release-config regressions, and a model price table that has gone stale against the locally-installed Claude Code.
 
    **Then run `make check-harness`** (~3–4 min, developer machine only). `ci-local` proves ape is internally consistent; it cannot prove ape still *works*, because ape's real dependency is the auto-updating `claude` binary on the host. The sweep is seven gates that read what that binary is actually doing: `check-prices` (model ids in transcripts), `check-output-styles` (the built-in style names ape folds declarations onto), `check-hooks` (the hook fields the step-completion gates read, judged against a runlog it seeds itself with one unattended `ape prompt` session — so the verdict never depends on finding a project someone happened to run), `check-claude` (a live PTY session — the ready-signal footer and `❯` glyph, an unknown pre-REPL modal, the spawn flags, `CLAUDE_CODE_EFFORT_LEVEL`, the family-alias model ids still naming real models and the same ones Claude Code's own family words start, a foreground sub-agent staying foreground, and transcript persistence), `check-task-subagents` (one `ape task` run of a framework-shaped skill that fans out to two foreground sub-agents), `check-agents-md` (this repo's own instructions still load, since it has no CLAUDE.md), and, last, `check-claude-surface` (the tool list, the binary's `CLAUDE_*` names and model ids, and unread CHANGELOG entries against a reviewed baseline — it stops on unread entries until someone reads them and runs `make update-claude-surface`; that is a review to do, not a breakage, and running last keeps it from hiding the other gates' verdicts). Deliberately **not** in `ci-local` and never in GitHub CI: they need `claude` + auth + network + local transcripts, so a CI run could only skip them, and a gate that always skips reads as a pass. Read the output — `check-prices` reports "not verified" rather than green when it has no evidence, and `check-hooks` fails a seed that produced no events rather than passing it as "nothing to judge".
 
