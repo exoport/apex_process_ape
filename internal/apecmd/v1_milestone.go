@@ -227,7 +227,7 @@ with no grant.`,
 // recorded red without reading milestones.json.
 type approveOut struct {
 	*apexv1.Milestone
-	SelfCheck *apexv1.GateSelfCheck `json:"self_check,omitempty"`
+	SelfCheck *apexv1.GateSelfCheck `json:"self_check,omitempty"` //nolint:tagliatelle // the v1 --json payloads are snake_case by contract
 }
 
 func gateHuman(g *apexv1.GateResult) func(io.Writer) {

@@ -150,9 +150,9 @@ const (
 	// (gaterule.go).
 	CodeGateRootModuleChange = "gate.root-module-change"
 
-	// v1.1 W8.
-	// CodeDocsUnaccepted: project check's notice while the docs block is
-	// a change no person accepted and the docs delegate reads it (A18).
+	// CodeDocsUnaccepted (v1.1 W8): project check's notice while the docs
+	// block is a change no person accepted and the docs delegate reads it
+	// (A18).
 	CodeDocsUnaccepted = "docs.unaccepted"
 )
 

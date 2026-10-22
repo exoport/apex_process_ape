@@ -275,8 +275,10 @@ func (p *Project) runWithRetries(ctx context.Context, pc *PlannedCheck, logPath 
 			undone, kept = p.undoStrays(ctx, before)
 			strays = append(strays, undone...)
 			// RK-4 watch: one line per check run, undone or not.
-			p.logStrays(StraysLogEntry{Start: start, End: Stamp(), PID: os.Getpid(), Check: pc.Ref, Cmd: pc.Cmd, Log: p.Rel(path), Exit: r.Exit,
-				DirtyBefore: len(before.modified) + len(before.untracked), Undone: undone, Kept: kept})
+			p.logStrays(StraysLogEntry{
+				Start: start, End: Stamp(), PID: os.Getpid(), Check: pc.Ref, Cmd: pc.Cmd, Log: p.Rel(path), Exit: r.Exit,
+				DirtyBefore: len(before.modified) + len(before.untracked), Undone: undone, Kept: kept,
+			})
 			done()
 		} else {
 			r = runCheck(ctx, p.Root, pc.Cmd, path, pc.LogNote, lim, vacuous, pc.Env...)

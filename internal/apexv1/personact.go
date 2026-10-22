@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -451,8 +452,8 @@ func latestTyped(recs []PromptRecord, skip, transcript string, origins map[strin
 // when the turn's prompt has no record — its place cannot be known.
 func turnRightAfter(recs []PromptRecord, typed, prompt string) bool {
 	at := -1
-	for i := len(recs) - 1; i >= 0; i-- {
-		if recs[i].PromptID == prompt {
+	for i, r := range slices.Backward(recs) {
+		if r.PromptID == prompt {
 			at = i
 			break
 		}

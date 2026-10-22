@@ -30,8 +30,8 @@ func TestMilestoneApprove_JSONCarriesSelfCheck(t *testing.T) {
 			Exit         int     `json:"exit"`
 			Secs         float64 `json:"secs"`
 			Log          string  `json:"log"`
-			OutputSHA256 string  `json:"output_sha256"`
-		} `json:"self_check"`
+			OutputSHA256 string  `json:"output_sha256"` //nolint:tagliatelle // the v1 --json payloads are snake_case by contract
+		} `json:"self_check"` //nolint:tagliatelle // the v1 --json payloads are snake_case by contract
 	}
 	approve := func() out {
 		t.Helper()
@@ -52,15 +52,16 @@ func TestMilestoneApprove_JSONCarriesSelfCheck(t *testing.T) {
 
 	var recs map[string]struct {
 		Approval struct {
-			SelfCheck json.RawMessage `json:"self_check"`
+			SelfCheck json.RawMessage `json:"self_check"` //nolint:tagliatelle // milestones.json is snake_case by contract
 		} `json:"approval"`
 	}
 	data, err := os.ReadFile(filepath.Join(root, "_apex", "state", "milestones.json"))
 	require.NoError(t, err)
 	require.NoError(t, json.Unmarshal(data, &recs))
 	var recorded struct {
-		At, SHA string
-		Exit    int
+		At   string `json:"at"`
+		SHA  string `json:"sha"`
+		Exit int    `json:"exit"`
 	}
 	require.NoError(t, json.Unmarshal(recs["M2"].Approval.SelfCheck, &recorded))
 	require.Equal(t, first.SelfCheck.At, recorded.At, "the one milestones.json records")
@@ -85,7 +86,11 @@ func TestAcceptConfig_ContextRelayLowNotice(t *testing.T) {
 		OK      bool   `json:"ok"`
 		Commit  string `json:"commit"`
 		Notices []struct {
-			Code, Severity, Action, File, Message, Fix string
+			Code     string `json:"code"`
+			Severity string `json:"severity"`
+			Action   string `json:"action"`
+			File     string `json:"file"`
+			Message  string `json:"message"`
 		} `json:"notices"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(stdout), &out), stdout)
