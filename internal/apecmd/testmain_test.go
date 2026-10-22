@@ -7,6 +7,7 @@ import (
 
 	"github.com/exoport/apex_process_ape/internal/apexv1"
 	"github.com/exoport/apex_process_ape/internal/sessions"
+	"github.com/exoport/apex_process_ape/internal/usercachetest"
 )
 
 // asApeBinary turns this test binary into ape for a subprocess, so a detached
@@ -32,6 +33,11 @@ func TestMain(m *testing.M) {
 		_ = os.Setenv(testRegistryEnv, path)
 	}
 	sessions.Path = func() string { return path }
+	// No test, and no copy of this binary a test runs as ape, reads or
+	// writes the real <user cache>/ape (the W4 usage reading and
+	// usage-runs, the probe, the update check, the clones): a fresh
+	// directory, made once here and inherited by every copy, removed after.
+	cleanup := usercachetest.Isolate("ape-apecmd-cache-")
 	if os.Getenv(asApeBinary) == "1" {
 		if err := Execute(); err != nil {
 			code, silent := ExitCode(err)
@@ -61,6 +67,7 @@ func TestMain(m *testing.M) {
 		_ = os.Setenv(k, v)
 	}
 	code := m.Run()
+	cleanup()
 	if made != "" {
 		_ = os.RemoveAll(made)
 	}
