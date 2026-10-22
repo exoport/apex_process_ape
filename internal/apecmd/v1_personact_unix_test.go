@@ -30,6 +30,10 @@ func e2DetachedRepo(t *testing.T) (string, *apexv1.Project) {
 				_ = syscall.Kill(l.PID, syscall.SIGKILL)
 			}
 		}
+		// The tests wait for the lock's release, not the worker's exit: a
+		// worker still in the repo when t.TempDir removes it can write into
+		// it (D380's gap, seen here once: "_apex/state: directory not empty").
+		awaitNoProcessUnder(t, root, 10*time.Second)
 	})
 	return root, p
 }
