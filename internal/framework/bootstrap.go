@@ -6,20 +6,29 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // TUIBootstrapper drives a two-phase Bubble Tea form to collect
 // project_name + extensions on first install. Returns
 // ErrBootstrapCancelled if the user presses Esc or Ctrl+C.
+//
+// Bubble Tea v2, not v1, and not for its features: v1's package init()
+// asks the terminal for its background colour (OSC 11) in EVERY process
+// that links it, before main runs, and waits up to 5 s for an answer when
+// stdout is a tty and TERM is xterm-like. A terminal that never answers —
+// a PTY nobody reads, as a test harness or a session driver gives a hook —
+// cost every `ape` command 5 s, this form being the only thing in ape that
+// needed Bubble Tea at all (W8b, D365). v2 has no such init: whatever it
+// asks the terminal, it asks here, when the form runs.
 type TUIBootstrapper struct{}
 
 // Bootstrap implements Bootstrapper.
 func (TUIBootstrapper) Bootstrap(ctx context.Context, defaultProjectName string, extensions []Extension) (BootstrapValues, error) {
 	model := newBootstrapModel(defaultProjectName, extensions)
-	program := tea.NewProgram(model, tea.WithContext(ctx), tea.WithAltScreen())
+	program := tea.NewProgram(model, tea.WithContext(ctx))
 	final, err := program.Run()
 	if err != nil {
 		return BootstrapValues{}, fmt.Errorf("bootstrap TUI: %w", err)
@@ -54,13 +63,22 @@ type bootstrapModel struct {
 	cancelled  bool
 }
 
+// nameFieldWidth is the project-name field's width, in cells.
+const nameFieldWidth = 40
+
 func newBootstrapModel(defaultProjectName string, extensions []Extension) *bootstrapModel {
 	ti := textinput.New()
 	ti.Placeholder = defaultProjectName
 	ti.SetValue(defaultProjectName)
 	ti.Focus()
 	ti.CharLimit = 64
-	ti.Width = 40
+	ti.SetWidth(nameFieldWidth)
+	// v1's look: an unstyled prompt and a cursor in the terminal's own
+	// colours, reversed. v2's defaults grey both.
+	st := textinput.DefaultDarkStyles()
+	st.Focused.Prompt, st.Blurred.Prompt = lipgloss.NewStyle(), lipgloss.NewStyle()
+	st.Cursor.Color = nil
+	ti.SetStyles(st)
 	// Pre-select the standard set, so Enter on the checklist gives the
 	// configuration the framework documents rather than none at all.
 	selected := make([]bool, len(extensions))
@@ -82,11 +100,11 @@ func (m *bootstrapModel) Init() tea.Cmd {
 
 // Update implements tea.Model.
 func (m *bootstrapModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	keyMsg, ok := msg.(tea.KeyMsg)
+	keyMsg, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		return m, nil
 	}
-	if keyMsg.Type == tea.KeyCtrlC || keyMsg.Type == tea.KeyEsc {
+	if k := keyMsg.String(); k == "ctrl+c" || k == "esc" {
 		m.cancelled = true
 		return m, tea.Quit
 	}
@@ -99,8 +117,8 @@ func (m *bootstrapModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *bootstrapModel) updateProjectName(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if msg.Type == tea.KeyEnter {
+func (m *bootstrapModel) updateProjectName(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if msg.String() == "enter" {
 		// Snap empty input to the placeholder default.
 		if strings.TrimSpace(m.input.Value()) == "" {
 			m.input.SetValue(m.input.Placeholder)
@@ -114,19 +132,19 @@ func (m *bootstrapModel) updateProjectName(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 	return m, cmd
 }
 
-func (m *bootstrapModel) updateExtensions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.Type { //nolint:exhaustive // bubbletea defines ~100 KeyType values; we only react to a few — others are intentional no-ops
-	case tea.KeyUp:
+func (m *bootstrapModel) updateExtensions(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "up":
 		if m.cursor > 0 {
 			m.cursor--
 		}
-	case tea.KeyDown:
+	case "down":
 		if m.cursor < len(m.extensions)-1 {
 			m.cursor++
 		}
-	case tea.KeySpace:
+	case "space":
 		m.selected[m.cursor] = !m.selected[m.cursor]
-	case tea.KeyEnter:
+	case "enter":
 		m.submitted = true
 		return m, tea.Quit
 	}
@@ -139,8 +157,15 @@ var (
 	cursorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("212"))
 )
 
-// View implements tea.Model.
-func (m *bootstrapModel) View() string {
+// View implements tea.Model: the form, on the alternate screen.
+func (m *bootstrapModel) View() tea.View {
+	v := tea.NewView(m.render())
+	v.AltScreen = true
+	return v
+}
+
+// render is the form's text.
+func (m *bootstrapModel) render() string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("APEX project bootstrap") + "\n\n")
 	switch m.phase {

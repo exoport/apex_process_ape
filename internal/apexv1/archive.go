@@ -873,7 +873,20 @@ func (p *Project) previewDelta(ctx context.Context, id string) (*SpecPreview, er
 		if u.Retired {
 			to, after = "/dev/null", ""
 		}
-		out.Specs = append(out.Specs, SpecDiff{SpecUpdate: u, Diff: udiff.Unified(from, to, before, after)})
+		out.Specs = append(out.Specs, SpecDiff{SpecUpdate: u, Diff: unifiedDiff(from, to, before, after)})
 	}
 	return out, nil
+}
+
+// unifiedDiff is go-udiff v0.3's Unified: the edits computed over the
+// text's characters (Strings), then grouped into line hunks. v0.4's
+// Unified diffs whole lines instead, which can choose different hunks for
+// the same change; the upgrade came with Bubble Tea v2 (W8b) and was not
+// meant to change a single archived diff.
+func unifiedDiff(from, to, before, after string) string {
+	d, err := udiff.ToUnified(from, to, before, udiff.Strings(before, after), udiff.DefaultContextLines)
+	if err != nil { // cannot happen: Strings' edits are consistent with before
+		return udiff.Unified(from, to, before, after)
+	}
+	return d
 }
