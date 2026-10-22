@@ -95,7 +95,7 @@ Runs before every `Edit`, `Write`, `MultiEdit`, `NotebookEdit` and `Bash` call, 
 | `development/changes/*/state.json` | Only ape writes a change's state |
 | `development/archive/**` | Only `ape change archive` writes the archive |
 | `_apex/state/**` | ape's own records: gate runs, logs, hook verdicts |
-| A file that already exists under `development/briefs/**` | A brief is a plan's dated input. A changed request is a new dated brief, `development/briefs/YYYY-MM-DD-<slug>.md`, and writing a new file there is allowed |
+| A file that already exists under `development/briefs/**` | A brief is a plan's dated input. A changed request is a new dated brief, `development/briefs/YYYY-MM-DD-<slug>.md`, and writing a new file there is allowed. Every file of a brief folder, `development/briefs/YYYY-MM-DD-<slug>/` (its `brief.md`, assets, `source.txt`; v1.1), is a brief file too |
 | `.claude/settings.json`, `.claude/settings.local.json` | They hold ape's hooks and the session's environment: a person edits them |
 
 Paths are resolved through symlinked folders, so a link into `specs/` is still `specs/`. The guard

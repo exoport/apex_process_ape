@@ -246,9 +246,11 @@ crashed never blocks an edit.
 Briefs: denies an edit to a file that already exists under development/briefs/ (any
 depth) — a brief is a plan's input, dated and verbatim, and is history: a new or
 changed request is a new dated brief (development/briefs/YYYY-MM-DD-<slug>.md), linked
-from the roadmap's Delivery: line. Writing a new file there is allowed. Symlinked
-folders and links to a brief are resolved. A Bash write is not seen here;
-` + "`ape project check`" + ` reports it (brief.edited).
+from the roadmap's Delivery: line. Every file of a brief folder (v1.1:
+development/briefs/YYYY-MM-DD-<slug>/ — its brief.md, assets, source.txt) is a brief
+file too. Writing a new file there is allowed. Symlinked folders and links to a brief
+are resolved. A Bash write is not seen here; ` + "`ape project check`" + ` reports it
+(brief.edited).
 
 Bash: denies a command that writes a git tag — only a person tags or releases:
   git tag <name> (-a, -s, -f, -m …), git tag -d|--delete

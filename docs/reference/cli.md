@@ -3656,9 +3656,11 @@ crashed never blocks an edit.
 Briefs: denies an edit to a file that already exists under development/briefs/ (any
 depth) — a brief is a plan's input, dated and verbatim, and is history: a new or
 changed request is a new dated brief (development/briefs/YYYY-MM-DD-<slug>.md), linked
-from the roadmap's Delivery: line. Writing a new file there is allowed. Symlinked
-folders and links to a brief are resolved. A Bash write is not seen here;
-`ape project check` reports it (brief.edited).
+from the roadmap's Delivery: line. Every file of a brief folder (v1.1:
+development/briefs/YYYY-MM-DD-<slug>/ — its brief.md, assets, source.txt) is a brief
+file too. Writing a new file there is allowed. Symlinked folders and links to a brief
+are resolved. A Bash write is not seen here; `ape project check` reports it
+(brief.edited).
 
 Bash: denies a command that writes a git tag — only a person tags or releases:
   git tag <name> (-a, -s, -f, -m …), git tag -d|--delete
@@ -4817,11 +4819,15 @@ Validate the whole project and list every failure, not just the first.
                            is a real YYYY-MM-DD with text after it, a "(from <id>)"
                            names a change id (next.bad-item); an undated item, as
                            apex-plan wrote them, is accepted
-  development/briefs/      YYYY-MM-DD-<slug>.md with a real date (brief.bad-name);
-                           committed with the plan (brief.uncommitted); never changed
-                           from the text of the commit that added it, in the working
-                           tree or a later commit (brief.edited: restore it, write a
-                           new dated brief)
+  development/briefs/      YYYY-MM-DD-<slug>.md with a real date, or a brief folder
+                           YYYY-MM-DD-<slug>/ whose brief.md is the brief and whose
+                           other files (assets/**, source.txt) are part of it: the
+                           name rule is the folder's (brief.bad-name, also for a
+                           dated folder with no brief.md); one brief, and Delivery:
+                           links its brief.md. Every file committed with the plan
+                           (brief.uncommitted); never changed from the text of the
+                           commit that added it, in the working tree or a later
+                           commit (brief.edited: restore it, write a new dated brief)
   specs/<cap>/spec.md      # title, Purpose: (the line and those after it up to a blank
                            line, heading or fenced code), "### Requirement: <name>" each
                            with ≥ 1 "#### Scenario:" and exactly one "- check: <cmd> |
@@ -5116,7 +5122,8 @@ for setup while no .claude/skills/apex-* exists; JSON "next" carries the same li
                                      standard_adr.action differs; see ape decision
                                      standard)
   development/briefs/                each plan's input, dated and verbatim (YYYY-MM-DD-<slug>.md,
-                                     written by apex-plan; never edited — see ape project check)
+                                     or a YYYY-MM-DD-<slug>/ folder with brief.md; written by
+                                     apex-plan; never edited — see ape project check)
   hot/.gitignore                     "*" when hot/ has no .gitignore (an existing one is kept):
                                      hot/ holds the project's secrets, which gates and checks
                                      read at run time ("$(cat hot/<name>)"), never as

@@ -134,6 +134,8 @@ var findingRules = []findingRule{
 	rule("", "^`Delivery:` links .*, which does not resolve to a file", "roadmap.delivery-link"),
 	rule("", "^no `Delivery:` line links a brief", "roadmap.delivery-unlinked"),
 	rule("", `^brief file name is not`, "brief.bad-name"),
+	rule("", `^brief folder name is not`, "brief.bad-name"),
+	rule("", `^brief folder holds no brief\.md`, "brief.bad-name"),
 	rule("", `^brief is not committed`, "brief.uncommitted"),
 	rule("", `^brief differs from the text it was committed with`, "brief.edited"),
 	rule("", `decision files are named`, "decision.bad-name"),

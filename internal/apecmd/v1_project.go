@@ -109,7 +109,8 @@ for setup while no .claude/skills/apex-* exists; JSON "next" carries the same li
                                      standard_adr.action differs; see ape decision
                                      standard)
   development/briefs/                each plan's input, dated and verbatim (YYYY-MM-DD-<slug>.md,
-                                     written by apex-plan; never edited — see ape project check)
+                                     or a YYYY-MM-DD-<slug>/ folder with brief.md; written by
+                                     apex-plan; never edited — see ape project check)
   hot/.gitignore                     "*" when hot/ has no .gitignore (an existing one is kept):
                                      hot/ holds the project's secrets, which gates and checks
                                      read at run time ("$(cat hot/<name>)"), never as
@@ -446,11 +447,15 @@ func newProjectCheckCmd() *cobra.Command {
                            is a real YYYY-MM-DD with text after it, a "(from <id>)"
                            names a change id (next.bad-item); an undated item, as
                            apex-plan wrote them, is accepted
-  development/briefs/      YYYY-MM-DD-<slug>.md with a real date (brief.bad-name);
-                           committed with the plan (brief.uncommitted); never changed
-                           from the text of the commit that added it, in the working
-                           tree or a later commit (brief.edited: restore it, write a
-                           new dated brief)
+  development/briefs/      YYYY-MM-DD-<slug>.md with a real date, or a brief folder
+                           YYYY-MM-DD-<slug>/ whose brief.md is the brief and whose
+                           other files (assets/**, source.txt) are part of it: the
+                           name rule is the folder's (brief.bad-name, also for a
+                           dated folder with no brief.md); one brief, and Delivery:
+                           links its brief.md. Every file committed with the plan
+                           (brief.uncommitted); never changed from the text of the
+                           commit that added it, in the working tree or a later
+                           commit (brief.edited: restore it, write a new dated brief)
   specs/<cap>/spec.md      # title, Purpose: (the line and those after it up to a blank
                            line, heading or fenced code), "### Requirement: <name>" each
                            with ≥ 1 "#### Scenario:" and exactly one "- check: <cmd> |

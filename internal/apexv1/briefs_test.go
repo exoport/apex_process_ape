@@ -235,3 +235,137 @@ func TestPreTool_Briefs(t *testing.T) {
 		require.True(t, PreTool(editPayload(t, q.Root, "Edit", "development/briefs/2026-10-16-x.md")).Deny)
 	})
 }
+
+// W5 (Q-S1): a dated brief folder is one brief. The name rule is the
+// folder's, brief.md is its text, every file in it is history, and
+// Delivery: links its brief.md.
+func TestProjectCheck_BriefFolders(t *testing.T) {
+	const folder = "development/briefs/2026-10-21-greeter"
+	withFolder := func(delivery string) map[string]string {
+		files := baseFiles()
+		files["development/roadmap.md"] = roadmapWithDelivery(delivery)
+		files[folder+"/brief.md"] = briefText
+		files[folder+"/source.txt"] = "spike: /x @ 0123456789ab\n"
+		files[folder+"/assets/home.svg"] = "<svg/>\n"
+		files[folder+"/assets/deep/notes.md"] = "notes\n"
+		files[folder+"/.hidden"] = "x\n"
+		return files
+	}
+	linked := func() map[string]string {
+		return withFolder("Delivery: Phase 1 — [brief](briefs/2026-10-21-greeter/brief.md)")
+	}
+
+	t.Run("a dated folder with brief.md, linked, is clean", func(t *testing.T) {
+		require.Empty(t, briefCodes(t, fixture(t, linked())))
+	})
+	t.Run("a bare path to its brief.md resolves too", func(t *testing.T) {
+		require.Empty(t, briefCodes(t, fixture(t, withFolder("Delivery: briefs/2026-10-21-greeter/brief.md"))))
+	})
+	t.Run("it counts as one brief, and is the current one", func(t *testing.T) {
+		files := withFolder(`Delivery: Phase 1 — "greet"`)
+		files["development/briefs/2026-10-01-first.md"] = briefText
+		p := fixture(t, files)
+		fs := ClassifyFindings(p.Check())
+		require.Len(t, fs, 1, findingMessages(fs))
+		require.Equal(t, "roadmap.delivery-unlinked", fs[0].Code)
+		require.Contains(t, fs[0].Message, "development/briefs/ holds 2 —")
+		require.Contains(t, fs[0].Message, "[2026-10-21-greeter/brief.md](briefs/2026-10-21-greeter/brief.md)")
+	})
+	t.Run("a newer single-file brief is the current one over an older folder", func(t *testing.T) {
+		files := withFolder(`Delivery: Phase 1 — "greet"`)
+		files["development/briefs/2026-10-22-later.md"] = briefText
+		fs := ClassifyFindings(fixture(t, files).Check())
+		require.Len(t, fs, 1, findingMessages(fs))
+		require.Contains(t, fs[0].Message, "[2026-10-22-later.md](briefs/2026-10-22-later.md)")
+	})
+	t.Run("a link to a missing brief.md names the folder's", func(t *testing.T) {
+		fs := ClassifyFindings(fixture(t, withFolder("Delivery: [b](briefs/2026-10-21-gone/brief.md)")).Check())
+		require.Len(t, fs, 1, findingMessages(fs))
+		require.Equal(t, "roadmap.delivery-link", fs[0].Code)
+		require.Contains(t, fs[0].Fix, "[2026-10-21-greeter/brief.md](briefs/2026-10-21-greeter/brief.md)")
+	})
+	t.Run("a link to the folder is no brief link", func(t *testing.T) {
+		require.Equal(t, []string{"roadmap.delivery-unlinked"},
+			briefCodes(t, fixture(t, withFolder("Delivery: [b](briefs/2026-10-21-greeter/)"))))
+	})
+	t.Run("a bad folder name is one brief.bad-name, on the folder", func(t *testing.T) {
+		for _, name := range []string{"2026-02-30-greeter", "2026-10-21-Greeter", "greeter"} {
+			files := baseFiles()
+			files["development/roadmap.md"] = roadmapWithDelivery("Delivery: [b](briefs/" + name + "/brief.md)")
+			files["development/briefs/"+name+"/brief.md"] = briefText
+			files["development/briefs/"+name+"/assets/home.svg"] = "<svg/>\n"
+			fs := ClassifyFindings(fixture(t, files).Check())
+			require.Len(t, fs, 1, "%s: %v", name, findingMessages(fs))
+			require.Equal(t, "brief.bad-name", fs[0].Code)
+			require.Equal(t, "development/briefs/"+name, fs[0].File)
+			require.Contains(t, fs[0].Message, "brief folder name is not YYYY-MM-DD-<slug>")
+		}
+	})
+	t.Run("a dated folder without brief.md is brief.bad-name", func(t *testing.T) {
+		files := baseFiles()
+		files["development/roadmap.md"] = roadmapWithDelivery("Delivery: [b](briefs/2026-10-16-greet.md)")
+		files["development/briefs/2026-10-16-greet.md"] = briefText
+		files[folder+"/assets/home.svg"] = "<svg/>\n"
+		fs := ClassifyFindings(fixture(t, files).Check())
+		require.Len(t, fs, 1, findingMessages(fs))
+		require.Equal(t, "brief.bad-name", fs[0].Code)
+		require.Equal(t, folder, fs[0].File)
+		require.Contains(t, fs[0].Message, "brief folder holds no brief.md")
+	})
+	t.Run("an undated folder without brief.md keeps v1.0's rule for its files", func(t *testing.T) {
+		files := linked()
+		files["development/briefs/archive/2025-01-01-old.md"] = briefText
+		files["development/briefs/archive/notes.md"] = briefText
+		fs := ClassifyFindings(fixture(t, files).Check())
+		require.Len(t, fs, 1, findingMessages(fs))
+		require.Equal(t, "brief.bad-name", fs[0].Code)
+		require.Equal(t, "development/briefs/archive/notes.md", fs[0].File)
+	})
+	t.Run("every file in it is history", func(t *testing.T) {
+		p := fixture(t, linked())
+		write(t, p, folder+"/assets/home.svg", "<svg>changed</svg>\n")
+		fs := ClassifyFindings(p.Check())
+		require.Len(t, fs, 1, findingMessages(fs))
+		require.Equal(t, "brief.edited", fs[0].Code)
+		require.Equal(t, folder+"/assets/home.svg", fs[0].File)
+		commitAll(t, p, "edit an asset")
+		require.Equal(t, []string{"brief.edited"}, briefCodes(t, p))
+	})
+	t.Run("an uncommitted file in it is brief.uncommitted", func(t *testing.T) {
+		p := fixture(t, linked())
+		write(t, p, folder+"/assets/later.svg", "<svg/>\n")
+		fs := ClassifyFindings(p.Check())
+		require.Len(t, fs, 1, findingMessages(fs))
+		require.Equal(t, "brief.uncommitted", fs[0].Code)
+		require.Equal(t, folder+"/assets/later.svg", fs[0].File)
+	})
+	t.Run("pre-tool denies an edit to any file in it, allows a new one", func(t *testing.T) {
+		p := fixture(t, linked())
+		for _, rel := range []string{folder + "/brief.md", folder + "/source.txt", folder + "/assets/deep/notes.md"} {
+			d := PreTool(editPayload(t, p.Root, "Edit", rel))
+			require.True(t, d.Deny, rel)
+			require.Contains(t, d.Reason, rel+" is a brief")
+		}
+		require.False(t, PreTool(editPayload(t, p.Root, "Write", folder+"/assets/new.svg")).Deny)
+		require.False(t, PreTool(editPayload(t, p.Root, "Write", "development/briefs/2026-10-22-next/brief.md")).Deny)
+	})
+}
+
+func TestCurrentBrief(t *testing.T) {
+	file := func(name string) brief {
+		return brief{Text: "/b/" + name, Files: []string{"/b/" + name}}
+	}
+	folder := func(name string, withText bool) brief {
+		b := brief{Text: "/b/" + name + "/brief.md", Folder: "/b/" + name, Files: []string{"/b/" + name + "/assets/x.svg"}}
+		if withText {
+			b.Files = append(b.Files, b.Text)
+		}
+		return b
+	}
+	require.Empty(t, currentBrief(nil))
+	require.Equal(t, "/b/2026-10-21-x/brief.md", currentBrief([]brief{file("2026-10-01-a.md"), folder("2026-10-21-x", true)}))
+	require.Equal(t, "/b/2026-10-22-b.md", currentBrief([]brief{file("2026-10-22-b.md"), folder("2026-10-21-x", true)}))
+	require.Equal(t, "/b/2026-10-01-a.md", currentBrief([]brief{file("2026-10-01-a.md"), folder("2026-10-21-x", false)}),
+		"a folder without its brief.md is not well named")
+	require.Equal(t, "/b/notes/brief.md", currentBrief([]brief{file("x.md"), folder("notes", true)}), "none well named: the last")
+}

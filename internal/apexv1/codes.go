@@ -328,7 +328,7 @@ var DiagnosticCodes = []CodeDoc{
 	{"roadmap.bad-budget", 1, "person", "a milestone Budget: is not a number"},
 	{"roadmap.delivery-link", 1, "person", "a brief the roadmap's Delivery: line links does not resolve to a file"},
 	{"roadmap.delivery-unlinked", 1, "person", "development/briefs/ holds briefs but no Delivery: line links one"},
-	{"brief.bad-name", 1, "person", "a file under development/briefs/ is not YYYY-MM-DD-<slug>.md (a real date)"},
+	{"brief.bad-name", 1, "person", "a brief under development/briefs/ is not YYYY-MM-DD-<slug>.md, or a YYYY-MM-DD-<slug>/ folder holding brief.md (a real date)"},
 	{"brief.uncommitted", 1, "person", "a brief is not committed: briefs are committed with the plan"},
 	{"brief.edited", 1, "person", "a brief differs from the text it was first committed with: restore it, write a new dated brief"},
 	{"decision.bad-name", 1, "person", "an ADR file is not NNNN-<slug>.md"},

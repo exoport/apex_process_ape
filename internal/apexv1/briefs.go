@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -20,15 +21,41 @@ import (
 // the specs stay the living intent; a brief is history and is never
 // edited. The pre-tool hook denies edits to an existing brief; project
 // check covers the rest (links, names, and edits the hook cannot see).
+//
+// W5 (Q-S1, v1.1): a brief may also be a dated folder,
+// development/briefs/YYYY-MM-DD-<slug>/, whose brief.md is the brief's
+// text and whose other files (assets/**, source.txt, at any depth) are
+// part of it. The name rule applies to the folder, not its files; every
+// file in it is history as a single-file brief is (pre-tool, brief.edited,
+// brief.uncommitted); it counts as one brief, and Delivery: links its
+// brief.md.
 
 // BriefPattern is the name every brief has.
 const BriefPattern = "YYYY-MM-DD-<slug>.md"
 
-var briefNameRe = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})-[a-z0-9][a-z0-9-]*\.md$`)
+// BriefFolderPattern is a brief kept as a folder (W5): the folder is
+// dated, and its brief.md is the brief.
+const BriefFolderPattern = "YYYY-MM-DD-<slug>/brief.md"
+
+// briefFolderText is the file a brief folder's brief is.
+const briefFolderText = "brief.md"
+
+var (
+	briefNameRe   = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})-[a-z0-9][a-z0-9-]*\.md$`)
+	briefFolderRe = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})-[a-z0-9][a-z0-9-]*$`)
+	// datedRe is what makes a folder a brief folder by its name alone.
+	datedRe = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}-`)
+)
 
 // validBriefName reports whether name is YYYY-MM-DD-<slug>.md with a real date.
-func validBriefName(name string) bool {
-	m := briefNameRe.FindStringSubmatch(name)
+func validBriefName(name string) bool { return realDated(briefNameRe, name) }
+
+// validBriefFolderName reports whether name is YYYY-MM-DD-<slug> with a
+// real date.
+func validBriefFolderName(name string) bool { return realDated(briefFolderRe, name) }
+
+func realDated(re *regexp.Regexp, name string) bool {
+	m := re.FindStringSubmatch(name)
 	if m == nil {
 		return false
 	}
@@ -36,16 +63,93 @@ func validBriefName(name string) bool {
 	return err == nil
 }
 
-// briefFiles lists the files under development/briefs/ at any depth,
-// sorted. Dotfiles (init's .gitkeep) are not briefs.
-func (p *Project) briefFiles() []string {
+// brief is one brief under development/briefs/: a file, or a brief
+// folder (W5).
+type brief struct {
+	// Text is the brief's text: the file, or the folder's brief.md (which
+	// may be missing).
+	Text string
+	// Folder is the brief folder; "" for a single-file brief.
+	Folder string
+	// Files is every file of the brief, sorted.
+	Files []string
+}
+
+// key is what orders briefs by date and name: the file's name without
+// .md, or the folder's name.
+func (b brief) key() string {
+	if b.Folder != "" {
+		return filepath.Base(b.Folder)
+	}
+	return strings.TrimSuffix(filepath.Base(b.Text), ".md")
+}
+
+// wellNamed reports whether b is a dated file, or a dated folder that
+// holds its brief.md.
+func (b brief) wellNamed() bool {
+	if b.Folder == "" {
+		return validBriefName(filepath.Base(b.Text))
+	}
+	return validBriefFolderName(filepath.Base(b.Folder)) && slices.Contains(b.Files, b.Text)
+}
+
+// isBriefFolder reports whether the folder dir under briefs/ is a brief
+// folder: dated by its name (a real date or not: the name rule then
+// reports it), or holding a brief.md.
+func isBriefFolder(dir string) bool {
+	if datedRe.MatchString(filepath.Base(dir)) {
+		return true
+	}
+	fi, err := os.Stat(filepath.Join(dir, briefFolderText))
+	return err == nil && fi.Mode().IsRegular()
+}
+
+// briefs lists development/briefs/'s briefs, sorted: every file at any
+// depth outside a brief folder is one, and every brief folder at any depth
+// is one with all its files. Dotfiles (init's .gitkeep) and dot folders
+// are no part of any.
+func (p *Project) briefs() []brief {
 	root := p.BriefsDir()
-	var out []string
+	var out []brief
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return filepath.SkipDir // absent or unreadable: nothing to list there
 		}
-		if path != root && strings.HasPrefix(d.Name(), ".") {
+		if path == root {
+			if !d.IsDir() { // a symlinked briefs/ is not walked, and is listed as v1.0 did
+				out = append(out, brief{Text: path, Files: []string{path}})
+			}
+			return nil
+		}
+		if strings.HasPrefix(d.Name(), ".") {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !d.IsDir() {
+			out = append(out, brief{Text: path, Files: []string{path}})
+			return nil
+		}
+		if !isBriefFolder(path) {
+			return nil
+		}
+		out = append(out, brief{Text: filepath.Join(path, briefFolderText), Folder: path, Files: listFiles(path)})
+		return filepath.SkipDir
+	})
+	sort.Slice(out, func(i, j int) bool { return out[i].Text < out[j].Text })
+	return out
+}
+
+// listFiles lists the files under dir at any depth but dotfiles and dot
+// folders, sorted.
+func listFiles(dir string) []string {
+	var out []string
+	_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return filepath.SkipDir
+		}
+		if path != dir && strings.HasPrefix(d.Name(), ".") {
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
@@ -128,43 +232,62 @@ func (p *Project) briefResolves(target string) bool {
 	return false
 }
 
-// briefLinkFor is how roadmap.md links brief: relative to its folder.
-func (p *Project) briefLinkFor(brief string) string {
-	rel, err := filepath.Rel(filepath.Dir(p.RoadmapMD()), brief)
+// briefLinkFor is how roadmap.md links a brief's text: relative to its
+// folder, named by the file (a brief folder's brief.md by its folder too).
+func (p *Project) briefLinkFor(text string) string {
+	rel, err := filepath.Rel(filepath.Dir(p.RoadmapMD()), text)
 	if err != nil {
-		rel = p.Rel(brief)
+		rel = p.Rel(text)
 	}
-	return "[" + filepath.Base(brief) + "](" + filepath.ToSlash(rel) + ")"
+	name := filepath.Base(text)
+	if name == briefFolderText {
+		name = filepath.Base(filepath.Dir(text)) + "/" + name
+	}
+	return "[" + name + "](" + filepath.ToSlash(rel) + ")"
 }
 
-// currentBrief is the newest well-named brief (by its date and name), or
-// the last one when none is well named.
-func currentBrief(briefs []string) string {
-	cur := ""
-	for _, b := range briefs {
-		if validBriefName(filepath.Base(b)) && (cur == "" || filepath.Base(b) > filepath.Base(cur)) {
-			cur = b
+// currentBrief is the text of the newest well-named brief, a file or a
+// folder (by its date and name), or the last one's when none is well
+// named.
+func currentBrief(briefs []brief) string {
+	var cur *brief
+	for i := range briefs {
+		if briefs[i].wellNamed() && (cur == nil || briefs[i].key() > cur.key()) {
+			cur = &briefs[i]
 		}
 	}
-	if cur == "" && len(briefs) > 0 {
-		cur = briefs[len(briefs)-1]
+	if cur == nil && len(briefs) > 0 {
+		cur = &briefs[len(briefs)-1]
 	}
-	return cur
+	if cur == nil {
+		return ""
+	}
+	return cur.Text
 }
 
 // briefFindings checks development/briefs/ and the roadmap's Delivery: link.
 func (p *Project) briefFindings(ctx context.Context) []Finding {
-	briefs := p.briefFiles()
+	briefs := p.briefs()
 	out := p.deliveryFindings(briefs)
 	gitOK := HeadSHA(ctx, p.Root) != ""
 	for _, b := range briefs {
-		rel := p.Rel(b)
-		if !validBriefName(filepath.Base(b)) {
-			out = append(out, Finding{File: rel, Message: "brief file name is not " + BriefPattern +
-				" (a real date, a kebab-case slug) — rename it with git mv, and update the roadmap's Delivery: link"})
+		switch name := filepath.Base(b.Folder); {
+		case b.Folder == "":
+			if !validBriefName(filepath.Base(b.Text)) {
+				out = append(out, Finding{File: p.Rel(b.Text), Message: "brief file name is not " + BriefPattern +
+					" (a real date, a kebab-case slug) — rename it with git mv, and update the roadmap's Delivery: link"})
+			}
+		case !validBriefFolderName(name):
+			out = append(out, Finding{File: p.Rel(b.Folder), Message: "brief folder name is not " + strings.TrimSuffix(BriefFolderPattern, "/"+briefFolderText) +
+				" (a real date, a kebab-case slug) — rename the folder with git mv, and update the roadmap's Delivery: link"})
+		case !slices.Contains(b.Files, b.Text):
+			out = append(out, Finding{File: p.Rel(b.Folder), Message: "brief folder holds no " + briefFolderText +
+				" — a brief folder's text is its " + briefFolderText + " (" + BriefFolderPattern + "): write it there, or move the files out of a folder that is no brief"})
 		}
 		if gitOK {
-			out = append(out, p.briefHistoryFindings(ctx, b, rel)...)
+			for _, f := range b.Files {
+				out = append(out, p.briefHistoryFindings(ctx, f, p.Rel(f))...)
+			}
 		}
 	}
 	return out
@@ -172,7 +295,7 @@ func (p *Project) briefFindings(ctx context.Context) []Finding {
 
 // deliveryFindings checks the roadmap's Delivery: links against briefs.
 // No roadmap is file.missing's finding, not this one's.
-func (p *Project) deliveryFindings(briefs []string) []Finding {
+func (p *Project) deliveryFindings(briefs []brief) []Finding {
 	doc, err := readFileString(p.RoadmapMD())
 	if err != nil {
 		return nil
@@ -180,7 +303,7 @@ func (p *Project) deliveryFindings(briefs []string) []Finding {
 	var out []Finding
 	file := p.Rel(p.RoadmapMD())
 	lines, links := deliveryLinks(doc)
-	fix := "save the planning input as " + p.DevRel + "/briefs/" + BriefPattern + " and link it"
+	fix := "save the planning input as " + p.DevRel + "/briefs/" + BriefPattern + " (or " + BriefFolderPattern + ") and link it"
 	if cur := currentBrief(briefs); cur != "" {
 		fix = "link an existing brief, relative to roadmap.md: " + p.briefLinkFor(cur)
 	}
