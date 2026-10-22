@@ -132,6 +132,31 @@ A fresh project with one approved milestone gives, in part:
 | `delegate_returns` | Delegate fails that sent the change back: `{"T2": [{run, reason, defects, at}]}`. |
 | `tools` | Design-tool tasks: `{task, name, skill, done}`. Always present. |
 | `review_tools` | Its `review_tools:` frontmatter: `{name, skill}`. Always present. |
+| `advise` | The files of the `tools.advise` entries its `advise:` frontmatter names, one row per file. Always present, `[]` when none. See [`changes[].advise`](#changesadvise). |
+
+### `changes[].advise`
+
+One row per `load:` file of each [`tools.advise`](config-yaml.md#toolsadvise) entry the change
+names. The sessions that `for` names (`change`, `apply`, `review`) Read `path` before they work.
+
+```json
+{"name": "nats", "skill": "nats-expert:nats-expert", "for": ["change", "apply", "review"],
+ "file": "advise.md", "path": "/home/ann/.claude/plugins/cache/team-tools/nats-expert/0.1.0/skills/nats-expert/advise.md",
+ "bytes": 7312, "sha256": "9f2c…"}
+```
+
+| Field | What it is |
+| --- | --- |
+| `name`, `skill` | The `tools.advise` entry, and its skill. |
+| `for` | The sessions that read the file. |
+| `file` | The `load:` entry, relative to the skill's folder. |
+| `path` | The file, absolute: in the plugin's install for a plugin skill, else in the user's or the project's `.claude/skills/<skill>/`. |
+| `bytes`, `sha256` | Its size and hash now. Every `ape change verify` records them, without `path`, in `state.json`'s `verify.advise`. |
+| `error` | Present instead of `sha256` when the file cannot be read: the entry is not declared, its skill is not installed (`… is unchecked: claude is not on PATH …` when the plugin installs cannot be read), or the file is missing. |
+
+`ape status` resolves them each time it runs; a plugin skill's folder comes from the
+`claude plugin` CLI, asked only when a change names such an entry. ape never reads the files for
+meaning.
 
 ### `latest_run` and `sessions[]`
 

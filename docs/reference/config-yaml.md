@@ -73,7 +73,7 @@ leaves an existing `models:` alone, warning for each default skill it lacks.
 | [`secrets`](#secrets) | `{allow: [{fingerprint, reason}]}` | none | yes |
 | [`marketplaces`](#marketplaces-and-plugins) | map: name → source | none | yes |
 | [`plugins`](#marketplaces-and-plugins) | list | none | yes |
-| [`tools`](#tools) | `{design: [...], review: [...]}` | none | yes |
+| [`tools`](#tools) | `{design: [...], review: [...], advise: [...]}` | none | yes |
 
 ## `project_name`
 
@@ -292,6 +292,8 @@ Artefact size caps, each a default with a hard ceiling. A size is plain bytes or
 | `spec` | one capability's `spec.md` | 24 KB | 64 KB |
 | `evidence_log` | one check's output in an evidence file | 1 MiB | 16 MiB |
 | `architecture_md` | `development/architecture.md`, when present | 16 KB | 48 KB |
+| `advise` | one `tools.advise` entry's `load:` files together | 8 KB | 16 KB |
+| `advise_session` | the advise files one session of a change reads | 16 KB | 32 KB |
 
 A value above its ceiling is `caps.over-ceiling`: `ape project check` reports it, and
 `ape change check`, `start` and `archive` refuse until a person fixes the config.
@@ -440,10 +442,18 @@ plugins:
 Claude Code cannot pin a plugin version from the consumer side. To pin one, point the marketplace
 at a ref.
 
+`ape plugins status --outdated` lists, per marketplace, the version tags of its repository newer
+than its `ref` (`git ls-remote --tags`), so a team that pins a marketplace tag sees what to bump.
+
+A listed plugin also installed or enabled at user scope (`claude plugin list` scope `user`, or
+`enabledPlugins` in the user's `settings.json`) is `plugins.user-scope` (action person): the user
+copy, unpinned, stands in for the project's on that machine.
+
 ## `tools`
 
-The skills the design and review steps may call, each with the condition that calls for it.
-Guarded: it widens what the loop may start.
+The skills the design and review steps may call, and the expert files the change, apply and
+review sessions read, each with the condition that calls for it. Guarded: it widens what the loop
+may start, and what text enters every apply session.
 
 ```yaml
 tools:
@@ -451,21 +461,59 @@ tools:
     - {name: ui-mockup, skill: frontend-design:mockup, when: "the change adds or changes a screen",
        args: "{change} --out {assets}", model: sonnet, effort: high}
   review:
-    - {name: security, skill: security-lens, when: "the change touches auth, secrets or input parsing"}
+    - {name: security, skill: security-lens, when: "the change touches auth, secrets or input parsing",
+       paths: ["internal/auth/**"], touches: [auth]}
+  advise:
+    - {name: nats, skill: nats-expert:nats-expert, when: "the change publishes, consumes or configures NATS",
+       paths: ["internal/bus/**"], load: [advise.md], for: [change, apply, review]}
 ```
 
-An entry is `{name, skill, when}`, with names unique across both slots, plus three optional keys:
+An entry is `{name, skill, when}`, with names unique across the three slots. A `design` or
+`review` entry has three more optional keys:
 
 - `args:`, the template ape fills into `ape task <skill> --args`, with the placeholders `{id}`,
   `{task}`, `{assets}` and `{change}` and no other;
 - `model:`;
 - `effort:`, a level.
 
+Every entry may have two more (v1.1):
+
+- `paths:`, globs relative to the project root (`**` any depth);
+- `touches:`, capability slugs.
+
+They make `when:` checkable. A change whose planned `paths:` or `touches:` (at
+`ape change check`), or whose diff (at `ape change verify`), match an entry it does not list gets
+the notice `tools.unmatched`. It is a warning, never a refusal: `when:` stays the planner's call.
+
 A skill is `<plugin>:<skill>` (of a plugin listed in `plugins:`), a project skill
-(`.claude/skills/<skill>/`) or a user skill. It must be installed (else `tools.not-installed`) and
-slash-invocable (else `tools.not-invocable`). A malformed block is `tools.invalid`. Every skill
-named here joins the loop's allow-list. `apex-change` names a tool in a change, and the loop runs it
-with `ape change tool <id> <name>`.
+(`.claude/skills/<skill>/`) or a user skill. It must be installed (else `tools.not-installed`). A
+`design` or `review` skill must also be slash-invocable (else `tools.not-invocable`). A malformed
+block is `tools.invalid`. Every `design` and `review` skill joins the loop's allow-list.
+`apex-change` names a tool in a change, and the loop runs it with `ape change tool <id> <name>`.
+
+### `tools.advise`
+
+An `advise` entry starts no session and gives no verdict. Its fields:
+
+| Field | Meaning |
+| ----- | ------- |
+| `load` | Required. Files relative to the skill's folder: the folder holding its `SKILL.md`, in the plugin's install for a plugin skill, else in the user's or the project's `.claude/skills/<skill>/` (a user skill wins, as in Claude Code). No `..`, no absolute path |
+| `for` | The sessions that read the files: `change`, `apply`, `review`. Default all three. A delegate never reads advise |
+| `paths`, `touches` | As above |
+
+`args`, `model` and `effort` are refused on an advise entry. The skill need not be
+slash-invocable; `disable-model-invocation: true` keeps it out of every session's skill listing.
+
+A change names the entries whose `when:` it matches in its `advise:` frontmatter, as it does
+`review_tools:`. Then:
+
+- `ape change check` refuses a name `tools.advise` does not declare (`tools.unknown`), and files over
+  `caps.advise` per entry or `caps.advise_session` per session (`tools.too-big`);
+- [`ape status --json`](status-json.md) lists each file under `changes[].advise`, with its absolute
+  path, bytes and sha256;
+- every `ape change verify` records the sha256s in `state.json`.
+
+ape resolves, sizes and hashes the files, and never reads them for meaning.
 
 ## Commands that act on the config
 
@@ -475,7 +523,7 @@ with `ape change tool <id> <name>`.
 | [`ape project check`](cli.md#ape-project-check) | Reports `config.changed`, `caps.over-ceiling`, `models.*`, `docs.missing`, `tools.*`, `plugins.*` |
 | [`ape project accept-config --by <who>`](cli.md#ape-project-accept-config) | A person accepts the guarded blocks as committed |
 | [`ape project operator-interface`](cli.md#ape-project-operator-interface) | Renames a `models.apex-orchestrator` row to `apex-loop` (migration `v1.0.0_seq-07`) |
-| [`ape plugins status`](cli.md#ape-plugins-status) | Reports each listed plugin's install, version against `ref`, enablement and `allow:`, and each `tools:` entry's state |
+| [`ape plugins status`](cli.md#ape-plugins-status) | Reports each listed plugin's install, version against `ref`, enablement and `allow:`, and each `tools:` entry's state and advise files; `--outdated` lists each marketplace's newer tags |
 | [`ape plugins sync`](cli.md#ape-plugins-sync) | Makes the installs and `.claude/settings.json` what the config says, committing a changed `settings.json` as `apex: plugins` |
 | [`ape doctor --fix`](cli.md#ape-doctor) | Does what `plugins sync` does before the checks run (row `plugins.project`). It fixes nothing else |
 | [`ape framework update`](cli.md#ape-framework-update) | Syncs the listed plugins after the install, as `plugins sync` does |

@@ -290,6 +290,18 @@ is undone after it and reported as `stray_files`. A copy of each, as the check l
 under `_apex/state/strays/` (`strays_kept`). Files that were there before the check ran are never
 touched.
 
+### Advise files and unmatched tools
+
+A change that names [`tools.advise`](config-yaml.md#toolsadvise) entries in its `advise:`
+frontmatter has their files hashed at each verify. JSON `advise` lists them as `ape status` does,
+and `state.json`'s `verify.advise` records `{name, skill, file, bytes, sha256}`, with no path. An
+expert updated in the middle of a change shows as a new sha256.
+
+A `tools:` entry with `paths:` that a file the change's commits touched matches, or with
+`touches:` the change names, and that the change does not list, is the notice `tools.unmatched`
+(JSON `notices`). It never changes the outcome. `ape change check` gives the same notice against
+the change's planned `paths:`.
+
 ## Limits
 
 All under `limits:` in `_apex/config.yaml`:

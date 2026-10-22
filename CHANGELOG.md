@@ -213,6 +213,59 @@ The APEX v1.1 work (D327, D330, D333, D337), built on v1.0.0's docs.
 - **Docs:** `<user cache>/ape/usage.json`'s fields, `usage-runs/` and `usage-history.json` in
   [pipeline-run-manifest.md](docs/reference/pipeline-run-manifest.md#the-usage-files-user-cacheapeusagejson).
 
+### W6: experts (Q-E1, Q-E2, Q-E7, Q-E8, Q-E11)
+
+- **`tools.advise` (class C):** a third tools slot, `{name, skill, when, load, for?, paths?,
+  touches?}`, for an expert's rules that the sessions doing the work read before they work. It
+  starts no session, gives no verdict, adds nothing to the loop's allow-list, and takes no `args`,
+  `model` or `effort`.
+  - **`load:`** names files relative to the skill's folder: the folder holding its `SKILL.md`,
+    resolved as a tools skill resolves (in the listed plugin's install for `<plugin>:<skill>`,
+    else the user's or the project's `.claude/skills/<skill>/`, a user one winning). ape resolves,
+    sizes and hashes them, and never reads them for meaning. A file the installed skill lacks is
+    `tools.not-installed`. **`for:`** is `change`, `apply` and/or `review` (default all three; no
+    delegate reads advise, Q-E12).
+  - **`change.md`'s `advise: [<name>]`** names the entries the change matches, as `review_tools:`
+    does. `ape change check` (and `start`) refuse an undeclared name (`tools.unknown`).
+  - **`ape status --json`** lists `changes[].advise`, always present: one row per file,
+    `{name, skill, for, file, path, bytes, sha256}`, `path` absolute; a row it cannot read has
+    `error` instead of `sha256`. A plugin skill's folder comes from the `claude plugin` CLI, asked
+    only when a change names such an entry, and only by `ape status` itself (not the hooks or the
+    board).
+  - **Every `ape change verify`** lists them (JSON `advise`) and records `{name, skill, file,
+    bytes, sha256}` in `state.json`'s `verify.advise`, with no path (Q-E11): an expert updated
+    in the middle of a change shows in the record. `tools` was already a guarded key, so the text
+    is a person's to accept.
+  - **`caps.advise`** (default 8 KB, ceiling 16 KB) bounds one entry's files together, and
+    **`caps.advise_session`** (default 16 KB, ceiling 32 KB) what one session of a change reads,
+    by `for:`. Over either is **`tools.too-big`** (exit 1, action replan): per entry from
+    `ape project check` and `ape plugins status` on `_apex/config.yaml`, and from
+    `ape change check` for an entry the change names; per session from `ape change check`.
+  - `ape change tool <id> <advise entry>` is `tool.unknown`, saying it starts no session.
+- **`paths:` and `touches:` on every tools entry (Q-E2, class C):** relative globs and capability
+  slugs (`tools.invalid` otherwise). A change that does not list an entry whose `touches:` it
+  names, or whose `paths:` meet its planned `paths:` (`ape change check`) or a file its commits
+  changed since `base_sha` (`ape change verify`), gets the notice **`tools.unmatched`** (exit 0,
+  action replan): a warning, never a refusal. Both commands print it as a `notice:` line on stderr
+  and list it under `notices` in `--json` (`[]` when none).
+- **`plugins.user-scope` (Q-E8, class C):** a finding (exit 1, action person) of
+  `ape plugins status` and `ape project check` when a listed plugin is also installed at user
+  scope (`claude plugin list` scope `user`, matched by plugin name) or enabled in the user's
+  `settings.json` `enabledPlugins`, or a `tools:` skill is a user skill ("is also installed at
+  user scope", or "at user scope only"). ape removes nothing.
+- **`ape plugins status --outdated` (Q-E7, class D):** per listed marketplace, the version tags of
+  its repository newer than its `ref` (`git ls-remote --tags`, newest first; `v1.2.0` and `1.2.0`
+  count, pre-releases do not). JSON `outdated: [{marketplace, source, ref, latest, newer, note,
+  error}]`. Nothing is fetched or written.
+- **A change checked from another branch** (a view of `development/` and `_apex/`) resolves skills
+  and plugin installs in the checkout it was read from, as the sessions do.
+- **Docs:** [config-yaml.md](docs/reference/config-yaml.md#toolsadvise) (`tools.advise`,
+  `paths:`/`touches:`, the two caps), [status-json.md](docs/reference/status-json.md#changesadvise),
+  [change-lifecycle.md](docs/reference/change-lifecycle.md#advise-files-and-unmatched-tools),
+  [use-plugins-and-tools.md](docs/how-to/use-plugins-and-tools.md#give-the-sessions-an-experts-rules);
+  `ape plugins --help`, `ape plugins status --help`, `ape change check|verify|tool --help`,
+  `ape status --help`, `ape project check --help` and `ape project codes`.
+
 ## v1.0.0 (2026-10-22)
 
 APEX v1: ape runs the framework's v1 loop and owns every record in it.

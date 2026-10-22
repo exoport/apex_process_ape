@@ -1714,7 +1714,12 @@ Validate one change and list every failure:
     records (change.subject-reserved, Q156);
     review_tools: [<name>, …] names tools.review entries of _apex/config.yaml whose
     when: the change matches (the loop runs each before the review; else
-    tools.unknown, D74); docs: true marks the milestone's docs change (D130, D152: its
+    tools.unknown, D74); advise: [<name>, …] names tools.advise entries whose when:
+    the change matches (W6: the change, apply and review sessions Read their files,
+    which `ape status --json` lists under changes[].advise; else tools.unknown), each
+    entry's files within caps.advise (default 8 KB) and what each session reads —
+    the entries whose for: names it — within caps.advise_session (default 16 KB; else
+    tools.too-big); docs: true marks the milestone's docs change (D130, D152: its
     human-review tasks are the docs check, a delegate's by default — `ape change accept --help`),
     a YAML boolean only (else change.frontmatter); any other key must start with x-
   - # title; ## Why and ## Out of scope non-empty; ## Delta; ## Tasks
@@ -1757,6 +1762,16 @@ Validate one change and list every failure:
 
 The change is checked as the branch holding its records has it, against that branch's
 specs and roadmap (D51 Q17; `ape change --help`): HEAD needs to be on no particular branch.
+
+Notices (W6) are not findings: they never change the exit. tools.unmatched (action
+replan) is a tools: entry with paths: or touches: (`ape plugins --help`) that the change
+matches and does not list — one of its touches: slugs names the entry's, or one of its
+planned paths: globs meets the entry's (either glob matches the other read as a path)
+— where "lists" is a task's `— tool: <name>` (design), review_tools: (review) or
+advise: (advise). If the entry's when: applies, apex-change lists it; if not, it leaves
+it. Printed as "notice: <file>:1: …" lines on stderr; JSON "notices": [{severity:
+"notice", code, message, fix, action, file, line}] ([] when none), beside the findings
+on a failure too.
 
 Exit codes: 0 green · 1 findings · 2 usage.
 
@@ -2129,7 +2144,8 @@ Code session: ape starts `ape task <skill> --args "<args filled>"` detached, as
       review:
         - {name: security, skill: security-lens, when: "…"}
 
-  - <name> is a tools.design or tools.review entry (else tool.unknown, action replan).
+  - <name> is a tools.design or tools.review entry (else tool.unknown, action replan;
+    a tools.advise entry is refused too: it starts no session, W6).
     A design tool runs for the task whose line names it (`- T<n> <what> — tool: <name> —
 check: …`), given with --task; a review tool, for a change whose review_tools:
     name it, before the review
@@ -2260,6 +2276,15 @@ marked stale, a verified/reviewed change back to in-progress, "apex: <id> rebase
 caught up here needs a new review. Refused while a conflicted catch-up is unresolved —
 unmerged paths, or conflict markers in a file the rebase conflicted in (exit 1,
 change.unresolved-conflict: resolve, `git add`, commit).
+
+Advise (W6): verify hashes the files of the tools.advise entries change.md's advise:
+names, as `ape status --json` resolves them, lists them (JSON "advise": [{name, skill, for,
+file, path, bytes, sha256}], or error for one it cannot read) and records them in
+state.json's verify (without path and for), so an expert updated in the middle of a
+change shows in the record. JSON "notices" ([] when none): tools.unmatched for a tools:
+entry the change does not list whose paths: a file the change's commits touched since
+base_sha matches (the development folder and _apex/state left out), or whose touches:
+the change's names (`ape change check --help`); a notice never changes the outcome.
 
 All checks exit 0 → status verified (a reviewed change whose work has not moved
 since its review stays reviewed), state.json committed. Any red → the failing checks' last
@@ -4539,7 +4564,11 @@ guard: a commit that changes them and is not ape's is a person's to accept):
       - {name: ui-mockup, skill: frontend-design:mockup, when: "the change adds or changes a screen",
          args: "{change} --out {assets}", model: sonnet, effort: high}
     review:
-      - {name: security, skill: security-lens, when: "the change touches auth, secrets or input parsing"}
+      - {name: security, skill: security-lens, when: "the change touches auth, secrets or input parsing",
+         paths: ["internal/auth/**"], touches: [auth]}
+    advise:
+      - {name: nats, skill: nats-expert:nats-expert, when: "the change publishes, consumes or configures NATS",
+         paths: ["internal/bus/**"], load: [advise.md], for: [change, apply, review]}
 
 allow: lists what a plugin may carry besides skills — hooks, mcp. A listed plugin
 that carries hooks (hooks/hooks.json, or hooks in .claude-plugin/plugin.json) or MCP
@@ -4547,17 +4576,42 @@ servers (.mcp.json, or mcpServers in plugin.json) its entry does not allow is th
 finding plugin.hooks-or-mcp (action person): a tool is a skill only. Another allow:
 value is a config error (plugins.config).
 
-tools: has two slots, design and review; each entry is {name, skill, when}, names
-unique, plus optional args: (the template ape fills into ape task <skill> --args;
-placeholders {id}, {task}, {assets}, {change}, no other), model: and effort: (low,
-medium, high, xhigh, max; unset: the D65 defaults). A skill is <plugin>:<skill> (the plugin listed in plugins:), or a project
+tools: has three slots, design, review and advise; each entry is {name, skill, when},
+names unique across the slots. A design or review entry may add args: (the template
+ape fills into ape task <skill> --args; placeholders {id}, {task}, {assets}, {change},
+no other), model: and effort: (low, medium, high, xhigh, max; unset: the D65 defaults).
+A skill is <plugin>:<skill> (the plugin listed in plugins:), or a project
 skill (.claude/skills/<skill>/SKILL.md) or user skill ($CLAUDE_CONFIG_DIR, else
 ~/.claude, /skills/<skill>/SKILL.md; a user skill wins over a project one). Each must
-be installed (tools.not-installed) and slash-invocable — not user-invocable: false
-(tools.not-invocable) — because ape task types it as a slash command; a malformed
-block is tools.invalid. The loop may start these skills as children, beside
-apex-plan, apex-change, apex-apply, apex-review, apex-release and apex-accept (D62,
-D76); apex-handoff, apex-loop and the operator's apex-orchestrator never.
+be installed (tools.not-installed); a design or review skill must be slash-invocable
+— not user-invocable: false (tools.not-invocable) — because ape task types it as a
+slash command; a malformed block is tools.invalid. The loop may start the design and
+review skills as children, beside apex-plan, apex-change, apex-apply, apex-review,
+apex-release and apex-accept (D62, D76); apex-handoff, apex-loop and the operator's
+apex-orchestrator never.
+
+An advise entry (W6, Q-E1) starts no session and gives no verdict: load: names files
+under its skill's folder (the folder holding its SKILL.md: in the plugin's install for
+a plugin skill, else the user's or the project's .claude/skills/<skill>/), and for:
+the sessions that read them, change, apply and/or review (default all three; never a
+delegate). A change names the entries whose when: it matches in change.md's advise:
+frontmatter (ape change check --help); ape status --json lists each file of them under
+changes[].advise with its absolute path, bytes and sha256, and every verify records
+the sha256s. ape resolves, sizes and hashes the files; it never reads them for meaning.
+caps.advise (default 8 KB, ceiling 16 KB) bounds one entry's files together and
+caps.advise_session (default 16 KB, ceiling 32 KB) what one session of a change reads
+(tools.too-big). The skill need not be slash-invocable; disable-model-invocation: true
+keeps it out of every session's skill listing.
+
+paths: (globs) and touches: (capability slugs), optional on every entry (W6, Q-E2),
+make when: checkable: a change whose planned paths: or touches: (ape change check) or
+whose diff (ape change verify) match an entry it does not list gets the notice
+tools.unmatched — a warning, never a refusal: when: stays the planner's call.
+
+A listed plugin also installed or enabled at user scope (claude plugin list scope
+user; enabledPlugins in $CLAUDE_CONFIG_DIR/settings.json, else ~/.claude/settings.json),
+or a tools: skill that is a user skill, is plugins.user-scope (action person, W6,
+Q-E8): the user copy wins over the project's pinned one on that machine.
 
 ape project check reports the same findings (exit 1).
 
@@ -4583,22 +4637,39 @@ each tools: entry: where its skill was found (plugin, project, user) and its sta
 ok, not-installed, not-invocable, or unchecked (a plugin skill while claude is not on
 PATH, so the installs cannot be read).
 
+An advise entry's row lists its load: files ("load <file>  <bytes> bytes  sha256
+<first 12>  for <sessions>").
+
 Findings: plugins.config, plugins.drift (ape plugins sync puts it right),
-plugin.hooks-or-mcp, tools.invalid, tools.not-installed, tools.not-invocable — see
-ape plugins --help. They are reported, not failed on: ape project check is the gate.
+plugin.hooks-or-mcp, plugins.user-scope, tools.invalid, tools.not-installed,
+tools.not-invocable, tools.too-big — see ape plugins --help. They are reported, not
+failed on: ape project check is the gate.
+
+--outdated (W6, Q-E7) also lists, for each marketplace _apex/config.yaml lists, the
+release tags of its repository newer than its ref (git ls-remote --tags; a github
+marketplace is read from https://github.com/<repo>.git, a git one from its url; a tag
+counts when it is a version, v1.2.0 or 1.2.0, pre-releases left out), newest first:
+"market  <name>  ref <ref>  newer: <tags>", or "up to date (latest <tag>)". A ref that
+is not a version (a branch, none) has a note naming the latest tag instead; a
+directory marketplace has no tags; a repository that cannot be read says why. Nothing
+is fetched, installed or written: bumping ref: is a person's change to the config.
 
 JSON: {"installs_checked", "plugins": [{"id", "ref", "installed", "version", "at_ref",
 "enabled", "install_path", "skills", "model_invocable", "hooks", "mcp", "allow",
-"allowed"}], "tools": [{"slot", "name", "skill", "source", "path", "state"}],
-"findings": [{"file", "message", "code", "fix"}]}.
+"allowed"}], "tools": [{"slot", "name", "skill", "source", "path", "state", "for",
+"files": [{"name", "skill", "for", "file", "path", "bytes", "sha256", "error"}]}],
+"findings": [{"file", "message", "code", "fix"}]}; with --outdated, "outdated":
+[{"marketplace", "source", "ref", "latest", "newer": [tags], "note", "error"}].
 
-Exit codes: 0 reported (findings or not) · 1 the config cannot be read · 2 usage.
+Exit codes: 0 reported (findings, or newer tags, or not) · 1 the config cannot be read ·
+2 usage.
 
 Examples:
 
 ```
   ape plugins status
   ape plugins status --json
+  ape plugins status --outdated
 ```
 
 Flags:
@@ -4607,6 +4678,7 @@ Flags:
 | ---- | ---- | ------- | ----------- |
 | `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
 | `--json` | bool | `false` | machine output (JSON on stdout) |
+| `--outdated` | bool | `false` | also list each listed marketplace's version tags newer than its ref (git ls-remote --tags) |
 
 ## ape plugins sync
 
@@ -4865,6 +4937,8 @@ Validate the whole project and list every failure, not just the first.
                              spec         24 KB / 64 KB    (per capability)
                              evidence_log  1 MiB / 16 MiB  (per check, evidence: archive)
                              architecture_md 16 KB / 48 KB (development/architecture.md, optional)
+                             advise        8 KB / 16 KB   (one tools.advise entry's files, W6)
+                             advise_session 16 KB / 32 KB (the advise files one session reads)
                            A value above its ceiling is caps.over-ceiling (action person):
                            reported here, and change check, start and archive refuse
                            until a person fixes it (abandon measures nothing, D89)
@@ -4907,15 +4981,24 @@ Validate the whole project and list every failure, not just the first.
                            at its ref (plugins.drift; plugins.config for a bad config);
                            `ape plugins sync` (or `ape doctor --fix`) puts them right;
                            an installed one that carries hooks or MCP servers its entry
-                           does not allow (allow: [hooks, mcp]) is plugin.hooks-or-mcp
+                           does not allow (allow: [hooks, mcp]) is plugin.hooks-or-mcp;
+                           a listed plugin also installed or enabled at user scope, or a
+                           tools: skill that is a user skill, is plugins.user-scope
+                           (action person, W6): the user copy wins on this machine
   tools                    _apex/config.yaml tools: {design: [{name, skill, when, args?,
-                           model?, effort?}], review: [...]}: well-formed — args:
-                           placeholders only {id} {task} {assets} {change}, effort: a
-                           level — (tools.invalid), each skill
+                           model?, effort?, paths?, touches?}], review: [...], advise:
+                           [{name, skill, when, load, for?, paths?, touches?}]}:
+                           well-formed — args: placeholders only {id} {task} {assets}
+                           {change}, effort: a level, paths: relative globs, touches:
+                           kebab slugs, load: paths inside the skill's folder, for:
+                           change, apply, review — (tools.invalid), each skill
                            installed — <plugin>:<skill> of a listed plugin, or a project
-                           or user skill — (tools.not-installed) and not
-                           user-invocable: false (tools.not-invocable); a plugin skill
-                           is judged only when claude is on PATH. See ape plugins --help
+                           or user skill — (tools.not-installed) and, for design and
+                           review, not user-invocable: false (tools.not-invocable); an
+                           advise entry's load: files in its skill's folder
+                           (tools.not-installed) and within caps.advise together
+                           (tools.too-big, W6); a plugin skill is judged only when
+                           claude is on PATH. See ape plugins --help
 
 Notices (D155 Q73) are not findings: listed as "notice: <file>:<line>: …" lines on stderr
 and under "notices" with --json ({severity: "notice", code, message, fix, action, file,
@@ -7226,6 +7309,13 @@ Show where the project stands, from the records ape keeps:
     latest verify of the current plan, or a human-review one accepted — and
     review_tools, its review_tools: frontmatter, as [{name, skill}]; skill is what
     _apex/config.yaml tools: names ("" when it names none). Both always present ([])
+  - advise (W6, Q-E1): every change lists advise, one row per file of each tools.advise
+    entry its advise: frontmatter names, as [{name, skill, for, file, path, bytes,
+    sha256}] — path absolute (a plugin skill's in its install, else the project's or
+    the user's .claude/skills/<skill>/), for the sessions that read it (change, apply,
+    review), file the load: entry; a row that cannot be read has error instead (not
+    declared, skill not installed, file missing) and no sha256. Always present ([]).
+    Resolved when ape status runs: a plugin skill through the claude plugin CLI
   - acceptances (JSON changes[].accepted: [{task, by, at, evidence, run}]): by a person,
     or by "delegate:<skill>" with its run when _apex/config.yaml human_review delegates
     them (D75; "Accepted by a delegate" in the long output); and each human-review task's

@@ -3,7 +3,7 @@
 An APEX v1 project can use Claude Code plugins, and can give the loop's design and review steps
 extra skills to call, its tool skills. Both are declared in `_apex/config.yaml`, and ape installs,
 enables and checks them. This page shows how to declare a plugin, accept the change, install it,
-check it, give a step a tool skill, and pin a plugin's version.
+check it, give a step a tool skill, give the sessions an expert's rules, and pin a plugin's version.
 [`_apex/config.yaml`](../reference/config-yaml.md#marketplaces-and-plugins) lists every field.
 
 You need an initialised v1 project (`ape project init`) and `claude` on `PATH`: ape installs
@@ -157,7 +157,8 @@ The findings, each with the fix it names:
 | `plugins.config` | A `marketplaces:` or `plugins:` entry is malformed: an unknown source, a missing `repo`/`url`/`path`, a `ref` on a directory marketplace, a plugin listed twice, an `allow:` value other than `hooks` or `mcp` | Fix the config |
 | `plugins.drift` | `settings.json`'s entries differ from the config, or a plugin is not installed at project scope or not at its ref | `ape plugins sync` or `ape doctor --fix` |
 | `plugin.hooks-or-mcp` | An installed plugin carries hooks (`hooks/hooks.json`, or `hooks` in `.claude-plugin/plugin.json`) or MCP servers (`.mcp.json`, or `mcpServers` in `plugin.json`) its entry does not allow | A person reviews them and adds `allow: [hooks]`, `[mcp]` or `[hooks, mcp]`, or drops the plugin |
-| `tools.invalid`, `tools.not-installed`, `tools.not-invocable` | A `tools:` problem | [Below](#give-a-step-a-tool-skill) |
+| `plugins.user-scope` | A listed plugin is also installed or enabled at user scope (`claude plugin list` scope `user`, or `enabledPlugins` in your own `settings.json`), or a `tools:` skill is a user skill. The user copy is not pinned by the project's `ref` and stands in for the project's on this machine | A person removes the user copy (`claude plugin uninstall <id> --scope user`), or moves the skill into the project's `.claude/skills/` |
+| `tools.invalid`, `tools.not-installed`, `tools.not-invocable`, `tools.too-big` | A `tools:` problem | [Below](#give-a-step-a-tool-skill) |
 
 `ape plugins status` exits 0 whatever it finds (1 when the config cannot be read). The gate is
 `ape project check`, which reports the same findings and exits 1.
@@ -188,7 +189,7 @@ tools:
     - {name: security, skill: security-lens, when: "the change touches auth, secrets or input parsing"}
 ```
 
-An entry is `{name, skill, when}`, with names unique across both slots, and three optional keys:
+An entry is `{name, skill, when}`, with names unique across the slots (design, review and [advise](#give-the-sessions-an-experts-rules)), and three optional keys:
 
 - `args`: the template ape fills into `ape task <skill> --args "…"`, with the placeholders `{id}`
   (the change id), `{task}` (the task), `{assets}` (the change's `development/changes/<id>/assets`)
@@ -205,7 +206,8 @@ The skill is one of:
   skill wins over a project skill of the same name.
 
 It must be installed and slash-invocable (not `user-invocable: false`), because ape types it as a
-slash command. Commit the block and [accept it](#accept-the-change) like any guarded change, run
+slash command. Any entry may also carry `paths:` and `touches:` ([below](#let-ape-check-when)).
+Commit the block and [accept it](#accept-the-change) like any guarded change, run
 `ape plugins sync` if it names a new plugin, and check it with `ape plugins status`.
 
 ### How the loop uses it
@@ -251,9 +253,79 @@ one. [Nesting](../explanation/operator-and-loop.md#nesting-as-it-applies-to-the-
 | `tools.invalid` | The block is malformed: an unknown slot, an entry missing `name`, `skill` or `when`, an unknown key, a skill that is not `<skill>` or `<plugin>:<skill>`, a name used twice, an unknown placeholder in `args`, an effort that is not a level. Only the valid entries are used | Fix the block |
 | `tools.not-installed` | No skill of that name: the plugin is not listed in `plugins:`, not installed or has no such skill, or there is no project or user skill | List the plugin and run `ape plugins sync`, add the skill, or fix the name |
 | `tools.not-invocable` | The skill has `user-invocable: false` | Drop the flag, or name another skill |
-| `tools.unknown` | A change's `— tool: <name>` task or `review_tools:` entry names no declared tool (`ape change check`) | Re-plan the change with a declared tool |
+| `tools.unknown` | A change's `— tool: <name>` task, `review_tools:` entry or `advise:` entry names no declared tool (`ape change check`) | Re-plan the change with a declared tool |
+| `tools.too-big` | An advise entry's files are over `caps.advise`, or what one session of a change reads is over `caps.advise_session` | List fewer advise entries; a person shortens the file, narrows `for:` or raises the cap |
 
 A plugin skill is judged only when `claude` is on `PATH`.
+
+## Give the sessions an expert's rules
+
+An expert skill can ship a short rules file, `advise.md` say, that the sessions doing the work read
+before they work. List it under `tools.advise`:
+
+```yaml
+tools:
+  advise:
+    - {name: nats, skill: nats-expert:nats-expert, when: "the change publishes, consumes or configures NATS",
+       paths: ["internal/bus/**"], load: [advise.md], for: [change, apply, review]}
+```
+
+- `load` names files relative to the skill's folder (the folder holding its `SKILL.md`). It is
+  required.
+- `for` names the sessions that read them: `change`, `apply`, `review`. It defaults to all three.
+  A delegate never reads advise.
+- An advise entry starts no session and gives no verdict, so it takes no `args`, `model` or
+  `effort`, and its skill need not be slash-invocable. Give the skill
+  `disable-model-invocation: true` so its description is not listed in every session.
+
+`ape plugins status` lists each advise entry's files with their size and sha256:
+
+```text
+tool    advise/nats  nats-expert:nats-expert  ok  plugin <cache>/nats-expert/0.1.0/skills/nats-expert/SKILL.md
+        load advise.md  7312 bytes  sha256 9f2c41d07a1b  for change, apply, review
+```
+
+A file missing from the installed skill is `tools.not-installed`. The files of one entry together
+may be at most `caps.advise` (8 KB by default), else `tools.too-big`.
+
+### How a change uses it
+
+1. **apex-change** reads each advise entry's `when:` and lists the ones the change matches in the
+   change's frontmatter, `advise: [nats]`. `ape change check` refuses a name `tools.advise` does not
+   declare (`tools.unknown`), and a session that would read more than `caps.advise_session` (16 KB
+   by default; `tools.too-big`).
+2. **The sessions** find the files in `ape status --json`, under `changes[].advise`: one row per
+   file, `{name, skill, for, file, path, bytes, sha256}`, with `path` absolute
+   ([status JSON](../reference/status-json.md#changesadvise)). A session whose role `for` names
+   Reads them before it works.
+3. **`ape change verify`** records each file's sha256 in `state.json`, so an expert updated in the
+   middle of a change shows in the record.
+
+ape never reads the files for meaning: it resolves, sizes and hashes them.
+
+## Let ape check when
+
+`when:` is prose, so whether a change matches is the planner's judgement. Add `paths:` (globs) and
+`touches:` (capability slugs) to any entry, design, review or advise, and ape checks it:
+
+```yaml
+tools:
+  review:
+    - {name: security, skill: security-lens, when: "the change touches auth", paths: ["internal/auth/**"], touches: [auth]}
+```
+
+A change that does not list the entry gets the notice `tools.unmatched` when:
+
+- one of its `touches:` names a slug of the entry's;
+- one of its planned `paths:` meets a glob of the entry's (`ape change check`);
+- a file its commits changed matches a glob of the entry's (`ape change verify`).
+
+```text
+notice: development/changes/add-login/change.md:1: tools.review entry security matches this change (internal/auth/login.go matches internal/auth/**) and the change does not list it — if its when: ("the change touches auth") applies, list it: review_tools: [security]; if not, leave it: a warning, never a refusal
+```
+
+A notice never changes the exit: a docs-only edit under `internal/auth/` may rightly not need the
+tool. With `--json` the notices are under `notices`.
 
 ## Pin a plugin's version
 
@@ -279,3 +351,24 @@ the marketplace and updates it. If the marketplace does not serve that version, 
 off it: the sync exits 1 with `plugins.missing` and the command to run, and `ape task` refuses the
 session. Move the marketplace's `ref` to a catalog that serves the version, or change the plugin's
 `ref`. Either is a guarded change to [accept](#accept-the-change) again.
+
+### See what is newer
+
+`ape plugins status --outdated` lists, for each listed marketplace, the version tags of its
+repository newer than its `ref`. It reads them with `git ls-remote --tags`, and fetches, installs
+and writes nothing:
+
+```yaml
+marketplaces:
+  experts: {source: github, repo: exoar/apish_experts_plugin, ref: v0.1.0}
+```
+
+```text
+market  experts  ref v0.1.0  up to date (latest v0.1.0)
+```
+
+A newer tag shows as `newer: v0.2.0`. A tag counts when it is a version (`v1.2.0` or `1.2.0`);
+pre-releases are left out. A marketplace with no `ref`, or one on a branch, gets a note naming its
+latest tag instead, and a directory marketplace has none. With `--json` they are under `outdated`:
+`[{marketplace, source, ref, latest, newer, note, error}]`. Bumping `ref` is a guarded change to
+[accept](#accept-the-change).
