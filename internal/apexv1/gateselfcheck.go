@@ -41,6 +41,19 @@ type GateSelfCheck struct {
 	OutputSHA256 string `json:"output_sha256"`
 }
 
+// ApprovalSelfCheck is the self-check milestones.json records with id's
+// approval (D224: approve's JSON carries it), nil when it records none.
+func (p *Project) ApprovalSelfCheck(id string) *GateSelfCheck {
+	recs, err := p.LoadMilestoneRecords()
+	if err != nil {
+		return nil
+	}
+	if rec := recs[id]; rec != nil && rec.Approval != nil {
+		return rec.Approval.SelfCheck
+	}
+	return nil
+}
+
 // gateSelfCheckProgress is how often a running self-check says it still is.
 var gateSelfCheckProgress = time.Minute
 

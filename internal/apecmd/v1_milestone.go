@@ -170,6 +170,11 @@ git config user.name (else session.by-mismatch, exit 1), and the record's by is
 (person_act): running the same command again while it runs (exit 75), or before its result
 is printed, attaches with no new grant; another run on the milestone is run.busy.
 
+JSON: the milestone {id, title, line, status, status_text, gate, budget, goal,
+out_of_scope, approved_at}, and self_check — the gate's run at the approval on record, as
+_apex/state/milestones.json holds it ({at, sha, exit, secs, log, output_sha256}; D224), so
+"exit": 1 shows the gate was recorded red; on a no-op it is the earlier approval's.
+
 Exit codes: 0 ok · 1 no such milestone, done, malformed (Gate/Goal missing), the gate green
 or broken, HEAD on a change branch, or session.by-mismatch · 2 usage, or a model session
 with no grant.`,
@@ -195,11 +200,15 @@ with no grant.`,
 					}
 				}
 				m, err := approve(ctx, id, personBy(ctx, by), opt.Progress)
+				out := approveOut{Milestone: m}
+				if err == nil {
+					out.SelfCheck = p.ApprovalSelfCheck(id)
+				}
 				return func(cmd *cobra.Command, f *v1Flags) error {
 					if err != nil {
 						return v1Fail(cmd, f, err, nil)
 					}
-					return v1Emit(cmd.OutOrStdout(), f, m, func(w io.Writer) {
+					return v1Emit(cmd.OutOrStdout(), f, out, func(w io.Writer) {
 						fmt.Fprintf(w, "%s — %s: %s\n", m.ID, m.Title, m.StatusText)
 					})
 				}
@@ -211,6 +220,14 @@ with no grant.`,
 	cmd.Flags().StringVar(&by, "by", "", "who approves (required from a terminal; in a Claude Code session, git config user.name)")
 	cmd.Flags().StringVar(&acceptGreen, "accept-green", "", "re-approval only: the gate is green because the milestone's work is done and the gate was fixed after it — why (Q145)")
 	return cmd
+}
+
+// approveOut is milestone approve's JSON: the milestone, and the gate's
+// run at the approval on record (D224): the operator can tell the gate was
+// recorded red without reading milestones.json.
+type approveOut struct {
+	*apexv1.Milestone
+	SelfCheck *apexv1.GateSelfCheck `json:"self_check,omitempty"`
 }
 
 func gateHuman(g *apexv1.GateResult) func(io.Writer) {
