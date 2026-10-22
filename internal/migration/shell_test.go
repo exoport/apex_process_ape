@@ -4,7 +4,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -18,9 +17,6 @@ import (
 // a shell intact rather than being split on whitespace, and that a
 // missing binary comes back as "could not run" rather than as a verdict.
 func TestShellRunner_RealShell(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("the framework's migration lines are POSIX shell")
-	}
 	dir := t.TempDir()
 	r := ShellRunner{}
 
@@ -62,9 +58,6 @@ func TestShellRunner_RealShell(t *testing.T) {
 // machine: a check that pipes into a binary that is not installed leaves
 // the entry CANNOT-TELL and NOT runnable.
 func TestShellRunner_MissingBinaryReachesCannotTell(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("the framework's migration lines are POSIX shell")
-	}
 	code, err := ShellRunner{}.Run(t.Context(), t.TempDir(), "definitely-not-a-real-binary-92831")
 	require.NoError(t, err)
 	require.Equal(t, 127, code, "a shell reports a missing command as a code, not a spawn error")
@@ -84,9 +77,6 @@ func TestShellRunner_MissingBinaryReachesCannotTell(t *testing.T) {
 // and `grep -q` exit 1 for "no", which IS a verdict and does make the
 // entry pending.
 func TestShellRunner_ExitOneIsTheAnsweredNoVerdict(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("the framework's migration lines are POSIX shell")
-	}
 	entries := []Entry{{
 		ID: "a", Version: "0.16.0", Seq: 1, Kind: KindDerivable,
 		Command: "true",

@@ -2,6 +2,18 @@
 
 ## v1.0.0-rc.7 (draft)
 
+### rc.7t: framework migrations run under `sh` on Windows (Q163, D367, D368)
+
+- **`ape framework update` on Windows judged the shipped migrations by `cmd` (class C).** Every
+  migration `check:` and `command:` ran under `cmd /c` on Windows, but the framework's are POSIX
+  shell (`$(…)`, `[ … ]`, `;`, quoted `--grep`). Since a fresh install records no migration as
+  applied, the first `ape framework update` of every v1 project, `update --plan` and `ape
+  doctor`'s `migrations.pending` judged seq-01 to seq-06 by noise: an update refused on its
+  blocking entries, a lift or archive-layout run when it should not, or, on a v0 → v1 upgrade, the
+  lift skipped and recorded as applied. They now run under `sh -c` on every OS, as checks, gates
+  and `notify:` do. Without an `sh` on `PATH` the check cannot run, and the update says so and
+  refuses rather than guess. The three real-shell migration tests now run on Windows too.
+
 ### rc.7s: Windows (D353, D355)
 
 - **A refusing commit hook is `archive.hook-failed` on Windows too (class C).** `ape change archive`

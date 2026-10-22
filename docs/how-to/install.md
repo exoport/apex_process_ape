@@ -17,7 +17,7 @@ To pin a specific version, set `VERSION` directly: `VERSION=v1.0.0`.
 
 The Linux asset is `ape_linux_amd64.tar.gz`. Replace with `ape_darwin_amd64.tar.gz`, `ape_darwin_arm64.tar.gz`, or `ape_windows_amd64.zip` as needed (Windows uses zip, not tar.gz).
 
-On Windows, an APEX v1 project's checks, gate commands and `notify:` command run under `sh -c`, so ape needs an `sh` on `PATH`: run it from Git Bash (Git for Windows), or put Git's `usr\bin` on `PATH`. Without one, every check exits 127.
+On Windows, an APEX v1 project's checks, gate commands and `notify:` command, and the migration checks `ape framework update` runs, run under `sh -c`, so ape needs an `sh` on `PATH`: run it from Git Bash (Git for Windows), or put Git's `usr\bin` on `PATH`. Without one, every check exits 127, and `ape framework update` refuses with its migration checks unable to run.
 
 ## Option 2 — Pin via `bingo` (recommended for project repos)
 

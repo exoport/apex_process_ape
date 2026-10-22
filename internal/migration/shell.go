@@ -6,12 +6,16 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"runtime"
 
 	"github.com/exoport/apex_process_ape/internal/selfpath"
 )
 
-// ShellRunner runs a line through the platform shell.
+// ShellRunner runs a line through `sh -c`, on every OS: the framework's
+// `check:` and `command:` lines are POSIX shell, as are the project's own
+// checks (apexv1's runner). On Windows that is Git Bash's sh; under `cmd`
+// the shipped checks were noise, so an update on Windows was refused or
+// skipped the lift (Q163). With no `sh` on PATH the spawn fails, which
+// reads as cannot-tell, never as a verdict.
 //
 // A shell is required rather than an argv split: the framework's own
 // entries pipe into `jq` and quote embedded JSON, and splitting those on
@@ -31,11 +35,7 @@ type ShellRunner struct {
 }
 
 func (r ShellRunner) Run(ctx context.Context, dir, line string) (int, error) {
-	name, flag := "sh", "-c"
-	if runtime.GOOS == "windows" {
-		name, flag = "cmd", "/c"
-	}
-	cmd := exec.CommandContext(ctx, name, flag, line)
+	cmd := exec.CommandContext(ctx, "sh", "-c", line)
 	cmd.Dir = dir
 	if len(r.Env) > 0 {
 		cmd.Env = r.Env
