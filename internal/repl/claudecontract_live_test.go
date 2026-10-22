@@ -39,7 +39,9 @@ import (
 //     transcript-derived telemetry value depends on;
 //   - `--version` printing something the manifest stamp can parse;
 //   - the args-file route (ArgsPointer) delivering text with runs of
-//     spaces, tabs and newlines byte-exact, which TypesVerbatim relies on.
+//     spaces, tabs and newlines byte-exact, which TypesVerbatim relies on;
+//   - the statusLine in ape's --settings being run, and handed the plan's
+//     rate_limits, which the usage guard reads (W4).
 //
 // When one of these moves, nothing errors. ape keeps running and silently
 // stops doing the thing the coupling bought — the same "believed-present
@@ -57,7 +59,7 @@ import (
 // the REPL and read the pane. transcript_persists submits one Haiku turn
 // (fractions of a cent) and is skippable with APE_CLAUDE_LIVE_TOKENS=0;
 // so are the other turn-submitting subtests, args_whitespace (two Haiku
-// turns) among them.
+// turns) and statusline_usage_recorded (one) among them.
 func TestLive_ClaudeCodeContract(t *testing.T) {
 	if os.Getenv("APE_CLAUDE_LIVE") != "1" {
 		t.Skip("set APE_CLAUDE_LIVE=1 (needs claude on PATH + auth + network) to run the live Claude Code contract gate")
@@ -83,6 +85,7 @@ func TestLive_ClaudeCodeContract(t *testing.T) {
 	t.Run("typed_line_renders", func(t *testing.T) { liveTypedLineRenders(t, claudeBin) })
 	t.Run("args_whitespace", func(t *testing.T) { liveArgsWhitespace(t, claudeBin) })
 	t.Run("settings_warning_refused", func(t *testing.T) { liveSettingsWarningRefused(t, claudeBin) })
+	t.Run("statusline_usage_recorded", func(t *testing.T) { liveStatuslineUsageRecorded(t, claudeBin) })
 }
 
 // liveTypedLineRenders checks what Deliver's Enter waits for: that a line
