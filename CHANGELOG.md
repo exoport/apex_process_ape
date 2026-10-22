@@ -373,6 +373,33 @@ The APEX v1.1 work (D327, D330, D333, D337), built on v1.0.0's docs.
   `ape milestone approve|project check|project accept-config|change verify|hook pre-tool|plugins
   status --help` and `ape project codes`.
 
+### W8 (tests and tooling)
+
+- **No ape command asks the terminal anything at startup (D365).** Every `ape` process, `ape
+  notify` and `ape hook stop` included, sent an OSC 11 background-colour query when its stdout
+  was a terminal under an xterm-like `TERM` (or none), and waited up to 5 s for an answer: Bubble
+  Tea v1's package `init()` did it in every program that links it. A terminal that never answers
+  (a PTY a driver or test fake hands its hooks) made each command take 5.05 s; a real terminal
+  answered at once. ape now uses Bubble Tea v2 (`charm.land/bubbletea/v2`, with bubbles and
+  lipgloss v2) for its one form, `ape framework setup`'s first-install bootstrap of an APEX v0
+  release, which asks nothing until it runs. Measured on a PTY that never answers, `TERM=xterm`:
+  `ape version` 5.05 s → 0.03 s, `ape notify --event Stop` 5.08 s → 0.04 s, `ape hook stop`
+  5.05 s → 0.04 s. The form's keys and text are unchanged. The upgrade raised
+  `github.com/aymanbagabas/go-udiff` to v0.4.1, whose `Unified` diffs whole lines; `ape change
+  archive`'s spec diffs keep v0.3's character-level edits, so an archived diff is byte-identical.
+- **The v1 stop gate pairs a Stop by when its hook started (D365 note 1, class B).** `ape task`
+  and `ape prompt` matched a Stop to the project stop hook's verdict by the moment ape's own
+  notification arrived, with a 5 s slack: a notification delayed past 5 s (the terminal query
+  above, or a loaded machine) skipped its own `block` and took the next turn's `allow`. `ape
+  notify` now stamps its frame with its process's start (`hook_started_at`, from the OS:
+  `/proc`, sysctl or `GetProcessTimes`), and the gate pairs by that.
+- **Tests and tooling:** `make docs-commands-check` (Q150, also part of `make test` and
+  `ci-local`) checks every `ape …` command line in README.md and `docs/` against the command
+  tree, flags included; it found no wrong command in the docs. Three regression-duration tests
+  no longer depend on the machine being slow enough to round a fixture's run above 0.0 s. The
+  v1 install tests (`v1Env`) run on Windows, as migration commands run under `sh -c` there since
+  rc.7t.
+
 ## v1.0.0 (2026-10-22)
 
 APEX v1: ape runs the framework's v1 loop and owns every record in it.
