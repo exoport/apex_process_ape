@@ -55,6 +55,9 @@ var boardSkipVerbs = map[string]bool{
 	// rc.7 (rc7-rename): seq-07 changes the config's models rows, the hooks
 	// and AGENTS.md, none of which status reports.
 	"project operator-interface": true,
+	// v1.1 W7: the module fences and the package check — status reports
+	// neither.
+	"project fence": true, "project package-check": true,
 }
 
 // boardGroups are the top-level commands whose leaves must each be in one
