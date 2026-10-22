@@ -7542,11 +7542,11 @@ version is kept, the raw PTY bytes in <user cache>/ape/claude-limit-<version>.bi
 and the last usage reading (ape usage) beside them in .json, and the stop's
 message names both (W4).
 
-Usage-aware launching (W4): every session ape launches records the plan's
-usage from its status line (ape usage --help). In an APEX v1 project, before
-the session starts — every ape task, the loop's children and the sessions
-ape change starts included — ape's usage guard reads the newest reading
-against _apex/config.yaml
+Usage-aware launching (W4): every unattended session ape launches records
+the plan's usage from its status line (ape usage --help; not ape chat). In an
+APEX v1 project, before the session starts — every ape task, the loop's
+children and the sessions ape change starts included — ape's usage guard
+reads the newest reading against _apex/config.yaml
   limits:
     usage:
       seven_day: 0.85   # stop over this 7-day fill
@@ -7798,11 +7798,12 @@ ape usage [flags]
 
 The claude.ai plan's usage, as the sessions ape launches last saw it.
 
-Every Claude Code session ape launches (ape task, ape prompt, ape chat, a
+Every unattended Claude Code session ape launches (ape task, ape prompt, a
 loop's children) gets ape's own status line in its --settings:
   statusLine: {type: command, command: "<ape> usage record [--run <key>]"}
 It applies to that session only; the person's own settings files and their
-status line are never written. Claude Code hands the status line a JSON
+status line are never written, and ape chat, the person's own interactive
+session, gets none: their status line stays theirs. Claude Code hands the status line a JSON
 object; from the session's first API response on it carries the plan's
 rate_limits (five_hour and seven_day: used_percentage 0–100, resets_at in
 epoch seconds; measured on Claude Code 2.1.306), and the recorder keeps the

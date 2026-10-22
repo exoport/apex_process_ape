@@ -222,8 +222,9 @@ func runChat(
 	defer func() { <-rtErrCh }()
 
 	// No effort table: chat is a person's own session and keeps claude's
-	// native effort unless --effort says otherwise (see chatSpawnEnv).
-	prepend, err := buildInteractivePrepend(apeBin, rt.IPCPort(), ignoreProjectSettings, outputStyle, nil, spawnSettings{})
+	// native effort unless --effort says otherwise (see chatSpawnEnv), and
+	// its own status line (W4: no ape usage record).
+	prepend, err := buildInteractivePrepend(apeBin, rt.IPCPort(), ignoreProjectSettings, outputStyle, nil, spawnSettings{personSession: true})
 	if err != nil {
 		return err
 	}

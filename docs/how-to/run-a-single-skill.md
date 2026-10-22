@@ -175,8 +175,9 @@ Run again after the reset. The first limit screen per Claude Code version is
 kept, raw, in `<user cache>/ape/claude-limit-<version>.bin`, with the last
 usage reading beside it (`.json`); the stop's message names both.
 
-Better not to reach the limit. Every session ape launches records the plan's
-usage from its status line (`ape usage` prints the last reading), and in an
+Better not to reach the limit. Every unattended session ape launches records
+the plan's usage from its status line (`ape usage` prints the last reading;
+`ape chat`, your own session, keeps your status line), and in an
 APEX v1 project ape's usage guard reads it before each `ape task` session
 starts: over `limits.usage.five_hour` with the launch's share it **holds** the
 launch until the 5-hour window resets, and over `limits.usage.seven_day` it

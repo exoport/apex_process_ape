@@ -106,9 +106,10 @@ func statusLineOf(t *testing.T, prepend []string) map[string]any {
 	return nil
 }
 
-// Every session ape launches gets ape's status line in its --settings — an
-// ape task run's with its launch key, an ape chat's or prompt's without —
-// and the person's own settings file is never written.
+// Every unattended session ape launches gets ape's status line in its
+// --settings — an ape task run's with its launch key, an ape prompt's
+// without — an ape chat (the person's own session) gets none, and the
+// person's own settings file is never written.
 func TestSpawnSettings_CarryTheStatusLine(t *testing.T) {
 	home := usageTempCache(t)
 	personal := filepath.Join(home, ".claude", "settings.json")
@@ -122,9 +123,17 @@ func TestSpawnSettings_CarryTheStatusLine(t *testing.T) {
 	require.Equal(t, "command", sl["type"])
 	require.Equal(t, "/opt/ape/bin/ape usage record --run 20261021-120000-1-abcd", sl["command"])
 
-	chat, err := buildInteractivePrepend("/opt/ape/bin/ape", 4242, false, "", nil, spawnSettings{})
+	prompt, err := buildInteractivePrepend("/opt/ape/bin/ape", 4242, false, "", nil, spawnSettings{})
 	require.NoError(t, err)
-	require.Equal(t, "/opt/ape/bin/ape usage record", statusLineOf(t, chat)["command"])
+	require.Equal(t, "/opt/ape/bin/ape usage record", statusLineOf(t, prompt)["command"])
+
+	chat, err := buildInteractivePrepend("/opt/ape/bin/ape", 4242, false, "", nil, spawnSettings{personSession: true})
+	require.NoError(t, err)
+	for i, a := range chat {
+		if a == "--settings" {
+			require.NotContains(t, chat[i+1], "statusLine", "ape chat is the person's own session")
+		}
+	}
 
 	got, err := os.ReadFile(personal)
 	require.NoError(t, err)

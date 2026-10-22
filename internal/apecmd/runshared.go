@@ -326,6 +326,10 @@ type spawnSettings struct {
 	// run's usage readings under (W4, ape usage record --run); "" records
 	// the newest reading only.
 	usageKey string
+	// personSession marks a person's own interactive session (ape chat):
+	// it gets no statusLine from ape, so the person's own status line
+	// stays theirs (W4).
+	personSession bool
 }
 
 // ANSI color escapes for colorized output (doctor). 16-color palette only,

@@ -183,7 +183,7 @@ usage:                       # v1.1: the plan's usage over the run
 
 ### `usage` — the plan's usage over the run
 
-v1.1. Every session ape launches records the claude.ai plan's rate limits from its status line
+v1.1. Every unattended session ape launches records the claude.ai plan's rate limits from its status line
 (`ape usage record`, see [`ape usage`](cli.md#ape-usage)). An `ape task` run's manifest gets, when
 it ends:
 

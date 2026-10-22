@@ -809,9 +809,10 @@ func buildInteractivePrepend(
 		Env:        map[string]string{repl.EnvFileReadMaxOutputTokens: strconv.Itoa(repl.FileReadMaxOutputTokens)},
 		ExtraHooks: extra.hooks,
 		Extra:      extra.settings,
-		// W4: every session ape launches records the plan's rate limits
-		// from its status line (ape usage record).
-		StatusLineCommand: usageRecordCommand(apeBin, extra.usageKey),
+		// W4: every unattended session ape launches records the plan's
+		// rate limits from its status line (ape usage record); a person's
+		// own ape chat keeps their status line.
+		StatusLineCommand: extra.statusLineCommand(apeBin),
 	})
 	if err != nil {
 		return nil, err

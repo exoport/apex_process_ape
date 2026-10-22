@@ -12,13 +12,23 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// W4 (v1.1): usage-aware launching. Every session ape launches gets `ape
-// usage record` as its status line (--settings); the recorder keeps the
+// W4 (v1.1): usage-aware launching. Every unattended session ape launches
+// gets `ape usage record` as its status line (--settings; ape chat, the
+// person's own session, does not); the recorder keeps the
 // plan's rate limits as Claude Code reports them, and `ape usage` shows the
 // last reading. internal/usage holds the files and the rules.
 
 // usageNow is the clock the usage commands and the guard read (a test seam).
 var usageNow = time.Now
+
+// statusLineCommand is the spawn's status-line command: ape usage record,
+// "" for a person's own session (ape chat).
+func (s spawnSettings) statusLineCommand(apeBin string) string {
+	if s.personSession {
+		return ""
+	}
+	return usageRecordCommand(apeBin, s.usageKey)
+}
 
 // usageRecordCommand is the status-line command of a session ape launches:
 // `<ape> usage record`, with --run <key> when the session belongs to a run
@@ -36,11 +46,12 @@ func usageRecordCommand(apeBin, key string) string {
 
 const usageLongHelp = `The claude.ai plan's usage, as the sessions ape launches last saw it.
 
-Every Claude Code session ape launches (ape task, ape prompt, ape chat, a
+Every unattended Claude Code session ape launches (ape task, ape prompt, a
 loop's children) gets ape's own status line in its --settings:
   statusLine: {type: command, command: "<ape> usage record [--run <key>]"}
 It applies to that session only; the person's own settings files and their
-status line are never written. Claude Code hands the status line a JSON
+status line are never written, and ape chat, the person's own interactive
+session, gets none: their status line stays theirs. Claude Code hands the status line a JSON
 object; from the session's first API response on it carries the plan's
 rate_limits (five_hour and seven_day: used_percentage 0–100, resets_at in
 epoch seconds; measured on Claude Code 2.1.306), and the recorder keeps the
@@ -93,7 +104,7 @@ func printUsage(w io.Writer, format output.Format, r *usage.Reading, now time.Ti
 		return output.Print(w, format, rep)
 	}
 	if r == nil {
-		fmt.Fprintln(w, "usage: unknown — no reading yet (every session ape launches records one from its status line)")
+		fmt.Fprintln(w, "usage: unknown — no reading yet (every unattended session ape launches records one from its status line)")
 		return nil
 	}
 	fmt.Fprintf(w, "usage: %s (read %s)\n", r.Short(), usage.Ago(r.Age(now)))

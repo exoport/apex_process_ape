@@ -229,11 +229,11 @@ version is kept, the raw PTY bytes in <user cache>/ape/claude-limit-<version>.bi
 and the last usage reading (ape usage) beside them in .json, and the stop's
 message names both (W4).
 
-Usage-aware launching (W4): every session ape launches records the plan's
-usage from its status line (ape usage --help). In an APEX v1 project, before
-the session starts — every ape task, the loop's children and the sessions
-ape change starts included — ape's usage guard reads the newest reading
-against _apex/config.yaml
+Usage-aware launching (W4): every unattended session ape launches records
+the plan's usage from its status line (ape usage --help; not ape chat). In an
+APEX v1 project, before the session starts — every ape task, the loop's
+children and the sessions ape change starts included — ape's usage guard
+reads the newest reading against _apex/config.yaml
   limits:
     usage:
       seven_day: 0.85   # stop over this 7-day fill

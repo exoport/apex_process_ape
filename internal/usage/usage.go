@@ -9,8 +9,8 @@
 //
 // (measured on Claude Code 2.1.306: used_percentage a whole number 0–100,
 // resets_at epoch seconds; before the first response the key is absent,
-// not null). Every session ape launches gets `ape usage record` as its
-// status line (--settings, ape's own sessions only); the recorder keeps the
+// not null). Every unattended session ape launches gets `ape usage
+// record` as its status line (--settings; not ape chat, the person's own); the recorder keeps the
 // newest reading in <user cache>/ape/usage.json, per OS user, and the
 // first and last reading of the run that launched the session, which
 // becomes the run manifest's usage: {before, after} and the history
