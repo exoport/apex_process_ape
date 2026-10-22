@@ -1104,3 +1104,47 @@ func writeJSON(file string, v any) error {
 	}
 	return writeFileAtomic(file, string(data)+"\n")
 }
+
+// changedByRe reads the commit out of a config.changed finding's message.
+var changedByRe = regexp.MustCompile(`changed by commit ([0-9a-f]+) `)
+
+// docsUnacceptedNotices is project check's docs.unaccepted (A18): the docs
+// block of _apex/config.yaml is a change no person accepted — a commit
+// since the v1 epoch that is not ape's changed it and no `ape project
+// accept-config` followed, or the working tree's block differs from HEAD's
+// — while the docs default (D152) is what a delegate would act on: no
+// configured delegate, human_review.docs not person. docs is no guarded
+// key (config.changed never names it), but it bounds the docs delegate's
+// scope, so prepareDocsDelegate refuses it (delegate.unaccepted-config);
+// this says so before a docs change waits on that refusal.
+func (p *Project) docsUnacceptedNotices() []Diagnostic {
+	ctx := context.Background()
+	cfg, err := LoadConfig(p.Root)
+	if err != nil || cfg.HumanReview.Delegates() || !cfg.HumanReview.DocsDefault() || !p.isWorkTree(ctx) {
+		return nil
+	}
+	const consequence = ", so the docs delegate refuses a docs change's human-review task (delegate.unaccepted-config) and the task waits for a person"
+	d := Diagnostic{Code: CodeDocsUnaccepted, File: configYAML}
+	if epoch := p.v1Epoch(ctx, "HEAD"); epoch != "" {
+		if fs := p.configFindingsFor(ctx, epoch, []string{"docs"}); len(fs) > 0 {
+			by := "a commit"
+			if m := changedByRe.FindStringSubmatch(fs[0].Message); m != nil {
+				by = "commit " + m[1]
+			}
+			d.Message = "_apex/config.yaml's docs block was changed by " + by + ", which is not ape's and no person accepted" + consequence +
+				" — a person reviews the docs block and accepts it (`ape project accept-config --by <who>`; in Claude Code the person types `accept the config`), or reverts the commit"
+			return []Diagnostic{notice(d)}
+		}
+	}
+	committed := p.configBlocksAt(ctx, "HEAD", configYAML)
+	live := map[string]any{}
+	if data, err := os.ReadFile(ConfigPath(p.Root)); err == nil {
+		_ = yaml.Unmarshal(data, &live)
+	}
+	if !reflect.DeepEqual(committed["docs"], live["docs"]) {
+		d.Message = "_apex/config.yaml's docs block differs from the one committed at HEAD (an uncommitted edit)" + consequence +
+			" — commit it and a person accepts it (`ape project accept-config --by <who>`; in Claude Code the person types `accept the config`), or restore it"
+		return []Diagnostic{notice(d)}
+	}
+	return nil
+}

@@ -651,6 +651,13 @@ line}; [] when none, beside the findings on a failure too), they never change th
                            (` + "`require <root> v0.0.0`" + ` + ` + "`replace <root> => ../`" + ` for the root
                            module's packages) and go.sum, run as
                            ` + "`GOWORK=off go -C development run ./gates/<x>`" + ` (W7)
+  docs.unaccepted          _apex/config.yaml's docs block was changed by a commit that is
+                           not ape's and no person accepted, or differs uncommitted from
+                           HEAD's, while the docs delegate is on (no configured delegate,
+                           human_review.docs not person): docs is not guarded, but it
+                           bounds that delegate, which refuses a docs change's human-review
+                           task until a person accepts it (delegate.unaccepted-config):
+                           ` + "`ape project accept-config --by <who>`" + `, or revert it (A18, W8)
 The gate's per-scenario run times these read are in _apex/state/logs/gate-<M>.json.
 
 Exit codes: 0 green · 1 findings (listed on stderr, or under "findings" with --json) · 2 usage.`,

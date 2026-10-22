@@ -149,6 +149,11 @@ const (
 	// gate program that imports outside its module's requires
 	// (gaterule.go).
 	CodeGateRootModuleChange = "gate.root-module-change"
+
+	// v1.1 W8.
+	// CodeDocsUnaccepted: project check's notice while the docs block is
+	// a change no person accepted and the docs delegate reads it (A18).
+	CodeDocsUnaccepted = "docs.unaccepted"
 )
 
 // CodeDoc documents one diagnostic code.
@@ -504,5 +509,7 @@ var DiagnosticCodes = []CodeDoc{
 	{CodePackageLeak, 1, "replan", "`ape project package-check` (W7): a library's packed files hold paths under an APEX folder (.claude/, _apex/, the development folder, evidence/) — the Go module zip at HEAD (built with golang.org/x/mod/zip; at the root, or a subfolder module's), npm pack --dry-run, the Python sdist and wheel, or cargo package --list; the finding names the first 20 and counts them: a Go library runs `ape project fence` and commits (or moves its module into a subfolder), the others exclude the folders in their manifest (package.json files, MANIFEST.in or the build backend's excludes, Cargo.toml exclude); apex-release refuses to release on it"},
 	{CodePackageUnchecked, 0, "person", "a notice, never a finding (`ape project package-check`'s notices; the exit is unchanged): a library's package was not checked (W7) — the packaging tool is not on PATH (npm, python3 with the build module, cargo) or failed, HEAD has no commit for the Go module zip, or the project has no manifest ape knows (go.mod, package.json, pyproject.toml or setup.py, Cargo.toml); never a silent pass: install the tool and run it again, or check the package by hand; apex-release states it in its reply"},
 	{CodeGateRootModuleChange, 0, "replan", "a notice, never a finding (project check's notices; the exit is unchanged): a library's gate program (Go files under <dev>/gates/) imports a package its module does not provide (W7, D207) — not the standard library, not that module's own, and not a module its go.mod requires: run from the root module, it needs the root go.mod and go.sum changed, which never change for a gate; from a fence, the fence lacks the require — the gate's module is its fence (<dev>/go.mod) with `require` lines, `require <root module> v0.0.0` + `replace <root module> => ../` for the root module's packages, and its own go.sum, run as `GOWORK=off go -C <dev> run ./gates/<x>`"},
+	// v1.1 W8.
+	{CodeDocsUnaccepted, 0, "person", "a notice, never a finding (project check's notices; the exit is unchanged): _apex/config.yaml's docs block was changed by a commit that is not ape's and no person accepted (`ape project accept-config`), or differs uncommitted from HEAD's, while the docs default delegate is on (no configured delegate, human_review.docs not person) — docs is no guarded key (config.changed never names it), but it bounds the docs delegate, which refuses a docs change's human-review task until a person accepts it (delegate.unaccepted-config; A18): a person reviews it and runs `ape project accept-config --by <who>` (in Claude Code, types `accept the config`), or reverts it"},
 	{UnclassifiedFinding, 1, "stop", "a finding no rule classifies (a bug: report it)"},
 }

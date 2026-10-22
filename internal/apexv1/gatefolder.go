@@ -205,5 +205,7 @@ func (p *Project) Notices() []Diagnostic {
 	out = append(out, p.duplicateRunNotices()...)
 	out = append(out, p.liveSuggestedNotices()...)
 	// v1.1 W7.
-	return append(out, p.gateRootModuleNotices()...)
+	out = append(out, p.gateRootModuleNotices()...)
+	// v1.1 W8.
+	return append(out, p.docsUnacceptedNotices()...)
 }

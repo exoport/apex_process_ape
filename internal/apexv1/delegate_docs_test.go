@@ -364,3 +364,46 @@ func TestHumanReviewConfig_Docs(t *testing.T) {
 		require.True(t, c.HumanReview.Delegates(), cfg)
 	}
 }
+
+// A18: project check's docs.unaccepted notice says what the docs delegate
+// will refuse on — the docs block committed by a commit no person
+// accepted, or edited and not committed — before a docs change meets it;
+// a person's acceptance clears it, and with the docs default off (docs:
+// person, or a configured delegate) there is none.
+func TestDocsUnacceptedNotice(t *testing.T) {
+	codes := func(p *Project) []string {
+		var out []string
+		for _, n := range p.Notices() {
+			if n.Code == CodeDocsUnaccepted {
+				out = append(out, n.Code+" "+n.Action+" "+n.File+": "+n.Message+" | "+n.Fix)
+			}
+		}
+		return out
+	}
+	p := fixture(t, baseFiles())
+	run(t, p.Root, "commit", "-q", "--allow-empty", "-m", "apex: project init")
+	require.Empty(t, codes(p), "no docs block: nothing to accept")
+
+	write(t, p, "_apex/config.yaml", "docs: {user_docs: README.md}\n")
+	got := codes(p)
+	require.Len(t, got, 1, "an uncommitted edit")
+	require.Contains(t, got[0], "docs.unaccepted person _apex/config.yaml: _apex/config.yaml's docs block differs from the one committed at HEAD (an uncommitted edit)")
+	require.Contains(t, got[0], "delegate.unaccepted-config")
+	require.Contains(t, got[0], "| commit it and a person accepts it (`ape project accept-config --by <who>`")
+
+	commitAll(t, p, "plan: M1")
+	sha := strings.TrimSpace(run(t, p.Root, "rev-parse", "--short=7", "HEAD"))
+	got = codes(p)
+	require.Len(t, got, 1, "committed by a commit no person accepted")
+	require.Contains(t, got[0], "_apex/config.yaml's docs block was changed by commit "+sha+", which is not ape's and no person accepted")
+	require.Contains(t, got[0], "| a person reviews the docs block and accepts it (`ape project accept-config --by <who>`; in Claude Code the person types `accept the config`), or reverts the commit")
+	require.NotContains(t, findingMessages(p.provenanceFindings(ctx())), "guarded config keys", "docs stays unguarded: a notice, never config.changed")
+
+	_, err := p.AcceptConfig(ctx(), "ann")
+	require.NoError(t, err)
+	require.Empty(t, codes(p), "a person accepted it")
+
+	write(t, p, "_apex/config.yaml", "docs: {user_docs: docs/}\nhuman_review: {docs: person}\n")
+	commitAll(t, p, "chore: docs are a person's")
+	require.Empty(t, codes(p), "docs: person — no docs delegate reads the block")
+}
