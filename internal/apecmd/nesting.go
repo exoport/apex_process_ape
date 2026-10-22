@@ -489,7 +489,7 @@ func (s *liveSession) spawned(claudePID int) {
 }
 
 // held records, on the row, that the usage guard holds the session's
-// launch until until (nil: no longer held).
+// launch until the time given (nil: no longer held).
 func (s *liveSession) held(until *time.Time) {
 	if s == nil {
 		return

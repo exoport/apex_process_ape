@@ -39,7 +39,7 @@ func liveStatuslineUsageRecorded(t *testing.T, claudeBin string) {
 	home, err := os.UserHomeDir()
 	require.NoError(t, err)
 	bin := filepath.Join(t.TempDir(), "ape")
-	build := exec.Command("go", "build", "-o", bin, "github.com/exoport/apex_process_ape/cmd/ape") //nolint:noctx // a bounded build
+	build := exec.Command("go", "build", "-o", bin, "github.com/exoport/apex_process_ape/cmd/ape")
 	out, err := build.CombinedOutput()
 	require.NoError(t, err, "build ape: %s", out)
 	cache := t.TempDir()

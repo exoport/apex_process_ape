@@ -1216,7 +1216,7 @@ func statusLong(r *apexv1.StatusReport) string {
 		}
 		if s.HeldUntil != nil {
 			// W4: the usage guard holds the launch.
-			b.WriteString(", held: 5-hour window, launches " + s.HeldUntil.Local().Format(time.RFC3339))
+			b.WriteString(", held: 5-hour window, launches " + s.HeldUntil.Format(time.RFC3339))
 		}
 		b.WriteString("\n")
 	}

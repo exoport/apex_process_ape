@@ -165,7 +165,7 @@ func TestAgo(t *testing.T) {
 // overwrite it, and a new version gets its own.
 func TestSaveLimitScreen_FirstPerVersion(t *testing.T) {
 	TempCache(t)
-	last := &Reading{At: now, SevenDay: ptr(0.97)}
+	last := &Reading{At: now, SevenDay: new(0.97)}
 	bin, js, wrote, err := SaveLimitScreen("2.1.306", []byte("\x1b[2Jfirst"), last)
 	require.NoError(t, err)
 	require.True(t, wrote)
@@ -197,5 +197,3 @@ func TestSaveLimitScreen_FirstPerVersion(t *testing.T) {
 	b, _ := LimitScreenPaths("../x")
 	require.Equal(t, Dir(), filepath.Dir(b))
 }
-
-func ptr(v float64) *float64 { return &v }

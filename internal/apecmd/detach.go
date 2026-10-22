@@ -442,7 +442,7 @@ func waitDetached(ctx context.Context, cmd *cobra.Command, path string, timeout 
 				_ = printDetachedReport(out, h, liveState(h))
 			case h.HeldUntil != nil:
 				fmt.Fprintf(out, "run %s is held: the usage guard holds its launch on the 5-hour window until %s; wait again\n",
-					h.ID, h.HeldUntil.Local().Format(time.RFC3339))
+					h.ID, h.HeldUntil.Format(time.RFC3339))
 			default:
 				fmt.Fprintf(out, "run %s is still running; wait again\n", h.ID)
 			}
@@ -620,7 +620,7 @@ at most 2048 bytes; absent without a transcript) — and exits 0.`,
 			}
 			state := "running"
 			if h.HeldUntil != nil {
-				state = "held by the usage guard until " + h.HeldUntil.Local().Format(time.RFC3339)
+				state = "held by the usage guard until " + h.HeldUntil.Format(time.RFC3339)
 			}
 			switch {
 			case h.ExitCode != nil:
@@ -870,7 +870,7 @@ func noteDetachedRun(projectRoot, runDir string) {
 }
 
 // noteDetachedHold records, on the handle of the detached run this process
-// is, that the usage guard holds its launch until until (nil: no longer).
+// is, that the usage guard holds its launch until the time given (nil: no longer).
 func noteDetachedHold(projectRoot string, until *time.Time) {
 	id := os.Getenv(envDetachedID)
 	if id == "" {

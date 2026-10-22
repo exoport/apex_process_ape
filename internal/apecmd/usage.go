@@ -89,9 +89,9 @@ func newUsageCmd() *cobra.Command {
 //
 //nolint:tagliatelle // snake_case, like every other file ape writes for tools to read
 type usageReport struct {
-	Reading    *usage.Reading `json:"reading" yaml:"reading"`
+	Reading    *usage.Reading `json:"reading"     yaml:"reading"`
 	AgeSeconds *float64       `json:"age_seconds" yaml:"age_seconds"`
-	Path       string         `json:"path" yaml:"path"`
+	Path       string         `json:"path"        yaml:"path"`
 }
 
 func printUsage(w io.Writer, format output.Format, r *usage.Reading, now time.Time) error {
@@ -114,13 +114,13 @@ func printUsage(w io.Writer, format output.Format, r *usage.Reading, now time.Ti
 		}
 		fmt.Fprintf(w, "  %-7s %.2f", label, *v)
 		if at != nil {
-			fmt.Fprintf(w, ", resets %s", at.Local().Format(time.RFC3339))
+			fmt.Fprintf(w, ", resets %s", at.Format(time.RFC3339))
 		}
 		fmt.Fprintln(w)
 	}
 	window("5-hour", r.FiveHour, r.FiveHourResetsAt)
 	window("7-day", r.SevenDay, r.SevenDayResetsAt)
-	fmt.Fprintf(w, "  read    %s", r.At.Local().Format(time.RFC3339))
+	fmt.Fprintf(w, "  read    %s", r.At.Format(time.RFC3339))
 	if r.Run != "" {
 		fmt.Fprintf(w, " by run %s", r.Run)
 	}

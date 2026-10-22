@@ -38,29 +38,16 @@ func LimitScreenPaths(claudeVersion string) (bin, reading string) {
 func SaveLimitScreen(claudeVersion string, raw []byte, last *Reading) (bin, reading string, wrote bool, err error) {
 	bin, reading = LimitScreenPaths(claudeVersion)
 	if len(raw) > 0 {
-		if err = os.MkdirAll(Dir(), 0o755); err != nil {
-			return "", "", false, err //nolint:wrapcheck // reported verbatim
+		if wrote, err = keepFirst(bin, raw); err != nil {
+			return "", "", false, err
 		}
-		f, openErr := os.OpenFile(bin, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
-		switch {
-		case openErr == nil:
-			_, err = f.Write(raw)
-			if cerr := f.Close(); err == nil {
-				err = cerr
-			}
-			if err != nil {
-				_ = os.Remove(bin)
-				return "", "", false, err //nolint:wrapcheck // reported verbatim
-			}
-			wrote = true
-			if last != nil {
-				data, _ := json.MarshalIndent(last, "", "  ")
+	}
+	if wrote {
+		_ = os.Remove(reading)
+		if last != nil {
+			if data, merr := json.MarshalIndent(last, "", "  "); merr == nil {
 				_ = os.WriteFile(reading, append(data, '\n'), 0o644) //nolint:gosec // diagnostic artifact in the user's own cache
-			} else {
-				_ = os.Remove(reading)
 			}
-		case !errors.Is(openErr, fs.ErrExist):
-			return "", "", false, openErr //nolint:wrapcheck // reported verbatim
 		}
 	}
 	if !exists(bin) {
@@ -70,6 +57,30 @@ func SaveLimitScreen(claudeVersion string, raw []byte, last *Reading) (bin, read
 		reading = ""
 	}
 	return bin, reading, wrote, nil
+}
+
+// keepFirst writes data to path unless path exists; it reports whether it
+// wrote.
+func keepFirst(path string, data []byte) (bool, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return false, err //nolint:wrapcheck // reported verbatim
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if errors.Is(err, fs.ErrExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err //nolint:wrapcheck // reported verbatim
+	}
+	_, err = f.Write(data)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		_ = os.Remove(path)
+		return false, err //nolint:wrapcheck // reported verbatim
+	}
+	return true, nil
 }
 
 func exists(path string) bool {

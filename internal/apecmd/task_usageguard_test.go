@@ -182,8 +182,8 @@ func TestUsageGuard_ShareAutoLearns(t *testing.T) {
 	require.Equal(t, usage.Launch, usage.Decide(g.cfg, usage.Load(), g.share(), guardStart, false).Outcome)
 
 	for i := range 3 {
-		b := usage.Reading{At: guardStart, FiveHour: ptrF(0.1), SevenDay: ptrF(0.3)}
-		a := usage.Reading{At: guardStart.Add(time.Hour), FiveHour: ptrF(0.18 + float64(i)/100), SevenDay: ptrF(0.32)}
+		b := usage.Reading{At: guardStart, FiveHour: new(0.1), SevenDay: new(0.3)}
+		a := usage.Reading{At: guardStart.Add(time.Hour), FiveHour: new(0.18 + float64(i)/100), SevenDay: new(0.32)}
 		require.NoError(t, usage.AppendHistory(usage.HistoryEntry{Skill: "apex-apply", Run: "r", At: guardStart, Before: &b, After: &a}))
 	}
 	s := g.share()
@@ -197,8 +197,6 @@ func TestUsageGuard_ShareAutoLearns(t *testing.T) {
 	cfgShare.Share = &v
 	require.Equal(t, usage.Share{FiveHour: 0.01, SevenDay: 0.01, Source: "config"}, guardFor(cfgShare, false).share())
 }
-
-func ptrF(v float64) *float64 { return &v }
 
 // --usage-ok is a person's: refused in a model session (APE_SESSION, and
 // any Claude Code session) before anything starts, exit 2.
@@ -313,7 +311,7 @@ func TestUsageGuard_HeldIsVisible(t *testing.T) {
 	live.held(&until)
 	stdout, _, err = v1Exec(t, newStatusCmd, "--cwd", root)
 	require.NoError(t, err)
-	require.Contains(t, stdout, "held: 5-hour window, launches "+until.Local().Format(time.RFC3339))
+	require.Contains(t, stdout, "held: 5-hour window, launches "+until.Format(time.RFC3339))
 	stdout, _, err = v1Exec(t, newStatusCmd, "--json", "--cwd", root)
 	require.NoError(t, err)
 	var st struct {

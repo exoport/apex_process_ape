@@ -110,7 +110,7 @@ func (g *usageGuard) hold(ctx context.Context, d usage.Decision, w io.Writer) er
 			return nil
 		}
 		fmt.Fprintf(w, "⏸ usage guard: %s — holding this %s launch until %s (%s left; the window's reset + 1 min); ape status shows it held\n",
-			d.Why, g.skill, d.HeldUntil.Local().Format(time.RFC3339), left.Round(time.Minute))
+			d.Why, g.skill, d.HeldUntil.Format(time.RFC3339), left.Round(time.Minute))
 		if err := usageSleep(ctx, min(left, usageHoldLineEvery)); err != nil {
 			return err
 		}
@@ -131,7 +131,7 @@ func (g *usageGuard) overrideCommand() string {
 func (g *usageGuard) stopMessage(d usage.Decision) string {
 	msg := "usage guard: " + d.Why + " (share " + d.Share.Source + ")"
 	if !d.ResetsAt.IsZero() {
-		msg += "; it resets " + d.ResetsAt.Local().Format(time.RFC3339)
+		msg += "; it resets " + d.ResetsAt.Format(time.RFC3339)
 	}
 	if r := d.Reading; r != nil {
 		msg += "; reading " + r.Short() + ", " + usage.Ago(r.Age(usageNow()))
@@ -143,7 +143,7 @@ func (g *usageGuard) stopMessage(d usage.Decision) string {
 func (g *usageGuard) stopError(d usage.Decision) *pipeline.LimitStopError {
 	e := &pipeline.LimitStopError{Kind: pipeline.TerminationUsageGuard, Message: g.stopMessage(d), ResetsAt: d.ResetsAt}
 	if !d.ResetsAt.IsZero() {
-		e.Resets = d.ResetsAt.Local().Format(time.RFC3339)
+		e.Resets = d.ResetsAt.Format(time.RFC3339)
 	}
 	return e
 }

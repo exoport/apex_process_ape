@@ -32,9 +32,9 @@ const (
 // starts.
 const HoldMargin = time.Minute
 
-// fiveHours is how long a launch is held when the reading names no reset
+// fiveHourWindow is how long a launch is held when the reading names no reset
 // for the 5-hour window: the window's whole length, at most.
-const fiveHours = 5 * time.Hour
+const fiveHourWindow = 5 * time.Hour
 
 // GuardConfig is limits.usage with its defaults filled in.
 type GuardConfig struct {
@@ -111,7 +111,7 @@ func Decide(cfg GuardConfig, r *Reading, share Share, now time.Time, usageOK boo
 		over := ""
 		switch {
 		case *sd > cfg.SevenDay:
-			over = fmt.Sprintf("over limits.usage.seven_day %s", frac(cfg.SevenDay))
+			over = "over limits.usage.seven_day " + frac(cfg.SevenDay)
 		case *sd+share.SevenDay > cfg.Ceiling:
 			over = fmt.Sprintf("with this launch's share %s over limits.usage.ceiling %s", frac(share.SevenDay), frac(cfg.Ceiling))
 		}
@@ -129,7 +129,7 @@ func Decide(cfg GuardConfig, r *Reading, share Share, now time.Time, usageOK boo
 		if r.FiveHourResetsAt != nil {
 			d.HeldUntil = r.FiveHourResetsAt.Add(HoldMargin)
 		} else {
-			d.HeldUntil = now.Add(fiveHours)
+			d.HeldUntil = now.Add(fiveHourWindow)
 		}
 		d.Why = fmt.Sprintf("the 5-hour window is at %s, with this launch's share %s over limits.usage.five_hour %s",
 			frac(*fh), frac(share.FiveHour), frac(cfg.FiveHour))

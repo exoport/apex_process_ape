@@ -40,10 +40,10 @@ import (
 //
 //nolint:tagliatelle // snake_case, like every other file ape writes for tools to read
 type Reading struct {
-	At               time.Time  `json:"at" yaml:"at"`
-	FiveHour         *float64   `json:"five_hour" yaml:"five_hour"`
+	At               time.Time  `json:"at"                  yaml:"at"`
+	FiveHour         *float64   `json:"five_hour"           yaml:"five_hour"`
 	FiveHourResetsAt *time.Time `json:"five_hour_resets_at" yaml:"five_hour_resets_at"`
-	SevenDay         *float64   `json:"seven_day" yaml:"seven_day"`
+	SevenDay         *float64   `json:"seven_day"           yaml:"seven_day"`
 	SevenDayResetsAt *time.Time `json:"seven_day_resets_at" yaml:"seven_day_resets_at"`
 	// Run is the ape run whose session recorded it ("" for a session ape
 	// launched without a run record: a chat, a prompt).
