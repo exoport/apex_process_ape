@@ -4,7 +4,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -28,14 +27,17 @@ func v1LiftEntry(check, command string) string {
 }
 
 // v1Env isolates git and makes the test a person at a terminal, as v1Repo
-// does, for the init half of the orders.
+// does, for the init half of the orders. It runs on Windows too: the
+// migration checks and commands these tests' entries hold run under sh -c
+// on every OS since Q163 (they ran under cmd /c there), and the helpers
+// they share with TestFrameworkUpdate_V1ProjectKeepsTheMigrationLedger
+// (setup, update, apexv1.Init, git) already run in the Windows job (W8b).
 func v1Env(t *testing.T) {
 	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("migration commands run with sh -c")
-	}
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not on PATH")
+	for _, bin := range []string{"git", "sh"} {
+		if _, err := exec.LookPath(bin); err != nil {
+			t.Skip(bin + " not on PATH")
+		}
 	}
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
 	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)

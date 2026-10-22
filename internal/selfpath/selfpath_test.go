@@ -37,7 +37,7 @@ func writeScript(t *testing.T, dir, name, body string) string {
 // STALE and the shadow prints CURRENT, and the check must see CURRENT.
 func TestSelfShadow_TheDecoyOnPathLoses(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("the framework's migration lines are POSIX shell")
+		t.Skip("the stand-in binaries are shell scripts, and Windows will not run one as the shadow's ape.exe")
 	}
 	decoyDir := filepath.Join(t.TempDir(), "stale-bin")
 	writeScript(t, decoyDir, Name, `echo STALE`)
@@ -64,7 +64,7 @@ func TestSelfShadow_TheDecoyOnPathLoses(t *testing.T) {
 // fix rather than an accident of PATH ordering.
 func TestSelfShadow_WithoutItTheDecoyWins(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("the framework's migration lines are POSIX shell")
+		t.Skip("the control runs where the test it controls for does (see TestSelfShadow_TheDecoyOnPathLoses)")
 	}
 	decoyDir := filepath.Join(t.TempDir(), "stale-bin")
 	writeScript(t, decoyDir, Name, `echo STALE`)

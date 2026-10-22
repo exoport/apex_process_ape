@@ -14,7 +14,7 @@ import (
 func seedV1Fixture(t *testing.T) string {
 	t.Helper()
 	if runtime.GOOS == "windows" {
-		t.Skip("v1 check commands run with sh -c")
+		t.Skip("the v1 fixtures are POSIX shell scripts run by path (./x.sh), not yet run on Windows; checks themselves run under sh -c on every OS")
 	}
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
 	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
