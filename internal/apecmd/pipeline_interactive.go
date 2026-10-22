@@ -1038,7 +1038,14 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 		OnStepCommit: func(stage string, stepIdx int, sha, message string) {
 			core.publisher().Commit(stage, stepIdx, sha, message)
 		},
-		OnRunDir:               onRunDir,
+		OnRunDir: onRunDir,
+		// W4: the usage guard, once the run has its record.
+		BeforeSpawn: func(bctx context.Context) error {
+			return cfg.usageGuard.beforeSpawn(bctx, func(until *time.Time) {
+				live.held(until)
+				noteDetachedHold(projectRoot, until)
+			}, progressW)
+		},
 		WaitStepDone:           core.WaitStepDone,
 		MaxDuration:            cfg.maxDuration,
 		ResumeCommand:          cfg.resumeCommand,

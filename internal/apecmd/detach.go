@@ -90,6 +90,9 @@ type detachedHandle struct {
 	// StopReason is why the supervisor stopped the run, when it did:
 	// "parent_gone".
 	StopReason string `json:"stop_reason,omitempty"`
+	// HeldUntil is set by the run while ape's usage guard holds its launch
+	// on the plan's 5-hour window (W4): state "held" in ape run wait|status.
+	HeldUntil *time.Time `json:"held_until,omitempty"`
 }
 
 // stopParentGone is the handle's stop_reason, and the run manifest's
@@ -363,14 +366,19 @@ code of its own, so it is never mistaken for a run that exited 1.
 The run's stdout is in its own file (the handle's "stdout"), apart from
 stderr (its "log"), so a --output-format json envelope reads clean.
 
---json prints one object instead of the lines: id, state (running, ended or
-lost), exit_code (null until it ends), log, stdout, run_id and run_dir (the
+--json prints one object instead of the lines: id, state (running, held,
+ended or lost), exit_code (null until it ends), log, stdout, run_id and run_dir (the
 run's own record, once it has one), depth and parent_run (the nesting rule:
 2 and the loop's run for a session a loop run started),
 stop_reason ("parent_gone" when ape stopped it because that loop run
 ended), and result: the session's last assistant message, read from its
 transcript, at most 2048 bytes (result_truncated: true when cut). result is
-absent when there is no transcript to read. The exit codes are the same.`,
+absent when there is no transcript to read. The exit codes are the same.
+
+state "held" (with held_until) is a run whose launch ape's usage guard holds
+on the plan's 5-hour window until it resets (W4, ape task --help): the run is
+waiting, not stuck, and the wait exits 75 as for running — wait again; never
+start it a second time.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root, err := resolveProjectRoot(cwd)
@@ -429,9 +437,13 @@ func waitDetached(ctx context.Context, cmd *cobra.Command, path string, timeout 
 			return usageErrExit(exitCodeRunLost, lost)
 		}
 		if !deadline.IsZero() && time.Now().After(deadline) {
-			if jsonOut {
-				_ = printDetachedReport(out, h, runRunning)
-			} else {
+			switch {
+			case jsonOut:
+				_ = printDetachedReport(out, h, liveState(h))
+			case h.HeldUntil != nil:
+				fmt.Fprintf(out, "run %s is held: the usage guard holds its launch on the 5-hour window until %s; wait again\n",
+					h.ID, h.HeldUntil.Local().Format(time.RFC3339))
+			default:
 				fmt.Fprintf(out, "run %s is still running; wait again\n", h.ID)
 			}
 			return reportedErr(exitCodeStillRunning, errors.New("still running"))
@@ -449,7 +461,18 @@ const (
 	runRunning = "running"
 	runEnded   = "ended"
 	runLost    = "lost"
+	// runHeld: running, its launch held by the usage guard (W4).
+	runHeld = "held"
 )
+
+// liveState is a running handle's state: held while the usage guard holds
+// its launch, else running.
+func liveState(h *detachedHandle) string {
+	if h.HeldUntil != nil {
+		return runHeld
+	}
+	return runRunning
+}
 
 // resultCap bounds the result a --json report carries: the session's last
 // message is for the caller to read, not a transcript.
@@ -459,25 +482,30 @@ const resultCap = 2048
 //
 //nolint:tagliatelle // snake_case, like every other file ape writes for tools to read
 type detachedReport struct {
-	ID              string   `json:"id"`
-	State           string   `json:"state"`
-	ExitCode        *int     `json:"exit_code"`
-	Argv            []string `json:"argv"`
-	Log             string   `json:"log"`
-	Stdout          string   `json:"stdout"`
-	RunID           string   `json:"run_id,omitempty"`
-	RunDir          string   `json:"run_dir,omitempty"`
-	Depth           int      `json:"depth"`
-	ParentRun       string   `json:"parent_run"`
-	StopReason      string   `json:"stop_reason,omitempty"`
-	Result          *string  `json:"result,omitempty"`
-	ResultTruncated bool     `json:"result_truncated,omitempty"`
+	ID         string   `json:"id"`
+	State      string   `json:"state"`
+	ExitCode   *int     `json:"exit_code"`
+	Argv       []string `json:"argv"`
+	Log        string   `json:"log"`
+	Stdout     string   `json:"stdout"`
+	RunID      string   `json:"run_id,omitempty"`
+	RunDir     string   `json:"run_dir,omitempty"`
+	Depth      int      `json:"depth"`
+	ParentRun  string   `json:"parent_run"`
+	StopReason string   `json:"stop_reason,omitempty"`
+	// HeldUntil: state held, until when (W4).
+	HeldUntil       *time.Time `json:"held_until,omitempty"`
+	Result          *string    `json:"result,omitempty"`
+	ResultTruncated bool       `json:"result_truncated,omitempty"`
 }
 
 func newDetachedReport(h *detachedHandle, state string) detachedReport {
 	r := detachedReport{
 		ID: h.ID, State: state, ExitCode: h.ExitCode, Argv: h.Argv, Log: h.Log, Stdout: h.Stdout,
 		RunID: h.RunID, RunDir: h.RunDir, Depth: h.Depth, ParentRun: h.ParentRun, StopReason: h.StopReason,
+	}
+	if state == runHeld {
+		r.HeldUntil = h.HeldUntil
 	}
 	if text, ok := sessionResult(h.RunDir); ok {
 		text, r.ResultTruncated = capUTF8(text, resultCap)
@@ -566,7 +594,7 @@ func newRunStatusCmd() *cobra.Command {
 "gone without recording an exit".
 
 --json prints the object ` + "`ape run wait --json`" + ` does instead — id, state
-(running, ended or lost), exit_code, log, stdout, run_id, run_dir, depth,
+(running, held, ended or lost; held_until while held), exit_code, log, stdout, run_id, run_dir, depth,
 parent_run, stop_reason, and result (the session's last assistant message,
 at most 2048 bytes; absent without a transcript) — and exits 0.`,
 		Args: cobra.ExactArgs(1),
@@ -580,7 +608,7 @@ at most 2048 bytes; absent without a transcript) — and exits 0.`,
 				return usageErrExit(ExitUsage, err)
 			}
 			if jsonOut {
-				state := runRunning
+				state := liveState(h)
 				switch {
 				case h.ExitCode != nil:
 					state = runEnded
@@ -591,6 +619,9 @@ at most 2048 bytes; absent without a transcript) — and exits 0.`,
 				return printDetachedReport(cmd.OutOrStdout(), h, state)
 			}
 			state := "running"
+			if h.HeldUntil != nil {
+				state = "held by the usage guard until " + h.HeldUntil.Local().Format(time.RFC3339)
+			}
 			switch {
 			case h.ExitCode != nil:
 				state = fmt.Sprintf("ended, exit %d", *h.ExitCode)
@@ -834,6 +865,20 @@ func noteDetachedRun(projectRoot, runDir string) {
 	_ = updateHandle(handlePath(projectRoot, id), func(cur *detachedHandle) {
 		if cur.ID == id {
 			cur.RunDir, cur.RunID = runDir, runIDFromDir(runDir)
+		}
+	})
+}
+
+// noteDetachedHold records, on the handle of the detached run this process
+// is, that the usage guard holds its launch until until (nil: no longer).
+func noteDetachedHold(projectRoot string, until *time.Time) {
+	id := os.Getenv(envDetachedID)
+	if id == "" {
+		return
+	}
+	_ = updateHandle(handlePath(projectRoot, id), func(cur *detachedHandle) {
+		if cur.ID == id {
+			cur.HeldUntil = until
 		}
 	})
 }

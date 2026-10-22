@@ -488,6 +488,15 @@ func (s *liveSession) spawned(claudePID int) {
 	_ = sessions.UpdateRun(sessions.Path(), s.pid, s.run, func(row *sessions.Session) { row.ClaudePID = claudePID })
 }
 
+// held records, on the row, that the usage guard holds the session's
+// launch until until (nil: no longer held).
+func (s *liveSession) held(until *time.Time) {
+	if s == nil {
+		return
+	}
+	_ = sessions.UpdateRun(sessions.Path(), s.pid, s.run, func(row *sessions.Session) { row.HeldUntil = until })
+}
+
 // end removes the row.
 func (s *liveSession) end() {
 	if s == nil {

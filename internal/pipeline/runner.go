@@ -128,6 +128,13 @@ type RunOptions struct {
 	// runlog.Writer alongside manifest.yaml. PLAN-5 / C6.
 	OnRunDir func(dir string)
 
+	// BeforeSpawn runs once the run has its manifest (after OnRunDir) and
+	// before the first claude is spawned: `ape task`'s usage guard (W4),
+	// which may hold the launch there. An error ends the run before
+	// anything spawns, recorded as any run error is (a *LimitStopError is
+	// its termination kind).
+	BeforeSpawn func(ctx context.Context) error
+
 	// Observer receives lifecycle events. Nil is allowed — events are
 	// dropped. The TUI installs an Observer that forwards events to a
 	// Bubble Tea program; the plain printer installs one that writes
@@ -433,7 +440,13 @@ func Run(ctx context.Context, spec *Spec, opts RunOptions) error {
 	// ape is PTY-only since v0.0.36 (PLAN-9 F2): every run executes in
 	// the interactive per-stage claude REPL. The programmatic `claude -p`
 	// path (runStages / buildArgv / runClaude) was removed.
-	runErr := runStagesInteractive(ctx, spec, opts, mw)
+	var runErr error
+	if opts.BeforeSpawn != nil {
+		runErr = opts.BeforeSpawn(ctx)
+	}
+	if runErr == nil {
+		runErr = runStagesInteractive(ctx, spec, opts, mw)
+	}
 	finalizeManifest(mw, runErr, opts)
 	runLog(opts.RunLog, "pipeline-end", spec.Name, map[string]any{"error": errMessage(runErr)})
 	return runErr
@@ -592,7 +605,7 @@ func finalizeManifest(mw *manifestWriter, runErr error, opts RunOptions) {
 // command again — after the reset, when a usage limit stopped it.
 func ResumeLine(kind, what, command string) string {
 	then := "then"
-	if kind == TerminationUsageLimit {
+	if kind == TerminationUsageLimit || kind == TerminationUsageGuard {
 		then = "then, after the reset,"
 	}
 	return "resume: `ape status` shows where " + what + " stopped; " + then + " `" + command + "`"

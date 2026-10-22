@@ -228,10 +228,39 @@ type Manifest struct {
 	Usage *UsageRecord `yaml:"usage,omitempty"`
 }
 
-// UsageRecord is the run's usage readings.
+// UsageRecord is the run's usage readings, and the guard's decision.
 type UsageRecord struct {
 	Before *UsageReading `yaml:"before,omitempty"`
 	After  *UsageReading `yaml:"after,omitempty"`
+	// Guard is the usage guard's decision before the launch, in an APEX
+	// v1 project (W4, limits.usage).
+	Guard *UsageGuardRecord `yaml:"guard,omitempty"`
+}
+
+// UsageGuardRecord is the usage guard's decision on one launch.
+type UsageGuardRecord struct {
+	// Decision is launch (a fresh reading under every limit), unknown (no
+	// reading, or one older than limits.usage.max_age: launched, with
+	// Note), stop (the 7-day window: the session was not started), off
+	// (limits.usage.off: not checked) or usage_ok (a person's --usage-ok:
+	// launched whatever the reading said).
+	Decision string `yaml:"decision"`
+	// Reading is the reading decided on (absent: none).
+	Reading *UsageReading `yaml:"reading,omitempty"`
+	// ShareFiveHour / ShareSevenDay are the launch's estimated use of each
+	// window, and ShareSource where it came from: config, auto (the
+	// skill's median over its recorded runs) or default.
+	ShareFiveHour float64 `yaml:"share_five_hour"`
+	ShareSevenDay float64 `yaml:"share_seven_day"`
+	ShareSource   string  `yaml:"share_source,omitempty"`
+	// HeldUntil / HeldSeconds: the launch was held on the 5-hour window
+	// until HeldUntil (its reset + 1 min), for HeldSeconds, before the
+	// decision above.
+	HeldUntil   *time.Time `yaml:"held_until,omitempty"`
+	HeldSeconds float64    `yaml:"held_seconds,omitempty"`
+	// UsageOK: a person launched it with --usage-ok.
+	UsageOK bool   `yaml:"usage_ok,omitempty"`
+	Note    string `yaml:"note,omitempty"`
 }
 
 // UsageReading is one reading of the plan's windows: fractions 0..1, and
@@ -324,6 +353,11 @@ const (
 	// ended the run. resets / resets_at say when the limit resets, when the
 	// line named it.
 	TerminationUsageLimit = "usage_limit"
+	// TerminationUsageGuard — ape did not start the session: its usage
+	// guard (W4, limits.usage) read the plan's 7-day window at or near its
+	// limit before the launch. resets / resets_at say when that window
+	// resets; a person launches it anyway with --usage-ok.
+	TerminationUsageGuard = "usage_guard"
 	// TerminationParentGone — the apex-loop run that started this
 	// session ended first (D62: a child dies with its parent), and ape
 	// stopped the session.

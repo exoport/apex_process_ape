@@ -282,6 +282,9 @@ type runConfig struct {
 	// (apexv1.PluginSettings).
 	spawnSettings spawnSettings
 	spawnEnv      []string
+	// usageGuard decides, before the session is spawned, whether the
+	// plan's usage lets it start (W4, task_usageguard.go); nil: no guard.
+	usageGuard *usageGuard
 
 	// NATS progress-eventing + transcript-blob upload (PLAN-13). All
 	// strictly opt-in and resolved flags → env (natsconn.Resolve); with no

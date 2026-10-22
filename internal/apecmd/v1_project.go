@@ -1023,8 +1023,13 @@ func newStatusCmd() *cobra.Command {
   - the latest ape task run (JSON "latest_run": {skill, run_id, status, stopped,
     resets, resets_at, message, depth, parent_run}): how it ended, e.g. "stopped:
     usage-limit, resets 2026-10-16T23:00:00+02:00" when a claude.ai usage limit
-    stopped it (see ape task --help, exit 14); a session a loop run started
-    names that run ("started by <run>"; depth 2, parent_run)
+    stopped it (see ape task --help, exit 14), or "stopped: usage-guard (not started:
+    the 7-day window), resets …" when ape's usage guard did not start it (W4); a
+    session a loop run started names that run ("started by <run>"; depth 2, parent_run)
+  - the plan's usage (W4, ape usage --help): "usage: 5h 0.14 · 7d 0.55 (read 2 min
+    ago)", or "usage: unknown" before the first reading; JSON "usage": {at, five_hour,
+    five_hour_resets_at, seven_day, seven_day_resets_at, run, claude_version,
+    age_seconds}, null when there is none
   - JSON "sessions": the model sessions ape launched that run in this project now
     ([{run_id, kind, skill, depth, parent_run, pid, started_at}], [] when none): an
     apex-loop run at depth 1 and its one child at depth 2 (D62). The loop's
@@ -1033,7 +1038,9 @@ func newStatusCmd() *cobra.Command {
     turn of its transcript shows it, over the model's window (context_fill null and
     context_window 0 when the window is unknown: no relay then), the threshold
     (limits.context_relay), the relays so far and their cap (limits.relays), and the
-    run it relays; the brief says "context 12 % (relay at 60 %), relays 0/5"
+    run it relays; the brief says "context 12 % (relay at 60 %), relays 0/5". A
+    session whose launch ape's usage guard holds on the 5-hour window (W4) carries
+    held_until (", held: 5-hour window, launches <ts>")
 
 --brief renders at most 25 lines (what the SessionStart hook injects).
 
@@ -1206,6 +1213,10 @@ func statusLong(r *apexv1.StatusReport) string {
 		}
 		if s.Relay != nil {
 			b.WriteString(", " + s.Relay.Describe())
+		}
+		if s.HeldUntil != nil {
+			// W4: the usage guard holds the launch.
+			b.WriteString(", held: 5-hour window, launches " + s.HeldUntil.Local().Format(time.RFC3339))
 		}
 		b.WriteString("\n")
 	}

@@ -8,8 +8,8 @@ import (
 // CodePersonOnly: a flag or command only a person may use was given from a
 // model session (BRIEF D45: --allow-pending-human, --accept-red; D47 Q6:
 // ape milestone approve, ape change approve, ape change answer; OI-4:
-// ape change accept --by, ape decision accept) with no grant from the
-// person's own words (E2, personact.go).
+// ape change accept --by, ape decision accept; W4: ape task --usage-ok)
+// with no grant from the person's own words (E2, personact.go).
 const CodePersonOnly = "session.person-only"
 
 // envApeSession is repl.EnvApeSession: every session ape spawns carries it.
@@ -49,4 +49,17 @@ func requirePerson(ctx context.Context, act, flag string) error {
 		msg += " — a person runs the command from a terminal outside Claude Code"
 	}
 	return &UsageError{Code: CodePersonOnly, Msg: msg}
+}
+
+// RequirePersonFlag refuses a person-only flag that no grant ever covers
+// (W4: `ape task --usage-ok`) in a model session — under APE_SESSION, or in
+// any Claude Code session (CLAUDECODE): a person runs the command from a
+// terminal.
+func RequirePersonFlag(flag string) error {
+	k := ModelSession()
+	if k == "" {
+		return nil
+	}
+	return &UsageError{Code: CodePersonOnly, Msg: flag + " is for a person, and this runs in a model session (" + k +
+		" is set) — a person runs the command from a terminal outside Claude Code"}
 }

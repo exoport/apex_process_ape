@@ -21,7 +21,7 @@ func TestProjectCheck_ConfigKeys(t *testing.T) {
 			"output_folder: _output\ngovernance_repository_url: https://example.invalid/g.git\n"},
 		"a limits typo": {config: "limits:\n  attempt: 3\n", finds: []want{{
 			CodeConfigUnknownKey,
-			"limits.attempt is not a key of limits:, so it limits nothing — the keys are budget, attempts, attempts_total, replans, consecutive_blocks, context_relay, relays: fix the name, or drop it",
+			"limits.attempt is not a key of limits:, so it limits nothing — the keys are budget, attempts, attempts_total, replans, consecutive_blocks, context_relay, relays, usage: fix the name, or drop it",
 		}}},
 		"a top-level effort that is not a level": {config: "effort: extreme\n", finds: []want{{
 			CodeConfigInvalid,

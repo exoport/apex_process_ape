@@ -45,6 +45,12 @@ func (r *LatestRun) Describe() string {
 		case r.Resets != "":
 			s += ", resets " + r.Resets
 		}
+	case r.Stopped == "usage_guard":
+		// W4: ape did not start it, the 7-day window being at its limit.
+		s += ", stopped: usage-guard (not started: the 7-day window)"
+		if r.ResetsAt != nil {
+			s += ", resets " + r.ResetsAt.Format(time.RFC3339)
+		}
 	case r.Stopped != "":
 		s += ", stopped: " + r.Stopped
 	}
@@ -68,6 +74,10 @@ type LiveSession struct {
 	// Relay is a live loop run's context fill and relays (OI-11), absent on
 	// every other session and on a loop ape has no relay record of.
 	Relay *LoopRelay `json:"relay,omitempty"`
+	// HeldUntil is set while ape's usage guard holds the session's launch
+	// on the plan's 5-hour window (W4): when it launches (the window's
+	// reset + 1 min). Absent otherwise.
+	HeldUntil *time.Time `json:"held_until,omitempty"`
 }
 
 // LiveSessions lists the live model sessions running in the project,
@@ -84,7 +94,7 @@ func (p *Project) LiveSessions() []LiveSession {
 		if depth <= 0 {
 			depth = 1
 		}
-		ls := LiveSession{RunID: r.RunID, Kind: r.Command, Skill: r.Skill, Depth: depth, ParentRun: r.ParentRun, PID: r.PID, StartedAt: r.StartedAt}
+		ls := LiveSession{RunID: r.RunID, Kind: r.Command, Skill: r.Skill, Depth: depth, ParentRun: r.ParentRun, PID: r.PID, StartedAt: r.StartedAt, HeldUntil: r.HeldUntil}
 		if r.Skill == OrchestratorSkill && depth == 1 {
 			ls.Relay = p.loopRelay(r.RunID)
 		}

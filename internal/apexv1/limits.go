@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/exoport/apex_process_ape/internal/cost"
+	"github.com/exoport/apex_process_ape/internal/usage"
 	"gopkg.in/yaml.v3"
 )
 
@@ -25,6 +26,13 @@ import (
 //	  consecutive_blocks: 2    # blocked changes in a row per milestone; default 2
 //	  context_relay: 0.6       # relay the loop at its next child launch at this context fill; default 0.6
 //	  relays: 5                # relays per loop run; default 5
+//	  usage:                   # the usage guard before every ape task launch (W4); defaults below
+//	    seven_day: 0.85        # stop (exit 14, a person's call) over this 7-day window fill
+//	    five_hour: 0.95        # hold until the 5-hour window resets, over this fill with the launch's share
+//	    ceiling: 0.95          # stop when the 7-day fill with the launch's share is over it
+//	    share: auto            # the launch's share: the skill's median, else 0.05; or a number
+//	    max_age: 10m           # a reading older than this is unknown: launch, with a note
+//	    off: false             # true: no guard
 const DefaultAttempts = 5
 
 // The defaults of the limits re-planning cannot reset (H19, D47 Q9).
@@ -68,6 +76,109 @@ type Limits struct {
 	// Relays caps the relays of one loop run: the relay past it stops the
 	// run (limits.relays, a person's).
 	Relays *int `yaml:"relays"`
+
+	// v1.1 W4.
+	// Usage is the usage guard ape applies before every ape task launch
+	// (internal/usage): unset keys take their defaults.
+	Usage *UsageLimits `yaml:"usage"`
+}
+
+// UsageLimits is limits.usage (W4). The fractions are 0 < x ≤ 1 (0.85 is
+// 85 %); max_age is a Go duration.
+type UsageLimits struct {
+	SevenDay *float64 `yaml:"seven_day"`
+	FiveHour *float64 `yaml:"five_hour"`
+	Ceiling  *float64 `yaml:"ceiling"`
+	// Share is "auto" (the default) or a fraction.
+	Share  *UsageShare `yaml:"share"`
+	MaxAge *string     `yaml:"max_age"`
+	Off    bool        `yaml:"off"`
+}
+
+// UsageShare is limits.usage.share: auto, or a fraction.
+type UsageShare struct {
+	Auto  bool
+	Value float64
+}
+
+// UnmarshalYAML reads auto or a number.
+func (s *UsageShare) UnmarshalYAML(n *yaml.Node) error {
+	if n.Kind == yaml.ScalarNode && strings.TrimSpace(n.Value) == "auto" {
+		*s = UsageShare{Auto: true}
+		return nil
+	}
+	var v float64
+	if err := n.Decode(&v); err != nil {
+		return fmt.Errorf("limits.usage.share: %q is not auto or a fraction", n.Value)
+	}
+	*s = UsageShare{Value: v}
+	return nil
+}
+
+// MarshalYAML writes it back as it reads.
+func (s UsageShare) MarshalYAML() (any, error) {
+	if s.Auto {
+		return "auto", nil
+	}
+	return s.Value, nil
+}
+
+// MarshalJSON writes "auto" or the number.
+func (s UsageShare) MarshalJSON() ([]byte, error) {
+	if s.Auto {
+		return []byte(`"auto"`), nil
+	}
+	return json.Marshal(s.Value)
+}
+
+func (u *UsageLimits) validate() error {
+	if u == nil {
+		return nil
+	}
+	for name, v := range map[string]*float64{"seven_day": u.SevenDay, "five_hour": u.FiveHour, "ceiling": u.Ceiling} {
+		if v != nil && (*v <= 0 || *v > 1) {
+			return fmt.Errorf("limits.usage.%s: %g is not a fraction above 0 and at most 1 (0.85 is 85%%)", name, *v)
+		}
+	}
+	if s := u.Share; s != nil && !s.Auto && (s.Value <= 0 || s.Value > 1) {
+		return fmt.Errorf("limits.usage.share: %g is not auto or a fraction above 0 and at most 1", s.Value)
+	}
+	if u.MaxAge != nil {
+		d, err := time.ParseDuration(strings.TrimSpace(*u.MaxAge))
+		if err != nil || d <= 0 {
+			return fmt.Errorf("limits.usage.max_age: %q is not a duration above 0 (10m, 1h)", *u.MaxAge)
+		}
+	}
+	return nil
+}
+
+// UsageGuard is limits.usage with its defaults filled in.
+func (l Limits) UsageGuard() usage.GuardConfig {
+	g := usage.DefaultGuard()
+	u := l.Usage
+	if u == nil {
+		return g
+	}
+	if u.SevenDay != nil {
+		g.SevenDay = *u.SevenDay
+	}
+	if u.FiveHour != nil {
+		g.FiveHour = *u.FiveHour
+	}
+	if u.Ceiling != nil {
+		g.Ceiling = *u.Ceiling
+	}
+	if u.Share != nil && !u.Share.Auto {
+		v := u.Share.Value
+		g.Share = &v
+	}
+	if u.MaxAge != nil {
+		if d, err := time.ParseDuration(strings.TrimSpace(*u.MaxAge)); err == nil && d > 0 {
+			g.MaxAge = d
+		}
+	}
+	g.Off = u.Off
+	return g
 }
 
 // UnmarshalYAML validates the block as it parses.
@@ -96,6 +207,9 @@ func (l *Limits) UnmarshalYAML(n *yaml.Node) error {
 	}
 	if v := p.ContextRelay; v != nil && (*v <= 0 || *v > MaxContextRelay) {
 		return fmt.Errorf("limits.context_relay: %g is not a fraction above 0 and at most %g (0.6 is 60%%)", *v, MaxContextRelay)
+	}
+	if err := p.Usage.validate(); err != nil {
+		return err
 	}
 	*l = Limits(p)
 	return nil

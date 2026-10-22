@@ -44,6 +44,9 @@ type Session struct {
 	Depth int `json:"depth,omitempty"`
 	// ParentRun is the run of the session that started this one (depth 2).
 	ParentRun string `json:"parent_run,omitempty"`
+	// HeldUntil is set while ape's usage guard holds the session's launch
+	// on the plan's 5-hour window (W4): when it decides again.
+	HeldUntil *time.Time `json:"held_until,omitempty"`
 }
 
 // registryShape is the on-disk container; we keep the wrapper so a

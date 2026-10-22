@@ -229,6 +229,40 @@ version is kept, the raw PTY bytes in <user cache>/ape/claude-limit-<version>.bi
 and the last usage reading (ape usage) beside them in .json, and the stop's
 message names both (W4).
 
+Usage-aware launching (W4): every session ape launches records the plan's
+usage from its status line (ape usage --help). In an APEX v1 project, before
+the session starts — every ape task, the loop's children and the sessions
+ape change starts included — ape's usage guard reads the newest reading
+against _apex/config.yaml
+  limits:
+    usage:
+      seven_day: 0.85   # stop over this 7-day fill
+      five_hour: 0.95   # hold over this 5-hour fill, with the launch's share
+      ceiling: 0.95     # stop when the 7-day fill with the share is over it
+      share: auto       # the skill's median over its last 10 runs (0.05 below
+                        # 3), or a number
+      max_age: 10m      # an older reading is unknown
+      off: false        # true: no guard
+(the defaults; guarded, like every limit) and decides:
+  launch   a fresh reading under every limit
+  hold     5-hour window + share over five_hour: the launch waits until the
+           window resets + 1 min (a line every 10 min; ape status shows the
+           session held, ape run wait --json state "held" with held_until and
+           exit 75 as for running), then decides again. Nothing is logged:
+           a hold resolves itself.
+  stop     7-day window over seven_day, or + share over ceiling: the session
+           is not started — exit 14, termination usage_guard (resets,
+           resets_at) in the run manifest, events stop (reason usage-guard)
+           and person (action: the command with --usage-ok). A person's call.
+  unknown  no reading, or one older than max_age: launch, with "usage
+           unknown (no reading in 10 min)" in the output and the manifest
+A window whose reset has passed counts as 0. --usage-ok launches whatever
+the reading says; it is a person's (refused in a model session, exit 2,
+session.person-only) and recorded. The decision is the run manifest's
+usage.guard: {decision, reading, share_five_hour, share_seven_day,
+share_source, held_until, held_seconds, usage_ok, note}, beside usage.before
+and usage.after.
+
 Events and the notifier (H20, W3): in an APEX v1 project every run logs
 "run-end" in _apex/state/events.jsonl when it ends, attached or detached
 (a detached run's supervisor logs it with the exit it records), and a run
@@ -305,7 +339,8 @@ session.not-allowed), or the loop relay refused a child launch (session.relay) �
 never became ready (last pane on stderr), or a session lock another run
 holds (session.child-running, session.orchestrator-running) · 5 upstream
 API failure · 6 the dispatch violated its declared commit ownership (the run
-itself may have succeeded) · 14 a claude.ai usage limit stopped the session.`
+itself may have succeeded) · 14 a claude.ai usage limit stopped the session,
+or ape's usage guard did not start it (termination usage_guard).`
 
 func newTaskCmd() *cobra.Command {
 	var (
@@ -335,6 +370,7 @@ func newTaskCmd() *cobra.Command {
 		eventsPrefixFlag   string
 		uploadTranscripts  bool
 		transcriptStore    string
+		usageOKFlag        bool
 	)
 	cmd := &cobra.Command{
 		Use:   "task <skill>",
@@ -363,6 +399,12 @@ func newTaskCmd() *cobra.Command {
 			// said with the run's own args, before the nesting rule.
 			if err := refuseRenamed("ape task", args[0], argsFlag, projectRoot); err != nil {
 				return sessionRefusal(err)
+			}
+			// W4: --usage-ok is a person's, from a terminal.
+			if usageOKFlag {
+				if err := apexv1.RequirePersonFlag("--usage-ok"); err != nil {
+					return sessionRefusal(err)
+				}
 			}
 			// The nesting rule (D62), before anything else is read or
 			// started: what the session this runs in may start.
@@ -442,6 +484,7 @@ func newTaskCmd() *cobra.Command {
 				uploadTranscripts:     uploadTranscripts,
 				transcriptStore:       transcriptStore,
 				launch:                launch,
+				usageOK:               usageOKFlag,
 			}
 			return runTask(cmd.Context(), opts)
 		},
@@ -470,6 +513,7 @@ func newTaskCmd() *cobra.Command {
 	addOutputStyleFlag(cmd, &outputStyleFlag)
 	cmd.Flags().StringVar(&cwdFlag, "cwd", "", "Project root directory (default: current working dir)")
 	addDetachFlag(cmd, &detachFlag)
+	cmd.Flags().BoolVar(&usageOKFlag, "usage-ok", false, "Launch whatever the plan's usage reads: the usage guard's override (a person only, from a terminal; recorded in the run manifest with the reading)")
 	addNatsFlags(cmd, &natsURLFlag, &natsCredsFlag, &eventsPrefixFlag, &uploadTranscripts, &transcriptStore)
 	return cmd
 }
@@ -508,6 +552,9 @@ type taskOptions struct {
 	// launch is the session's place in the nesting rule (D62), decided by
 	// the caller's gateSession; nil decides it at dispatch.
 	launch *sessionLaunch
+	// usageOK is a person's --usage-ok: the usage guard launches whatever
+	// the plan's usage reads (W4).
+	usageOK bool
 }
 
 // resolveHandoffPrompt derives the --prompt value from --handoff: a
@@ -654,7 +701,8 @@ func taskExitCode(runErr error) int {
 		return ExitUpstreamAPI
 	}
 	// H20: the plan's usage limit, not the skill: run again after the reset.
-	if isUsageLimitStop(runErr) {
+	// W4: as is the usage guard's stop, before the session started.
+	if isUsageLimitStop(runErr) || isUsageGuardStop(runErr) {
 		return ExitUsageLimit
 	}
 	return ExitRunFailed
@@ -895,11 +943,17 @@ func dispatchTaskOnce(ctx context.Context, o taskOptions, cfg runConfig) (taskRu
 	recordBudgetStop(o.projectRoot, o.skill, manifestDir, cfg.budgetWatch)
 	// H20: a run stopped on a limit logs `stop` and runs the project's
 	// notifier; W3: every run logs `run-end` after it.
+	recordUsageGuard(runDir, cfg.usageGuard)
 	if lse, ok := errors.AsType[*pipeline.LimitStopError](runErr); ok && v1Launch != nil {
 		if p, ok := v1ProjectAt(o.projectRoot); ok {
-			nctx := context.WithoutCancel(ctx)
-			milestone, change := p.EventScope(nctx, o.args)
-			p.Emit(nctx, apexv1.Event{Event: apexv1.EventStop, Milestone: milestone, Change: change, Run: runID, Reason: lse.Message, Skill: o.skill}, os.Stderr)
+			if lse.Kind == pipeline.TerminationUsageGuard {
+				// W4: stop (usage-guard), and the person's override.
+				emitUsageGuardStop(ctx, p, cfg.usageGuard, runID, lse)
+			} else {
+				nctx := context.WithoutCancel(ctx)
+				milestone, change := p.EventScope(nctx, o.args)
+				p.Emit(nctx, apexv1.Event{Event: apexv1.EventStop, Milestone: milestone, Change: change, Run: runID, Reason: lse.Message, Skill: o.skill}, os.Stderr)
+			}
 		}
 	}
 	if v1Launch != nil {
@@ -976,6 +1030,8 @@ func prepareV1Task(ctx context.Context, p *apexv1.Project, o *taskOptions, cfg *
 		return nil, &taskPreflightError{err: err}
 	}
 	cfg.spawnSettings.settings = plugins
+	// W4: the usage guard decides before the session is spawned.
+	cfg.usageGuard = newUsageGuard(p, o.skill, o.args, o.usageOK)
 	return &l, nil
 }
 
