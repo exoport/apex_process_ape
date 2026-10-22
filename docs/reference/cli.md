@@ -5185,8 +5185,8 @@ APEX folders are outside it.
 Refused, nothing written: outside a git repository (git.not-a-repo), on a change branch
 (branch.change-branch), while a fence it would rewrite has uncommitted changes
 (tree.dirty), and for a fence that does not parse (fence.altered: fix or delete it).
-fence.unreadable (exit 2): the root go.mod, or a fence, cannot be read or does not
-parse. A command any session may run (not person-only).
+fence.unreadable (exit 2): the root go.mod cannot be read or does not parse, or a fence
+cannot be read. A command any session may run (not person-only).
 
 --check writes nothing: exit 0 when every present APEX folder's fence is in place and
 committed (or there is nothing to fence), 1 when one is not — fence.missing (absent, or

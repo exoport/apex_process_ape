@@ -45,8 +45,8 @@ type LibrarySuggestion struct {
 // Text is the suggestion as init and the lift print it.
 func (s *LibrarySuggestion) Text() string {
 	return "add \"" + s.Line + "\" to " + s.File + " if this is a library others download — " + s.Reason +
-		", whose module zip would carry .claude/, _apex/ and the development folder; with the key, ape project fence keeps them out" +
-		" (see ape project fence --help). ape never sets it"
+		": a library's module zip carries .claude/, _apex/ and the development folder unless ape project fence keeps them out" +
+		" (see ape project fence --help); ape never sets the key"
 }
 
 // IsLibrary reports `library: true` in the project's config; false when
