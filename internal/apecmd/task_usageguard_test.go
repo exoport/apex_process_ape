@@ -218,6 +218,7 @@ func TestTask_UsageOKRefusedInAModelSession(t *testing.T) {
 		var ue *apexv1.UsageError
 		require.ErrorAs(t, err, &ue)
 		require.Equal(t, apexv1.CodePersonOnly, ue.Code)
+		require.Contains(t, err.Error(), "(code session.person-only, action person)", "the refusal names its action")
 	}
 	t.Setenv("APE_SESSION", "")
 	t.Setenv("CLAUDECODE", "")

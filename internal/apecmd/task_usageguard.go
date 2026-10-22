@@ -29,10 +29,12 @@ type usageGuard struct {
 	usageOK bool
 
 	// decision is the last decision, and heldFrom/heldUntil the hold
-	// before it, for the manifest (record).
+	// before it, for the manifest (record); heldTo is when the hold ended
+	// (record runs after the session, whose time is not the hold's).
 	decision  *usage.Decision
 	heldFrom  time.Time
 	heldUntil time.Time
+	heldTo    time.Time
 }
 
 // newUsageGuard is the guard of one launch of skill in p.
@@ -88,6 +90,7 @@ func (g *usageGuard) beforeSpawn(ctx context.Context, held func(*time.Time), w i
 			until := d.HeldUntil
 			held(&until)
 			err := g.hold(ctx, d, w)
+			g.heldTo = usageNow()
 			held(nil)
 			if err != nil {
 				return fmt.Errorf("usage guard: held launch: %w", err)
@@ -165,7 +168,7 @@ func (g *usageGuard) record() *pipeline.UsageGuardRecord {
 	if !g.heldFrom.IsZero() {
 		until := g.heldUntil
 		rec.HeldUntil = &until
-		rec.HeldSeconds = usageNow().Sub(g.heldFrom).Seconds()
+		rec.HeldSeconds = g.heldTo.Sub(g.heldFrom).Seconds()
 	}
 	if d.Outcome == usage.Off {
 		rec.ShareFiveHour, rec.ShareSevenDay, rec.ShareSource = 0, 0, ""
