@@ -192,6 +192,40 @@ it ends:
 | `before`, `after` | The first and the last reading the run's session recorded: `{at, five_hour, five_hour_resets_at, seven_day, seven_day_resets_at}`, the windows as fractions 0..1. `before` is taken at the session's first API response, not before the launch. Absent when the session recorded none (a plan without rate limits, a session that never reached the API). |
 | `guard` | APEX v1: the usage guard's decision before the launch: `decision` (`launch`, `unknown`, `stop`, `off`, `usage_ok`), `reading` (the reading decided on), `share_five_hour`, `share_seven_day` and `share_source` (`config`, `auto`, `default`), `held_until` and `held_seconds` when the launch was held on the 5-hour window first, `usage_ok` for a person's `--usage-ok`, and `note` ("usage unknown (no reading in 10 min)"). |
 
+#### The usage files: `<user cache>/ape/usage.json`
+
+The readings live outside every project, under `os.UserCacheDir()` (on Linux `$XDG_CACHE_HOME/ape`, by default `~/.cache/ape`):
+they belong to the claude.ai account the person is signed in with, one set per OS user.
+`usage.json` is the newest reading any session recorded (`internal/usage/usage.go`):
+
+```json
+{
+  "at": "2026-10-21T09:41:40Z",
+  "five_hour": 0.19,
+  "five_hour_resets_at": "2026-10-21T14:00:00Z",
+  "seven_day": 0.76,
+  "seven_day_resets_at": "2026-10-23T18:00:00Z",
+  "run": "20261021-090012-5be21f0",
+  "claude_version": "2.1.306"
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `at` | When the status line ran, UTC (RFC 3339). |
+| `five_hour`, `seven_day` | The windows' use as a fraction 0..1. Claude Code's status-line JSON gives `rate_limits.<window>.used_percentage` as a whole number 0–100; ape stores it over 100. `null` when the reading did not carry that window. |
+| `five_hour_resets_at`, `seven_day_resets_at` | The window's reset. Claude Code gives `resets_at` in epoch seconds; ape stores RFC 3339, UTC. `null` when not given. |
+| `run` | The ape run whose session recorded the reading; `""` for a session launched without a run record. |
+| `claude_version` | The status-line JSON's `version`. |
+
+The file is absent until a session ape launched gets its first API response: before that
+Claude Code's JSON has no `rate_limits` key, and a reading with neither window records nothing.
+A reading older than the one on disk is not written, and neither is one equal to it within 30 s.
+The manifest's `before`/`after` and the history entries carry the same shape.
+
+- `usage-runs/<launch key>.json` — one in-flight launch's `{run, skill, first, last}` readings, taken into the manifest's `before`/`after` and removed when the run ends (files a killed ape left are removed after 7 days).
+- `usage-history.json` — a list of ended runs' `{skill, run, at, before, after}` (only runs with both readings; the newest 500), which `limits.usage.share: auto` learns from.
+
 ### `termination` — why a run ended
 
 Present only when a run ended for a reason other than finishing; absent on a
