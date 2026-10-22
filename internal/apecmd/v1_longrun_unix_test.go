@@ -246,3 +246,54 @@ func TestLongRun_SIGKILLLeavesNoOrphan(t *testing.T) {
 	require.Contains(t, stdout, "ended without a result")
 	require.Nil(t, p.LoadRunLock("add-wave"), "the stale lock is removed")
 }
+
+// endedProbe is a worker's stderr (its run log) that records, when the
+// worker writes its "ended" line, whether the run's lock and result are
+// there.
+type endedProbe struct {
+	p                         *apexv1.Project
+	buf                       strings.Builder
+	seen, lockHeld, hasResult bool
+}
+
+func (e *endedProbe) Write(b []byte) (int, error) {
+	if !e.seen && strings.Contains(string(b), "] ") && strings.Contains(string(b), " ended, exit ") {
+		e.seen = true
+		e.lockHeld = e.p.LoadRunLock("add-wave") != nil
+		e.hasResult = e.p.LoadRunResult("add-wave") != nil
+	}
+	return e.buf.Write(b)
+}
+
+// D380: the worker writes "ended, exit N — result:" to its log before it
+// releases the run lock, so a call that sees the run end reads a log that
+// already says so — and the result is recorded by then.
+func TestLongRun_EndedLineBeforeLockRelease(t *testing.T) {
+	root, p := detachedRepo(t, "echo wave")
+
+	// Detached: the log ends with the ended line by the time the call
+	// that waited for the run returns.
+	_, _, err := v1Exec(t, newChangeCmd, "verify", "add-wave", "--json", "--wait", "60s", "--cwd", root)
+	require.NoError(t, err)
+	data, err := os.ReadFile(p.RunLogPath("add-wave"))
+	require.NoError(t, err)
+	require.Contains(t, string(data), " ended, exit 0 — result:")
+
+	// The worker, in this process, on a lock taken as a call takes it:
+	// what the log reader sees is the order, not a timing.
+	lock, held, err := p.TakeRunLock(t.Context(), "change verify", "add-wave")
+	require.NoError(t, err)
+	require.Nil(t, held)
+	probe := &endedProbe{p: p}
+	cmd := newRunWorkerCmd()
+	cmd.SilenceUsage, cmd.SilenceErrors = true, true
+	var out strings.Builder
+	cmd.SetOut(&out)
+	cmd.SetErr(probe)
+	cmd.SetArgs([]string{lock.ID, "change", "verify", "add-wave", "--cwd", root})
+	require.NoError(t, cmd.Execute(), probe.buf.String())
+	require.True(t, probe.seen, "the worker wrote its ended line: %s", probe.buf.String())
+	require.True(t, probe.lockHeld, "the ended line is written while the lock is held")
+	require.True(t, probe.hasResult, "and after the result is recorded")
+	require.Nil(t, p.LoadRunLock("add-wave"), "then the lock is released")
+}

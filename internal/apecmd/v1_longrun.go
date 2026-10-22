@@ -37,7 +37,8 @@ import (
 //     around it, stops nothing;
 //  3. the worker runs the verb's in-process body (the code path the verb
 //     always had), records the outcome rendered both ways
-//     (<scope>.result.json) and releases the lock;
+//     (<scope>.result.json), ends its log with it, and only then releases
+//     the lock;
 //  4. the call waits up to --wait and prints that outcome with the verb's
 //     own exit code and --json shape, or exits 75: still running, run the
 //     same command again to attach.
@@ -188,7 +189,7 @@ func runLong(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, scope string, co
 		}
 	}
 	if f.noDetach || !v1DetachDefault {
-		r, _ := runHere(cmd, f, p, lock, compute, nil) // printed here: a record that failed to save is not needed
+		r, _ := runHere(cmd, f, p, lock, compute, nil, nil) // printed here: a record that failed to save is not needed
 		return deliverRun(cmd, f, p, r)
 	}
 	if err := launchWorker(cmd, p, lock, workerArgv(cmd, p, scope)); err != nil {
@@ -201,9 +202,12 @@ func runLong(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, scope string, co
 
 // runHere runs the verb's body in this process under lock, records its
 // outcome rendered both ways, and releases the lock. progress, when set,
-// gets a line per check. The result is returned even when recording it
-// failed (the error).
-func runHere(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, lock *apexv1.RunLock, compute longCompute, progress io.Writer) (*apexv1.RunResult, error) {
+// gets a line per check; ended, when set, is called with the recorded
+// result while the lock is still held. The result is returned even when
+// recording it failed (the error; ended is not called then).
+func runHere(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, lock *apexv1.RunLock, compute longCompute, progress io.Writer,
+	ended func(*apexv1.RunResult),
+) (*apexv1.RunResult, error) {
 	defer p.ReleaseRunLock(lock)
 	f.ranHere = true
 	opt := f.runOptions()
@@ -221,7 +225,13 @@ func runHere(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, lock *apexv1.Run
 	if err != nil {
 		r.Err = err.Error()
 	}
-	return r, p.SaveRunResult(r)
+	if err := p.SaveRunResult(r); err != nil {
+		return r, err
+	}
+	if ended != nil {
+		ended(r)
+	}
+	return r, nil
 }
 
 // renderAs renders a run's outcome to buffers, as --json or not.
@@ -400,12 +410,21 @@ func runAsWorker(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, verb, scope,
 		}
 	}
 	fmt.Fprintf(cmd.ErrOrStderr(), "[ape] %s `ape %s %s` started (run %s, pid %d, at %.7s)\n", apexv1.Stamp(), verb, scope, id, os.Getpid(), lock.SHA)
-	r, err := runHere(cmd, f, p, lock, compute, cmd.ErrOrStderr())
+	// The log says how the run ended before its lock is released (D380):
+	// a call that sees the lock gone — and prints the result — reads a log
+	// that already ends with it.
+	logEnded := func(r *apexv1.RunResult) {
+		w := cmd.ErrOrStderr()
+		fmt.Fprintf(w, "[ape] %s ended, exit %d — result:\n", apexv1.Stamp(), r.Exit)
+		_, _ = io.WriteString(w, r.Human.Stdout+r.Human.Stderr)
+		if s, ok := w.(interface{ Sync() error }); ok {
+			_ = s.Sync()
+		}
+	}
+	r, err := runHere(cmd, f, p, lock, compute, cmd.ErrOrStderr(), logEnded)
 	if err != nil {
 		return failErr(fmt.Errorf("run %s: its result could not be recorded: %w", id, err))
 	}
-	fmt.Fprintf(cmd.ErrOrStderr(), "[ape] %s ended, exit %d — result:\n", apexv1.Stamp(), r.Exit)
-	_, _ = io.WriteString(cmd.ErrOrStderr(), r.Human.Stdout+r.Human.Stderr)
 	if r.Exit == 0 {
 		return nil
 	}
