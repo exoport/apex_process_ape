@@ -829,8 +829,18 @@ type ptoken struct {
 	start, end int
 }
 
+// apostrophes are the single quotes a word may hold (don't, don’t):
+// a token reads each as ', but the prompt keeps the person's own (D234).
+const apostrophes = "'’‘"
+
 func wordRune(r rune) bool {
-	return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '-' || r == '_' || r == '\''
+	return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '-' || r == '_' || strings.ContainsRune(apostrophes, r)
+}
+
+// tokenWord is a prompt word as the matcher compares it: lower case, its
+// apostrophes straight, none at either end.
+func tokenWord(w string) string {
+	return strings.ToLower(strings.NewReplacer("’", "'", "‘", "'").Replace(strings.Trim(w, apostrophes)))
 }
 
 func promptTokens(text string) []ptoken {
@@ -844,12 +854,12 @@ func promptTokens(text string) []ptoken {
 			continue
 		}
 		if start >= 0 {
-			out = append(out, ptoken{strings.ToLower(strings.Trim(text[start:i], "'")), start, i})
+			out = append(out, ptoken{tokenWord(text[start:i]), start, i})
 			start = -1
 		}
 	}
 	if start >= 0 {
-		out = append(out, ptoken{strings.ToLower(strings.Trim(text[start:], "'")), start, len(text)})
+		out = append(out, ptoken{tokenWord(text[start:]), start, len(text)})
 	}
 	return out
 }
@@ -861,9 +871,10 @@ const sentenceEnds = ".!?;\n"
 // sentence nor among the three words after the target, the sentence no
 // question — and, for an answer, the --text itself after the target. It
 // returns the quote (the sentence, at most quoteMax characters) and the
-// raw sentence the transcript must hold.
+// raw sentence the transcript must hold: both as the person typed them,
+// their own quote characters included (D234).
 func matchAct(prompt string, c PersonCall) (quote, raw string, ok bool) {
-	text := strings.NewReplacer("’", "'", "‘", "'").Replace(prompt)
+	text := prompt
 	toks := promptTokens(text)
 	want := c.words()
 	if len(want) == 0 {
@@ -924,8 +935,10 @@ func clip(s string, n int) string {
 }
 
 // quoteFor is the clause as a record keeps it (T9): secrets redacted by
-// the commit scan's rules, on one line, with no `"` (the record quotes
-// it) and no `#` (a roadmap Status line ends at " #").
+// the commit scan's rules, on one line, and no `#` (a roadmap Status line
+// ends at " #"). The person's quote characters stay as typed (D234): a
+// `"approve M2"` is recorded as `(prompt <ts>: ""approve M2"")` — the
+// record's own quotes are its first and last, so one inside ends nothing.
 func quoteFor(ctx context.Context, clause string) string {
 	redacted, ok := redactText(ctx, clause)
 	if !ok {
@@ -934,8 +947,6 @@ func quoteFor(ctx context.Context, clause string) string {
 	var b strings.Builder
 	for _, r := range normSpace(redacted) {
 		switch {
-		case r == '"':
-			b.WriteRune('\'')
 		case r == '#':
 			b.WriteRune('＃')
 		case unicode.IsControl(r):

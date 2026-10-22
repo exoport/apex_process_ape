@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -374,7 +375,26 @@ func TestE2_T9_QuoteRedacted(t *testing.T) {
 	require.NotContains(t, a.Quote, fakeToken)
 	require.Contains(t, a.Quote, "approve M1 and use token ghp_")
 	require.NotContains(t, a.Quote, "#")
-	require.NotContains(t, a.Quote, `"`)
+}
+
+// D234: the record keeps the person's own quote characters — straight or
+// curly, double or single — never rewritten; a curly apostrophe inside the
+// sentence still matches the transcript, which holds it as typed.
+func TestE2_D234_QuoteKeepsThePersonsQuotes(t *testing.T) {
+	for i, prompt := range []string{`"approve M2"`, `'approve M2'`, "`approve M2`", "“approve M2”", "‘approve M2’", "It’s right: approve M2"} {
+		p := e2Project(t)
+		asClaudeCode(t)
+		c := approveCall("M2")
+		pid := "p" + strconv.Itoa(i)
+		d := PersonActGate(ctx(), e2Turn(t, p, "s1", pid, prompt, c.Line), []PersonCall{c})
+		require.False(t, d.Deny, "%s: %s", prompt, d.Reason)
+		a := p.ConsumeGrant(ctx(), c)
+		require.NotNil(t, a, prompt)
+		require.Equal(t, prompt, a.Quote, "the quote is the sentence as typed")
+		require.Equal(t, `Ann (prompt ts: "`+prompt+`")`, PersonBy("Ann", "ts", a.Quote))
+	}
+	quote, raw, ok := matchAct("We shouldn’t approve M2", approveCall("M2"))
+	require.False(t, ok, "a curly n’t still negates: %q %q", quote, raw)
 }
 
 // writeGrant writes a grant file for session s1 as pre-tool would, live

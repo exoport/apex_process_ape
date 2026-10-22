@@ -324,7 +324,8 @@ each act and target once. The command line is normalised — the verb, its argum
 every flag set but --cwd, --json, --wait and --no-detach, as --name=value, sorted — and
 must be literal (no $ or backquote anywhere), one person act per command. The command
 consumes the grant and records by: <git config user.name> (prompt <ts>: "<the sentence,
-at most 160 characters, secrets redacted>"); a --by there must be git config user.name
+at most 160 characters, secrets redacted, with the person's own quote characters: typed
+"approve M2" is recorded ""approve M2"">"); a --by there must be git config user.name
 (else session.by-mismatch). Without a grant it is refused, session.person-only, naming the
 phrase; pre-tool denies it first, saying why. A ` + "`!`" + ` line fires no hook, so it can never be
 granted. In a session ape launched (APE_SESSION) nothing is recorded or granted.
