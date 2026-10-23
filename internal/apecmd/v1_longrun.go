@@ -80,9 +80,9 @@ since <time> — run the same command again to attach" (--json: {"running": true
 Running the same command again attaches: it waits again and prints the run's result once it
 ends — never a second run — or exits 75 again with the log lines the run wrote since the
 last call (stderr; --json: "log_tail"). A result no call
-printed yet is printed by the next call of the same verb while HEAD has not moved;
-` + "`ape milestone gate`" + ` returns a printed one too while HEAD and the working tree are
-unchanged (see its help; --rerun runs it again). While a
+printed yet is printed by the next call of the same verb while HEAD has not moved (for
+` + "`ape milestone gate`" + `, only while the working tree is unchanged too, marked "recorded";
+see its help); once printed, the next call runs again. While a
 run holds the lock, another of these verbs on the same change or milestone is refused:
 run.busy (exit 3, action retry; the message names the running verb and since when). A lock
 whose process is gone (killed, the machine restarted) is removed and reported as
@@ -171,23 +171,22 @@ func runLong(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, scope string, co
 		}
 		return awaitRun(cmd, f, p, held)
 	}
-	// `ape milestone gate` returns its finished run while nothing changed
-	// (F1); --rerun runs it again whatever is recorded.
-	recall := verb == apexv1.VerbMilestoneGate
-	rerun := recall && f.rerun
+	// --rerun (`ape milestone gate` only) runs the gate whatever is recorded.
+	rerun := verb == apexv1.VerbMilestoneGate && f.rerun
 	// A run that ended after its call stopped waiting: its result is the
-	// answer while nothing moved since (a person act's, only to that act).
+	// answer, once — to the call that had not seen it — while nothing
+	// moved since (a person act's, only to that act). Once a call has
+	// printed it, the next call runs again: a gate re-run is how a flaky
+	// check clears (D455).
 	if r := p.LoadRunResult(scope); !rerun && r != nil && !r.Reported && r.Verb == verb && r.HeadAfter == apexv1.HeadSHA(ctx, p.Root) &&
 		(f.person == nil || r.PersonAct.Same(*f.person)) {
-		p.ReleaseRunLock(lock)
-		return deliverRun(cmd, f, p, r)
-	}
-	// A finished gate run, printed already: the answer again while HEAD
-	// and the working tree (ape's state aside) are where it left them —
-	// a call meant to read the result must not run an hour-long gate
-	// again (D419). Only the same act's result: none for a plain call.
-	if recall && !rerun {
-		if r := p.GateRecall(ctx, scope); r != nil && samePersonAct(f.person, r.PersonAct) {
+		switch {
+		case r.Tree == "":
+			p.ReleaseRunLock(lock)
+			return deliverRun(cmd, f, p, r)
+		case p.GateRunCurrent(ctx, scope) != nil && samePersonAct(f.person, r.PersonAct):
+			// A gate run that recorded the tree it left (F1): handed back
+			// only while the working tree is that tree too, and said so.
 			p.ReleaseRunLock(lock)
 			return deliverRecorded(cmd, f, p, r)
 		}
@@ -302,9 +301,11 @@ func samePersonAct(c *apexv1.PersonCall, a *apexv1.PersonAct) bool {
 	return a.Same(*c)
 }
 
-// deliverRecorded prints a finished gate run a call returns instead of a
-// new run (F1): its output as it was, with "recorded": true added under
-// --json, and a note on stderr saying so; the verb's exit code.
+// deliverRecorded prints a finished gate run no call had printed, to the
+// call that returns it instead of starting a run (F1, D455): its output as
+// it was, with "recorded": true added under --json, and a note on stderr
+// saying so; the verb's exit code. It is marked printed: the next call
+// runs the gate again.
 func deliverRecorded(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, r *apexv1.RunResult) error {
 	out := r.Human
 	if f.json {
@@ -313,7 +314,7 @@ func deliverRecorded(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, r *apexv
 	}
 	_, _ = io.WriteString(cmd.OutOrStdout(), out.Stdout)
 	_, _ = io.WriteString(cmd.ErrOrStderr(), out.Stderr)
-	fmt.Fprintf(cmd.ErrOrStderr(), "unchanged since %s (%.7s): the finished run's result, not a new run — `ape %s %s --rerun` runs it again\n",
+	fmt.Fprintf(cmd.ErrOrStderr(), "unchanged since %s (%.7s): the finished run's result, not a new run — the next call runs the gate again; `ape %s %s --rerun` runs it now\n",
 		r.Ended, r.HeadAfter, r.Verb, r.Scope)
 	if !r.Reported {
 		r.Reported = true
@@ -387,7 +388,7 @@ func longStillRunning(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, l *apex
 	msg := fmt.Sprintf("`ape %s %s` is still running since %s (pid %d, log %s) — run the same command again to attach",
 		l.Verb, l.Scope, l.Started, l.PID, l.Log)
 	if l.Verb == apexv1.VerbMilestoneGate {
-		msg += "; once it has finished, the same command returns its result while nothing changed (`--rerun` runs the gate again)"
+		msg += "; once it has finished, the next call returns its result once, while nothing changed (`--rerun` runs the gate again)"
 	}
 	return stillRunning(cmd, f, payload, msg)
 }

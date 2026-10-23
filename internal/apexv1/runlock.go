@@ -265,10 +265,11 @@ type RunResult struct {
 	// person act's call only when it is that act (D179).
 	PersonAct *PersonAct `json:"person_act,omitempty"`
 	// Tree is the working tree the run left (WorkTreeDigest, after its own
-	// commit), recorded by `ape milestone gate` alone (F1): while HEAD and
-	// the tree are unchanged, a new call returns this result — printed or
-	// not — rather than running the gate again (GateRecall). Absent from
-	// ape v1.1's records, which are never returned that way.
+	// commit), recorded by `ape milestone gate` alone (F1): an unprinted
+	// gate result is handed to the next call (as "recorded") only while
+	// HEAD and the tree are both unchanged (GateRunCurrent); once printed,
+	// the next call runs the gate again (D455). Absent from ape v1.1's
+	// records.
 	Tree string `json:"tree,omitempty"`
 }
 

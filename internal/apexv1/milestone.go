@@ -52,10 +52,11 @@ type GateRun struct {
 	// logs/gate-<M>.json (gateTimings); never in milestones.json, the
 	// gate's output or ape status.
 	ScenarioSecs map[string]float64 `json:"scenario_secs,omitempty"`
-	// Current is set by ape status alone (F1): whether `ape milestone
-	// gate <M>` would return this run's result now rather than run the
-	// gate (GateRecall) — no run in progress, HEAD and the working tree
-	// unchanged since it ended.
+	// Current is set by ape status alone (F1): whether this run still
+	// describes the project (GateRunCurrent) — no run in progress, HEAD
+	// and the working tree unchanged since it ended, the gate not changed
+	// since its approval. A gate call returns it only if no call has
+	// printed it yet (D455); otherwise it runs the gate again.
 	Current *bool `json:"current,omitempty"`
 }
 

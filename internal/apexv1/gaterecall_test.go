@@ -58,7 +58,7 @@ func TestWorkTreeDigest(t *testing.T) {
 
 // A record without a tree (ape v1.1), another verb's, or one whose HEAD
 // moved is never recalled.
-func TestGateRecall_Keys(t *testing.T) {
+func TestGateRunCurrent_Keys(t *testing.T) {
 	p := fixture(t, baseFiles())
 	head := HeadSHA(ctx(), p.Root)
 	tree, err := p.WorkTreeDigest(ctx())
@@ -69,11 +69,11 @@ func TestGateRecall_Keys(t *testing.T) {
 		require.NoError(t, p.SaveRunResult(&r))
 	}
 	save(RunResult{Verb: VerbMilestoneGate, HeadAfter: head, Tree: tree, Reported: true})
-	require.NotNil(t, p.GateRecall(ctx(), "M1"))
+	require.NotNil(t, p.GateRunCurrent(ctx(), "M1"))
 	save(RunResult{Verb: VerbMilestoneGate, HeadAfter: head, Reported: true})
-	require.Nil(t, p.GateRecall(ctx(), "M1"), "v1.1's record has no tree")
+	require.Nil(t, p.GateRunCurrent(ctx(), "M1"), "v1.1's record has no tree")
 	save(RunResult{Verb: "milestone close", HeadAfter: head, Tree: tree})
-	require.Nil(t, p.GateRecall(ctx(), "M1"))
+	require.Nil(t, p.GateRunCurrent(ctx(), "M1"))
 	save(RunResult{Verb: VerbMilestoneGate, HeadAfter: "0000000000000000000000000000000000000000", Tree: tree})
-	require.Nil(t, p.GateRecall(ctx(), "M1"), "HEAD moved")
+	require.Nil(t, p.GateRunCurrent(ctx(), "M1"), "HEAD moved")
 }

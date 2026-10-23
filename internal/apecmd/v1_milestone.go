@@ -365,18 +365,19 @@ or the gate differs from the approved one (milestone.gate-changed): a person app
 On a done milestone, refused (milestone.done) before anything runs: its gate was recorded at
 the close, which archived its gate folder; nothing is run, written or committed.
 
-A finished run is the answer while nothing changed (F1): a call that finds no run in
-progress, and the last run of the milestone's lock was this gate's, with HEAD where that
-run left it (after its own "apex: <M> gate" commit) and the working tree the same — tracked
-and untracked files git does not ignore, _apex/state/ left out — prints that run's result
-again instead of running the gate: the same output and exit code (0 green, 1 gate.red), a
-note on stderr ("unchanged since <time> (<sha>): the finished run's result, not a new run"),
-and under --json "recorded": true. So running the same command again after a run ended
-reads its result. Any commit, any edit or new file outside _apex/state/, a change of the
-gate since its approval (refused as milestone.gate-changed), or a run that was refused
-before the gate ran starts a new run; so does a result recorded by ape v1.1. --rerun runs
-the gate again whatever is recorded (it never attaches a different run: a run in progress is
-still attached to). Only this command: close, approve and the change verbs always run.
+A finished run no call has printed is returned once (F1): when a call's --wait ran out
+(exit 75) and the run ended before the next call, that next call — finding no run in
+progress, the last run of the milestone's lock this gate's, HEAD where that run left it
+(after its own "apex: <M> gate" commit) and the working tree the same (tracked and untracked
+files git does not ignore, _apex/state/ left out) — prints that run's result instead of
+running the gate: the same output and exit code (0 green, 1 gate.red), a note on stderr
+("unchanged since <time> (<sha>): the finished run's result, not a new run"), and under
+--json "recorded": true. Once a call has printed a run's result, the next call runs the
+gate again, even with nothing changed: that is how a flaky check clears. Any commit, any
+edit or new file outside _apex/state/, a change of the gate since its approval (refused as
+milestone.gate-changed), or a run that was refused before the gate ran also starts a new
+run. --rerun runs the gate even when an unprinted result would be returned (it never
+attaches a different run: a run in progress is still attached to).
 
 --spec-only (W2): runs the spec's scenario checks alone, as the gate runs them — no Gate:
 command, no regression command, no live check (JSON live_skipped) — and records nothing: no milestones.json, no gate-<M>.json,
@@ -428,7 +429,7 @@ approval record, a changed gate, or HEAD on a change branch · 2 usage · 3 run.
 	addV1TimeoutFlag(cmd, &f)
 	addV1WaitFlags(cmd, &f)
 	cmd.Flags().BoolVar(&specOnly, "spec-only", false, "run only the spec's scenario checks (no Gate: command, no regression) and record nothing; allowed on a proposed milestone")
-	cmd.Flags().BoolVar(&f.rerun, "rerun", false, "run the gate again even when its finished run is current (by default, while HEAD and the working tree are unchanged since the last run, its result is returned)")
+	cmd.Flags().BoolVar(&f.rerun, "rerun", false, "run the gate even when a finished run no call has printed would be returned (by default that result is returned once, while HEAD and the working tree are unchanged since it ended)")
 	return cmd
 }
 

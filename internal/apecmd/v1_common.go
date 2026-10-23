@@ -38,10 +38,10 @@ type v1Flags struct {
 	// person is the person act a long verb's call carries out (E2,
 	// D179), nil for none: runLong takes it under the run lock.
 	person *apexv1.PersonCall
-	// rerun is `ape milestone gate --rerun`: run the gate even when its
-	// finished run is current (F1). recallTree marks a gate run whose
-	// result is the gate's own (not a refusal): its run result records
-	// the tree it left.
+	// rerun is `ape milestone gate --rerun`: run the gate even when a
+	// finished run no call printed is current (F1). recallTree marks a
+	// gate run whose result is the gate's own (not a refusal): its run
+	// result records the tree it left.
 	rerun      bool
 	recallTree bool
 }

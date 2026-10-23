@@ -8,9 +8,10 @@ import (
 	"path/filepath"
 )
 
-// VerbMilestoneGate is the long verb whose finished run a later call
-// returns while nothing changed (F1, D432/D434): a gate run takes up to
-// hours, and a call meant to read its result must not run it again.
+// VerbMilestoneGate is the long verb whose finished run records the tree
+// it left (F1, D432/D434, narrowed by D455): a gate run takes up to hours,
+// and the call that saw only exit 75 must get its result rather than run
+// it again — but only once; a later call runs the gate again.
 const VerbMilestoneGate = "milestone gate"
 
 // WorkTreeDigest is the git tree id of the project's working tree as it
@@ -78,14 +79,16 @@ func (p *Project) GatePreflight(ctx context.Context, id string) error {
 	return nil
 }
 
-// GateRecall is the finished `ape milestone gate <M>` run a new call of
-// it returns instead of running the gate again (F1): the scope's last
-// long run was that gate, it recorded the tree it left, HEAD is still
-// where it ended, the working tree (ape's state aside) is the same, and
-// the gate would not be refused now — so a gate whose files changed since
-// its approval is refused, never answered from the record. Nil when any of that fails: a new call runs
-// the gate. A result without a tree (written by ape v1.1) never matches.
-func (p *Project) GateRecall(ctx context.Context, id string) *RunResult {
+// GateRunCurrent is the scope's last long run when it was a finished
+// `ape milestone gate <M>` that still describes the project (F1): it
+// recorded the tree it left, HEAD is still where it ended, the working
+// tree (ape's state aside) is the same, and the gate would not be refused
+// now — so a gate whose files changed since its approval is refused,
+// never answered from the record. Nil when any of that fails. A result
+// without a tree (written by ape v1.1) never matches. Being current is
+// not enough for a call to return it: only a result no call printed yet
+// is returned, once (D455); ape status reports it as gate_last.current.
+func (p *Project) GateRunCurrent(ctx context.Context, id string) *RunResult {
 	r := p.LoadRunResult(id)
 	if r == nil || r.Verb != VerbMilestoneGate || r.Tree == "" || r.HeadAfter == "" || r.HeadAfter != HeadSHA(ctx, p.Root) {
 		return nil
