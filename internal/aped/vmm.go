@@ -35,6 +35,12 @@ type VMMConfig struct {
 	// Socket is the priv socket the bridge dials for a streaming attach/exec.
 	// Empty disables interactive attach.
 	Socket string
+	// Subs confirms a session's subscriptions with the NATS server NatsConn is
+	// connected to, before attach.open / forward.open tell the client the session
+	// is ready. In aped-front it is the embedded *Server. Nil disables
+	// interactive attach, like an empty Socket: a session whose subscriptions
+	// nothing confirmed could be announced ready and then deliver nothing.
+	Subs SubscriptionConfirmer
 	// Egress re-points a live workspace's allowlist (the egress.set verb). It is the
 	// same EgressPlanner the resolver uses at create time — one seam, so a change made
 	// live and a grant made at create go through identical policy intersection. Nil
@@ -61,6 +67,7 @@ type VMM struct {
 	costs   CostReporter
 	nc      *nats.Conn
 	socket  string
+	subs    SubscriptionConfirmer
 	publish func(subject string, data []byte)
 	session atomic.Uint64 // interactive attach session id counter
 }
@@ -73,7 +80,7 @@ func NewVMM(cfg VMMConfig) *VMM {
 	}
 	return &VMM{
 		node: node, backend: cfg.Backend, egress: cfg.Egress, costs: cfg.Costs,
-		nc: cfg.NatsConn, socket: cfg.Socket, publish: cfg.Publish,
+		nc: cfg.NatsConn, socket: cfg.Socket, subs: cfg.Subs, publish: cfg.Publish,
 	}
 }
 
@@ -215,7 +222,7 @@ func (v *VMM) handleAttachOpen(req micro.Request) {
 		_ = req.Error(workspace.CodeValidation, "id is required", nil)
 		return
 	}
-	if v.nc == nil || v.socket == "" {
+	if v.nc == nil || v.socket == "" || v.subs == nil {
 		v.respondErr(req, fmt.Errorf("%w: interactive attach is not available on this node", workspace.ErrUnsupported))
 		return
 	}
@@ -233,13 +240,12 @@ func (v *VMM) handleAttachOpen(req micro.Request) {
 
 	sid := fmt.Sprintf("s%d", v.session.Add(1))
 	prefix := fmt.Sprintf("%s.exec.%s", v.Group(), sid)
-	sess, err := vmmstream.NewServerSession(v.nc, prefix, connToProcess(conn), 0)
+	sess, err := v.openSession(prefix, connToProcess(conn))
 	if err != nil {
-		_ = conn.Close()
 		v.respondErr(req, err)
+		forwardAuditRecords(v.publish, v.node, completionAudit(audit, r.ID, -1, err))
 		return
 	}
-	_ = v.nc.Flush() // the server is fully subscribed before the client is told
 
 	_ = req.RespondJSON(workspace.AttachOpenReply{
 		V:             workspace.WireVersion,
@@ -284,7 +290,7 @@ func (v *VMM) handleForwardOpen(req micro.Request) {
 			fmt.Sprintf("port %d is not a TCP port (1..65535)", r.Port), nil)
 		return
 	}
-	if v.nc == nil || v.socket == "" {
+	if v.nc == nil || v.socket == "" || v.subs == nil {
 		v.respondErr(req, fmt.Errorf("%w: port-forwarding is not available on this node", workspace.ErrUnsupported))
 		return
 	}
@@ -301,13 +307,12 @@ func (v *VMM) handleForwardOpen(req micro.Request) {
 
 	sid := fmt.Sprintf("f%d", v.session.Add(1))
 	prefix := fmt.Sprintf("%s.exec.%s", v.Group(), sid)
-	sess, err := vmmstream.NewServerSession(v.nc, prefix, connToProcess(conn), 0)
+	sess, err := v.openSession(prefix, connToProcess(conn))
 	if err != nil {
-		_ = conn.Close()
 		v.respondErr(req, err)
+		forwardAuditRecords(v.publish, v.node, completionAudit(audit, r.ID, -1, err))
 		return
 	}
-	_ = v.nc.Flush() // fully subscribed before the client is told
 
 	_ = req.RespondJSON(workspace.ForwardOpenReply{
 		V:             workspace.WireVersion,
@@ -319,6 +324,73 @@ func (v *VMM) handleForwardOpen(req micro.Request) {
 		code, runErr := sess.Run(context.Background())
 		forwardAuditRecords(v.publish, v.node, completionAudit(audit, r.ID, code, runErr))
 	}()
+}
+
+// SubscriptionConfirmer answers whether the NATS server holds a client
+// connection's subscriptions. *Server implements it.
+type SubscriptionConfirmer interface {
+	ConfirmSubscriptions(cid uint64, want map[string]int) error
+}
+
+// sessionReadyTimeout bounds the flush that precedes a session's confirmation.
+// Well under vmmclient.DefaultTimeout, so a client waiting on attach.open gets
+// this error rather than its own timeout. Var (not const) so tests can shorten it.
+var sessionReadyTimeout = 10 * time.Second
+
+// openSession stands up the server side of an interactive session under prefix
+// and confirms it before the caller announces it (F13, D444).
+//
+// A Subscribe returns before the server has processed the SUB, so "subscribed"
+// means a flush round trip that succeeded AND a server that kept every SUB. The
+// second half cannot be read off the connection the way `ape service` reads it
+// (its LastError): this connection is shared by every concurrent session and the
+// service endpoints, so its last error may be another session's, and nats.go
+// hands a permissions violation to the async error handler with no
+// subscription attached, on a goroutine of its own. Subscription.IsValid does
+// not see it either — a refused SUB stays valid client-side. So the check asks
+// the server itself, by subject: every subject sits under this session's own
+// prefix, which makes the answer this session's alone.
+//
+// On failure everything opened for this session — its subscriptions and the
+// streamed process (the priv conn, whose close makes the executor kill the guest
+// exec) — is torn down, and nothing else on the shared connection is touched.
+func (v *VMM) openSession(prefix string, proc *connProcess) (*vmmstream.ServerSession, error) {
+	sess, err := vmmstream.NewServerSession(v.nc, prefix, proc, 0)
+	if err != nil {
+		_ = proc.Kill(context.Background())
+		return nil, err
+	}
+	if err := v.confirmSession(prefix, sess.Subscriptions()); err != nil {
+		sess.Close()
+		_ = proc.Kill(context.Background())
+		return nil, err
+	}
+	return sess, nil
+}
+
+// confirmSession is the check behind a session's ready reply: a flush that
+// succeeded within sessionReadyTimeout, every subscription still valid
+// client-side, and every one held by the server.
+func (v *VMM) confirmSession(prefix string, subs []*nats.Subscription) error {
+	if err := v.nc.FlushTimeout(sessionReadyTimeout); err != nil {
+		return fmt.Errorf("aped: session %s not ready: the NATS server did not confirm its subscriptions within %s: %w",
+			prefix, sessionReadyTimeout, err)
+	}
+	want := make(map[string]int, len(subs))
+	for _, sub := range subs {
+		if !sub.IsValid() {
+			return fmt.Errorf("aped: session %s not ready: its subscription to %s was closed", prefix, sub.Subject)
+		}
+		want[sub.Subject]++
+	}
+	cid, err := v.nc.GetClientID()
+	if err != nil {
+		return fmt.Errorf("aped: session %s not ready: %w", prefix, err)
+	}
+	if err := v.subs.ConfirmSubscriptions(cid, want); err != nil {
+		return fmt.Errorf("session %s not ready: %w", prefix, err)
+	}
+	return nil
 }
 
 // completionAudit derives the session-completion record the front forwards when

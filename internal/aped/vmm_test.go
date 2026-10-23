@@ -26,6 +26,9 @@ type fakeBackend struct {
 	// idleStop is stamped onto every listed workspace, so the reaper tests can
 	// exercise the per-workspace opt-out without a registry.
 	idleStop string
+	// procs records every interactive process opened, in order, so a test can
+	// see which ones were torn down.
+	procs []*fakeStreamProcess
 }
 
 func newFakeBackend() *fakeBackend { return &fakeBackend{ws: map[string]workspace.State{}} }
@@ -115,7 +118,11 @@ func (f *fakeBackend) openInteractive(id string) (workspace.Process, error) {
 	if !ok {
 		return nil, workspace.ErrNotFound
 	}
-	return newFakeStreamProcess(), nil
+	p := newFakeStreamProcess()
+	f.mu.Lock()
+	f.procs = append(f.procs, p)
+	f.mu.Unlock()
+	return p, nil
 }
 
 // Suspend/Resume/Snapshot mirror the real Kata tier: unsupported.

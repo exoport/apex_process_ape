@@ -70,8 +70,9 @@ type ServerSession struct {
 // NewServerSession binds proc to the session subjects under prefix
 // (ape.vmm.<node>.exec.<sid>): it creates the stdout/stderr senders (gated at
 // zero credit), subscribes the stdin/resize inbound channels, and returns the
-// ready-to-run session. The caller must nc.Flush() before signalling the client,
-// then call Run. credit ≤ 0 uses DefaultCredit. This is the half the aped front
+// ready-to-run session. The caller must confirm Subscriptions with the server
+// before signalling the client (a flush alone does not say a SUB was accepted),
+// then call Run — or Close, if the confirmation failed. credit ≤ 0 uses DefaultCredit. This is the half the aped front
 // runs; proc is supplied by the executor over the priv socket (or a fake, in
 // tests) — the network-less executor holds no NATS conn of its own.
 func NewServerSession(nc *nats.Conn, prefix string, proc Process, credit int) (*ServerSession, error) {
@@ -136,6 +137,30 @@ func NewServerSession(nc *nats.Conn, prefix string, proc Process, credit int) (*
 	}
 	s.livenessSub = live
 	return s, nil
+}
+
+// Subscriptions returns every subscription this session holds — its inbound
+// channels (stdin, resize) and the control-subject listeners (both output
+// senders' credit, liveness). They are this session's alone: the subjects sit
+// under its own prefix. The caller confirms them with the server before it
+// tells the client the session is ready, because a Subscribe returns before the
+// server has accepted (or refused) the SUB.
+func (s *ServerSession) Subscriptions() []*nats.Subscription {
+	return []*nats.Subscription{s.stdout.creditSub, s.stderr.creditSub, s.stdin.sub, s.resizeSub, s.livenessSub}
+}
+
+// Close drops a session that will not Run: it unsubscribes every subscription
+// and closes the senders' credit windows. It touches nothing on the connection
+// but this session's own subscriptions, so it is safe on a connection other
+// sessions share. Run's own teardown is separate; call one or the other.
+func (s *ServerSession) Close() {
+	s.stdout.window.Close()
+	s.stderr.window.Close()
+	_ = s.stdout.creditSub.Unsubscribe()
+	_ = s.stderr.creditSub.Unsubscribe()
+	_ = s.stdin.Close()
+	_ = s.resizeSub.Unsubscribe()
+	_ = s.livenessSub.Unsubscribe()
 }
 
 // Run streams proc's stdio over the session subjects until proc exits or ctx is

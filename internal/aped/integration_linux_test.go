@@ -30,7 +30,8 @@ type fullStack struct {
 	client     *vmmclient.Client
 	clientConn *nats.Conn // the operator conn, for driving a vmmstream session
 	reg        *sandbox.Registry
-	srv        *Server // exposed so a test can mint an audit-consumer cred
+	srv        *Server      // exposed so a test can mint an audit-consumer cred
+	fake       *fakeBackend // the in-memory backend, when stackOpts.fake
 }
 
 // stackOpts selects the backend the stack's executor drives.
@@ -42,6 +43,9 @@ type stackOpts struct {
 	// driver selects a real driver for the gated Tier-2 acceptance: "" → the
 	// nerdctl shellDriver; DriverContainerd → the opt-in containerd client.
 	driver string
+	// svcGrant, when set, replaces the front's full-access service grant — to
+	// make the server refuse some of the front's subscriptions (F13).
+	svcGrant *Grant
 }
 
 func startFullStack(t *testing.T) *fullStack {
@@ -61,13 +65,14 @@ func newStack(t *testing.T, opts stackOpts) *fullStack {
 	}
 	reg := sandbox.OpenRegistry(stateDir)
 	var (
+		fake      *fakeBackend
 		backend   workspace.Backend
 		provision Provisioner
 		policy    *Policy
 	)
 	switch {
 	case opts.fake:
-		fake := newFakeBackend()
+		fake = newFakeBackend()
 		backend = fake
 		provision = func(ctx context.Context, spec sandbox.WorkspaceSpec) (workspace.Workspace, error) {
 			_, _ = fake.Create(ctx, workspace.CreateRequest{Name: spec.Name, Image: spec.Image})
@@ -113,7 +118,11 @@ func newStack(t *testing.T, opts stackOpts) *fullStack {
 	srv := startTestServer(t)
 	resolver := NewResolver(ResolverConfig{StateDir: stateDir, HostHome: t.TempDir(), Telemetry: srv.Telemetry()})
 
-	svcCreds, _, err := srv.HostOps().MintUser("aped", serviceGrant(), 0)
+	grant := serviceGrant()
+	if opts.svcGrant != nil {
+		grant = *opts.svcGrant
+	}
+	svcCreds, _, err := srv.HostOps().MintUser("aped", grant, 0)
 	if err != nil {
 		t.Fatalf("mint service cred: %v", err)
 	}
@@ -138,6 +147,7 @@ func newStack(t *testing.T, opts stackOpts) *fullStack {
 		Backend:  priv,
 		NatsConn: svcConn,
 		Socket:   sock,
+		Subs:     srv,
 		Publish:  func(subject string, data []byte) { _ = svcConn.Publish(subject, data) },
 	}).Register(svc); err != nil {
 		t.Fatalf("Register: %v", err)
@@ -150,7 +160,7 @@ func newStack(t *testing.T, opts stackOpts) *fullStack {
 		t.Fatalf("mint operator cred: %v", err)
 	}
 	cliConn, _ := connectCreds(t, srv.ClientURL(), opCreds, "")
-	return &fullStack{client: vmmclient.New(cliConn, "node1", 5*time.Second), clientConn: cliConn, reg: reg, srv: srv}
+	return &fullStack{client: vmmclient.New(cliConn, "node1", 5*time.Second), clientConn: cliConn, reg: reg, srv: srv, fake: fake}
 }
 
 // TestFullStackControlPlane exercises the entire real stack (NATS → vmm →

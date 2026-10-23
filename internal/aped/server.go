@@ -6,6 +6,8 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/nats-io/nats-server/v2/server"
@@ -151,6 +153,48 @@ func (s *Server) Shutdown() {
 	if s.ns != nil {
 		s.ns.Shutdown()
 	}
+}
+
+// ConfirmSubscriptions reports whether the server holds, for client connection
+// cid, at least want[subject] subscriptions on each subject. It reads the
+// server's own record of that connection's subscriptions, so it sees a SUB the
+// server refused (a permissions violation, a subscription limit) as absent — the
+// one thing a client-side Subscribe cannot tell, since it returns before the
+// server has processed the SUB. The caller must have flushed first: a server
+// processes a connection's protocol in order, so after the PONG every earlier
+// SUB is either held or refused.
+//
+// It asks about subjects, not the connection's error state, which is why it is
+// safe on a connection concurrent sessions share: each session's subjects are
+// its own.
+func (s *Server) ConfirmSubscriptions(cid uint64, want map[string]int) error {
+	if s.ns == nil {
+		return errors.New("aped: no NATS server to confirm subscriptions with")
+	}
+	cz, err := s.ns.Connz(&server.ConnzOptions{CID: cid, SubscriptionsDetail: true})
+	if err != nil {
+		return fmt.Errorf("aped: read the server's subscriptions for client %d: %w", cid, err)
+	}
+	if len(cz.Conns) == 0 {
+		return fmt.Errorf("aped: the NATS server has no open client %d", cid)
+	}
+	held := map[string]int{}
+	for _, c := range cz.Conns {
+		for _, d := range c.SubsDetail {
+			held[d.Subject]++
+		}
+	}
+	var missing []string
+	for subj, n := range want {
+		if held[subj] < n {
+			missing = append(missing, fmt.Sprintf("%s (%d of %d)", subj, held[subj], n))
+		}
+	}
+	if len(missing) > 0 {
+		slices.Sort(missing)
+		return fmt.Errorf("aped: the NATS server did not accept %s", strings.Join(missing, ", "))
+	}
+	return nil
 }
 
 // loadOrCreateOperatorKey loads the persisted operator seed or generates one.

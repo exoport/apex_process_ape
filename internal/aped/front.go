@@ -244,7 +244,10 @@ func RunFront(ctx context.Context, cfg FrontConfig) error {
 		Egress:   egressPlannerOrNil(egress),
 		NatsConn: nc,
 		Socket:   cfg.Socket,
-		Publish:  func(subject string, data []byte) { _ = nc.Publish(subject, data) },
+		// The embedded server confirms each session's subscriptions before the
+		// client is told it is ready (F13).
+		Subs:    srv,
+		Publish: func(subject string, data []byte) { _ = nc.Publish(subject, data) },
 		// Cost reporting reads the composed homes this process owns (PLAN-24 D3) —
 		// the operator's `ape` cannot, they are 0700 and aped-owned.
 		Costs: &WorkspaceCosts{StateDir: cfg.StateDir, Backend: backend},
