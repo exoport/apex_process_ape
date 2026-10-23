@@ -52,6 +52,11 @@ type GateRun struct {
 	// logs/gate-<M>.json (gateTimings); never in milestones.json, the
 	// gate's output or ape status.
 	ScenarioSecs map[string]float64 `json:"scenario_secs,omitempty"`
+	// Current is set by ape status alone (F1): whether `ape milestone
+	// gate <M>` would return this run's result now rather than run the
+	// gate (GateRecall) — no run in progress, HEAD and the working tree
+	// unchanged since it ended.
+	Current *bool `json:"current,omitempty"`
 }
 
 // Green reports a passing gate: its command exited 0, every scenario
@@ -458,26 +463,8 @@ func (p *Project) RunGate(ctx context.Context, id string, opt RunOptions) (*Gate
 	if err := p.recoverArchive(ctx); err != nil {
 		return nil, err
 	}
-	if err := p.refuseOnChangeBranch(ctx, "a milestone gate run"); err != nil {
+	if err := p.GatePreflight(ctx, id); err != nil {
 		return nil, err
-	}
-	if _, rm, err := p.loadRoadmapDoc(); err == nil {
-		if m := rm.Find(id); m != nil {
-			switch m.Status {
-			case MilestoneDone:
-				// A done milestone's gate was recorded at its close, and its
-				// gate folder archived (D155): run now, the Gate: line names
-				// a script that is gone, and a red would be recorded and
-				// committed against a closed milestone (Q162, D350).
-				// Refused before anything runs or is written.
-				return nil, doneMilestoneGate(m)
-			case MilestoneApproved:
-				// An approved milestone's gate is the one a person approved (H2).
-				if err := p.requireApprovalRecord(m, true); err != nil {
-					return nil, err
-				}
-			}
-		}
 	}
 	// Only milestones.json is the run's own edit: the gate may run long,
 	// and roadmap.md is a person's to edit meanwhile.
