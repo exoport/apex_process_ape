@@ -14,9 +14,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestQuiet_AboardV040HonoursIt pins, against the pinned aboard v0.4.0's
-// own server running in-process, what the tab's `quiet: true` (D60, D126)
-// does:
+// TestQuiet_AboardV040HonoursIt pins, against the pinned aboard's own server
+// (quiet arrived in v0.4.0) running in-process, what the tab's `quiet: true`
+// (D60, D126) does:
 //
 //   - a refresh with no board running writes the file, quiet set and no
 //     `touched`: no dot;
