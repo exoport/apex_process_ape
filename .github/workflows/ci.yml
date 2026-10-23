@@ -2,8 +2,17 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # ci/** runs the matrix on a candidate without a throwaway trigger commit:
+    # the branch tip is the candidate, .github included.
+    branches: [main, 'ci/**']
   pull_request:
+  # Daily on the default branch: catches runner-image drift and advisories
+  # published overnight, which no push would. GitHub reads `schedule` and
+  # `workflow_dispatch` only from the default branch, and disables a schedule
+  # after 60 days without repository activity.
+  schedule:
+    - cron: '17 5 * * *'
+  workflow_dispatch:
 
 # Cancel in-progress runs for the same ref when a new commit lands.
 concurrency:
@@ -49,7 +58,21 @@ jobs:
         run: make build
 
       - name: Test
-        run: make ${{ matrix.test_target }}
+        # tee keeps the log for the annotation step below; pipefail keeps
+        # make's exit status as the step's.
+        run: |
+          set -o pipefail
+          make ${{ matrix.test_target }} 2>&1 | tee test.log
+
+      - name: Annotate test failures
+        # Run logs are 403 without auth, so a red run would name no test.
+        # Annotations are public: lift each failure line into one. Runs only
+        # after a failure, so it cannot turn a green run red.
+        if: failure()
+        run: |
+          [ -f test.log ] || exit 0
+          grep -E -e '--- FAIL' -e '^panic:' -e '^FAIL' test.log | head -n 40 \
+            | sed -e 's/%/%25/g' -e 's/^/::error title=go test::/' || true
 
       - name: Smoke — ./ape version
         # Catches //go:build constraint regressions that would let a
