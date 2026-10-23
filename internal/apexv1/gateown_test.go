@@ -138,7 +138,8 @@ func TestGateDataOutsideNotice(t *testing.T) {
 	require.Equal(t, 3, n.Line)
 	require.Equal(t, "M1's gate script development/gates/M1-skel/g.sh reads scripts/checks/m1.checks (`< scripts/checks/m1.checks`), which is not one of the gate's own files, "+
 		"so the approval does not record it: an edit to it is no gate drift and no change.touches-gate (D313a)", n.Message)
-	require.Equal(t, "if it is the gate's own check list, move it into development/gates/M1-<slug>/ and read it from there before it is approved; "+
+	require.Equal(t, "if it is the gate's own check list, move it into development/gates/M1-<slug>/ and read it from there, "+
+		"or declare it in the script (`# ape: gate-files scripts/checks/m1.checks`), before it is approved; "+
 		"if it is a work product the gate checks, leave it", n.Fix)
 
 	// Moved into the gate's folder, it is the gate's own: recorded, no notice.

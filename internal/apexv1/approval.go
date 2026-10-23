@@ -49,6 +49,10 @@ type MilestoneApproval struct {
 	// it names under its own folder — each with its SHA-256 at approval.
 	// Absent on approvals before rc.7o.
 	GateOwnFiles map[string]string `json:"gate_own_files,omitempty"`
+	// GateGlobs are the globs that named some of the own files (v1.2 F4,
+	// gateOwnScan), sorted: a file one matches that GateOwnFiles does not
+	// hold is drift. Absent on approvals before v1.2.
+	GateGlobs []string `json:"gate_globs,omitempty"`
 	// SelfCheck is the gate's run at approval (D70 B): red, its exit,
 	// duration and log. Absent on approvals before rc.3.
 	SelfCheck *GateSelfCheck `json:"self_check,omitempty"`
@@ -142,8 +146,12 @@ func (p *Project) newApproval(m *Milestone, by string) *MilestoneApproval {
 	if len(files) > 0 {
 		a.GateFiles = files
 	}
-	if own := p.gateOwnFiles(m); len(own) > 0 {
-		a.GateOwnFiles = own
+	own := p.gateOwnScan(m)
+	if len(own.files) > 0 {
+		a.GateOwnFiles = own.files
+	}
+	if len(own.globs) > 0 {
+		a.GateGlobs = own.sortedGlobs()
 	}
 	return a
 }
@@ -315,4 +323,41 @@ func (p *Project) recordAcceptedDecision(ctx context.Context, id, path, doc, by 
 	}
 	res.Commit = sha
 	return res, nil
+}
+
+// FrozenGate is what an approval froze (v1.2 F4, `ape milestone approve
+// --json` "frozen"): the paths of its gate files and own files, and its
+// globs, each sorted.
+type FrozenGate struct {
+	GateFiles    []string `json:"gate_files"`
+	GateOwnFiles []string `json:"gate_own_files"`
+	GateGlobs    []string `json:"gate_globs"`
+}
+
+// Count is how many files f froze.
+func (f *FrozenGate) Count() int { return len(f.GateFiles) + len(f.GateOwnFiles) }
+
+// ApprovalFrozen is what m's approval on record froze, and when it was
+// recorded; nil when ape holds no approval record of it.
+func (p *Project) ApprovalFrozen(id string) (frozen *FrozenGate, at string) {
+	recs, err := p.LoadMilestoneRecords()
+	if err != nil {
+		return nil, ""
+	}
+	rec := recs[id]
+	if rec == nil || rec.Approval == nil {
+		return nil, ""
+	}
+	a := rec.Approval
+	sorted := func(m map[string]string) []string {
+		out := make([]string, 0, len(m))
+		for n := range m {
+			out = append(out, n)
+		}
+		sort.Strings(out)
+		return out
+	}
+	globs := append([]string{}, a.GateGlobs...)
+	sort.Strings(globs)
+	return &FrozenGate{GateFiles: sorted(a.GateFiles), GateOwnFiles: sorted(a.GateOwnFiles), GateGlobs: globs}, a.At
 }

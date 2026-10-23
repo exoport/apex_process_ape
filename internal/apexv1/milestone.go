@@ -291,7 +291,24 @@ func (p *Project) NewMilestone(ctx context.Context, title, gate string, budget *
 // green or broken gate is refused, a red one's run is recorded with the
 // approval.
 func (p *Project) ApproveMilestone(ctx context.Context, id, by string, progress io.Writer) (*Milestone, error) {
-	return p.approveMilestone(ctx, id, by, "", progress)
+	m, _, err := p.approveMilestone(ctx, id, by, "", progress)
+	return m, err
+}
+
+// ApproveMilestoneOutcome is ApproveMilestone — with acceptGreen set,
+// ApproveMilestoneAcceptGreen with its reason — that also reports whether
+// it recorded an approval: false is the no-op on an approved milestone
+// whose record holds its gate as it is (v1.2 F4: approve --json
+// "approval": "unchanged").
+func (p *Project) ApproveMilestoneOutcome(ctx context.Context, id, by string, acceptGreen *string, progress io.Writer) (*Milestone, bool, error) {
+	if acceptGreen == nil {
+		return p.approveMilestone(ctx, id, by, "", progress)
+	}
+	reason := strings.TrimSpace(*acceptGreen)
+	if reason == "" || strings.Contains(reason, "\n") {
+		return nil, false, &UsageError{Code: "usage.reason", Msg: "--accept-green needs a one-line reason: why the gate is green before this re-approval (the milestone's work is done and the gate was fixed after it)"}
+	}
+	return p.approveMilestone(ctx, id, by, reason, progress)
 }
 
 // ApproveMilestoneAcceptGreen is a re-approval by a person who states
@@ -301,53 +318,50 @@ func (p *Project) ApproveMilestone(ctx context.Context, id, by string, progress 
 // error — a new gate must be red — and on a red re-approval the reason is
 // not needed and not recorded.
 func (p *Project) ApproveMilestoneAcceptGreen(ctx context.Context, id, by, reason string, progress io.Writer) (*Milestone, error) {
-	reason = strings.TrimSpace(reason)
-	if reason == "" || strings.Contains(reason, "\n") {
-		return nil, &UsageError{Code: "usage.reason", Msg: "--accept-green needs a one-line reason: why the gate is green before this re-approval (the milestone's work is done and the gate was fixed after it)"}
-	}
-	return p.approveMilestone(ctx, id, by, reason, progress)
+	m, _, err := p.ApproveMilestoneOutcome(ctx, id, by, &reason, progress)
+	return m, err
 }
 
-func (p *Project) approveMilestone(ctx context.Context, id, by, acceptGreen string, progress io.Writer) (*Milestone, error) {
+func (p *Project) approveMilestone(ctx context.Context, id, by, acceptGreen string, progress io.Writer) (*Milestone, bool, error) {
 	// A model never approves its own milestone (D47 Q6).
 	if err := requirePerson(ctx, ActMilestoneApprove, "ape milestone approve"); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if err := p.recoverArchive(ctx); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if strings.TrimSpace(by) == "" {
-		return nil, &UsageError{Code: "usage.by", Msg: "--by names who approves"}
+		return nil, false, &UsageError{Code: "usage.by", Msg: "--by names who approves"}
 	}
 	if err := p.refuseOnChangeBranch(ctx, "a milestone approval"); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	doc, rm, err := p.loadRoadmapDoc()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	m := rm.Find(id)
 	if m == nil {
-		return nil, &FailError{Code: CodeMilestoneNotFound, Msg: "no milestone " + id + " in roadmap.md"}
+		return nil, false, &FailError{Code: CodeMilestoneNotFound, Msg: "no milestone " + id + " in roadmap.md"}
 	}
 	recs, err := p.LoadMilestoneRecords()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	rec := recs[id]
 	switch m.Status {
 	case MilestoneDone:
-		return nil, &FailError{Code: "milestone.done", Msg: id + " is already done"}
+		return nil, false, &FailError{Code: "milestone.done", Msg: id + " is already done"}
 	case MilestoneApproved:
 		// Re-approval: only when ape holds no record of the approval, the
 		// gate changed since it, or it runs a script the record does not
 		// hold (created since: not drift, but approving freezes it).
 		if rec != nil && rec.Approval != nil && len(p.gateDrift(m, rec.Approval)) == 0 && !p.gateScriptUnrecorded(m, rec.Approval) && rec.ConsecutiveBlocks == 0 {
-			return m, nil
+			return m, false, nil
 		}
 	}
 	if fs := ValidateRoadmap(p.Rel(p.RoadmapMD()), doc); len(filterMilestone(fs, m)) > 0 {
-		return nil, &FailError{Code: "milestone.malformed", Msg: id + " is not well-formed — fix roadmap.md before approving", Findings: filterMilestone(fs, m)}
+		return nil, false, &FailError{Code: "milestone.malformed", Msg: id + " is not well-formed — fix roadmap.md before approving", Findings: filterMilestone(fs, m)}
 	}
 	// The milestone's start (D130 Q60): HEAD now, at its first approval;
 	// a re-approval keeps the first one, as the Status line does.
@@ -357,11 +371,11 @@ func (p *Project) approveMilestone(ctx context.Context, id, by, acceptGreen stri
 	}
 	reapproval := m.Status == MilestoneApproved
 	if acceptGreen != "" && !reapproval {
-		return nil, &UsageError{Code: "usage.accept-green", Msg: "--accept-green is for a re-approval of an approved milestone: " + id + " is " + m.StatusText + ", and a new gate must be red until the milestone's work is done"}
+		return nil, false, &UsageError{Code: "usage.accept-green", Msg: "--accept-green is for a re-approval of an approved milestone: " + id + " is " + m.StatusText + ", and a new gate must be red until the milestone's work is done"}
 	}
 	selfCheck, err := p.gateSelfCheck(ctx, m, base, reapproval, acceptGreen != "", progress)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	what := MilestoneApproved
 	own := p.milestoneOwn(ctx)
@@ -372,10 +386,10 @@ func (p *Project) approveMilestone(ctx context.Context, id, by, acceptGreen stri
 	} else {
 		updated, err := rm.WithStatus(id, "approved (by "+strings.TrimSpace(by)+" "+Stamp()+")")
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		if err := writeFileAtomic(p.RoadmapMD(), updated); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		m = ParseRoadmap("", updated).Find(id)
 	}
@@ -394,12 +408,12 @@ func (p *Project) approveMilestone(ctx context.Context, id, by, acceptGreen stri
 	// A person's approval resets the run of blocked changes (H19).
 	rec.ConsecutiveBlocks = 0
 	if err := p.saveMilestoneRecords(recs); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if _, err := p.commitMilestone(ctx, own, id, what); err != nil {
-		return m, err
+		return m, true, err
 	}
-	return m, nil
+	return m, true, nil
 }
 
 // filterMilestone keeps the findings that name milestone m. Status
