@@ -131,8 +131,9 @@ names unique across the slots. A design or review entry may add args: (the templ
 ape fills into ape task <skill> --args; placeholders {id}, {task}, {assets}, {change},
 no other), model: and effort: (low, medium, high, xhigh, max; unset: the D65 defaults).
 A skill is <plugin>:<skill> (the plugin listed in plugins:), or a project
-skill (.claude/skills/<skill>/SKILL.md) or user skill ($CLAUDE_CONFIG_DIR, else
-~/.claude, /skills/<skill>/SKILL.md; a user skill wins over a project one). Each must
+skill (.claude/skills/<skill>/SKILL.md) or command (.claude/commands/<skill>.md), or
+a user one (the same two under $CLAUDE_CONFIG_DIR, else ~/.claude; a user skill or
+command wins over a project one). Each must
 be installed (tools.not-installed); a design or review skill must be slash-invocable
 — not user-invocable: false (tools.not-invocable) — because ape task types it as a
 slash command; a malformed block is tools.invalid. The loop may start the design and
@@ -142,7 +143,8 @@ apex-orchestrator never.
 
 An advise entry (W6, Q-E1) starts no session and gives no verdict: load: names files
 under its skill's folder (the folder holding its SKILL.md: in the plugin's install for
-a plugin skill, else the user's or the project's .claude/skills/<skill>/), and for:
+a plugin skill, else the user's or the project's .claude/skills/<skill>/; for a
+command, the whole commands/ folder its <skill>.md sits in), and for:
 the sessions that read them, change, apply and/or review (default all three; never a
 delegate). A change names the entries whose when: it matches in change.md's advise:
 frontmatter (ape change check --help); ape status --json lists each file of them under

@@ -386,8 +386,12 @@ func claudeConfigDir() string {
 	return filepath.Join(home, ".claude")
 }
 
-// localSkill finds a user or project skill (or command) by name. A user
-// skill wins over a project skill of the same name, as in Claude Code.
+// localSkill finds a user or project skill (or command) by name: under
+// the user's .claude, then the project's, skills/<name>/SKILL.md, then
+// commands/<name>.md. A user skill or command wins over a project one of
+// the same name, as in Claude Code. A command's folder (filepath.Dir of
+// its Path, which an advise entry's load: resolves under) is the whole
+// commands/ folder.
 func (p *Project) localSkill(name string) (SkillInfo, string, bool) {
 	bases := []struct{ source, dir string }{{"user", claudeConfigDir()}, {"project", filepath.Join(p.liveRoot(), ".claude")}}
 	for _, b := range bases {
@@ -470,7 +474,7 @@ func installHint(skill string) string {
 	if plugin, _, ok := strings.Cut(skill, ":"); ok {
 		return "list the plugin " + plugin + " in plugins: and run `ape plugins sync`, or fix the skill name"
 	}
-	return "add .claude/skills/" + skill + "/SKILL.md (or a user skill), or fix the skill name"
+	return "add .claude/skills/" + skill + "/SKILL.md or .claude/commands/" + skill + ".md (or a user skill or command), or fix the skill name"
 }
 
 // resolveTool finds one tool's skill. Path is where it was found or, when
@@ -491,7 +495,7 @@ func (p *Project) resolveTool(cfg Config, rows []PluginStatus, checked bool, slo
 			st.Source = source
 			return judge(s)
 		}
-		st.Path = "no skills/" + tool.Skill + "/SKILL.md in the project's or the user's .claude"
+		st.Path = "no skills/" + tool.Skill + "/SKILL.md or commands/" + tool.Skill + ".md in the project's or the user's .claude"
 		return st
 	}
 	st.Source = "plugin"

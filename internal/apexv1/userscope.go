@@ -60,8 +60,12 @@ func (p *Project) userScopeFindings(ctx context.Context, cli PluginCLI, cfg Conf
 					"), which wins over the project's copy — a person removes the user copy, or renames one of them"})
 				continue
 			}
+			into := ".claude/skills/" + t.Skill + "/"
+			if user == filepath.Join(dir, "commands", t.Skill+".md") {
+				into = ".claude/commands/" + t.Skill + ".md"
+			}
 			out = append(out, Finding{File: configYAML, Message: label + " is installed at user scope only (" + user +
-				"), so it is this machine's, unpinned — a person moves it into the project's .claude/skills/" + t.Skill + "/ (committed) and removes the user copy"})
+				"), so it is this machine's, unpinned — a person moves it into the project's " + into + " (committed) and removes the user copy"})
 		}
 	}
 	return out

@@ -565,12 +565,12 @@ func newProjectCheckCmd() *cobra.Command {
                            kebab slugs, load: paths inside the skill's folder, for:
                            change, apply, review — (tools.invalid), each skill
                            installed — <plugin>:<skill> of a listed plugin, or a project
-                           or user skill — (tools.not-installed) and, for design and
-                           review, not user-invocable: false (tools.not-invocable); an
-                           advise entry's load: files in its skill's folder
-                           (tools.not-installed) and within caps.advise together
-                           (tools.too-big, W6); a plugin skill is judged only when
-                           claude is on PATH. See ape plugins --help
+                           or user skill or command — (tools.not-installed) and, for
+                           design and review, not user-invocable: false
+                           (tools.not-invocable); an advise entry's load: files in its
+                           skill's folder (tools.not-installed) and within caps.advise
+                           together (tools.too-big, W6); a plugin skill is judged only
+                           when claude is on PATH. See ape plugins --help
   module fences            a library (_apex/config.yaml library: true) with a go.mod at
                            the root has a go.mod fence in each APEX folder that exists —
                            .claude/, _apex/, the development folder, a root evidence/ —

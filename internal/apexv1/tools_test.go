@@ -1,6 +1,7 @@
 package apexv1
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -151,4 +152,67 @@ func TestChildSkillAllowList(t *testing.T) {
 	require.Equal(t, []string{"apex-plan", "apex-change", "apex-apply", "apex-review", "apex-release", "apex-accept", "mockups", "kit:security"}, got)
 	require.NotContains(t, got, "apex-handoff")
 	require.NotContains(t, got, "apex-orchestrator")
+}
+
+// F7: a tools: skill may be a local Claude Code command,
+// commands/<name>.md, at project or user scope. ape looks under the
+// user's .claude, then the project's, and in each for the skill before the
+// command; the first found wins. An advise entry on a command resolves
+// load: against the whole commands/ folder. A skill found nowhere names
+// both places.
+func TestTools_LocalCommands(t *testing.T) {
+	p, cli := statusProject(t, pluginConfig+`tools:
+  review:
+    - {name: projcmd, skill: mylint, when: a}
+    - {name: usercmd, skill: myfmt, when: a}
+    - {name: mixed, skill: dual, when: a}
+    - {name: missing, skill: nowhere, when: a}
+  advise:
+    - {name: rules, skill: mylint, when: a, load: [advise.md]}
+`)
+	cfgDir := isolatedClaudeDir(t)
+	writeTree(t, p.Root, map[string]string{
+		".claude/commands/mylint.md":   "Lint the change.\n",
+		".claude/commands/advise.md":   "Rules.\n",
+		".claude/skills/dual/SKILL.md": skillMD("dual", ""),
+	})
+	writeTree(t, cfgDir, map[string]string{
+		"commands/myfmt.md": "Format the change.\n",
+		"commands/dual.md":  "The user's dual.\n",
+	})
+	rep, err := p.PluginsStatus(ctx(), cli)
+	require.NoError(t, err)
+	state := map[string]ToolStatus{}
+	for _, ts := range rep.Tools {
+		state[ts.Name] = ts
+	}
+	projCmds := filepath.Join(p.liveRoot(), ".claude", "commands")
+
+	require.Equal(t, ToolOK, state["projcmd"].State)
+	require.Equal(t, "project", state["projcmd"].Source)
+	require.Equal(t, filepath.Join(projCmds, "mylint.md"), state["projcmd"].Path)
+
+	require.Equal(t, ToolOK, state["usercmd"].State)
+	require.Equal(t, "user", state["usercmd"].Source)
+	require.Equal(t, filepath.Join(cfgDir, "commands", "myfmt.md"), state["usercmd"].Path)
+
+	require.Equal(t, "user", state["mixed"].Source, "a user command wins over a project skill of the same name")
+	require.Equal(t, filepath.Join(cfgDir, "commands", "dual.md"), state["mixed"].Path)
+
+	require.Equal(t, ToolNotInstalled, state["missing"].State)
+	require.Equal(t, "no skills/nowhere/SKILL.md or commands/nowhere.md in the project's or the user's .claude", state["missing"].Path)
+
+	rules := state["rules"]
+	require.Equal(t, ToolOK, rules.State)
+	require.Len(t, rules.Files, 1)
+	require.Equal(t, filepath.Join(projCmds, "advise.md"), rules.Files[0].Path, "load: resolves against the whole commands/ folder")
+	require.Empty(t, rules.Files[0].Error)
+
+	msgs := findingMessages(p.CheckPluginContents(ctx(), cli))
+	require.Contains(t, msgs, "tool review/missing: skill nowhere is not installed (no skills/nowhere/SKILL.md or commands/nowhere.md in the project's or the user's .claude)"+
+		" — add .claude/skills/nowhere/SKILL.md or .claude/commands/nowhere.md (or a user skill or command), or fix the skill name")
+	require.NotContains(t, msgs, "tool review/projcmd")
+	require.NotContains(t, msgs, "tool advise/rules")
+	require.Contains(t, msgs, "skill myfmt of tool review/usercmd is installed at user scope only ("+filepath.Join(cfgDir, "commands", "myfmt.md")+
+		"), so it is this machine's, unpinned — a person moves it into the project's .claude/commands/myfmt.md (committed) and removes the user copy")
 }
