@@ -1,8 +1,28 @@
 # CHANGELOG
 
-## v1.1.0 (draft)
+## v1.1.0 (2026-10-23)
 
-The APEX v1.1 work (D327, D330, D333, D337), built on v1.0.0's docs.
+APEX v1.1, on v1.0.0: ape measures what a run costs and waits for what it needs — test-time cost
+(W2), events and `ape status --wait` (W3), usage-aware launching (W4) — and takes in brief folders
+(W5), expert skills (W6) and module fences for libraries (W7), with the v1.0 follow-ups, Claude Code
+2.1.306 (W1) and the smalls (W8). A framework payload that uses it declares
+`min_ape_version: "1.1.0"`.
+
+Evaluated end to end on Claude Code 2.1.306 with the release build, rc.4 (24c2dac), and the
+framework's v1.1.0-rc.1 payload: the eval's $0 gate passed 272/272, and its four release runs
+(brownfield, greenfield, ledger, taskforge) each did at least as well as v1.0's. ape's harness gates
+pass on Claude Code 2.1.306 and 2.1.305. GitHub CI green twice on rc.4's tree on
+ci/v1.1.0-check: ubuntu-latest (`make test`), windows-latest (`make test-portable`), lint,
+docs-cli-check and govulncheck.
+
+Promoted from the release build at 24c2dac. Nothing compiled into the binary changed after that
+build: one docs commit (README's status and bingo pin, the install examples) and the release
+commit, which touches only this file.
+
+The trial built v1.1.0 as eight work items and four candidates: rc.1 (132613b) carries the work
+items and the follow-ups; rc.2 (899c191) a finding's `--json` message and a test-rig fix; rc.3
+(9aa17fb) a test-only fix, with no section of its own; rc.4 (24c2dac) the secret scan and ape's
+own records. Their sections follow, the work items first.
 
 ### v1.0 follow-ups (Q151–Q155, AE-9)
 
