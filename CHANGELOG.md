@@ -116,6 +116,20 @@ its arms differ only in the framework's `vet:` switch.
   change verbs' waits and `run stop` keep waiting. A run is lost (exit 76, `<id>.lost`) only after
   two definite negatives a second apart. Under load, a slow `ps` used to mark a live run lost.
 
+### F15: a check's exit is its own; what it leaves running is ended (eval bf `:3` M2, D460)
+
+- A check's output now goes through ape's own pipe, so its result is recorded when its shell exits.
+  What it left running in its process group gets SIGTERM, then SIGKILL after 1 s. It is recorded
+  as `leftovers` (on every check result and on `gate_last`) and named on the log's last line.
+- This applies to every check ape runs: gate, approval self-check, close, a change's task and
+  scenario checks, and the regression command.
+- Before this, a green gate script whose killed subshell orphaned a `sleep` holding the pipe was
+  recorded as exit 127 (`WaitDelay expired before I/O complete`) after 5 s, with every check
+  green. A quiet leftover, such as a server sending its output elsewhere, kept running past the
+  check and could hold the next check's port.
+- A process that left the group (`setsid`, a daemon) is not ended. ape stops reading its output 5 s
+  after the check exits and keeps the exit.
+
 ### C1: Claude Code 2.1.309 (D306 pattern)
 
 - `make check-harness` passes on Claude Code 2.1.309, and the surface baseline is reviewed through

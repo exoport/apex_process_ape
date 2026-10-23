@@ -199,7 +199,10 @@ Each runs under its timeout tier (`timeouts.gate`, `timeouts.check`, `timeouts.r
 `--timeout` sets the max for all three. Files a run leaves outside `development/` are undone and
 reported as `stray_files`, with a copy under `_apex/state/strays/`. Every check run, whether it
 undid anything or not, adds one line to `_apex/state/logs/strays.jsonl` (see
-[The guard while a check runs](../reference/hooks.md#while-a-check-runs)).
+[The guard while a check runs](../reference/hooks.md#while-a-check-runs)). A process a gate
+script leaves running, such as a server it did not stop, is ended once the script exits and named
+in `leftovers`. The gate's result is still the script's own exit (see
+[Processes a check leaves running](../reference/change-lifecycle.md#processes-a-check-leaves-running)).
 
 The run goes to `_apex/state/logs/gate-<M>.json`, which git ignores and `ape status` shows. When
 the result differs from the recorded one (green or red), or is the first, `milestones.json` is

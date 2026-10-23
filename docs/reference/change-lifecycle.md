@@ -291,6 +291,18 @@ is undone after it and reported as `stray_files`. A copy of each, as the check l
 under `_apex/state/strays/` (`strays_kept`). Files that were there before the check ran are never
 touched.
 
+### Processes a check leaves running
+
+A check's result is its shell's exit, recorded when the shell exits (v1.2). What the check started
+and left running in its process group (a server it did not stop, a `sleep` orphaned when the
+script killed the subshell around it) is then sent SIGTERM, and SIGKILL a second later. Each
+is recorded as `leftovers` (`"<pid> <command>"`; the pid alone on Windows, where the check's job
+holds them), and the log ends with a line naming them. A process that left the group (`setsid`, a
+daemon) is not ended. If it holds the check's output open, ape stops reading 5 s after the check
+exited and says so in the log; the exit stands. Before v1.2 such a process made a green check
+exit 127 (`WaitDelay expired before I/O complete`), and a quiet leftover kept running after the
+check.
+
 ### Advise files and unmatched tools
 
 A change that names [`tools.advise`](config-yaml.md#toolsadvise) entries in its `advise:`
