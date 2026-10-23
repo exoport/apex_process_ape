@@ -154,7 +154,8 @@ func parseGroupMembers(out string, pgid int) []groupMember {
 	var members []groupMember
 	for line := range strings.SplitSeq(out, "\n") {
 		f := strings.Fields(line)
-		if len(f) < 4 {
+		const psColumns = 4 // pid, pgid, stat, the command's first word
+		if len(f) < psColumns {
 			continue
 		}
 		pid, err1 := strconv.Atoi(f[0])
