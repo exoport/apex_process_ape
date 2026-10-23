@@ -206,6 +206,27 @@ the result differs from the recorded one (green or red), or is the first, `miles
 committed as `apex: <M> gate green` or `apex: <M> gate red`. The gate never changes the
 milestone's status. Exit 0 is green, exit 1 red.
 
+### The verdict is the last line
+
+The output ends with one line that names the verdict, the exit code, the gate's log, and how to
+read the result again, so a caller that keeps only the end of a long output (`| tail`) still has
+it:
+
+```text
+gate M5: red (exit 1) at 3f2a9c1 — log _apex/state/logs/gate-M5.log; this result is recorded: re-read it with `ape status --json` (milestone.gate_last) or the log, not by running the gate again
+```
+
+It is the last line on stdout, green or red, and when a call returns a finished run's result
+(below). `--json` keeps the same object and puts `exit` and `log` first and `verdict`, that line,
+last: `head` shows the exit and the log, and `tail` the verdict. `ape milestone close` ends the
+same way (`close M5: done, gate green (exit 0) …`, `close M5: gate red, not closed (exit 1) …`,
+re-read through `milestones[].last_gate`). While the run is still going (exit 75) there is no
+verdict yet: the last line says it is still running and that the same command attaches, and the
+`--json` object ends with `"verdict": "no verdict yet: …"`.
+
+Never run the gate again to read a result you cut off: the call after one that printed a result
+starts a new run.
+
 ### Calling the gate again after a run ended
 
 A finished gate run that no call has printed is returned once. That is the call that saw only

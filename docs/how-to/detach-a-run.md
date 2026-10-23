@@ -138,7 +138,10 @@ command runs the verb again. See
 and `close` accept a `--wait` of at most `9m30s`. With `--json` their 75
 prints `{"running": true, "verb", "scope", "since", "log", "pid",
 "log_tail"}`, where `log_tail` holds the lines the run logged since the last
-call. They take the run lock of their change or milestone,
+call; `ape milestone gate` and `close` add a last key, `"verdict": "no verdict
+yet: …"`, so a cut-off tail still says the run is going (see
+[The verdict is the last line](run-a-milestone.md#the-verdict-is-the-last-line)).
+They take the run lock of their change or milestone,
 `_apex/state/runs/<id|M>.json`, and log to `_apex/state/runs/<id|M>.log`.
 The lock gives two answers:
 
