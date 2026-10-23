@@ -95,6 +95,14 @@ change and reason.
 through the project's settings. With `--ignore-project-settings` it does not
 run, and the first Stop ends the session.
 
+## Servers the session leaves running
+
+When the session ends, ape stops any process it left running, such as a
+server its Bash tool started in the background, and lists each one under
+`session_leftovers` in `prompt.yaml`. Pass `--leftovers report` to record
+them and leave them running. `ape task` does the same; see
+[`session_leftovers`](../reference/pipeline-run-manifest.md#session_leftovers--what-the-session-left-running).
+
 ## `--workflow` and `--ultracode`
 
 Two independent flags shape how the session runs the work:

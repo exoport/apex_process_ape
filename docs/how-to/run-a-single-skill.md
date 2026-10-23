@@ -274,6 +274,18 @@ and the 5m and 1h fields split it by tier. Other fields appear when they
 apply: `model_usage`, `sessions`, `commits_shared`, `commit_contract`,
 `relays`, `relay_of`.
 
+## Servers the session leaves running
+
+A session may start a server and leave it running, for example from its Bash
+tool with `&`. That server is no longer claude's child once its shell exits.
+When the session ends, ape finds every process still carrying the session's
+`APE_SESSION` marker and stops its process tree. It prints one `⚠` line and
+lists each process under `session_leftovers` in the manifest. With
+`--leftovers report`, ape records them and leaves them running. ape's own
+detached workers are never touched, and neither is anything in an `ape chat`
+session. This works on Linux only. See
+[`session_leftovers`](../reference/pipeline-run-manifest.md#session_leftovers--what-the-session-left-running).
+
 ## Artifacts
 
 In an APEX v1 project each run writes its manifest, per-step event stream and

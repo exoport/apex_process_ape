@@ -155,6 +155,7 @@ usage:                       # v1.1: the plan's usage over the run
 | `usage` | The claude.ai plan's usage over the run, and the usage guard's decision; see [below](#usage--the-plans-usage-over-the-run). |
 | `relay_of`, `relay` | Only on a loop session ape relayed: the loop run it relays, and how many relays that loop run has had with this one (1 for the first). |
 | `children`, `tree_cost_usd` | Only on an `apex-loop` run, written when it ends; see [below](#children-and-tree_cost_usd). |
+| `session_leftovers` | The processes the session left running after it ended, and what ape did to each; see [below](#session_leftovers--what-the-session-left-running). Absent when there were none. |
 | `transcript_blobs`, `upload_status` | Present only with `--upload-transcripts`: each uploaded transcript's content-addressed reference, and `ok`, `partial` or `failed`. |
 
 ### Step fields
@@ -314,6 +315,27 @@ stop_gate:
 ```
 
 `ape prompt` records the same verdicts under `stop_gate` in `prompt.yaml`. Why the hook blocks is in [step-completion-gates.md](../explanation/step-completion-gates.md#v1-the-stop-hook).
+
+### `session_leftovers` — what the session left running
+
+A server a session's Bash tool backgrounded (`cmd &`, `nohup`, `setsid`) is no longer a child of claude once its shell exits, so stopping claude and everything below it does not stop it. When the session has ended and claude has been stopped, ape looks for every process still carrying the session's `APE_SESSION=<kind>/<run-id>` environment entry, which names this run alone:
+
+```yaml
+session_leftovers:
+  - pid: 48211
+    command: ./bin/taskforge serve --port 8080
+    started: 2026-10-23T10:14:02Z
+    action: killed          # killed | kept | kill-failed
+```
+
+- With the default `--leftovers kill`, each one's process tree gets SIGTERM, then SIGKILL after 2 s. `kill-failed` means it was still running after that.
+- With `--leftovers report`, they are recorded as `kept` and left running.
+- Only the topmost process of each leftover tree is listed. The processes below it stop with it.
+- Never touched: ape itself and its ancestors, zombies, processes whose environment ape cannot read (another user's), and ape's own detached processes. Those are the long verbs' `ape __run` workers and the `ape run supervise` supervisor of a detached run, everything in their sessions and process groups, and everything below them.
+- A process that cleared its environment (`env -i`, a container) carries no marker and is not found.
+- Linux only. On macOS and Windows nothing is looked for or recorded.
+
+ape prints one `⚠` line on stderr when it finds any. `ape prompt` records the same list in `prompt.yaml`. `ape chat` never looks: what a person's session starts is theirs.
 
 ### `children` and `tree_cost_usd`
 

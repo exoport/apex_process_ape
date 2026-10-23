@@ -6081,6 +6081,7 @@ Flags:
 | `--handoff` | string | `—` | Handoff document to seed the session with (mutually exclusive with the positional prompt) |
 | `--idle-timeout` | duration | `0s` | Idle backstop: end the session only after this long with no progress across hooks, transcript growth, or PTY output (e.g. 15m); default 60m |
 | `--ignore-project-settings` | bool | `false` | Tell the spawned claude to skip project + local .claude/settings*.json |
+| `--leftovers` | string | `kill` | What to do, once the session has ended, with the processes it left running (a server its Bash tool backgrounded), found by the session's APE_SESSION marker: kill stops each one's tree, report leaves them running. Either way they are listed under session_leftovers in the run record (Linux only; ape's own detached workers are never touched) |
 | `--max-duration` | duration | `0s` | Wall-clock ceiling regardless of progress (e.g. 8h); off by default (D159: a run showing progress stops only on the idle timeout, ape's limits or a person). The clock resets on each sub-agent boundary, so a sequential batch skill is bounded per item. |
 | `--model` | string | `—` | Claude model. A bare family (fable, haiku, mythos, opus, sonnet) resolves to its current generation; sonnet-5 / claude-sonnet-5 / opus[1m] pin explicitly |
 | `--output-format` | string | `human` | Output format: human\|json\|yaml (json/yaml = result envelope on stdout, progress on stderr) |
@@ -8002,6 +8003,7 @@ Flags:
 | `--handoff` | string | `—` | Path to a handoff/context file; derives a "Read <path> and follow the Resume Protocol" --prompt value (mutually exclusive with --prompt) |
 | `--idle-timeout` | duration | `0s` | Idle backstop: cancel only after this long with no progress across hook events or transcript growth (e.g. 15m); default 60m. PTY output is NOT an anchor here — see `ape prompt` |
 | `--ignore-project-settings` | bool | `false` | Tell the spawned claude to skip project + local .claude/settings*.json |
+| `--leftovers` | string | `kill` | What to do, once the session has ended, with the processes it left running (a server its Bash tool backgrounded), found by the session's APE_SESSION marker: kill stops each one's tree, report leaves them running. Either way they are listed under session_leftovers in the run record (Linux only; ape's own detached workers are never touched) |
 | `--manifest-dir` | string | `—` | Override the run-artifact base dir (default: <project>/_output/ape/tasks; _apex/state/runs/tasks in an APEX v1 project) |
 | `--max-duration` | duration | `0s` | Wall-clock ceiling regardless of progress (e.g. 8h); off by default (D159: a run showing progress stops only on the idle timeout, ape's limits or a person). The clock resets on each sub-agent boundary, so a sequential batch skill is bounded per item. |
 | `--model` | string | `—` | Claude model (APEX v1 unset: models.<skill> in _apex/config.yaml, else the parent session's, else claude's default). A bare family (fable, haiku, mythos, opus, sonnet) resolves to its current generation; sonnet-5 / claude-sonnet-5 / opus[1m] pin explicitly |
