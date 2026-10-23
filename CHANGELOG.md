@@ -1,5 +1,135 @@
 # CHANGELOG
 
+## v1.2.0 (draft)
+
+APEX v1.2, on v1.1.0: hardening and currency. ape stops a session's leftover servers (F3), freezes
+the files a milestone gate reaches (F4), returns a finished gate run to the call that had not seen
+it and ends a gate's output with its verdict (F1), no longer calls a live detached run lost on a slow
+`ps` (F14), confirms its NATS subscriptions before announcing ready (F2, F13), lets the loop start
+`apex-vet` (Q4a), pins aboard v0.4.1 (F10) and is measured on Claude Code 2.1.309 (C1). CI runs on
+`ci/**`, daily and on dispatch (F5), and `make check-harness` runs every gate (F6).
+
+Not yet evaluated. The Q4 A/B runs on a separate frozen build, v1.1.0 plus Q4a only (af5ef1e), so
+its arms differ only in the framework's `vet:` switch.
+
+### F1: a finished gate run, once; the verdict last (D419, D432, D455, D456)
+
+- **A finished run is returned once, to the call that had not seen it.** A `milestone gate` call
+  whose run ended after an earlier call's `--wait` gave up (exit 75) gets that run's result, with
+  `"recorded": true` and a stderr note, while HEAD and the working tree are unchanged. The run now
+  records a digest of the tree it left (`_apex/state/` and ignored files excluded). Once a result
+  has been printed, the next call runs the gate again, as v1.1.0 did, so a flaky red can clear.
+  The gate's refusals (change branch, done milestone, approval record, `milestone.gate-changed`)
+  come before any recall.
+- **`--rerun`** on `ape milestone gate` always starts a run.
+- **`ape status --json`** adds `milestone.gate_last.current`: the last run still describes the
+  project (same HEAD and tree).
+- **A gate's output ends with its verdict.** atomix M5 cut an attaching call's output with
+  `| tail -c 1500`, did not see the verdict and ran the one-hour gate again (D419). The human output
+  of `milestone gate` and `milestone close` now ends with one line naming the verdict, the log and
+  how to re-read the result (`ape status --json`, `milestone.gate_last`), never by running the gate
+  again. `--json` keeps every key, puts `exit` and `log` first and a one-line `verdict` last. Exit
+  75 gets a last `verdict` of "no verdict yet".
+
+### F2 and F13: ready only once the server holds the subscriptions (D408, D444)
+
+- **`ape service`** prints its ready line only after a flush that succeeded within 10 s and no
+  refused subscription (`permissions violation`). Otherwise it stops what it started and exits 1,
+  naming the subject pattern. It used to discard the flush error, announce ready and serve nothing.
+- **`aped`** answers an attach or forward open as ready only once its embedded server holds each of
+  that session's subscriptions, counted by the session's own subject prefix, so concurrent sessions
+  cannot mask each other. On failure it tears down that session alone and replies with an error.
+- **Not covered:** a subscription refused after a reconnect still only warns, in both.
+
+### F3: what a session leaves running (O-1, D434, D447)
+
+- **Class B.** When an unattended session ends, ape finds the processes that still carry its exact
+  `APE_SESSION` marker (Linux, `/proc/*/environ`): a server a skill backgrounded with `&`, `nohup`
+  or `setsid`. It kills them (TERM, then KILL) and records them in the manifest as
+  `session_leftovers: [{pid, command, started, action}]`, with one stderr line and a
+  `session-leftovers` checkpoint. This applies to `ape task` and everything that runs one (`change
+  review --run`, `change tool`, `accept --delegate`, loop children, scripts) and to `ape prompt`.
+  `ape chat`, a person's session, is never swept.
+- **`--leftovers kill|report`** on `ape task` and `ape prompt`; `report` records them as `kept`.
+- **A detached long-run worker carries its own marker,** `<kind>/<run-id>/worker/<worker-run-id>`,
+  so a server a gate script double-forks belongs to the run, which outlives the session by design,
+  and is never the session's leftover. Nesting answers are unchanged: a worker's script is answered
+  as its session would be.
+- **Not covered:** a process that cleared its environment; macOS and Windows record nothing.
+
+### F4: approval freezes what a gate's scripts reach (D313a, D319, D424, D433, D434)
+
+- Measured first: v1.1.0 already freezes atomix's M5 layout (a literal `$(dirname "$0")/lib`
+  source and a literal check-list path). D424's no-op re-approve came from an older dev build.
+- **Approval now also freezes** files reached through a script-dir variable
+  (`here=$(cd "$(dirname "$0")" && pwd)`, `${BASH_SOURCE%/*}`, …, including `$V/..`), what sourced
+  files source and read in turn (depth 3, each file once), and every match of a glob such as
+  `scripts/checks/*.checks`. The pattern is kept as `approval.gate_globs`, so a new matching file is
+  `milestone.gate-changed` ("… is new (it matches …)").
+- **`# ape: gate-files <path|glob>…`** in a gate script or a sourced file declares what the parser
+  cannot see.
+- **`milestone approve --json`** adds `approval: recorded|unchanged` and
+  `frozen: {gate_files, gate_own_files, gate_globs}`; the human output says what it froze, or that
+  nothing changed.
+- D53 holds: the root's README, `docs/` and `development/` are never frozen by inference.
+  `change.touches-gate` covers the wider set, including a new file under a recorded glob. A
+  milestone approved by v1.1 gets no new drift; approving it again records the wider set.
+- `gate.data-outside`'s fix also offers the declaration.
+
+### F5 and F6: CI and the harness (D358–D363, D360, D366)
+
+- **CI** runs on pushes to `main` and `ci/**`, daily (`17 5 * * *`) and on `workflow_dispatch`, so a
+  runner-image change cannot go unseen and a candidate needs no trigger commit. Test failures
+  become annotations; the concurrency group is per event, so the schedule never cancels a push run.
+- **`make check-harness` runs every gate** and ends with one row per gate; it fails if any did. A
+  surface row reads "review needed or failed". It used to stop at the first failing gate.
+- **Tests:** `internal/gittest.AppendConfig` extends the environment's git config instead of
+  replacing TestMain's keys.
+
+### F7: command tools (D331)
+
+- A `tools:` entry may name a local Claude Code command, `.claude/commands/<name>.md`, as well as a
+  skill; ape looks in the user's `.claude` before the project's, and for the skill before the
+  command. This is now documented, with what an advise entry's `load:` means for a command (the
+  whole `commands/` folder). `tools.not-installed` and the user-scope finding name both places.
+- The docs no longer say `change tool` and `accept --delegate` take any `--wait`: every long verb
+  refuses one outside 0–9m30s.
+
+### F8: status shows the newer self-check (D434)
+
+- `ape status` shows the newer of the last gate run and the approval's self-check, so a
+  re-approval no longer shows the older run. An accepted-green self-check reads green and
+  accepted, with its reason (`approval_self_check.accept_green`), and the next step after it is
+  `ape milestone close`. The board's milestone card shows the self-check instead of "not run".
+
+### F10: aboard v0.4.1 (D435, D438)
+
+- ape pins aboard v0.4.1: no dead `make caps` hint, the corrected "journal and watch" help, and the
+  example board without its invalid `sparkline`. capsHash is unchanged (4a958b30).
+- A silent aboard exit 1 (a stale capabilities reference, a refused detach) keeps its silence under
+  `ape aboard` instead of a bare `Error:` line.
+
+### F14: a slow `ps` is not a lost run (eval F-LOST1, D452)
+
+- A detached run's supervisor is checked through `/proc/<pid>/cmdline` on Linux. A check that
+  times out or fails is unknown, never "not ours", so `run wait`, `run status`, `ape status`, the
+  change verbs' waits and `run stop` keep waiting. A run is lost (exit 76, `<id>.lost`) only after
+  two definite negatives a second apart. Under load, a slow `ps` used to mark a live run lost.
+
+### C1: Claude Code 2.1.309 (D306 pattern)
+
+- `make check-harness` passes on Claude Code 2.1.309, and the surface baseline is reviewed through
+  2.1.309: 29 CHANGELOG entries, no tool, model or variable change that touches ape.
+- **For cost comparisons:** on Claude Code 2.1.306 and earlier, 0.5–1 % of sub-agent messages kept a
+  placeholder output token count (1–46), so sub-agent output cost recorded on those versions is
+  slightly low. 2.1.309 records the final usage. A comparison within one version is unaffected.
+
+### Q4a: the loop may start `apex-vet` (D437, D439)
+
+- **Class B.** `apex-vet`, the framework's plan vetter, joins the loop's core child skills (after
+  `apex-change`, before `apex-apply`), so a change vet runs as a loop child instead of being refused
+  `session.not-allowed`. Its model defaults and state are left for its adoption.
+
 ## v1.1.0 (2026-10-23)
 
 APEX v1.1, on v1.0.0: ape measures what a run costs and waits for what it needs — test-time cost
