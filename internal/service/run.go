@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/exoport/apex_process_ape/internal/natsconn"
+	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/micro"
 )
 
@@ -122,13 +123,52 @@ func Run(ctx context.Context, o Options) error {
 	// Ensure the endpoint subscriptions are active server-side before we
 	// announce readiness — otherwise an eager client could discover the
 	// service (via $SRV) yet get no-responders on a just-added endpoint.
-	_ = conn.Flush()
+	if err := confirmEndpoints(conn, fmt.Sprintf("%s.%s.%s.>", subjectRootSvc, name, daemon.projectSlug)); err != nil {
+		stopNotReady(conn, svc, daemon) //nolint:contextcheck // the stop must outlive ctx, which may be what is cancelled
+		return err
+	}
 
 	fmt.Fprintf(stderr, "▶ ape service %q on ape.svc.%s.%s.>  (project %s, %d allowed root(s), %d running)\n",
 		name, name, daemon.projectSlug, cfg.ProjectRoot, len(cfg.Allow), daemon.RunningCount())
 	fmt.Fprintf(stderr, "  discovery: $SRV.PING.%s · stop: SIGTERM (drain), SIGTERM×2 (force)\n", name)
 
 	return serveUntilSignal(ctx, daemon, o.DrainTimeout, stderr)
+}
+
+// readyFlushTimeout bounds the round trip that confirms the endpoints before
+// the ready line. Var (not const) so tests can shorten it.
+var readyFlushTimeout = 10 * time.Second
+
+// confirmEndpoints is the check behind the ready line (D408). A Subscribe
+// returns before the server has processed the SUB, so readiness is a Flush
+// round trip after the last endpoint was added, and that round trip has to
+// succeed: a flush that timed out confirmed nothing. The server answers a
+// SUB it refuses with -ERR, which the read loop records as the connection's
+// last error before the PONG that ends the flush arrives, so the check
+// reads LastError once the flush returns. pattern is the endpoint subject
+// pattern the error names.
+func confirmEndpoints(conn *nats.Conn, pattern string) error {
+	if err := conn.FlushTimeout(readyFlushTimeout); err != nil {
+		return fmt.Errorf("service: the NATS server did not confirm the endpoints on %s within %s: %w — not ready", pattern, readyFlushTimeout, err)
+	}
+	if err := conn.LastError(); err != nil && errors.Is(err, nats.ErrPermissionViolation) {
+		return fmt.Errorf("service: the NATS server refused a subscription this service needs (endpoints on %s, discovery on $SRV.>): %w — not ready", pattern, err)
+	}
+	return nil
+}
+
+// stopNotReady undoes what Run started when the endpoints were not
+// confirmed: no new job is accepted, the endpoint and discovery
+// subscriptions are dropped, a job that slipped in through an endpoint the
+// server did accept is stopped and its end recorded, and the connection is
+// closed. It does not wait on another flush, since the link may be what
+// failed; nothing was announced, so nobody is owed one.
+func stopNotReady(conn *nats.Conn, svc micro.Service, daemon *Daemon) {
+	daemon.draining.Store(true)
+	_ = svc.Stop()
+	daemon.KillAll()
+	daemon.WaitJobs()
+	conn.Close()
 }
 
 // serveUntilSignal blocks until the first shutdown trigger, then runs the
