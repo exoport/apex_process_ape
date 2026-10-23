@@ -14,7 +14,7 @@ tree dirty. Each verb's full rules are in [cli.md](../reference/cli.md#ape-miles
 | `ape milestone new` | apex-plan, or you | Proposes. |
 | `ape milestone approve <M> --by <who>` | a person | Refused in a model session. |
 | `ape milestone approve <M> --accept-green "<reason>" --by <who>` | a person | Re-approval only. |
-| `ape milestone gate <M>` | anyone; apex-loop runs it | Records the result. With nothing changed since the last run, returns that run's result; `--rerun` runs it again. |
+| `ape milestone gate <M>` | anyone; apex-loop runs it | Records the result. A finished run no call printed is returned once while nothing changed; `--rerun` runs the gate anyway. |
 | `ape milestone gate <M> --spec-only` | anyone; apex-plan runs it before approval | The spec's scenario checks alone. Records nothing. |
 | `ape milestone close <M>` | anyone; apex-loop runs it on a green gate | Done only when it exits 0. |
 | `ape milestone close <M> --accept-red "<reason>" --by <who>` | a person | Closes on a red gate. |
@@ -206,30 +206,33 @@ the result differs from the recorded one (green or red), or is the first, `miles
 committed as `apex: <M> gate green` or `apex: <M> gate red`. The gate never changes the
 milestone's status. Exit 0 is green, exit 1 red.
 
-### Running the gate again with nothing changed
+### Calling the gate again after a run ended
 
-A finished gate run is the answer while nothing changed. When the last run of the milestone's
-lock was `ape milestone gate <M>`, HEAD is where that run left it (after its own
-`apex: <M> gate …` commit), and the working tree is the same, a new `ape milestone gate <M>`
-prints that run's result instead of running the gate again: the same output and exit code, a note
-on stderr (`unchanged since <time> (<sha>): the finished run's result, not a new run`), and
-`"recorded": true` under `--json`. The working tree counts tracked files and untracked files git
-does not ignore; `_apex/state/` is left out. So the same command reads a result that came after its
-call stopped waiting, and a second call meant to read the result does not run an hour-long gate
-again.
+A finished gate run that no call has printed is returned once. That is the call that saw only
+exit 75: its `--wait` ran out, and the run ended before it called again. When the last run of the
+milestone's lock was `ape milestone gate <M>`, no call printed its result yet, HEAD is where that
+run left it (after its own `apex: <M> gate …` commit), and the working tree is the same, the next
+`ape milestone gate <M>` prints that run's result instead of running the gate: the same output
+and exit code, a note on stderr (`unchanged since <time> (<sha>): the finished run's result, not
+a new run`), and `"recorded": true` under `--json`. The working tree counts tracked files and
+untracked files git does not ignore; `_apex/state/` is left out. So an hour-long gate is not run
+twice for one caller.
 
+Once a call has printed a run's result, the next call runs the gate again, even with nothing
+changed: a flaky check clears that way. A caller that needs the result again reads
+`milestone.gate_last` in `ape status --json`, or the run's log, rather than calling the gate.
 Any commit, an edited, new or deleted file outside `_apex/state/`, a gate changed since its
 approval (still refused, `milestone.gate-changed`), or a last run that was refused before the gate
-ran starts a new run. So does a result ape v1.1 recorded. `--rerun` runs the gate whatever is
-recorded:
+ran also starts a new run. `--rerun` runs the gate even when an unprinted result would be
+returned:
 
 ```bash
 ape milestone gate M1 --rerun
 ```
 
-Only `gate` returns a recorded run. `--spec-only` always runs, and `close` and `approve` always
-run the gate. `ape status --json` says whether a call would return the last run:
-`milestone.gate_last.current`.
+`--spec-only` always runs and is never returned. `ape status --json` says whether the last run
+still describes the project — no run in progress, HEAD and the working tree unchanged since it
+ended, the gate unchanged since its approval: `milestone.gate_last.current`.
 
 A done milestone's gate does not run again: its result was recorded at the close, which archived
 its gate folder. `gate` refuses it with `milestone.done` (exit 1, action `stop`) before anything
@@ -334,10 +337,9 @@ Tagging the release is a person's act, after the close.
 result with its usual exit code.
 
 Otherwise the call exits **75**, still running. **Run the same command again to attach**: it waits
-again and prints the result once the run ends, and it never starts a second run. Once a `gate` run
-has finished, the same command still returns its result while nothing changed (see
-[Running the gate again with nothing changed](#running-the-gate-again-with-nothing-changed));
-`--rerun` runs it again.
+again and prints the result once the run ends, and it never starts a second run. A `gate` run that
+finished before that call returns its result once, while nothing changed (see
+[Calling the gate again after a run ended](#calling-the-gate-again-after-a-run-ended)).
 
 | Exit and code | Meaning |
 | --- | --- |

@@ -125,11 +125,12 @@ ape change verify <change-id> --wait 9m --json
 ```
 
 The second call waits again and prints the run's result once it ends. It
-never starts a second run. After a run has ended and its result was printed,
-the same command runs the verb again, except `ape milestone gate`: while HEAD
-and the working tree are unchanged since its run, it prints that run's result
-again (`"recorded": true` under `--json`), and `--rerun` runs the gate again.
-See [How to run a milestone](run-a-milestone.md#running-the-gate-again-with-nothing-changed). The sessions that `ape change review --run`,
+never starts a second run. A run that ended after the last call stopped
+waiting is printed by the next call, once, while HEAD has not moved; for
+`ape milestone gate` only while the working tree is unchanged too, marked
+`"recorded": true` under `--json`. After a run's result was printed, the same
+command runs the verb again. See
+[How to run a milestone](run-a-milestone.md#calling-the-gate-again-after-a-run-ended). The sessions that `ape change review --run`,
 `ape change tool` and `ape change accept --delegate` start are ordinary
 `ape task` runs, each with its own manifest.
 
