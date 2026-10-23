@@ -14,9 +14,11 @@ on:
     - cron: '17 5 * * *'
   workflow_dispatch:
 
-# Cancel in-progress runs for the same ref when a new commit lands.
+# Cancel in-progress runs for the same ref when a new commit lands. The
+# event is part of the group, so the daily schedule never cancels a push
+# run on main (or a push run the schedule).
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 permissions:

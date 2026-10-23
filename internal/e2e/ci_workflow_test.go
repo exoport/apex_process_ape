@@ -71,6 +71,16 @@ func TestRepo_CIWorkflowTriggers(t *testing.T) {
 		// Present; its value is usually empty, which is a null node, not nil.
 		require.NotNil(t, mappingValue(on, "workflow_dispatch"), "%s: no `workflow_dispatch` trigger", path)
 	})
+
+	t.Run("concurrency_per_event", func(t *testing.T) {
+		t.Parallel()
+		// cancel-in-progress with a group of the ref alone would let the
+		// daily schedule cancel a push run on main.
+		group := mappingValue(mappingValue(doc.Content[0], "concurrency"), "group")
+		require.NotNil(t, group, "%s: no concurrency.group", path)
+		require.Contains(t, group.Value, "github.event_name",
+			"%s: concurrency.group %q must include the event, or the schedule cancels push runs", path, group.Value)
+	})
 }
 
 // mappingValue returns the value node under key in a mapping node, matching
