@@ -236,7 +236,7 @@ Run the whole sweep as one named gate:
 make check-harness
 ```
 
-That is `check-prices` + `check-output-styles` + `check-hooks` + `check-claude` + `check-task-subagents` + `check-agents-md` + `check-claude-surface` (last, so its unread-CHANGELOG stop never hides another gate). ~3–5 min total.
+That is `check-prices` + `check-output-styles` + `check-hooks` + `check-claude` + `check-task-subagents` + `check-agents-md` + `check-claude-surface`. Every gate runs whatever an earlier one did; the sweep ends with one row per gate and exits non-zero if any failed. Surface runs last, so its row (`review needed or failed — see output` on unread CHANGELOG entries) reads after the verdicts of the gates that judge whether ape still works. ~3–5 min total.
 
 It measures the `claude` first on PATH. To measure another version too (the v1 trial measured 2.1.304 installed and 2.1.305 from a PATH shim), run the same targets with `DISABLE_AUTOUPDATER=1 PATH=<dir holding that claude>:$PATH`. Run `check-claude-surface` only against the version the baseline's `reviewed_through` names. The versions measured are the ones the release states. Spends a few cents (two short sessions — the PTY gate's Haiku turn, and the seeded run `check-hooks` judges); everything else reads local artifacts or the rendered pane for free.
 
@@ -248,7 +248,7 @@ If `{autonomous}` is true: skip the ask and run it.
 
 Stream output. Record the probed version from the `probing Claude Code at …` log line as `{claude_version}`.
 
-**If it fails, HALT.** Report which gate failed and what it means — the failure messages name the affected coupling and its consequence. Do not treat it as flaky and do not proceed to tag: a failure here means the binary you are about to release is already broken against the Claude Code on users' machines, which is a reason to fix before shipping, not after.
+**If it fails, HALT.** Report which gate failed (the summary rows at the end of the log name each gate's verdict) and what it means — the failure messages name the affected coupling and its consequence. Do not treat it as flaky and do not proceed to tag: a failure here means the binary you are about to release is already broken against the Claude Code on users' machines, which is a reason to fix before shipping, not after.
 
 **Then read the output for SKIPs. A skip is never a pass** — every gate here reports "not verified" rather than green when it finds no evidence, precisely so an empty run cannot be mistaken for a clean one. Report each explicitly in the summary:
 

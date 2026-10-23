@@ -76,7 +76,7 @@ make check-harness
 
 `ci-local` proves *ape* is internally consistent. It cannot prove ape still works, because ape's real dependency is not a library it pins — it is the `claude` binary on the machine, which auto-updates on a schedule ape does not control and makes no compatibility promise about its TUI, its flags, its hook payloads, or its transcript format.
 
-`check-harness` is the whole sweep — seven gates that each read what the locally-installed Claude Code is *actually doing*:
+`check-harness` is the whole sweep — seven gates that each read what the locally-installed Claude Code is *actually doing*. Every gate runs whatever an earlier one did, and the sweep ends with one summary row per gate and exits non-zero if any failed. `check-claude-surface` runs last: unread CHANGELOG entries fail it, which is a review to do rather than a breakage, so its row reads "review needed or failed — see output".
 
 | Gate | Reads | Catches |
 | --- | --- | --- |

@@ -57,13 +57,15 @@ For each version in `{others}`, run the same gates against it one at a time, nev
 
 ```bash
 DISABLE_AUTOUPDATER=1 PATH=<dir holding that claude>:$PATH \
-  make check-output-styles check-hooks check-claude check-task-subagents check-agents-md \
+  make -k check-output-styles check-hooks check-claude check-task-subagents check-agents-md \
   > {scratchpad}/harness-<v>.log 2>&1
 ```
 
+`-k` because these are separate goals, not the sweep: without it make stops at the first gate that fails.
+
 `check-claude-surface` runs only against the version Phase 2 records, the newest measured. An older one would read the newer baseline's additions as removals. Triage each log as below.
 
-Read the log, not just the exit code: `grep -nE -- '--- (PASS|FAIL)|not verified|FAIL|REVIEW NEEDED' {log}`. The sweep is seven gates, `check-claude-surface` last. On a Claude Code bump the sweep normally exits non-zero on `REVIEW NEEDED` (unread CHANGELOG entries) after every other gate has run. That is a review to do, not a failure: report it as "N CHANGELOG entries to review", never as "failed". Triage each real failure:
+Read the log, not just the exit code: `grep -nE -- '--- (PASS|FAIL)|not verified|FAIL|REVIEW NEEDED' {log}`. The sweep is seven gates, `check-claude-surface` last. Every gate runs whatever an earlier one did, and the log ends with one row per gate (`ok`, `FAILED (exit N)`, or for the surface `review needed or failed (exit N) — see output`); the rows say which gates to triage, the gate's own output says why. On a Claude Code bump the sweep normally exits non-zero on `REVIEW NEEDED` (unread CHANGELOG entries) with every other row `ok`. That is a review to do, not a failure: report it as "N CHANGELOG entries to review", never as "failed". Triage each real failure:
 
 | gate | failure | action |
 | --- | --- | --- |

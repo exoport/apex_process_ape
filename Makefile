@@ -435,15 +435,40 @@ check-agents-md:  ## Verify the installed Claude Code loads this repo's AGENTS.m
 	APE_CLAUDE_LIVE=1 go test ./internal/e2e/ \
 	  -run TestLive_AgentsMD -v -count=1 -timeout 10m
 
+# The gates check-harness sweeps, in order. check-claude-surface is LAST: on
+# every Claude Code bump it fails on unread CHANGELOG entries, which is a
+# review to do, not a breakage, so its row should be read after the verdicts
+# of the gates that judge whether ape still works.
+HARNESS_GATES := check-prices check-output-styles check-hooks check-claude \
+  check-task-subagents check-agents-md check-claude-surface
+
 .PHONY: check-harness
-check-harness: check-prices check-output-styles check-hooks check-claude check-task-subagents check-agents-md check-claude-surface ## All local-only gates against the installed Claude Code (prices + output styles + hooks + PTY/model + sub-agents + AGENTS.md + surface).
-	@# check-claude-surface runs LAST: on every Claude Code bump it stops on
-	@# unread CHANGELOG entries, which is a review to do, not a breakage, and
-	@# make stops at the first failing prerequisite. Last, it never hides the
-	@# verdict of a gate that judges whether ape still works.
-	@echo
-	@echo "Harness sweep complete against Claude Code $$(claude --version 2>/dev/null || echo 'unknown')."
-	@echo "Read the output above: any gate that reported a SKIP was NOT verified — it found no evidence to judge."
+check-harness:  ## All local-only gates against the installed Claude Code (prices + output styles + hooks + PTY/model + sub-agents + AGENTS.md + surface).
+	@# Every gate runs, whatever an earlier one did: they used to be
+	@# prerequisites, and make stops at the first failing prerequisite, so
+	@# one red gate hid the verdict of every gate after it (D366: the
+	@# surface check never ran on 2.1.304). One summary row per gate, and
+	@# the target fails if any gate did.
+	@failed=0; rows=""; \
+	for g in $(HARNESS_GATES); do \
+	  echo; echo "==> make $$g"; \
+	  if $(MAKE) --no-print-directory -f $(firstword $(MAKEFILE_LIST)) $$g; then \
+	    row="ok"; \
+	  else \
+	    rc=$$?; failed=1; \
+	    if [ "$$g" = check-claude-surface ]; then \
+	      row="review needed or failed (exit $$rc) — see output"; \
+	    else \
+	      row="FAILED (exit $$rc)"; \
+	    fi; \
+	  fi; \
+	  rows="$$rows$$(printf '  %-22s %s' "$$g" "$$row")\n"; \
+	done; \
+	echo; \
+	echo "Harness sweep against Claude Code $$(claude --version 2>/dev/null || echo 'unknown'):"; \
+	printf '%b' "$$rows"; \
+	echo "Read the output above: any gate that reported a SKIP was NOT verified — it found no evidence to judge."; \
+	exit $$failed
 
 .PHONY: ci-local
 ci-local: test lint govulncheck docs-check docs-cli-check docs-commands-check check-prices xcompile-windows snapshot ## Run every gate CI + release would run (Linux + Windows cross-compile + snapshot).
