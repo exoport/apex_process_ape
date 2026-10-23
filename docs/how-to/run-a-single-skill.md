@@ -282,8 +282,10 @@ When the session ends, ape finds every process still carrying the session's
 `APE_SESSION` marker and stops its process tree. It prints one `⚠` line and
 lists each process under `session_leftovers` in the manifest. With
 `--leftovers report`, ape records them and leaves them running. ape's own
-detached workers are never touched, and neither is anything in an `ape chat`
-session. This works on Linux only. See
+detached workers are never touched, nor anything they started: a server a
+detached `ape milestone gate` started keeps running when the session ends,
+because the worker carries its own `APE_SESSION` marker. Nothing in an
+`ape chat` session is touched either. This works on Linux only. See
 [`session_leftovers`](../reference/pipeline-run-manifest.md#session_leftovers--what-the-session-left-running).
 
 ## Artifacts

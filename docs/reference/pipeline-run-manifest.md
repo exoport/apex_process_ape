@@ -332,6 +332,7 @@ session_leftovers:
 - With `--leftovers report`, they are recorded as `kept` and left running.
 - Only the topmost process of each leftover tree is listed. The processes below it stop with it.
 - Never touched: ape itself and its ancestors, zombies, processes whose environment ape cannot read (another user's), and ape's own detached processes. Those are the long verbs' `ape __run` workers and the `ape run supervise` supervisor of a detached run, everything in their sessions and process groups, and everything below them.
+- Nor anything a long verb's worker started, even a server its gate script double-forked out of the worker's tree and session (`( setsid server & )`). The worker carries its own marker, `APE_SESSION=<kind>/<run-id>/worker/<worker-run-id>`, which is never the session's entry: a detached gate outlives the session that started it, and so do its servers. The nesting rule reads that marker as the session it names, so a gate script's `ape task` is refused exactly as the session's would be.
 - A process that cleared its environment (`env -i`, a container) carries no marker and is not found.
 - Linux only. On macOS and Windows nothing is looked for or recorded.
 
