@@ -645,11 +645,25 @@ func sortTweaksFirst(cs []ChangeStatus) {
 	})
 }
 
+// gateLastCurrent reports whether a gate call would return the last run
+// now (F1): no run holds the milestone's lock, and GateRecall answers. Its
+// tree digest is computed only when the last run was a gate that recorded
+// one at today's HEAD.
+func (p *Project) gateLastCurrent(id string) bool {
+	if l := p.LoadRunLock(id); l != nil && l.Alive() {
+		return false
+	}
+	return p.GateRecall(context.Background(), id) != nil
+}
+
 // milestoneStatus is the current milestone with its last gate run and
 // the spend of runs started since its approval.
 func (p *Project) milestoneStatus(m *Milestone, runs []cost.RunCost, tweaks map[string]bool) *MilestoneStatus {
 	ms := &MilestoneStatus{ID: m.ID, Title: m.Title, Status: m.Status, StatusText: m.StatusText, Gate: m.Gate, Budget: m.Budget}
 	ms.GateLast = p.LastGateRun(m.ID)
+	if ms.GateLast != nil {
+		ms.GateLast.Current = new(p.gateLastCurrent(m.ID))
+	}
 	ms.Stops = p.milestoneStops(m.ID)
 	if ms.Stops == nil {
 		ms.Stops = []LimitStop{}

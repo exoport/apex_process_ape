@@ -321,7 +321,7 @@ func newMilestoneGateCmd() *cobra.Command {
 	var f v1Flags
 	var specOnly bool
 	cmd := &cobra.Command{
-		Use:   "gate <M> [--spec-only]",
+		Use:   "gate <M> [--spec-only | --rerun]",
 		Short: "Run the milestone's gate and record the result",
 		Long: `Run the milestone's Gate: command from the project root — with APE_MILESTONE=<M> and
 APE_MILESTONE_BASE=<the milestone's start: HEAD at its first approval, ape status --json
@@ -365,9 +365,22 @@ or the gate differs from the approved one (milestone.gate-changed): a person app
 On a done milestone, refused (milestone.done) before anything runs: its gate was recorded at
 the close, which archived its gate folder; nothing is run, written or committed.
 
+A finished run is the answer while nothing changed (F1): a call that finds no run in
+progress, and the last run of the milestone's lock was this gate's, with HEAD where that
+run left it (after its own "apex: <M> gate" commit) and the working tree the same — tracked
+and untracked files git does not ignore, _apex/state/ left out — prints that run's result
+again instead of running the gate: the same output and exit code (0 green, 1 gate.red), a
+note on stderr ("unchanged since <time> (<sha>): the finished run's result, not a new run"),
+and under --json "recorded": true. So running the same command again after a run ended
+reads its result. Any commit, any edit or new file outside _apex/state/, a change of the
+gate since its approval (refused as milestone.gate-changed), or a run that was refused
+before the gate ran starts a new run; so does a result recorded by ape v1.1. --rerun runs
+the gate again whatever is recorded (it never attaches a different run: a run in progress is
+still attached to). Only this command: close, approve and the change verbs always run.
+
 --spec-only (W2): runs the spec's scenario checks alone, as the gate runs them — no Gate:
 command, no regression command, no live check (JSON live_skipped) — and records nothing: no milestones.json, no gate-<M>.json,
-no commit. It runs in this process (no detached worker, so never exit 75) under the
+no commit — so it always runs, and a full gate call never returns it. It runs in this process (no detached worker, so never exit 75) under the
 milestone's run lock (run.busy beside a gate or close of it), with the same refusals as
 the gate (a done milestone's milestone.done included), and is allowed on a proposed milestone: apex-plan runs it before the approval to
 see which scenarios of the plan are red. Output under _apex/state/logs/gate-<M>-spec/, the
@@ -378,7 +391,7 @@ scenario is the diagnostic gate.spec-red (exit 1, action replan), the result und
 Exit codes: 0 gate green (--spec-only: every scenario passed) · 1 gate red (last output
 lines shown), a red scenario under --spec-only, no such milestone, a done milestone, no
 approval record, a changed gate, or HEAD on a change branch · 2 usage · 3 run.busy (--spec-only).`,
-		Example: "  ape milestone gate M1\n  ape milestone gate M2 --spec-only --json",
+		Example: "  ape milestone gate M1\n  ape milestone gate M1 --rerun\n  ape milestone gate M2 --spec-only --json",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			p, err := v1Project(&f)
@@ -394,6 +407,8 @@ approval record, a changed gate, or HEAD on a change branch · 2 usage · 3 run.
 			}
 			return runLong(cmd, &f, p, id, func(ctx context.Context, opt apexv1.RunOptions) renderFn {
 				g, err := p.RunGate(ctx, id, opt)
+				// Only a gate that ran is returned to a later call (F1).
+				f.recallTree = err == nil
 				return func(cmd *cobra.Command, f *v1Flags) error {
 					if err != nil {
 						return v1Fail(cmd, f, err, nil)
@@ -413,6 +428,7 @@ approval record, a changed gate, or HEAD on a change branch · 2 usage · 3 run.
 	addV1TimeoutFlag(cmd, &f)
 	addV1WaitFlags(cmd, &f)
 	cmd.Flags().BoolVar(&specOnly, "spec-only", false, "run only the spec's scenario checks (no Gate: command, no regression) and record nothing; allowed on a proposed milestone")
+	cmd.Flags().BoolVar(&f.rerun, "rerun", false, "run the gate again even when its finished run is current (by default, while HEAD and the working tree are unchanged since the last run, its result is returned)")
 	return cmd
 }
 

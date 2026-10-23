@@ -1633,7 +1633,9 @@ since <time> — run the same command again to attach" (--json: {"running": true
 Running the same command again attaches: it waits again and prints the run's result once it
 ends — never a second run — or exits 75 again with the log lines the run wrote since the
 last call (stderr; --json: "log_tail"). A result no call
-printed yet is printed by the next call of the same verb while HEAD has not moved. While a
+printed yet is printed by the next call of the same verb while HEAD has not moved;
+`ape milestone gate` returns a printed one too while HEAD and the working tree are
+unchanged (see its help; --rerun runs it again). While a
 run holds the lock, another of these verbs on the same change or milestone is refused:
 run.busy (exit 3, action retry; the message names the running verb and since when). A lock
 whose process is gone (killed, the machine restarted) is removed and reported as
@@ -2100,7 +2102,9 @@ since <time> — run the same command again to attach" (--json: {"running": true
 Running the same command again attaches: it waits again and prints the run's result once it
 ends — never a second run — or exits 75 again with the log lines the run wrote since the
 last call (stderr; --json: "log_tail"). A result no call
-printed yet is printed by the next call of the same verb while HEAD has not moved. While a
+printed yet is printed by the next call of the same verb while HEAD has not moved;
+`ape milestone gate` returns a printed one too while HEAD and the working tree are
+unchanged (see its help; --rerun runs it again). While a
 run holds the lock, another of these verbs on the same change or milestone is refused:
 run.busy (exit 3, action retry; the message names the running verb and since when). A lock
 whose process is gone (killed, the machine restarted) is removed and reported as
@@ -2339,7 +2343,9 @@ since <time> — run the same command again to attach" (--json: {"running": true
 Running the same command again attaches: it waits again and prints the run's result once it
 ends — never a second run — or exits 75 again with the log lines the run wrote since the
 last call (stderr; --json: "log_tail"). A result no call
-printed yet is printed by the next call of the same verb while HEAD has not moved. While a
+printed yet is printed by the next call of the same verb while HEAD has not moved;
+`ape milestone gate` returns a printed one too while HEAD and the working tree are
+unchanged (see its help; --rerun runs it again). While a
 run holds the lock, another of these verbs on the same change or milestone is refused:
 run.busy (exit 3, action retry; the message names the running verb and since when). A lock
 whose process is gone (killed, the machine restarted) is removed and reported as
@@ -4161,7 +4167,9 @@ since <time> — run the same command again to attach" (--json: {"running": true
 Running the same command again attaches: it waits again and prints the run's result once it
 ends — never a second run — or exits 75 again with the log lines the run wrote since the
 last call (stderr; --json: "log_tail"). A result no call
-printed yet is printed by the next call of the same verb while HEAD has not moved. While a
+printed yet is printed by the next call of the same verb while HEAD has not moved;
+`ape milestone gate` returns a printed one too while HEAD and the working tree are
+unchanged (see its help; --rerun runs it again). While a
 run holds the lock, another of these verbs on the same change or milestone is refused:
 run.busy (exit 3, action retry; the message names the running verb and since when). A lock
 whose process is gone (killed, the machine restarted) is removed and reported as
@@ -4258,7 +4266,9 @@ since <time> — run the same command again to attach" (--json: {"running": true
 Running the same command again attaches: it waits again and prints the run's result once it
 ends — never a second run — or exits 75 again with the log lines the run wrote since the
 last call (stderr; --json: "log_tail"). A result no call
-printed yet is printed by the next call of the same verb while HEAD has not moved. While a
+printed yet is printed by the next call of the same verb while HEAD has not moved;
+`ape milestone gate` returns a printed one too while HEAD and the working tree are
+unchanged (see its help; --rerun runs it again). While a
 run holds the lock, another of these verbs on the same change or milestone is refused:
 run.busy (exit 3, action retry; the message names the running verb and since when). A lock
 whose process is gone (killed, the machine restarted) is removed and reported as
@@ -4292,7 +4302,7 @@ Flags:
 Run the milestone's gate and record the result
 
 ```
-ape milestone gate <M> [--spec-only] [flags]
+ape milestone gate <M> [--spec-only | --rerun] [flags]
 ```
 
 Run the milestone's Gate: command from the project root — with APE_MILESTONE=<M> and
@@ -4337,9 +4347,22 @@ or the gate differs from the approved one (milestone.gate-changed): a person app
 On a done milestone, refused (milestone.done) before anything runs: its gate was recorded at
 the close, which archived its gate folder; nothing is run, written or committed.
 
+A finished run is the answer while nothing changed (F1): a call that finds no run in
+progress, and the last run of the milestone's lock was this gate's, with HEAD where that
+run left it (after its own "apex: <M> gate" commit) and the working tree the same — tracked
+and untracked files git does not ignore, _apex/state/ left out — prints that run's result
+again instead of running the gate: the same output and exit code (0 green, 1 gate.red), a
+note on stderr ("unchanged since <time> (<sha>): the finished run's result, not a new run"),
+and under --json "recorded": true. So running the same command again after a run ended
+reads its result. Any commit, any edit or new file outside _apex/state/, a change of the
+gate since its approval (refused as milestone.gate-changed), or a run that was refused
+before the gate ran starts a new run; so does a result recorded by ape v1.1. --rerun runs
+the gate again whatever is recorded (it never attaches a different run: a run in progress is
+still attached to). Only this command: close, approve and the change verbs always run.
+
 --spec-only (W2): runs the spec's scenario checks alone, as the gate runs them — no Gate:
 command, no regression command, no live check (JSON live_skipped) — and records nothing: no milestones.json, no gate-<M>.json,
-no commit. It runs in this process (no detached worker, so never exit 75) under the
+no commit — so it always runs, and a full gate call never returns it. It runs in this process (no detached worker, so never exit 75) under the
 milestone's run lock (run.busy beside a gate or close of it), with the same refusals as
 the gate (a done milestone's milestone.done included), and is allowed on a proposed milestone: apex-plan runs it before the approval to
 see which scenarios of the plan are red. Output under _apex/state/logs/gate-<M>-spec/, the
@@ -4362,7 +4385,9 @@ since <time> — run the same command again to attach" (--json: {"running": true
 Running the same command again attaches: it waits again and prints the run's result once it
 ends — never a second run — or exits 75 again with the log lines the run wrote since the
 last call (stderr; --json: "log_tail"). A result no call
-printed yet is printed by the next call of the same verb while HEAD has not moved. While a
+printed yet is printed by the next call of the same verb while HEAD has not moved;
+`ape milestone gate` returns a printed one too while HEAD and the working tree are
+unchanged (see its help; --rerun runs it again). While a
 run holds the lock, another of these verbs on the same change or milestone is refused:
 run.busy (exit 3, action retry; the message names the running verb and since when). A lock
 whose process is gone (killed, the machine restarted) is removed and reported as
@@ -4377,6 +4402,7 @@ Examples:
 
 ```
   ape milestone gate M1
+  ape milestone gate M1 --rerun
   ape milestone gate M2 --spec-only --json
 ```
 
@@ -4386,6 +4412,7 @@ Flags:
 | ---- | ---- | ------- | ----------- |
 | `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
 | `--json` | bool | `false` | machine output (JSON on stdout) |
+| `--rerun` | bool | `false` | run the gate again even when its finished run is current (by default, while HEAD and the working tree are unchanged since the last run, its result is returned) |
 | `--spec-only` | bool | `false` | run only the spec's scenario checks (no Gate: command, no regression) and record nothing; allowed on a proposed milestone |
 | `--timeout` | duration | `0s` | ceiling for each command run, overriding _apex/config.yaml timeouts.<tier>.max (default: check 2h, regression 2h, gate 4h; capped at ape's hard ceilings 4h/8h/12h); the tier's idle window still applies; exit 124 when exceeded |
 | `--wait` | duration | `9m0s` | how long this call waits for the detached run (at most 9m30s; 0 returns at once); exit 75 while it still runs — run the same command again to attach |
