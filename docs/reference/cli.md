@@ -146,8 +146,9 @@ refusal (exit 1, nothing written) — the guard for a loop that must stop rather
 than ship a wrong tab. Together they are "tell me and exit non-zero".
 
 --label records WHY this write is happening on the journal entry, where the
-journal, watch and trace commands show it. It is navigation inside a local,
-rotating file — never a record to cite anywhere permanent.
+journal and watch commands print it and a trace tab on the board shows it. It
+is navigation inside a local, rotating file — never a record to cite anywhere
+permanent.
 
 The compare-and-set base is the `rev` inside the document you submit — the one
 you read. A document with no `rev` is refused (exit 2) rather than written
