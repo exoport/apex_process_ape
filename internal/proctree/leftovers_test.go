@@ -28,16 +28,17 @@ func TestSelectLeftovers_Rules(t *testing.T) {
 		500: {pid: 500, ppid: 1, sid: 500, state: 'Z', argv: []string{"sleep"}},
 	}
 	lookup := func(pid int) (procInfo, bool) { p, ok := table[pid]; return p, ok }
-	var marked []procInfo
-	for _, pid := range []int{90, 100, 200, 201, 300, 301, 302, 400, 401, 500} {
+	pids := []int{90, 100, 200, 201, 300, 301, 302, 400, 401, 500}
+	marked := make([]procInfo, 0, len(pids))
+	for _, pid := range pids {
 		marked = append(marked, table[pid])
 	}
 	got := selectLeftovers(marked, 100, Ancestors(100, func(pid int) (int, bool) { p, ok := table[pid]; return p.ppid, ok }), lookup)
-	pids := make([]int, 0, len(got))
+	roots := make([]int, 0, len(got))
 	for _, p := range got {
-		pids = append(pids, p.pid)
+		roots = append(roots, p.pid)
 	}
-	require.Equal(t, []int{200}, pids, "only the server: its worker goes with its tree")
+	require.Equal(t, []int{200}, roots, "only the server: its worker goes with its tree")
 }
 
 func TestIsApeDetached(t *testing.T) {

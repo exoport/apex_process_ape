@@ -3,6 +3,7 @@ package proctree
 import (
 	"context"
 	"fmt"
+	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -141,6 +142,9 @@ func (p procInfo) command() string {
 
 func (p procInfo) started() time.Time {
 	if p.boot.IsZero() {
+		return time.Time{}
+	}
+	if p.start > uint64(math.MaxInt64/int64(clockTick)) {
 		return time.Time{}
 	}
 	return p.boot.Add(time.Duration(p.start) * clockTick).UTC().Truncate(time.Second)

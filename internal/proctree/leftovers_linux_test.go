@@ -29,7 +29,7 @@ const (
 
 func TestMain(m *testing.M) {
 	if os.Getenv(helperEnv) == "worker" {
-		sh := exec.Command("sh", "-c", `sleep 600 & echo $! > "$`+helperPIDFile+`"`) //nolint:noctx // test helper
+		sh := exec.Command("sh", "-c", `sleep 600 & echo $! > "$`+helperPIDFile+`"`)
 		_ = sh.Run()
 		time.Sleep(10 * time.Minute)
 		os.Exit(0)
@@ -51,7 +51,7 @@ func testMarker(t *testing.T) string {
 func orphan(t *testing.T, env ...string) int {
 	t.Helper()
 	pidf := filepath.Join(t.TempDir(), "pid")
-	sh := exec.Command("sh", "-c", `( setsid sleep 600 & echo $! > "$PIDF" )`) //nolint:noctx // test
+	sh := exec.Command("sh", "-c", `( setsid sleep 600 & echo $! > "$PIDF" )`)
 	sh.Env = append(append(os.Environ(), "PIDF="+pidf), env...)
 	require.NoError(t, sh.Run())
 	pid := readPID(t, pidf)
@@ -120,7 +120,7 @@ func TestLeftovers_SkipsADifferentRunsMarker(t *testing.T) {
 func TestLeftovers_SkipsRunWorkerSession(t *testing.T) {
 	marker := testMarker(t)
 	pidf := filepath.Join(t.TempDir(), "pid")
-	w := exec.Command(os.Args[0], "__run", "r1", "milestone", "gate", "M1") //nolint:noctx,gosec // this test binary as a worker
+	w := exec.Command(os.Args[0], "__run", "r1", "milestone", "gate", "M1")
 	w.Env = append(os.Environ(), helperEnv+"=worker", helperPIDFile+"="+pidf, marker)
 	w.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	require.NoError(t, w.Start())

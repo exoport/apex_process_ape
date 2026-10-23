@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -77,7 +78,7 @@ func leftoverProject(t *testing.T) (project string, env []string, pidFile string
 	fake := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(fake, "claude"), []byte(fakeClaudeServer), 0o755))
 	pidFile = filepath.Join(t.TempDir(), "server.pid")
-	env = append(gitEnv, "PATH="+fake+":"+os.Getenv("PATH"), "APE_CLAUDE_PROBE=off", "FAKE_SERVER_PID="+pidFile,
+	env = append(slices.Clone(gitEnv), "PATH="+fake+":"+os.Getenv("PATH"), "APE_CLAUDE_PROBE=off", "FAKE_SERVER_PID="+pidFile,
 		"APE_SESSION=", "APE_DEPTH=", "CLAUDECODE=")
 	// Whatever the test does, no sleep it started outlives it.
 	t.Cleanup(func() {
