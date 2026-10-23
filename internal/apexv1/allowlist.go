@@ -1,15 +1,18 @@
 package apexv1
 
 // CoreChildSkills are the core skills ape's apex-loop run may start as a
-// child session at depth 1 (D62), in the order of the loop, then
-// apex-accept, the default human-review delegate (D76).
+// child session at depth 1 (D62), in the order of the loop — apex-vet vets
+// the plan apex-change wrote, in a fresh session, before apex-apply builds
+// it — then apex-accept, the default human-review delegate (D76). The
+// order is for reading only: the allow-list is a membership test, and the
+// order shows only in the refusal message and ape task --help.
 //
 // apex-handoff, apex-loop and apex-orchestrator are deliberately absent:
 // handoff is a person's (or a peer conductor's) tool for clearing a
 // session, never a step of the loop; a loop starting another loop is the
 // nesting D62 exists to prevent; and the operator's apex-orchestrator
 // opens only in a person's own session (Q95).
-var CoreChildSkills = []string{"apex-plan", "apex-change", "apex-apply", "apex-review", "apex-release", "apex-accept"}
+var CoreChildSkills = []string{"apex-plan", "apex-change", "apex-vet", "apex-apply", "apex-review", "apex-release", "apex-accept"}
 
 // ChildSkillAllowList is the depth-1 allow-list (D62, D59 Q4, D76): the
 // core skills, then human_review's delegate, then every skill the config's
