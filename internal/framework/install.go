@@ -1549,7 +1549,7 @@ type Drift struct {
 	// releases already in the clone; no drift then does not mean in sync
 	// (F16c). Its warning is one of the Notes.
 	FetchFailed bool     `json:"fetchFailed,omitempty" yaml:"fetchFailed,omitempty"`
-	Notes       []string `json:"notes,omitempty" yaml:"notes,omitempty"`
+	Notes       []string `json:"notes,omitempty"       yaml:"notes,omitempty"`
 }
 
 // Status reads a project's framework.yaml, optionally compares it with

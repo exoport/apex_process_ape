@@ -218,7 +218,7 @@ func TestArchiveLayout_DirtOutsideTheArchiveStays(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, res.Moved, 2)
 	require.Equal(t, before, run(t, p.Root, "rev-parse", "HEAD~1"), "one commit")
-	for _, f := range strings.Split(run(t, p.Root, "show", "--name-only", "--no-renames", "--format=", "HEAD"), "\n") {
+	for f := range strings.SplitSeq(run(t, p.Root, "show", "--name-only", "--no-renames", "--format=", "HEAD"), "\n") {
 		require.True(t, strings.HasPrefix(f, "development/archive/"), "the commit takes the archive alone: %s", f)
 	}
 	require.Equal(t, status, run(t, p.Root, "status", "--porcelain", "--untracked-files=all"), "the rest is as it was, staged included")

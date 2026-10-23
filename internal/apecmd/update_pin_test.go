@@ -231,7 +231,7 @@ func TestUpdatePin_UsesTheProjectsPinnedBingo(t *testing.T) {
 	fakeLatestRelease(t, "v0.99.0")
 	withApeVersion(t, "0.99.0")
 	// PATH without any bingo: only what git, sh and go need.
-	var dirs []string
+	dirs := make([]string, 0, 3)
 	for _, tool := range []string{"git", "sh", "go"} {
 		p, err := exec.LookPath(tool)
 		require.NoError(t, err)

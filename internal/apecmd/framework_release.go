@@ -641,33 +641,41 @@ func removeCreatedBoard(ctx context.Context, projectRoot string, before map[stri
 	if len(tracked) == 0 {
 		return os.RemoveAll(dir)
 	}
-	var dirs []string
-	err = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+	root, err := os.OpenRoot(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	// Listed first, removed after, through the root: nothing the walk
+	// follows can lead the removal outside .aboard/.
+	var files, dirs []string
+	err = fs.WalkDir(root.FS(), ".", func(rel string, d fs.DirEntry, err error) error {
 		if err != nil {
-			if errors.Is(err, fs.ErrNotExist) {
-				return nil
-			}
 			return err
 		}
-		rel, rerr := filepath.Rel(projectRoot, path)
-		if rerr != nil {
-			return rerr
+		switch inProject := framework.ProjectAboardDir + "/" + rel; {
+		case d.IsDir():
+			if rel != "." {
+				dirs = append(dirs, rel)
+			}
+		case !tracked[inProject] && !before[inProject]:
+			files = append(files, rel)
 		}
-		rel = filepath.ToSlash(rel)
-		if d.IsDir() {
-			dirs = append(dirs, path)
-			return nil
-		}
-		if tracked[rel] || before[rel] {
-			return nil
-		}
-		return os.Remove(path)
+		return nil
 	})
 	if err != nil {
 		return err
 	}
+	for _, f := range files {
+		if err := root.Remove(f); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+	}
 	for _, d := range slices.Backward(dirs) {
-		_ = os.Remove(d) // only an emptied one goes
+		_ = root.Remove(d) // only an emptied one goes
 	}
 	return nil
 }
