@@ -241,7 +241,8 @@ const EnvClaudeEffortLevel = "CLAUDE_CODE_EFFORT_LEVEL"
 // apex-loop run starts a session from inside one.
 //
 // Deliberately NOT set by the migration shell runner or the service
-// daemon — neither spawns a claude session.
+// daemon — neither spawns a claude session. A long verb's detached worker
+// rewrites it to its own (WorkerMarker, D447).
 const EnvApeSession = "APE_SESSION"
 
 // SessionMarkerEnv returns the EnvApeSession entry for a spawned session.

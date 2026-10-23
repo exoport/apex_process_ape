@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/exoport/apex_process_ape/internal/apexv1"
+	"github.com/exoport/apex_process_ape/internal/repl"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -34,7 +35,10 @@ import (
 //     CREATE_NEW_PROCESS_GROUP|DETACHED_PROCESS), stdout and stderr to
 //     _apex/state/runs/<scope>.log, and exits at once — so the worker is
 //     an orphan, no descendant of the call: killing the call, or the shell
-//     around it, stops nothing;
+//     around it, stops nothing. Called from inside a model session, the
+//     worker carries its own APE_SESSION, the session's with its run
+//     appended (repl.WorkerMarker, D447), so the session's leftover sweep
+//     never takes what the worker started for the session's;
 //  3. the worker runs the verb's in-process body (the code path the verb
 //     always had), records the outcome rendered both ways
 //     (<scope>.result.json), ends its log with it, and only then releases
@@ -440,6 +444,11 @@ func launchWorker(cmd *cobra.Command, p *apexv1.Project, lock *apexv1.RunLock, a
 	}
 	spawn := exec.CommandContext(context.WithoutCancel(cmd.Context()), exe, append([]string{"__run", "--spawn", "--log", logPath, lock.ID}, argv...)...)
 	spawn.Dir = p.Root
+	// The worker, and all it starts, carries its own session marker, not
+	// the calling session's (D447): a server its checks double-fork is
+	// the run's, which outlives the session by design, and must not be
+	// what the session's leftover sweep finds by that session's marker.
+	spawn.Env = repl.WorkerEnv(os.Environ(), lock.ID)
 	var stderr bytes.Buffer
 	spawn.Stderr = &stderr
 	out, err := spawn.Output()

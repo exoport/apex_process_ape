@@ -117,7 +117,10 @@ func currentSession(projectRoot string) sessionAt {
 }
 
 // sessionFromEnv reads the marker ape set on the session: APE_SESSION, and
-// APE_DEPTH (1 when an older ape set only the first).
+// APE_DEPTH (1 when an older ape set only the first). A long verb's worker
+// carries the session's marker with its own run appended
+// (repl.WorkerMarker, D447): read as the session it names, so what a
+// worker's script starts is answered as the session would be.
 func sessionFromEnv() apexv1.SessionAt {
 	marker := os.Getenv(repl.EnvApeSession)
 	depth, err := strconv.Atoi(os.Getenv(repl.EnvDepth))
@@ -130,7 +133,7 @@ func sessionFromEnv() apexv1.SessionAt {
 	if depth == 0 {
 		depth = 1
 	}
-	kind, run, _ := strings.Cut(marker, "/")
+	kind, run := repl.SessionOfMarker(marker)
 	return apexv1.SessionAt{Depth: depth, Kind: kind, Run: run}
 }
 

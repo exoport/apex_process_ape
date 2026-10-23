@@ -27,6 +27,11 @@ import (
 //     which outlive the call that started them by design, and the
 //     `ape run supervise` supervisor of a detached run — and every process
 //     in their sessions, or below them;
+//   - what a worker started that left its tree and session (a gate script's
+//     `( setsid server & )`): a worker carries its own marker, the
+//     session's with its run appended (repl.WorkerMarker, D447), which is
+//     never the session's exact entry — the worker's run outlives the
+//     session by design, and so may what it started;
 //   - a process whose environment cannot be read (another user's).
 //
 // A process that scrubbed its environment (`env -i`, a container) carries

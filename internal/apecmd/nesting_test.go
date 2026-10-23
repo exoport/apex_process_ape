@@ -210,6 +210,63 @@ func TestNesting_RefusalMatrix(t *testing.T) {
 	}
 }
 
+// D447: a long verb's worker carries the session's marker with its own run
+// appended (repl.WorkerMarker), and a session started from the worker's
+// script gets exactly the session's answer — the same launch, or the same
+// refusal word for word — the loop's allow-listed child included.
+func TestNesting_AWorkersMarkerAnswersAsItsSession(t *testing.T) {
+	root := t.TempDir()
+	sessionsAt := []struct {
+		name   string
+		marker string
+		depth  int
+		row    *sessions.Session
+	}{
+		{"a skill session", "task/apply-run", 1, &sessions.Session{PID: os.Getppid(), Command: "task", RunID: "apply-run", Skill: "apex-apply", Depth: 1}},
+		{"a prompt session", "prompt/p1", 1, nil},
+		{"the loop", "task/orch-run", 1, func() *sessions.Session { r := orchestratorRow(); return &r }()},
+		{"a loop's child", "task/child-run", 2, nil},
+	}
+	starters := []struct{ verb, skill string }{
+		{"ape task", "apex-change"},
+		{"ape task", "apex-nope"},
+		{"ape prompt", ""},
+	}
+	type answer struct {
+		depth     int
+		parentRun string
+		parentPID int
+		err       string
+	}
+	ask := func(t *testing.T, marker string, depth int, row *sessions.Session, verb, skill string) answer {
+		t.Helper()
+		outsideEverySession(t)
+		inSession(t, marker, depth)
+		if row != nil {
+			registerRow(t, *row)
+		}
+		l, err := gateSession(verb, skill, root)
+		if err != nil {
+			return answer{err: err.Error()}
+		}
+		return answer{depth: l.depth, parentRun: l.parentRun, parentPID: l.parentPID}
+	}
+	for _, at := range sessionsAt {
+		for _, s := range starters {
+			t.Run(at.name+"/"+s.verb+" "+s.skill, func(t *testing.T) {
+				want := ask(t, at.marker, at.depth, at.row, s.verb, s.skill)
+				if at.name == "the loop" && s.skill == "apex-change" {
+					require.Equal(t, 2, want.depth, "the loop starts an allow-listed child: %+v", want)
+				} else {
+					require.NotEmpty(t, want.err, "refused from the session itself")
+				}
+				got := ask(t, repl.WorkerMarker(at.marker, "20261023-101010-42-a1b2c3"), at.depth, at.row, s.verb, s.skill)
+				require.Equal(t, want, got)
+			})
+		}
+	}
+}
+
 // Q2: the depth comes from the process ancestry as well as the
 // environment, and is the larger of the two. A model that scrubs the marker
 // still runs under the claude ape spawned, matched by pid, never by name.
