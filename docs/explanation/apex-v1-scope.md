@@ -7,6 +7,9 @@ when a record would be wrong. This page says what that buys you, and the shape o
 built and measured for. The reference for each command is `ape <command> --help` and
 [cli.md](../reference/cli.md).
 
+v1.1 keeps this promise and the shape below, and adds to it (usage-aware launching, waiting on
+events, module fences for libraries, expert advise); the repository's `CHANGELOG.md` lists what.
+
 ## The shape v1.0 is built for
 
 **One operator per checkout, on a local trunk.** Every project surveyed before v1 worked this way:

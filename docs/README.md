@@ -13,7 +13,8 @@ The four quadrants serve different needs and are written in different styles. Tu
 
 ## Index
 
-New to APEX v1? Start with [What APEX v1.0 promises](explanation/apex-v1-scope.md), then
+New to APEX v1? Start with [What APEX v1.0 promises](explanation/apex-v1-scope.md) (v1.1 keeps
+that promise and adds to it: the repository's `CHANGELOG.md` lists what), then
 [the tutorial](tutorials/first-v1-project.md). Every command and flag is in the
 [CLI reference](reference/cli.md).
 
