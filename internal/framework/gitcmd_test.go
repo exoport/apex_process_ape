@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/exoport/apex_process_ape/internal/framework"
+	"github.com/exoport/apex_process_ape/internal/gittest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -256,9 +257,7 @@ func TestRemoteOrigin_IsTheConfiguredURLNotTheRewrite(t *testing.T) {
 	dir := t.TempDir()
 	initRepo(t, dir)
 	gitIn(t, dir, "config", "remote.origin.url", "https://example.invalid/o/r.git")
-	t.Setenv("GIT_CONFIG_COUNT", "1")
-	t.Setenv("GIT_CONFIG_KEY_0", "url.git@private.alias:.insteadOf")
-	t.Setenv("GIT_CONFIG_VALUE_0", "https://example.invalid/")
+	gittest.AppendConfig(t, "url.git@private.alias:.insteadOf", "https://example.invalid/")
 	got, err := framework.RemoteOrigin(context.Background(), dir)
 	require.NoError(t, err)
 	require.Equal(t, "https://example.invalid/o/r.git", got)

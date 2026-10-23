@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/exoport/apex_process_ape/internal/apexv1"
+	"github.com/exoport/apex_process_ape/internal/gittest"
 	"github.com/exoport/apex_process_ape/internal/sessions"
 	"github.com/exoport/apex_process_ape/internal/usercachetest"
 )
@@ -54,18 +55,8 @@ func TestMain(m *testing.M) {
 	// it, with this binary on PATH as ape; a copy running as ape keeps
 	// the environment it was given).
 	_ = os.Setenv(apexv1.EnvScanned, "1")
-	// No test repository runs git's auto-maintenance (D360): the
-	// `git maintenance run --auto --detach` a commit starts outlives it —
-	// on git 2.56 holding .git/objects/maintenance.lock until it exits —
-	// and races t.TempDir's cleanup ("unlinkat …/.git/objects: directory
-	// not empty"). gc.auto covers a git whose commit runs `gc --auto`.
-	for k, v := range map[string]string{
-		"GIT_CONFIG_COUNT": "2",
-		"GIT_CONFIG_KEY_0": "maintenance.auto", "GIT_CONFIG_VALUE_0": "false",
-		"GIT_CONFIG_KEY_1": "gc.auto", "GIT_CONFIG_VALUE_1": "0",
-	} {
-		_ = os.Setenv(k, v)
-	}
+	// No test repository runs git's auto-maintenance (D360).
+	gittest.QuietMaintenance()
 	code := m.Run()
 	cleanup()
 	if made != "" {

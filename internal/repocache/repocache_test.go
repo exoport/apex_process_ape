@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/exoport/apex_process_ape/internal/gittest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -359,9 +360,7 @@ func TestState_NoCloneIsEmpty(t *testing.T) {
 func TestPrepare_OriginIsTheConfiguredURLNotTheRewrite(t *testing.T) {
 	c := userClone(t, origin(t))
 	git(t, c.Path, "remote", "set-url", "origin", "https://example.invalid/o/r.git")
-	t.Setenv("GIT_CONFIG_COUNT", "1")
-	t.Setenv("GIT_CONFIG_KEY_0", "url.git@private.alias:.insteadOf")
-	t.Setenv("GIT_CONFIG_VALUE_0", "https://example.invalid/")
+	gittest.AppendConfig(t, "url.git@private.alias:.insteadOf", "https://example.invalid/")
 	tg, err := Prepare(context.Background(), c, SyncOptions{NoFetch: true})
 	require.NoError(t, err)
 	require.Equal(t, "https://example.invalid/o/r.git", tg.Origin)
