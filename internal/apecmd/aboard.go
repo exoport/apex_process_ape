@@ -76,15 +76,24 @@ func newAboardCmd() *cobra.Command {
 // export` (a usage error) and `ape aboard wait` (a timeout) would both exit 1,
 // and exit 3 in particular is documented and scripted against.
 //
-// aboardcli.ExitCode returns ExitFailed for an error it does not own, which
-// is also ape's fallback — so "prefer aboard's answer when it is not 1" is
-// correct in both directions: an aboard error keeps its status, and anything
-// else falls through to ape's own mapping unchanged.
+// aboardcli.ExitCode returns (ExitFailed, not silent) for an error it does
+// not own, which is also ape's fallback — so aboard's answer is taken
+// whenever it differs from that: a status other than 1, OR a silent 1. An
+// aboard error keeps its status, and anything else falls through to ape's own
+// mapping unchanged.
+//
+// The silent 1 is not a corner. `capabilities --check` on a stale reference
+// and `serve --detach` on a child that refused both print their own account
+// and return exit 1 marked silent — the error's text is empty. Keying on the
+// status alone sent them down ape's fallback, which knows nothing of the
+// flag and printed "Error: " with nothing after it, under a diagnostic that
+// had already said everything. Standalone aboard honours the flag; the host
+// must too, or the two binaries' stderr differ for the same board.
 func aboardExitCode(err error) (code int, silent, handled bool) {
 	if err == nil {
 		return ExitOK, false, false
 	}
-	if c, s := aboardcli.ExitCode(err); c != aboard.ExitFailed {
+	if c, s := aboardcli.ExitCode(err); c != aboard.ExitFailed || s {
 		return c, s, true
 	}
 	return ExitRunFailed, false, false

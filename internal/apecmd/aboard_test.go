@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/exoport/aboard/pkg/aboard"
@@ -71,6 +72,22 @@ func runCapabilities(t *testing.T, opts aboardcli.Options) string {
 	return out.String()
 }
 
+// runAboardCheck runs `capabilities --check` on the mounted tree's options
+// against dir, returning what it printed on stdout and the error it returned.
+func runAboardCheck(t *testing.T, dir string) (string, error) {
+	t.Helper()
+	var out bytes.Buffer
+	opts := aboardOptions()
+	opts.Stdout = &out
+	opts.Stderr = io.Discard
+	cmd := aboardcli.NewRootCmd(opts)
+	cmd.SetArgs([]string{"capabilities", "--check", "--cwd", dir})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	err := cmd.Execute()
+	return out.String(), err
+}
+
 // The capability manifest describes the BOARD, not the process serving it, so
 // an agent reading it must not be able to tell which host it reached. That is
 // why aboard.AppName stays "aboard" under both hosts while app/host in
@@ -108,9 +125,51 @@ func TestAboardExitStatusesSurviveApesMapping(t *testing.T) {
 		"a board usage error must exit 2, not ape's generic 1")
 
 	// Exit 3 (`aboard wait` timing out) travels the identical branch — any
-	// code aboard reports that is not ExitFailed is preferred — and is
+	// code aboard reports that is not ExitFailed, or is a silent one, is
+	// preferred — and is
 	// verified end to end against a live board, which a unit test cannot
 	// construct.
+
+	// F10: aboard returns exit 1 marked SILENT when the command already printed
+	// its own account — `capabilities --check` on a stale reference, `serve
+	// --detach` on a refused child. Keyed on the status alone, the host sent
+	// it down ape's fallback, which printed "Error: " with nothing after it.
+	t.Run("a silent aboard failure keeps exit 1 and prints no Error line", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		ref := filepath.Join(dir, ".claude", "skills", "aboard", "references", "reference.generated.md")
+		require.NoError(t, os.MkdirAll(filepath.Dir(ref), 0o755))
+		require.NoError(t, os.WriteFile(ref, []byte("# a reference no build ever wrote\n"), 0o644))
+
+		out, err := runAboardCheck(t, dir)
+		require.Error(t, err)
+		require.Contains(t, out, "stale:", "the command printed its own diagnostic")
+		_, silent := aboardcli.ExitCode(err)
+		require.True(t, silent, "premise: aboard marks this failure silent")
+
+		var stderr bytes.Buffer
+		require.Equal(t, aboard.ExitFailed, Report(err, &stderr))
+		require.NotRegexp(t, `(?m)^Error: *$`, stderr.String(), "a bare Error: line under a diagnostic that said everything")
+		require.Empty(t, stderr.String(), "standalone aboard prints nothing more here, so ape must not either")
+	})
+
+	t.Run("a non-silent aboard failure still prints its message", func(t *testing.T) {
+		t.Parallel()
+		// A reference that is present and unreadable (a directory) is a real
+		// exit-1 failure whose message nobody has printed yet.
+		dir := t.TempDir()
+		ref := filepath.Join(dir, ".claude", "skills", "aboard", "references", "reference.generated.md")
+		require.NoError(t, os.MkdirAll(ref, 0o755))
+
+		_, err := runAboardCheck(t, dir)
+		require.Error(t, err)
+		_, silent := aboardcli.ExitCode(err)
+		require.False(t, silent, "premise: this failure is not silent")
+
+		var stderr bytes.Buffer
+		require.Equal(t, ExitRunFailed, Report(err, &stderr))
+		require.Regexp(t, `(?m)^Error: reading .*reference\.generated\.md`, stderr.String())
+	})
 
 	t.Run("an error ape owns still wins", func(t *testing.T) {
 		t.Parallel()
