@@ -161,3 +161,56 @@ func TestTheViewIsDeterministic(t *testing.T) {
 	}
 	require.Less(t, strings.Index(first, `"label":"alsoweird"`), strings.Index(first, `"label":"weird"`))
 }
+
+// F8: the milestone card said "not run" when only the approval's
+// self-check had run the gate, and showed an older gate run over a
+// re-approval's self-check. The newer of the two is the gate stat.
+func TestMilestoneCard_SelfCheck(t *testing.T) {
+	t.Parallel()
+	gateStat := func(c map[string]any) string {
+		children, ok := c["children"].([]any)
+		require.True(t, ok)
+		grid, ok := children[0].(map[string]any)
+		require.True(t, ok)
+		stats, ok := grid["children"].([]any)
+		require.True(t, ok)
+		for _, s := range stats {
+			if s, ok := s.(map[string]any); ok && s["label"] == "gate" {
+				v, _ := s["value"].(string)
+				return v
+			}
+		}
+		return ""
+	}
+	r := sampleReport()
+	m := r.Milestone
+	m.GateLast = nil
+	m.ApprovalSelfCheck = &apexv1.GateSummary{SHA: "bbbbbbb1234", Exit: 1, At: "2026-10-17T10:00:00Z", Log: "gate-M2-approve.log"}
+	c := milestoneCard(r)
+	require.Equal(t, "self-check red", gateStat(c))
+	b, err := json.Marshal(c)
+	require.NoError(t, err)
+	require.Contains(t, string(b), `"key":"approval self-check","value":"2026-10-17T10:00:00Z at bbbbbbb, exit 1"`)
+
+	// An older gate run: the re-approval's self-check is shown, green and
+	// accepted.
+	m.GateLast = &apexv1.GateRun{Exit: 1, At: "2026-10-17T09:00:00Z", SHA: "abcdef1234", Cmd: "./gate.sh"}
+	m.ApprovalSelfCheck.Exit = 0
+	m.ApprovalSelfCheck.AcceptGreen = &apexv1.AcceptGreen{Reason: "fixed after the work", By: "diego"}
+	c = milestoneCard(r)
+	require.Equal(t, "self-check green", gateStat(c))
+	b, err = json.Marshal(c)
+	require.NoError(t, err)
+	require.Contains(t, string(b), `"key":"accepted green","value":"diego: fixed after the work"`)
+
+	// A gate run after it wins, and the self-check is no longer listed.
+	m.GateLast.At = "2026-10-17T11:00:00Z"
+	c = milestoneCard(r)
+	require.Equal(t, "red", gateStat(c))
+	b, err = json.Marshal(c)
+	require.NoError(t, err)
+	require.NotContains(t, string(b), "approval self-check")
+
+	m.GateLast, m.ApprovalSelfCheck = nil, nil
+	require.Equal(t, "not run", gateStat(milestoneCard(r)))
+}

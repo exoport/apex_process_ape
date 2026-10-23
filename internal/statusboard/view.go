@@ -134,7 +134,15 @@ func milestoneCard(r *apexv1.StatusReport) map[string]any {
 		return card("Milestone", "", []any{caption("No current milestone: every milestone is done, or the roadmap has none.")})
 	}
 	gate, gateTone := "not run", toneMuted
-	if g := m.GateLast; g != nil {
+	switch g := m.GateLast; {
+	case m.SelfCheckLatest():
+		// F8: the approval's self-check ran the gate after any run of its
+		// own — right after approve, or at a re-approval.
+		gate, gateTone = "self-check red", toneDanger
+		if m.ApprovalSelfCheck.Exit == 0 {
+			gate, gateTone = "self-check green", toneAgent
+		}
+	case g != nil:
 		gate, gateTone = "green", toneAgent
 		if !g.Green() {
 			gate, gateTone = "red", toneDanger
@@ -167,6 +175,13 @@ func milestoneCard(r *apexv1.StatusReport) map[string]any {
 		}
 		if len(g.Flaky) > 0 {
 			pairs = append(pairs, kv("flaky", strings.Join(g.Flaky, ", ")))
+		}
+		children = append(children, map[string]any{"type": "kv", "pairs": pairs})
+	}
+	if sc := m.ApprovalSelfCheck; m.SelfCheckLatest() {
+		pairs := []any{kv("approval self-check", fmt.Sprintf("%s at %.7s, exit %d", sc.At, sc.SHA, sc.Exit))}
+		if a := sc.AcceptGreen; a != nil {
+			pairs = append(pairs, kv("accepted green", a.By+": "+a.Reason))
 		}
 		children = append(children, map[string]any{"type": "kv", "pairs": pairs})
 	}
