@@ -7,8 +7,8 @@ project that archived changes before that layout has them one level up, at
 command reads both layouts, so nothing breaks while you wait: this is tidying, in one commit.
 
 You usually do not run it yourself. The framework's migration `v1.0.0_seq-06` runs it during
-`ape framework update` (command `ape project archive-layout`, check
-`ape project archive-layout --check`). Run it by hand when you want the move on its own commit
+`ape framework update`. From framework v1.2, `v1.2.0_seq-01` supersedes it with the same command,
+`ape project archive-layout`, and the check `ape project archive-layout --check`. Run it by hand when you want the move on its own commit
 before an update, or to see what is left.
 
 ## See what is left
@@ -22,7 +22,9 @@ It writes nothing. Exit 0 means nothing is left in the older layout. Exit 1
 
 ## Move them
 
-On the base branch, with a clean tree:
+On the base branch, with nothing uncommitted under `development/archive/`. Changes elsewhere stay
+out of its commit (v1.2; before, any uncommitted change refused it, so the update that runs it,
+whose install is uncommitted at that point, could never finish):
 
 ```bash
 ape project archive-layout

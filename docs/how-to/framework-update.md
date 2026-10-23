@@ -18,6 +18,11 @@ ape framework update --dry-run   # what would change, and the pending migrations
 ape framework update
 ```
 
+When the dry run cannot fetch the framework's tags (for example over an ssh with no agent), it
+prints the fetch warning and `framework: NOT CHECKED against origin` instead of
+`framework: in sync` (v1.2). It has compared only with the releases already in the clone, so a
+newer one may exist.
+
 What happens:
 
 1. Checks that `_apex/framework.yaml` exists, and, when committing, that the tree is clean. Nothing has been written yet.
@@ -67,7 +72,7 @@ An APEX v0 project becomes an APEX v1 project when `ape framework update` instal
    ape framework update
    ```
 
-**Which ape runs.** The update must run on a v1 ape. A project whose `.bingo/ape.mod` pins a v0 ape hands `ape framework update` to that pin, and the v0 ape is below the v1 release's `min_ape_version` 1.0.0: without a terminal it exits 11, and at one it offers to move the pin in a `chore(ape)` commit, which then makes the lift refuse (below). Either run the update as `APE_TOOLCHAIN=local ape framework update`, or move the pin with `ape update --pin` (step 1) **before** you tag. The lift itself always runs on the binary you invoke, and its commit moves the pin to that ape when it is a release and bingo is on PATH (otherwise it prints the command that does). See [How to pin ape in a project](pin-ape-in-a-project.md).
+**Which ape runs.** The update must run on a v1 ape. A project whose `.bingo/ape.mod` pins a v0 ape hands `ape framework update` to that pin, and the v0 ape is below the v1 release's `min_ape_version` 1.0.0: without a terminal it exits 11, and at one it offers to move the pin in a `chore(ape)` commit, which then makes the lift refuse (below). Either run the update as `APE_TOOLCHAIN=local ape framework update`, or move the pin with `ape update --pin` (step 1) **before** you tag. The lift itself always runs on the binary you invoke, and its commit moves the pin to that ape when it is a release and a bingo is found (on PATH, or the project's own in `$GOBIN`; otherwise it prints the command that does). See [How to pin ape in a project](pin-ape-in-a-project.md).
 
 **Commit nothing after the tag.** A commit on top of `apex-v0-final`, including a `chore(ape)` pin move, makes the lift refuse with `lift.tag-not-head`. Tag the new HEAD and push the tag again, replacing the old one (`git tag -fa apex-v0-final -m "apex-v0 final"`, then `git push --force origin apex-v0-final`), and re-run.
 
@@ -205,7 +210,7 @@ A failed entry **stops the sequence**, because later entries may depend on it, a
 An entry marked `blocking: true` is one the install is not valid without; the lift is the main one. When a blocking derivable entry fails or is not attempted (an earlier entry failed, its check could not run, or it cannot be run):
 
 - the update **exits 1**, names the entry and why, and commits nothing;
-- the install is reverted, so the tree is as the update found it and a re-run starts from the release again;
+- the install is reverted, so the tree is as the update found it and a re-run starts from the release again. A board the update created is removed file by file: what `.aboard/` already tracked stays (v1.2; v1.1 removed the whole folder, and a tracked `.aboard/.gitignore` with it);
 - the entry's own error is printed where it ran;
 - a commit that migration, or an earlier one, made itself stays (`git log <start>..HEAD` shows them), and the re-run carries on after them.
 

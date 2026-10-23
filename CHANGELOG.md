@@ -147,6 +147,26 @@ its arms differ only in the framework's `vet:` switch.
   `apex-change`, before `apex-apply`), so a change vet runs as a loop child instead of being refused
   `session.not-allowed`. Its model defaults and state are left for its adoption.
 
+### F16: updating a pre-1.0 install (atomix, D464, D465, D467)
+
+- **F16a, class B:** `ape project archive-layout` is refused only by uncommitted changes under
+  `development/archive/`, and its commit takes the archive alone. `ape framework update` runs it as
+  `v1.0.0_seq-06` while the update's own install is uncommitted. It used to refuse any dirty tree,
+  so an update that still needed seq-06 could never complete. Its help names `v1.2.0_seq-01`,
+  the framework's superseding entry with an anchored check, beside seq-06 (D467).
+- **F16b, class B:** a failed update reverts a board it created file by file and keeps what
+  `.aboard/` already tracked. It used to remove the whole folder, a tracked `.aboard/.gitignore`
+  with it.
+- **F16c, class C:** `ape framework update --dry-run` whose tag fetch failed prints the warning and
+  `framework: NOT CHECKED against origin` instead of `framework: in sync`. A `--version` tag
+  missing after a failed fetch says the fetch failed. `ape framework status` says the same, and its
+  JSON gains `drift.fetchFailed`.
+- **F16d, class D:** moving a pin (`ape update --pin`, `--update-ape`, the lift) runs bingo from
+  PATH, else the project's own pinned bingo (`$GOBIN/bingo-<version>` from `.bingo/bingo.mod`),
+  else `$GOBIN/bingo`. When there is none, the error names each place it looked.
+- `migrations.pending` keeps WARN for a half-applied entry whose command ran (F16e, D467): the
+  framework's `v1.2.0_seq-01` fixes the check that made seq-06 half-applied.
+
 ## v1.1.0 (2026-10-23)
 
 APEX v1.1, on v1.0.0: ape measures what a run costs and waits for what it needs — test-time cost
