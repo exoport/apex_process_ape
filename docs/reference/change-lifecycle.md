@@ -328,7 +328,7 @@ person act the project newly waits on, such as `answer <id>: <answer>` for a blo
 
 | Code | When | Action |
 | --- | --- | --- |
-| `change.touches-gate` | The change's commits since `base_sha` edit a gate a person approved: a recorded gate file or own file of its milestone (for a tweak, of any approved milestone). Refused by verify before any check runs, and by archive before it rebases. Restore the files on the branch, or reply `gate defect: <evidence>`. | replan |
+| `change.touches-gate` | The change's commits since `base_sha` edit a gate a person approved: a recorded gate file or own file of its milestone, or a new file one of its recorded globs matches (for a tweak, of any approved milestone). Refused by verify before any check runs, and by archive before it rebases. Restore the files on the branch, or reply `gate defect: <evidence>`. | replan |
 | `change.plan-drift` | `change.md` differs from the plan frozen at start, outside `## Why` and `## Notes`. Re-start to re-baseline, or restore the plan. | apply |
 | `change.provenance` | Since the v1 epoch, a commit wrote `development/specs/**` outside an archive squash (`spec.edited`), or a `state.json` outside an `apex:` commit or a squash (`state.forged`). Also refused while a guarded block of `_apex/config.yaml` changed in a commit no person accepted (`config.changed`). A person reverts the commit, or accepts the config change with `ape project accept-config --by <who>`. | person |
 | `review.stale` | Archive: the work changed on `change/<id>` since the review. `ape change review <id> --run` verifies it again, then reviews it. | review |

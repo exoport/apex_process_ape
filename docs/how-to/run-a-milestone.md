@@ -99,33 +99,71 @@ never the `Status:` line alone. The record holds:
 | `gate_files` | The SHA-256 of each script the command runs: an executable word that is a path (`./scripts/e2e.sh`), or the script given to an interpreter (`bash scripts/gate.sh`). Arguments, data files, commands inside `$(…)`, bare command names and absolute paths are not hashed. |
 | `gate_files_sha256` | A digest of the gate files. |
 | `gate_own_files` | The gate's own files beside its scripts, each with its SHA-256 (below). |
+| `gate_globs` | The globs that named some of the own files (below): a file one matches later is a change to the gate. |
 | `base_sha` | HEAD at the first approval, the milestone's start. A re-approval keeps it. It is `APE_MILESTONE_BASE` for every gate run. |
 | `self_check` | The approval's red run: `at`, `sha`, `exit`, `secs`, `log`, `output_sha256`. |
 
 `ape milestone approve <M> --json` prints the milestone and this `self_check` beside it, so
 `"exit": 1` there shows the gate was recorded red without opening `milestones.json`. After a
-no-op approve it is the earlier approval's.
+no-op approve it is the earlier approval's. Beside it, `"approval"` says whether this call
+recorded an approval (`"recorded"`) or found nothing to re-approve (`"unchanged"`), and `"frozen"`
+lists what the approval on record froze: `{gate_files, gate_own_files, gate_globs}`. The human
+output says the same in one line: `froze 3 files: scripts/gate.sh, scripts/checks/one.checks,
+scripts/lib/gate.sh`, or `unchanged since <at>: nothing to re-approve`.
 
-`gate_own_files` freezes the files a gate reads, one level deep:
+`gate_own_files` freezes the files a gate reads:
 
 - every file under the milestone's gate folders, `development/gates/<M>-*/`;
 - every file under `development/gates/lib/`;
-- every file a recorded script sources (`. <path>`, `source <path>`, literal or
-  `"$(dirname "$0")/<path>"`);
-- every literal relative path a recorded script names under its own folder, when that folder is
+- every file a recorded script sources (`. <path>`, `source <path>`);
+- every relative path a recorded script names under its own folder, when that folder is
   neither the project root nor the development folder (`scripts/checks/m4.checks` beside
   `scripts/m4.sh`).
 
-Never the files a gate checks elsewhere (`README.md`, `docs/`): those are the milestone's work.
+A path counts written literally or from the script's own folder: `$(dirname "$0")/x`,
+`${0%/*}/x`, `$(cd "$(dirname "$0")" && pwd)` (also with `pwd -P`, `realpath` or `readlink -f`),
+the `BASH_SOURCE` forms (`${BASH_SOURCE%/*}/x`, `$(dirname "${BASH_SOURCE[0]}")/x`), and a
+variable assigned one of those:
 
-So a check list the gate reads must live with the gate. When an open milestone's gate script
+```bash
+here=$(cd "$(dirname "$0")" && pwd)
+. "$here/lib/gate.sh"
+```
+
+`$here/../x` is under the parent folder, and the same folder rule judges that folder.
+
+A sourced file is read in turn, by the same rules, up to three files deep and each file once:
+inside it `$0` is still the gate script and `BASH_SOURCE` is the sourced file, and its own
+folder counts as well. So a shared `scripts/lib/gate.sh` that reads
+`"$GATE_DIR/checks/one.checks"` (with `GATE_DIR=$(dirname "$0")`) or names
+`scripts/checks/one.checks` freezes that list.
+
+A path with a glob under such a folder, `for f in scripts/checks/*.checks`, freezes every file it
+matches at approval and records the pattern in `gate_globs`. A file that matches it later is a
+change to the gate, as an edited one is: `milestone.gate-changed` names it ("… is new (it matches
+scripts/checks/*.checks)"), and a change that adds one is refused with `change.touches-gate`.
+
+A gate can also name its own files: a line `# ape: gate-files <path|glob>…` in a gate script or a
+file it sources adds those repo-relative paths and globs, wherever they are (a declared glob is
+recorded even before anything matches it):
+
+```bash
+# ape: gate-files data/expected.json scripts/checks/*.checks
+```
+
+Never the files a gate checks elsewhere (`README.md`, `docs/`): those are the milestone's work.
+They stay out even when a script reaches them through its folder (`"$here/../README.md"`).
+
+So a check list the gate reads must live with the gate, or be declared. When an open milestone's gate script
 reads a file by an input redirection (`while read -r c; do …; done < scripts/checks/m1.checks`)
 and the file is none of the gate's own, `ape project check` gives the notice `gate.data-outside`:
 the approval does not record it, so an edit to it is no drift and no `change.touches-gate`. Move a
-check list into `development/gates/<M>-<slug>/` before the approval (for an approved milestone,
+check list into `development/gates/<M>-<slug>/`, or declare it in the script
+(`# ape: gate-files scripts/checks/m1.checks`), before the approval (for an approved milestone,
 with its next re-approval). A work product the gate only reads to check stays where it is.
 
-From approval on, a change that edits a recorded gate file or own file is refused at verify and
+From approval on, a change that edits a recorded gate file or own file, or adds a file a recorded
+glob matches, is refused at verify and
 archive with `change.touches-gate` (action `replan`). Only a person or apex-plan changes a gate.
 
 ## 4. Deliver the changes

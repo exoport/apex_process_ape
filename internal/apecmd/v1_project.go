@@ -667,11 +667,13 @@ line}; [] when none, beside the findings on a failure too), they never change th
   gate.data-outside        an open milestone's gate script reads a file by an input
                            redirection (` + "`while read …; done < scripts/checks/m1.checks`" + `)
                            that is none of the gate's own files (its gate folders,
-                           development/gates/lib/, what it sources, a literal path under
-                           its own non-root, non-development folder), so the approval
+                           development/gates/lib/, what it sources, a path under its
+                           own non-root, non-development folder, what it declares:
+                           ` + "`ape milestone approve --help`" + `), so the approval
                            does not record it: an edit to it is no gate drift and no
                            change.touches-gate (D313a). A gate's own check list moves
-                           into development/gates/<M>-<slug>/ (approved: with its next
+                           into development/gates/<M>-<slug>/, or the script declares it
+                           ("# ape: gate-files <path>", v1.2) (approved: with its next
                            re-approval); a work product the gate checks stays (D319, W8)
 The gate's per-scenario run times these read are in _apex/state/logs/gate-<M>.json.
 

@@ -691,8 +691,8 @@ Refused while change.md differs from the plan frozen at start outside ## Why and
 as pending.
 Refused, before any check runs, when the change's commits since its base_sha edit a gate a
 person approved (RK-6 R2): a recorded gate file of its milestone — a script the Gate:
-command runs, or one of the gate's own files (`+"`ape milestone approve --help`"+`: gate_own_files);
-for a tweak, of any approved milestone. Exit 1, code change.touches-gate, action replan:
+command runs, or one of the gate's own files (`+"`ape milestone approve --help`"+`: gate_own_files),
+or a new file a recorded glob matches (gate_globs); for a tweak, of any approved milestone. Exit 1, code change.touches-gate, action replan:
 only a person or apex-plan changes a gate; restore the files on the change branch, or reply
 "gate defect: <evidence>". archive refuses it the same way before it rebases.
 
