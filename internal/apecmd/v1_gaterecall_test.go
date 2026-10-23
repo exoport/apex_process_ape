@@ -63,6 +63,9 @@ func gateJSON(t *testing.T, root string, args ...string) (exit int, recorded boo
 	return exit, out.Recorded, stderr
 }
 
+// exitOf is gateJSON's exit alone.
+func exitOf(exit int, _ bool, _ string) int { return exit }
+
 // F1 (D419, D432): a gate call at an unchanged HEAD and tree returns the
 // finished run — its output, its exit code, "recorded": true — and never
 // runs the gate again; human output says so on stderr.
@@ -104,7 +107,7 @@ func TestGateRecall_UnchangedReturnsFinishedRun(t *testing.T) {
 // status says the last one is not current.
 func TestGateRecall_UntrackedFileRunsAgain(t *testing.T) {
 	root, gateRuns, _ := gateRecallRepo(t)
-	_, _, _ = gateJSON(t, root)
+	require.Equal(t, ExitRunFailed, exitOf(gateJSON(t, root)))
 	require.NoError(t, os.WriteFile(filepath.Join(root, "new.txt"), []byte("x\n"), 0o644))
 	stdout, _, err := v1Exec(t, newStatusCmd, "--json", "--cwd", root)
 	require.NoError(t, err)
@@ -122,7 +125,7 @@ func TestGateRecall_UntrackedFileRunsAgain(t *testing.T) {
 func TestGateRecall_StateCommitKeepsIt(t *testing.T) {
 	root, gateRuns, _ := gateRecallRepo(t)
 	before := v1Git(t, root, "rev-parse", "HEAD")
-	_, _, _ = gateJSON(t, root)
+	require.Equal(t, ExitRunFailed, exitOf(gateJSON(t, root)))
 	require.NotEqual(t, before, v1Git(t, root, "rev-parse", "HEAD"))
 	require.Equal(t, "apex: M1 gate red", v1Git(t, root, "log", "-1", "--format=%s"))
 	require.NoError(t, os.WriteFile(filepath.Join(root, "_apex", "state", "scratch.txt"), []byte("x\n"), 0o644))
@@ -139,7 +142,7 @@ func TestGateRecall_StateCommitKeepsIt(t *testing.T) {
 // --rerun runs the gate whatever is recorded; its run is then the answer.
 func TestGateRecall_RerunFlag(t *testing.T) {
 	root, gateRuns, _ := gateRecallRepo(t)
-	_, _, _ = gateJSON(t, root)
+	require.Equal(t, ExitRunFailed, exitOf(gateJSON(t, root)))
 	exit, recorded, _ := gateJSON(t, root, "--rerun")
 	require.Equal(t, ExitRunFailed, exit)
 	require.False(t, recorded)
@@ -152,7 +155,7 @@ func TestGateRecall_RerunFlag(t *testing.T) {
 // A result ape v1.1 recorded has no tree: it is never returned again.
 func TestGateRecall_V11RecordRunsAgain(t *testing.T) {
 	root, gateRuns, _ := gateRecallRepo(t)
-	_, _, _ = gateJSON(t, root)
+	require.Equal(t, ExitRunFailed, exitOf(gateJSON(t, root)))
 	p, err := apexv1.Open(root)
 	require.NoError(t, err)
 	r := p.LoadRunResult("M1")
@@ -170,7 +173,7 @@ func TestGateRecall_V11RecordRunsAgain(t *testing.T) {
 // full gate call never returns a spec-only run.
 func TestGateRecall_ModeMismatchRunsAgain(t *testing.T) {
 	root, gateRuns, specRuns := gateRecallRepo(t)
-	_, _, _ = gateJSON(t, root)
+	require.Equal(t, ExitRunFailed, exitOf(gateJSON(t, root)))
 	require.Equal(t, 2, gateRuns())
 	specs := specRuns()
 	_, _, err := v1Exec(t, newMilestoneCmd, "gate", "M1", "--spec-only", "--cwd", root)
@@ -215,7 +218,7 @@ func TestGateRecall_PersonActOnlyItsOwn(t *testing.T) {
 // record (under _apex/state/, left out of it) names another command.
 func TestGateRecall_GateChangedStillRefused(t *testing.T) {
 	root, gateRuns, _ := gateRecallRepo(t)
-	_, _, _ = gateJSON(t, root)
+	require.Equal(t, ExitRunFailed, exitOf(gateJSON(t, root)))
 	recs := filepath.Join(root, "_apex", "state", "milestones.json")
 	data, err := os.ReadFile(recs)
 	require.NoError(t, err)
