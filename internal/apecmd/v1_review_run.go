@@ -249,7 +249,9 @@ func startReviewSession(ctx context.Context, p *apexv1.Project, id, model, effor
 }
 
 // awaitHandle waits up to wait for a detached run to end (0: it only
-// looks). lost reports a supervisor gone without recording an exit.
+// looks). lost reports a supervisor gone without recording an exit — a
+// definite negative seen twice (supervisorLost), never a look that could
+// not tell.
 func awaitHandle(ctx context.Context, path string, wait time.Duration) (h *detachedHandle, ended, lost bool) {
 	deadline := time.Now().Add(wait)
 	for {
@@ -260,11 +262,12 @@ func awaitHandle(ctx context.Context, path string, wait time.Duration) (h *detac
 		if h.ExitCode != nil {
 			return h, true, false
 		}
-		if h.SupervisorPID != 0 && !supervisorIsOurs(ctx, h) {
-			if h2, err := readHandle(path); err == nil && h2.ExitCode != nil {
-				return h2, true, false
-			}
-			return h, false, true
+		// Lost only on a definite negative seen twice (F14); a look that
+		// cannot tell keeps the wait going.
+		if lost, cur := supervisorLost(ctx, path, h); cur.ExitCode != nil {
+			return cur, true, false
+		} else if lost {
+			return cur, false, true
 		}
 		if !time.Now().Before(deadline) {
 			return h, false, false

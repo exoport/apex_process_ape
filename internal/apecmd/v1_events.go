@@ -106,7 +106,7 @@ func emitDetachedRunEnd(ctx context.Context, h *detachedHandle, code int) {
 
 // lostMarkerPath marks a detached run whose loss is logged.
 func lostMarkerPath(projectRoot, id string) string {
-	return strings.TrimSuffix(handlePath(projectRoot, id), ".json") + ".lost"
+	return lostMarkerOfHandle(handlePath(projectRoot, id))
 }
 
 // noteRunLost logs run-lost for h, whose supervisor is gone without
@@ -128,8 +128,9 @@ func noteRunLost(ctx context.Context, projectRoot string, h *detachedHandle) {
 }
 
 // detachedRuns are the project's detached runs still going: a handle with
-// no exit whose supervisor is ours (or not yet recorded). A handle found
-// lost is logged (noteRunLost) and does not count.
+// no exit whose supervisor is ours, not yet recorded, or could not be
+// checked. A handle found lost (supervisorLost: a definite negative, seen
+// twice) is logged (noteRunLost) and does not count.
 func detachedRuns(ctx context.Context, projectRoot string) []string {
 	paths, _ := filepath.Glob(filepath.Join(filepath.Dir(handlePath(projectRoot, "x")), "*.json"))
 	var live []string
@@ -138,15 +139,15 @@ func detachedRuns(ctx context.Context, projectRoot string) []string {
 		if err != nil || h.ExitCode != nil {
 			continue
 		}
-		if h.SupervisorPID != 0 && !supervisorIsOurs(ctx, h) {
-			// Re-read once: the exit may have been recorded between the two.
-			if h2, err := readHandle(path); err == nil && h2.ExitCode != nil {
-				continue
-			}
-			noteRunLost(ctx, projectRoot, h)
+		lost, cur := supervisorLost(ctx, path, h)
+		if cur.ExitCode != nil {
 			continue
 		}
-		live = append(live, h.ID)
+		if lost {
+			noteRunLost(ctx, projectRoot, cur)
+			continue
+		}
+		live = append(live, h.ID) // ours, or a look that could not tell: never lost on that
 	}
 	return live
 }

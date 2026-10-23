@@ -361,7 +361,10 @@ Exit 76 means the run's supervisor is gone without recording an exit
 (killed, or the machine restarted), so ape cannot report how the run ended
 — it does NOT mean the run did nothing: the ape commands its session ran may
 have committed state, so read ` + "`ape status`" + ` before starting it again. A
-code of its own, so it is never mistaken for a run that exited 1.
+code of its own, so it is never mistaken for a run that exited 1. ape
+reports it only after seeing twice, a second apart, that the supervisor's
+pid is gone or belongs to another program; a check that cannot tell (ps
+failing or timing out on a loaded machine) keeps the wait going.
 
 The run's stdout is in its own file (the handle's "stdout"), apart from
 stderr (its "log"), so a --output-format json envelope reads clean.
@@ -419,12 +422,12 @@ func waitDetached(ctx context.Context, cmd *cobra.Command, path string, timeout 
 			}
 			return reportedErr(*h.ExitCode, fmt.Errorf("the detached run exited %d", *h.ExitCode))
 		}
-		if h.SupervisorPID != 0 && !supervisorIsOurs(ctx, h) {
-			// Re-read once: the supervisor may have recorded the exit
-			// between the two reads and then ended.
-			if h2, err := readHandle(path); err == nil && h2.ExitCode != nil {
-				continue
-			}
+		// Lost only on a definite negative seen twice; a look that cannot
+		// tell (ps slow under load, F14) keeps the wait going.
+		if gone, cur := supervisorLost(ctx, path, h); cur.ExitCode != nil {
+			continue // recorded between the reads: report it
+		} else if gone {
+			h = cur
 			lost := fmt.Errorf(
 				"run %s: its supervisor (pid %d) is gone without recording an exit — it was killed, or the machine restarted; see %s",
 				h.ID, h.SupervisorPID, h.Log)
@@ -603,18 +606,24 @@ at most 2048 bytes; absent without a transcript) — and exits 0.`,
 			if err != nil {
 				return usageErr(err)
 			}
-			h, err := readHandle(handlePath(root, args[0]))
+			path := handlePath(root, args[0])
+			h, err := readHandle(path)
 			if err != nil {
 				return usageErrExit(ExitUsage, err)
+			}
+			// Lost only on a definite negative seen twice (F14): a look
+			// that cannot tell reports the run as running.
+			lost, h := supervisorLost(cmd.Context(), path, h)
+			if lost {
+				noteRunLost(cmd.Context(), root, h)
 			}
 			if jsonOut {
 				state := liveState(h)
 				switch {
 				case h.ExitCode != nil:
 					state = runEnded
-				case h.SupervisorPID != 0 && !supervisorIsOurs(cmd.Context(), h):
+				case lost:
 					state = runLost
-					noteRunLost(cmd.Context(), root, h)
 				}
 				return printDetachedReport(cmd.OutOrStdout(), h, state)
 			}
@@ -625,9 +634,8 @@ at most 2048 bytes; absent without a transcript) — and exits 0.`,
 			switch {
 			case h.ExitCode != nil:
 				state = fmt.Sprintf("ended, exit %d", *h.ExitCode)
-			case h.SupervisorPID != 0 && !supervisorIsOurs(cmd.Context(), h):
+			case lost:
 				state = "gone without recording an exit"
-				noteRunLost(cmd.Context(), root, h)
 			}
 			enc := json.NewEncoder(cmd.OutOrStdout())
 			enc.SetIndent("", "  ")
@@ -664,11 +672,13 @@ Only this run's own process is ever signalled. A pid is reused once its
 process is gone, so ape first checks the process is still this run's (Unix:
 its "ape run supervise --handle …/<id>.json" command line; Windows: an ape
 process created after the handle). Anything else is refused, exit 76, and
-nothing is signalled.
+nothing is signalled. A check that cannot tell (ps failing or timing out on
+a loaded machine) signals nothing either, and exits 75: run it again.
 
 Exits 0 once the run has ended, whatever its own exit code (ape run wait
-reports that); 75 if it has not ended within --timeout; 76 if its supervisor
-is gone or the pid is no longer the run's; 0 at once if it had already ended.`,
+reports that); 75 if it has not ended within --timeout, or its process could
+not be checked; 76 if its supervisor is gone or the pid is no longer the
+run's (seen twice, a second apart); 0 at once if it had already ended.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root, err := resolveProjectRoot(cwd)
@@ -688,6 +698,13 @@ is gone or the pid is no longer the run's; 0 at once if it had already ended.`,
 			// Identity, not just liveness: a pid is reused once its process is
 			// gone, and stop must never signal a process that is not this run's.
 			if err := stopDetached(cmd.Context(), h); err != nil {
+				if errors.Is(err, errIdentityUnknown) {
+					return usageErrExit(exitCodeStillRunning, err)
+				}
+				if h2, rerr := readHandle(path); rerr == nil && h2.ExitCode != nil {
+					fmt.Fprintf(out, "run %s had already ended with exit %d\n", h2.ID, *h2.ExitCode)
+					return nil
+				}
 				return usageErrExit(exitCodeRunLost, err)
 			}
 			deadline := time.Now().Add(timeout)

@@ -6218,11 +6218,13 @@ Only this run's own process is ever signalled. A pid is reused once its
 process is gone, so ape first checks the process is still this run's (Unix:
 its "ape run supervise --handle …/<id>.json" command line; Windows: an ape
 process created after the handle). Anything else is refused, exit 76, and
-nothing is signalled.
+nothing is signalled. A check that cannot tell (ps failing or timing out on
+a loaded machine) signals nothing either, and exits 75: run it again.
 
 Exits 0 once the run has ended, whatever its own exit code (ape run wait
-reports that); 75 if it has not ended within --timeout; 76 if its supervisor
-is gone or the pid is no longer the run's; 0 at once if it had already ended.
+reports that); 75 if it has not ended within --timeout, or its process could
+not be checked; 76 if its supervisor is gone or the pid is no longer the
+run's (seen twice, a second apart); 0 at once if it had already ended.
 
 Flags:
 
@@ -6253,7 +6255,10 @@ Exit 76 means the run's supervisor is gone without recording an exit
 (killed, or the machine restarted), so ape cannot report how the run ended
 — it does NOT mean the run did nothing: the ape commands its session ran may
 have committed state, so read `ape status` before starting it again. A
-code of its own, so it is never mistaken for a run that exited 1.
+code of its own, so it is never mistaken for a run that exited 1. ape
+reports it only after seeing twice, a second apart, that the supervisor's
+pid is gone or belongs to another program; a check that cannot tell (ps
+failing or timing out on a loaded machine) keeps the wait going.
 
 The run's stdout is in its own file (the handle's "stdout"), apart from
 stderr (its "log"), so a --output-format json envelope reads clean.
