@@ -201,9 +201,13 @@ An entry is `{name, skill, when}`, with names unique across the slots (design, r
 The skill is one of:
 
 - `<plugin>:<skill>`, a skill of a plugin listed in `plugins:`;
-- a project skill, `.claude/skills/<skill>/SKILL.md`;
-- a user skill, `skills/<skill>/SKILL.md` under `$CLAUDE_CONFIG_DIR`, else `~/.claude`. A user
-  skill wins over a project skill of the same name.
+- a project skill, `.claude/skills/<skill>/SKILL.md`, or a project command,
+  `.claude/commands/<skill>.md`;
+- a user skill or command, the same two paths under `$CLAUDE_CONFIG_DIR`, else `~/.claude`.
+
+ape looks under the user's `.claude` first, then the project's, and in each for the skill before
+the command. The first found wins, so a user skill or command wins over a project one of the same
+name.
 
 It must be installed and slash-invocable (not `user-invocable: false`), because ape types it as a
 slash command. Any entry may also carry `paths:` and `touches:` ([below](#let-ape-check-when)).
@@ -236,7 +240,7 @@ session's, then the config's `effort:`, then Claude Code's own.
 | ---- | ------- |
 | 0 | The session ended 0 |
 | 1 | `tool.unknown` (no entry has that name), `tool.args` (a filled value is not one shell-safe token), `tool.failed` (the session ended non-zero or was lost), or the change was not found |
-| 2 | Usage: no such task, or a template using `{task}` without `--task` |
+| 2 | Usage: no such task, a template using `{task}` without `--task`, or a `--wait` outside 0–9m30s (`usage.wait`) |
 | 75 | Still running: call it again |
 
 ### The allow-list
@@ -251,7 +255,7 @@ one. [Nesting](../explanation/operator-and-loop.md#nesting-as-it-applies-to-the-
 | Code | Means | Fix |
 | ---- | ----- | --- |
 | `tools.invalid` | The block is malformed: an unknown slot, an entry missing `name`, `skill` or `when`, an unknown key, a skill that is not `<skill>` or `<plugin>:<skill>`, a name used twice, an unknown placeholder in `args`, an effort that is not a level. Only the valid entries are used | Fix the block |
-| `tools.not-installed` | No skill of that name: the plugin is not listed in `plugins:`, not installed or has no such skill, or there is no project or user skill | List the plugin and run `ape plugins sync`, add the skill, or fix the name |
+| `tools.not-installed` | No skill of that name: the plugin is not listed in `plugins:`, not installed or has no such skill, or there is no project or user skill or command | List the plugin and run `ape plugins sync`, add the skill, or fix the name |
 | `tools.not-invocable` | The skill has `user-invocable: false` | Drop the flag, or name another skill |
 | `tools.unknown` | A change's `— tool: <name>` task, `review_tools:` entry or `advise:` entry names no declared tool (`ape change check`) | Re-plan the change with a declared tool |
 | `tools.too-big` | An advise entry's files are over `caps.advise`, or what one session of a change reads is over `caps.advise_session` | List fewer advise entries; a person shortens the file, narrows `for:` or raises the cap |
@@ -271,7 +275,9 @@ tools:
 ```
 
 - `load` names files relative to the skill's folder (the folder holding its `SKILL.md`). It is
-  required.
+  required. For a command that folder is the whole `.claude/commands/`, shared with every other
+  command, and every `.md` file there is itself a command. Ship advise files in a skill folder
+  ([config reference](../reference/config-yaml.md#an-advise-entry-on-a-command)).
 - `for` names the sessions that read them: `change`, `apply`, `review`. It defaults to all three.
   A delegate never reads advise.
 - An advise entry starts no session and gives no verdict, so it takes no `args`, `model` or

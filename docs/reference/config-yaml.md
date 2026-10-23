@@ -493,8 +493,11 @@ They make `when:` checkable. A change whose planned `paths:` or `touches:` (at
 `ape change check`), or whose diff (at `ape change verify`), match an entry it does not list gets
 the notice `tools.unmatched`. It is a warning, never a refusal: `when:` stays the planner's call.
 
-A skill is `<plugin>:<skill>` (of a plugin listed in `plugins:`), a project skill
-(`.claude/skills/<skill>/`) or a user skill. It must be installed (else `tools.not-installed`). A
+A skill is `<plugin>:<skill>` (of a plugin listed in `plugins:`), or a local skill or command:
+ape looks under the user's `.claude` (`$CLAUDE_CONFIG_DIR`, else `~/.claude`), then the project's,
+and in each for `skills/<skill>/SKILL.md`, then `commands/<skill>.md`. The first found wins, so a
+user skill or command wins over a project one of the same name, as in Claude Code. It must be
+installed (else `tools.not-installed`). A
 `design` or `review` skill must also be slash-invocable (else `tools.not-invocable`). A malformed
 block is `tools.invalid`. Every `design` and `review` skill joins the loop's allow-list.
 `apex-change` names a tool in a change, and the loop runs it with `ape change tool <id> <name>`.
@@ -505,12 +508,19 @@ An `advise` entry starts no session and gives no verdict. Its fields:
 
 | Field | Meaning |
 | ----- | ------- |
-| `load` | Required. Files relative to the skill's folder: the folder holding its `SKILL.md`, in the plugin's install for a plugin skill, else in the user's or the project's `.claude/skills/<skill>/` (a user skill wins, as in Claude Code). No `..`, no absolute path |
+| `load` | Required. Files relative to the skill's folder: the folder holding its `SKILL.md`, in the plugin's install for a plugin skill, else in the user's or the project's `.claude/skills/<skill>/` (a user skill wins, as in Claude Code). For a command it is the `commands/` folder holding `<skill>.md`, shared with every other command ([below](#an-advise-entry-on-a-command)). No `..`, no absolute path |
 | `for` | The sessions that read the files: `change`, `apply`, `review`. Default all three. A delegate never reads advise |
 | `paths`, `touches` | As above |
 
 `args`, `model` and `effort` are refused on an advise entry. The skill need not be
 slash-invocable; `disable-model-invocation: true` keeps it out of every session's skill listing.
+
+#### An advise entry on a command
+
+A command has no folder of its own, so `load:` resolves against the whole `commands/` folder
+(`.claude/commands/` in the project, or under the user's `.claude`). `load: [advise.md]` reads
+`.claude/commands/advise.md`, whichever command the entry names. Claude Code also lists that file
+as a command, `/advise`. Give an expert's files a skill folder, `.claude/skills/<skill>/`.
 
 A change names the entries whose `when:` it matches in its `advise:` frontmatter, as it does
 `review_tools:`. Then:
