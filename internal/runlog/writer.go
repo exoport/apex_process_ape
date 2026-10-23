@@ -136,7 +136,8 @@ func (w *Writer) CheckpointKindStep(kind, step string, payload any, at time.Time
 }
 
 // Checkpoint writes one checkpoints.jsonl entry. Kinds: stage-start,
-// stage-end, commit-made, contract, pipeline-end, reply, stopped.
+// stage-end, commit-made, contract, pipeline-end, reply, stopped,
+// session-leftovers.
 // PLAN-5 / C6.
 func (w *Writer) Checkpoint(entry CheckpointEntry) error {
 	if entry.Timestamp.IsZero() {

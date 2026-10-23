@@ -86,6 +86,14 @@ type RunOptions struct {
 	// registry the nesting rule reads.
 	OnSessionSpawn func(pid int)
 
+	// Leftovers is what the run does, once a stage's session has ended,
+	// with the processes still carrying its APE_SESSION marker (O-1): stop
+	// them (proctree.LeftoversKill, also ""), or only record them
+	// (proctree.LeftoversReport). Either way the manifest lists them under
+	// session_leftovers. A run without a manifest has no marker of its own
+	// and looks for none.
+	Leftovers string
+
 	// SessionKind is the command that owns this run — pipeline, task,
 	// change or script — stamped into every stage's session as
 	// APE_SESSION=<kind>/<run-id> (repl.EnvApeSession). Empty means

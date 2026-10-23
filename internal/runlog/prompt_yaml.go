@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/exoport/apex_process_ape/internal/proctree"
 	"gopkg.in/yaml.v3"
 )
 
@@ -66,6 +67,11 @@ type PromptMeta struct {
 	// block kept the session going instead of ending it. Absent when no
 	// verdict was consulted.
 	StopGate *PromptStopGate `json:"stop_gate,omitempty" yaml:"stop_gate,omitempty"`
+	// SessionLeftovers are the processes the session left running after it
+	// ended (O-1), found by its APE_SESSION marker, and what was done to
+	// each — as a task's manifest records them. Linux only; absent when
+	// there were none.
+	SessionLeftovers []proctree.Leftover `json:"session_leftovers,omitempty" yaml:"session_leftovers,omitempty"`
 }
 
 // PromptStopGate is a prompt session's stop-gate verdicts, in the shape of

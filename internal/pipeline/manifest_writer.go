@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/exoport/apex_process_ape/internal/proctree"
 	"github.com/exoport/apex_process_ape/internal/stamp"
 	"gopkg.in/yaml.v3"
 )
@@ -278,6 +279,12 @@ func (w *manifestWriter) RecordTermination(rec *TerminationRecord) {
 		return
 	}
 	w.manifest.Termination = rec
+}
+
+// RecordLeftovers adds the processes a stage's session left running, for
+// Finalize to persist.
+func (w *manifestWriter) RecordLeftovers(list []proctree.Leftover) {
+	w.manifest.SessionLeftovers = append(w.manifest.SessionLeftovers, list...)
 }
 
 // Finalize writes the terminal manifest + renders the human report.

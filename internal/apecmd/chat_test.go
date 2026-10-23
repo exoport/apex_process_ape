@@ -114,3 +114,16 @@ func TestChatSpawnEnv_DisablesTheBackgroundShellReap(t *testing.T) {
 	require.Equal(t, []string{repl.EnvDisableBGShellReap + "=1"}, got,
 		"exactly one entry, ape's own: the inherited value is scrubbed with the rest of the family")
 }
+
+// O-1: a person's session is never swept. ape task and ape prompt kill
+// the processes their session left running; ape chat has no --leftovers
+// flag and its code never calls the sweep.
+func TestChat_NeverSweepsLeftovers(t *testing.T) {
+	require.Nil(t, newChatCmd().Flags().Lookup("leftovers"))
+	require.NotNil(t, newTaskCmd().Flags().Lookup("leftovers"))
+	require.NotNil(t, newPromptCmd().Flags().Lookup("leftovers"))
+	src, err := os.ReadFile("chat.go")
+	require.NoError(t, err)
+	require.NotContains(t, string(src), "SessionLeftovers(")
+	require.NotContains(t, string(src), "pipeline.Run(", "chat drives no runner that sweeps")
+}

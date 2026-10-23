@@ -2,6 +2,8 @@ package pipeline
 
 import (
 	"time"
+
+	"github.com/exoport/apex_process_ape/internal/proctree"
 )
 
 // ManifestSchemaVersion is the current on-disk schema for run manifests.
@@ -226,6 +228,13 @@ type Manifest struct {
 	// when no reading was recorded (a plan without rate limits, a session
 	// that never reached the API). Additive under schema_version 2.
 	Usage *UsageRecord `yaml:"usage,omitempty"`
+
+	// SessionLeftovers are the processes the run's session left running
+	// after it ended (O-1) — found by its APE_SESSION marker once claude
+	// was stopped — and what was done to each: killed, kept (--leftovers
+	// report) or kill-failed. Linux only; absent when there were none.
+	// Additive under schema_version 2.
+	SessionLeftovers []proctree.Leftover `yaml:"session_leftovers,omitempty"`
 }
 
 // UsageRecord is the run's usage readings, and the guard's decision.

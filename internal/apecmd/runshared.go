@@ -13,6 +13,7 @@ import (
 	"github.com/exoport/apex_process_ape/internal/effort"
 	"github.com/exoport/apex_process_ape/internal/eventing"
 	"github.com/exoport/apex_process_ape/internal/pipeline"
+	"github.com/exoport/apex_process_ape/internal/proctree"
 	"github.com/exoport/apex_process_ape/internal/runlog"
 	"github.com/exoport/apex_process_ape/internal/tui"
 	"github.com/spf13/cobra"
@@ -303,6 +304,11 @@ type runConfig struct {
 	// for pipeline and task; change and script dispatch through the task
 	// runner and set their own.
 	sessionKind string
+	// leftovers is what the run does with the processes its session leaves
+	// running once it ends (O-1): proctree.LeftoversKill (also "") or
+	// proctree.LeftoversReport. Never set for ape chat, which is a person's
+	// session and runs none of this.
+	leftovers string
 
 	// launch is the session's place in the nesting rule (D62): its lineage
 	// goes into the session's environment and the run's manifest, and the
@@ -345,3 +351,13 @@ const (
 	helpCwd    = "Project root (default: current working dir)"
 	helpFormat = "Output format: human|json|yaml"
 )
+
+// addLeftoversFlag is --leftovers, on the commands that launch a session
+// nobody watches (ape task, ape prompt) — never on ape chat, a person's
+// session, whose processes are theirs.
+func addLeftoversFlag(cmd *cobra.Command, v *string) {
+	cmd.Flags().StringVar(v, "leftovers", proctree.LeftoversKill,
+		"What to do, once the session has ended, with the processes it left running (a server its Bash tool backgrounded), "+
+			"found by the session's APE_SESSION marker: kill stops each one's tree, report leaves them running. "+
+			"Either way they are listed under session_leftovers in the run record (Linux only; ape's own detached workers are never touched)")
+}

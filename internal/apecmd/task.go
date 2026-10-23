@@ -20,6 +20,7 @@ import (
 	"github.com/exoport/apex_process_ape/internal/commitowners"
 	"github.com/exoport/apex_process_ape/internal/eventing"
 	"github.com/exoport/apex_process_ape/internal/pipeline"
+	"github.com/exoport/apex_process_ape/internal/proctree"
 	"github.com/exoport/apex_process_ape/internal/repl"
 	"github.com/exoport/apex_process_ape/internal/runlog"
 	"github.com/exoport/apex_process_ape/internal/sessiondriver"
@@ -370,6 +371,7 @@ func newTaskCmd() *cobra.Command {
 		eventsPrefixFlag   string
 		uploadTranscripts  bool
 		transcriptStore    string
+		leftoversFlag      string
 		usageOKFlag        bool
 	)
 	cmd := &cobra.Command{
@@ -393,6 +395,10 @@ func newTaskCmd() *cobra.Command {
 			// DR-11 (D277): a prompt with nowhere to go is a usage error,
 			// before anything is read or started.
 			if err := checkPromptFlag(cmd.Flags().Changed, promptFlagName); err != nil {
+				return usageErr(err)
+			}
+			leftovers, err := proctree.ParseLeftoversMode(leftoversFlag)
+			if err != nil {
 				return usageErr(err)
 			}
 			// Q95: apex-orchestrator is the operator's now, never a task;
@@ -485,6 +491,7 @@ func newTaskCmd() *cobra.Command {
 				transcriptStore:       transcriptStore,
 				launch:                launch,
 				usageOK:               usageOKFlag,
+				leftovers:             leftovers,
 			}
 			return runTask(cmd.Context(), opts)
 		},
@@ -514,6 +521,7 @@ func newTaskCmd() *cobra.Command {
 	cmd.Flags().StringVar(&cwdFlag, "cwd", "", "Project root directory (default: current working dir)")
 	addDetachFlag(cmd, &detachFlag)
 	cmd.Flags().BoolVar(&usageOKFlag, "usage-ok", false, "Launch whatever the plan's usage reads: the usage guard's override (a person only, from a terminal; recorded in the run manifest with the reading)")
+	addLeftoversFlag(cmd, &leftoversFlag)
 	addNatsFlags(cmd, &natsURLFlag, &natsCredsFlag, &eventsPrefixFlag, &uploadTranscripts, &transcriptStore)
 	return cmd
 }
@@ -555,6 +563,10 @@ type taskOptions struct {
 	// usageOK is a person's --usage-ok: the usage guard launches whatever
 	// the plan's usage reads (W4).
 	usageOK bool
+	// leftovers is --leftovers: what the run does with the processes its
+	// session leaves running (O-1); "" is kill, as for every caller that
+	// dispatches without the flag (ape change, ape script).
+	leftovers string
 }
 
 // resolveHandoffPrompt derives the --prompt value from --handoff: a
@@ -767,6 +779,7 @@ func dispatchTask(ctx context.Context, o taskOptions) (taskRun, error) {
 		transcriptStore:       o.transcriptStore,
 		kind:                  eventing.KindTask,
 		sessionKind:           o.sessionKind,
+		leftovers:             o.leftovers,
 	}
 	if o.jsonMode {
 		// stdout carries only the envelope; progress goes to stderr.

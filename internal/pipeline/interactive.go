@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/exoport/apex_process_ape/internal/effort"
+	"github.com/exoport/apex_process_ape/internal/proctree"
 	"github.com/exoport/apex_process_ape/internal/repl"
 	"github.com/exoport/apex_process_ape/internal/runlog"
 	"github.com/exoport/apex_process_ape/internal/sessiondriver"
@@ -210,7 +211,8 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, skips Sta
 	}
 	argv = append(argv, effortPlan.ArgEntries()...)
 
-	stageEnv := append(effortPlan.EnvEntries(), repl.SessionMarkerEnv(sessionKind(opts), runIDOf(mw, spec))...)
+	marker := repl.SessionMarkerEnv(sessionKind(opts), runIDOf(mw, spec))
+	stageEnv := append(effortPlan.EnvEntries(), marker...)
 	stageEnv = append(stageEnv, repl.LaunchEnv(firstModel, explicitEffort)...)
 	stageEnv = append(stageEnv, opts.SpawnEnv...)
 
@@ -224,7 +226,12 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, skips Sta
 		opts.OnSessionSpawn(pid)
 	}
 	// Cleanup must run even after ctx is cancelled — Background is intentional.
-	defer func() { _ = repl.KillSession(context.Background(), sessionName) }() //nolint:contextcheck // cleanup-on-exit; ctx is already done here
+	// Once claude is stopped, whatever still carries the session's marker
+	// is a process it left running (O-1).
+	defer func() { //nolint:contextcheck // cleanup-on-exit; ctx is already done here
+		_ = repl.KillSession(context.Background(), sessionName)
+		endLeftovers(context.Background(), mw, opts, marker[0])
+	}()
 
 	if err := sessiondriver.WaitReady(ctx, interactiveReadyTimeout, opts.MaxDuration, "interactive step", func(readyCtx context.Context) error {
 		return repl.WaitForReady(readyCtx, sessionName)
@@ -759,6 +766,24 @@ func waitStepDone(ctx context.Context, opts RunOptions, stage string, stepIdx in
 	case <-time.After(opts.InteractiveStepGrace):
 		return nil
 	}
+}
+
+// endLeftovers deals with the processes a stage's session left running
+// (O-1): kills them, unless the run asked for a report only, and records
+// them in the manifest, with one line on stderr. A run without a manifest
+// is not looked at: its marker names the pipeline, not this run, so it is
+// not this run's alone.
+func endLeftovers(ctx context.Context, mw *manifestWriter, opts RunOptions, marker string) {
+	if mw == nil || mw.runID == "" {
+		return
+	}
+	list := proctree.SessionLeftovers(ctx, marker, opts.Leftovers, proctree.LeftoversGrace)
+	if len(list) == 0 {
+		return
+	}
+	mw.RecordLeftovers(list)
+	fmt.Fprintln(os.Stderr, proctree.LeftoversLine(list))
+	runLog(opts.RunLog, "session-leftovers", "", map[string]any{"count": len(list), "leftovers": list})
 }
 
 // sessionKind is the owning command for the APE_SESSION marker.

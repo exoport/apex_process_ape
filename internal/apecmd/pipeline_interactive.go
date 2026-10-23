@@ -1018,6 +1018,7 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 		EffortSource:      cfg.effortSource,
 		SpawnEnv:          append(slices.Clone(cfg.spawnEnv), cfg.launch.env()...),
 		SessionKind:       sessionKindOf(cfg),
+		Leftovers:         cfg.leftovers,
 		Depth:             cfg.launch.depthOrZero(),
 		ParentRun:         cfg.launch.parentRunOrEmpty(),
 		RelayOf:           cfg.relay.relayOfOrEmpty(),

@@ -280,6 +280,10 @@ func runChat(
 		return fmt.Errorf("ape chat: claude: %w", err)
 	}
 	live.spawned(claude.Process.Pid)
+	// No leftovers sweep when claude exits (O-1): this is a person's
+	// session, and a server they started from it is theirs to stop. ape
+	// task and ape prompt sweep theirs (proctree.SessionLeftovers); chat
+	// never does, and has no --leftovers flag.
 	if err := claude.Wait(); err != nil {
 		// Non-zero exit from claude itself is treated as a clean exit
 		// — same behaviour the PLAN-6 tmux-era attach path provided.

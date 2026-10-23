@@ -20,6 +20,7 @@ import (
 	"github.com/exoport/apex_process_ape/internal/effort"
 	"github.com/exoport/apex_process_ape/internal/framework"
 	"github.com/exoport/apex_process_ape/internal/output"
+	"github.com/exoport/apex_process_ape/internal/proctree"
 	"github.com/exoport/apex_process_ape/internal/repl"
 	"github.com/exoport/apex_process_ape/internal/runlog"
 	"github.com/exoport/apex_process_ape/internal/sessiondriver"
@@ -77,6 +78,9 @@ type promptOptions struct {
 	// launch is the session's place in the nesting rule (D62); nil
 	// decides it in runPromptCore.
 	launch *sessionLaunch
+	// leftovers is --leftovers (O-1); "" is kill, as for ape script's
+	// prompt runner.
+	leftovers string
 }
 
 func newPromptCmd() *cobra.Command {
@@ -94,6 +98,7 @@ func newPromptCmd() *cobra.Command {
 		ignoreProjSettings bool
 		outputStyleFlag    string
 		outputFormat       string
+		leftoversFlag      string
 	)
 	cmd := &cobra.Command{
 		Use:   "prompt [text]",
@@ -181,6 +186,11 @@ failed, or the typed line never submitted · 2 usage or preflight error (no _ape
 				fmt.Fprintf(os.Stderr, "Error: --output-format must be human, json, or yaml, got %q\n", outputFormat)
 				os.Exit(ExitUsage)
 			}
+			leftovers, err := proctree.ParseLeftoversMode(leftoversFlag)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+				os.Exit(ExitUsage)
+			}
 
 			var text string
 			if len(args) == 1 {
@@ -227,6 +237,7 @@ failed, or the typed line never submitted · 2 usage or preflight error (no _ape
 				outputStyle:           outputStyleFlag,
 				format:                format,
 				launch:                launch,
+				leftovers:             leftovers,
 			})
 		},
 	}
@@ -244,6 +255,7 @@ failed, or the typed line never submitted · 2 usage or preflight error (no _ape
 	addOutputStyleFlag(cmd, &outputStyleFlag)
 	cmd.Flags().BoolVar(&ignoreProjSettings, "ignore-project-settings", false, "Tell the spawned claude to skip project + local .claude/settings*.json")
 	cmd.Flags().StringVar(&outputFormat, "output-format", "human", "Output format: human|json|yaml (json/yaml = result envelope on stdout, progress on stderr)")
+	addLeftoversFlag(cmd, &leftoversFlag)
 	return cmd
 }
 
@@ -340,6 +352,9 @@ type promptResult struct {
 	telemetry *sessiondriver.Telemetry
 	runDir    string
 	waitErr   error
+	// record is the prompt.yaml written, for the session's teardown to add
+	// its leftovers to.
+	record *runlog.PromptMeta
 }
 
 // runPrompt is the `ape prompt` CLI entrypoint: it runs the session core,
@@ -501,7 +516,22 @@ func runPromptCore(ctx context.Context, o promptOptions) (promptResult, int, err
 	if pid, ok := repl.SessionPID(sessionName); ok {
 		live.spawned(pid)
 	}
-	defer func() { _ = repl.KillSession(context.Background(), sessionName) }() //nolint:contextcheck // cleanup-on-exit
+	// Once claude is stopped, whatever still carries the session's marker
+	// is a process it left running (O-1): killed unless --leftovers report,
+	// and added to prompt.yaml when the session got as far as writing it.
+	var recorded *runlog.PromptMeta
+	defer func() { //nolint:contextcheck // cleanup-on-exit
+		_ = repl.KillSession(context.Background(), sessionName)
+		list := proctree.SessionLeftovers(context.Background(), repl.SessionMarkerEnv("prompt", promptID)[0], o.leftovers, proctree.LeftoversGrace)
+		if len(list) == 0 {
+			return
+		}
+		fmt.Fprintln(os.Stderr, proctree.LeftoversLine(list))
+		if recorded != nil {
+			recorded.SessionLeftovers = list
+			_ = runlog.WritePromptYAML(runDir, *recorded)
+		}
+	}()
 
 	// PLAN-19 D1/D4: feed the Driver the PTY-output progress signal and the
 	// child-liveness probe now that the session exists. The transcript-growth
@@ -554,6 +584,7 @@ func runPromptCore(ctx context.Context, o promptOptions) (promptResult, int, err
 		sessionID: driver.SessionID(), transcript: driver.TranscriptPath(), effort: effortPlan, argsFile: argsFile,
 		stopGate: stopGate,
 	}, promptID, runDir, status, start, waitErr, progressf)
+	recorded = res.record
 	return res, exitCode, waitErr
 }
 
@@ -601,7 +632,7 @@ func finishPrompt(o promptOptions, driver *sessiondriver.Driver, x promptRecordE
 	tele := driver.Telemetry()
 	duration := time.Since(start)
 	perModel := perModelTotals(tele)
-	writePromptRecord(runDir, promptID, o, x, status, start, tele, perModel)
+	record := writePromptRecord(runDir, promptID, o, x, status, start, tele, perModel)
 	if _, rerr := cost.RebuildRollup(o.projectRoot); rerr != nil {
 		progressf("ape prompt: rebuild cost rollup: %v\n", rerr)
 	}
@@ -616,6 +647,7 @@ func finishPrompt(o promptOptions, driver *sessiondriver.Driver, x promptRecordE
 		telemetry:       tele,
 		runDir:          runDir,
 		waitErr:         waitErr,
+		record:          record,
 	}
 }
 
@@ -671,8 +703,9 @@ type promptRecordExtras struct {
 	stopGate   *stopGateRecorder
 }
 
-// writePromptRecord persists prompt.yaml. Best-effort.
-func writePromptRecord(runDir, promptID string, o promptOptions, x promptRecordExtras, status string, start time.Time, tele *sessiondriver.Telemetry, perModel map[string]cost.Totals) {
+// writePromptRecord persists prompt.yaml, and returns what it wrote.
+// Best-effort.
+func writePromptRecord(runDir, promptID string, o promptOptions, x promptRecordExtras, status string, start time.Time, tele *sessiondriver.Telemetry, perModel map[string]cost.Totals) *runlog.PromptMeta {
 	meta := runlog.PromptMeta{
 		PromptID:  promptID,
 		StartedAt: start,
@@ -709,6 +742,7 @@ func writePromptRecord(runDir, promptID string, o promptOptions, x promptRecordE
 		}
 	}
 	_ = runlog.WritePromptYAML(runDir, meta)
+	return &meta
 }
 
 // collectTranscriptPaths lists the copied transcripts under
