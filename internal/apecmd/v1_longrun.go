@@ -59,6 +59,9 @@ const (
 	maxLongWait     = 9*time.Minute + 30*time.Second
 )
 
+// verbMilestoneClose is `ape milestone close`'s lock verb.
+const verbMilestoneClose = "milestone close"
+
 // v1DetachDefault: the six verbs run in a detached worker unless
 // --no-detach. The package's tests run them in-process (their binary is
 // not ape); the detach tests turn it back on.
@@ -76,7 +79,8 @@ backgrounded or killed without stopping it. The call waits up to --wait (default
 most 9m30s; 0 returns at once); a run that ends in time is printed as always, with the same
 exit code and --json shape. Otherwise the call exits 75, still running: "… still running
 since <time> — run the same command again to attach" (--json: {"running": true, "verb",
-"scope", "since", "log", "pid", "log_tail"}, the shape ` + "`ape change review --run`" + ` has).
+"scope", "since", "log", "pid", "log_tail"}, the shape ` + "`ape change review --run`" + ` has;
+milestone gate and close add "verdict": "no verdict yet: …" last).
 Running the same command again attaches: it waits again and prints the run's result once it
 ends — never a second run — or exits 75 again with the log lines the run wrote since the
 last call (stderr; --json: "log_tail"). A result no call
@@ -131,6 +135,9 @@ type runningPayload struct {
 	Log     string   `json:"log"`
 	PID     int      `json:"pid,omitempty"`
 	LogTail []string `json:"log_tail,omitempty"`
+	// Verdict, last for tail, is the human line (F1c): no verdict yet,
+	// and how to attach. Milestone gate and close only.
+	Verdict string `json:"verdict,omitempty"`
 }
 
 // stillRunning reports a run that has not ended within the call's wait:
@@ -326,14 +333,21 @@ func deliverRecorded(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, r *apexv
 	return &exitError{code: r.Exit, err: errors.New(r.Err), reported: r.Silent}
 }
 
-// withRecorded adds "recorded": true as the last key of a --json object
-// as v1Emit prints it (two-space indent); anything else is left as it is.
+// withRecorded adds "recorded": true to a --json object as v1Emit prints
+// it (two-space indent): as its last key, or just before "verdict" when
+// that ends the object — the verdict stays last, for tail (F1c). Anything
+// else is left as it is.
 func withRecorded(out string) string {
 	body := strings.TrimRight(out, "\n")
 	if !strings.HasPrefix(body, "{") || !strings.HasSuffix(body, "\n}") {
 		return out
 	}
-	return strings.TrimSuffix(body, "\n}") + ",\n  \"recorded\": true\n}\n"
+	body = strings.TrimSuffix(body, "\n}")
+	const verdict = "\n  \"verdict\": "
+	if i := strings.LastIndex(body, verdict); i >= 0 && !strings.Contains(body[i+1:], "\n") {
+		return body[:i] + "\n  \"recorded\": true," + body[i:] + "\n}\n"
+	}
+	return body + ",\n  \"recorded\": true\n}\n"
 }
 
 // awaitRun polls the run lock every awaitPollFirst at first, doubling up to
@@ -389,6 +403,10 @@ func longStillRunning(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, l *apex
 		l.Verb, l.Scope, l.Started, l.PID, l.Log)
 	if l.Verb == apexv1.VerbMilestoneGate {
 		msg += "; once it has finished, the next call returns its result once, while nothing changed (`--rerun` runs the gate again)"
+	}
+	// A gate's or close's tail names it too (F1c): no verdict yet.
+	if l.Verb == apexv1.VerbMilestoneGate || l.Verb == verbMilestoneClose {
+		payload.Verdict = "no verdict yet: " + msg
 	}
 	return stillRunning(cmd, f, payload, msg)
 }

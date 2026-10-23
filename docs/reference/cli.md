@@ -1629,7 +1629,8 @@ backgrounded or killed without stopping it. The call waits up to --wait (default
 most 9m30s; 0 returns at once); a run that ends in time is printed as always, with the same
 exit code and --json shape. Otherwise the call exits 75, still running: "… still running
 since <time> — run the same command again to attach" (--json: {"running": true, "verb",
-"scope", "since", "log", "pid", "log_tail"}, the shape `ape change review --run` has).
+"scope", "since", "log", "pid", "log_tail"}, the shape `ape change review --run` has;
+milestone gate and close add "verdict": "no verdict yet: …" last).
 Running the same command again attaches: it waits again and prints the run's result once it
 ends — never a second run — or exits 75 again with the log lines the run wrote since the
 last call (stderr; --json: "log_tail"). A result no call
@@ -2098,7 +2099,8 @@ backgrounded or killed without stopping it. The call waits up to --wait (default
 most 9m30s; 0 returns at once); a run that ends in time is printed as always, with the same
 exit code and --json shape. Otherwise the call exits 75, still running: "… still running
 since <time> — run the same command again to attach" (--json: {"running": true, "verb",
-"scope", "since", "log", "pid", "log_tail"}, the shape `ape change review --run` has).
+"scope", "since", "log", "pid", "log_tail"}, the shape `ape change review --run` has;
+milestone gate and close add "verdict": "no verdict yet: …" last).
 Running the same command again attaches: it waits again and prints the run's result once it
 ends — never a second run — or exits 75 again with the log lines the run wrote since the
 last call (stderr; --json: "log_tail"). A result no call
@@ -2339,7 +2341,8 @@ backgrounded or killed without stopping it. The call waits up to --wait (default
 most 9m30s; 0 returns at once); a run that ends in time is printed as always, with the same
 exit code and --json shape. Otherwise the call exits 75, still running: "… still running
 since <time> — run the same command again to attach" (--json: {"running": true, "verb",
-"scope", "since", "log", "pid", "log_tail"}, the shape `ape change review --run` has).
+"scope", "since", "log", "pid", "log_tail"}, the shape `ape change review --run` has;
+milestone gate and close add "verdict": "no verdict yet: …" last).
 Running the same command again attaches: it waits again and prints the run's result once it
 ends — never a second run — or exits 75 again with the log lines the run wrote since the
 last call (stderr; --json: "log_tail"). A result no call
@@ -4163,7 +4166,8 @@ backgrounded or killed without stopping it. The call waits up to --wait (default
 most 9m30s; 0 returns at once); a run that ends in time is printed as always, with the same
 exit code and --json shape. Otherwise the call exits 75, still running: "… still running
 since <time> — run the same command again to attach" (--json: {"running": true, "verb",
-"scope", "since", "log", "pid", "log_tail"}, the shape `ape change review --run` has).
+"scope", "since", "log", "pid", "log_tail"}, the shape `ape change review --run` has;
+milestone gate and close add "verdict": "no verdict yet: …" last).
 Running the same command again attaches: it waits again and prints the run's result once it
 ends — never a second run — or exits 75 again with the log lines the run wrote since the
 last call (stderr; --json: "log_tail"). A result no call
@@ -4251,6 +4255,10 @@ own Claude Code session, the person typed "accept red on <M>" in this turn (E2: 
 a run of the same command line: a plain close running on the milestone is run.busy (exit 3),
 never an attach that would drop the flag. A person tags after close.
 
+A close whose gate ran ends with its verdict line, as `ape milestone gate`'s does ("close <M>:
+done, gate green (exit 0) …", "close <M>: gate red, not closed (exit 1) …"; re-read through
+`ape status --json` milestones[].last_gate); --json puts "exit" and "log" first and "verdict" last.
+
 Exit codes: 0 done · 1 gate red (without --accept-red), changes in flight, not approved,
 no approval record, a changed gate, an archived gate/ in the way, or HEAD on a change
 branch · 2 usage, or --accept-red from a model session.
@@ -4262,7 +4270,8 @@ backgrounded or killed without stopping it. The call waits up to --wait (default
 most 9m30s; 0 returns at once); a run that ends in time is printed as always, with the same
 exit code and --json shape. Otherwise the call exits 75, still running: "… still running
 since <time> — run the same command again to attach" (--json: {"running": true, "verb",
-"scope", "since", "log", "pid", "log_tail"}, the shape `ape change review --run` has).
+"scope", "since", "log", "pid", "log_tail"}, the shape `ape change review --run` has;
+milestone gate and close add "verdict": "no verdict yet: …" last).
 Running the same command again attaches: it waits again and prints the run's result once it
 ends — never a second run — or exits 75 again with the log lines the run wrote since the
 last call (stderr; --json: "log_tail"). A result no call
@@ -4371,6 +4380,12 @@ result beside it in gate-<M>-spec.json (never the gate's gate-<M>.json). JSON {m
 spec_only: true, mode: "spec-only", spec_checks, spec_failed: [...], log, at, sha}; a red
 scenario is the diagnostic gate.spec-red (exit 1, action replan), the result under "result".
 
+The output ends with the verdict (F1c), so a tail of it still has it: the last stdout line
+is "gate <M>: green|red (exit N) at <sha> — log <path>; this result is recorded: re-read it
+with `ape status --json` (milestone.gate_last) or the log, not by running the gate again",
+returned results included; --json puts "exit" and "log" (the gate's log) first and that line,
+"verdict", last. Never run the gate again to read a result: the next call runs it.
+
 Exit codes: 0 gate green (--spec-only: every scenario passed) · 1 gate red (last output
 lines shown), a red scenario under --spec-only, no such milestone, a done milestone, no
 approval record, a changed gate, or HEAD on a change branch · 2 usage · 3 run.busy (--spec-only).
@@ -4382,7 +4397,8 @@ backgrounded or killed without stopping it. The call waits up to --wait (default
 most 9m30s; 0 returns at once); a run that ends in time is printed as always, with the same
 exit code and --json shape. Otherwise the call exits 75, still running: "… still running
 since <time> — run the same command again to attach" (--json: {"running": true, "verb",
-"scope", "since", "log", "pid", "log_tail"}, the shape `ape change review --run` has).
+"scope", "since", "log", "pid", "log_tail"}, the shape `ape change review --run` has;
+milestone gate and close add "verdict": "no verdict yet: …" last).
 Running the same command again attaches: it waits again and prints the run's result once it
 ends — never a second run — or exits 75 again with the log lines the run wrote since the
 last call (stderr; --json: "log_tail"). A result no call

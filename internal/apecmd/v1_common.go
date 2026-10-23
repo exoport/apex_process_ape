@@ -108,6 +108,102 @@ func v1Emit(w io.Writer, f *v1Flags, v any, human func(io.Writer)) error {
 	return nil
 }
 
+// jsonKV is one key of a framed --json object.
+type jsonKV struct {
+	key string
+	val any
+}
+
+// jsonFrame puts keys first and last in a --json object (F1c, D456): a
+// long result read through head or tail still shows them.
+type jsonFrame struct {
+	head, tail []jsonKV
+}
+
+// encodeFramed writes v as v1Emit does (two-space indent), with fr's head
+// keys first and its tail keys last, the rest in v's own order between
+// them. A framed key a map v holds is moved, not repeated; a struct v must
+// not hold one. A nil fr is v1Emit's encoding.
+func encodeFramed(w io.Writer, v any, fr *jsonFrame) error {
+	if fr == nil {
+		enc := json.NewEncoder(w)
+		enc.SetIndent("", "  ")
+		return enc.Encode(v)
+	}
+	if m, ok := v.(map[string]any); ok {
+		m = maps.Clone(m)
+		for _, kv := range append(append([]jsonKV{}, fr.head...), fr.tail...) {
+			delete(m, kv.key)
+		}
+		v = m
+	}
+	body, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return err
+	}
+	s := string(body)
+	if !strings.HasPrefix(s, "{") || !strings.HasSuffix(s, "}") {
+		return fmt.Errorf("a framed --json value must be an object, not %.20s", s)
+	}
+	inner := strings.TrimSuffix(strings.TrimPrefix(s[1:len(s)-1], "\n"), "\n")
+	members := make([]string, 0, len(fr.head)+len(fr.tail)+1)
+	member := func(kv jsonKV) error {
+		k, err := json.Marshal(kv.key)
+		if err != nil {
+			return err
+		}
+		val, err := json.MarshalIndent(kv.val, "  ", "  ")
+		if err != nil {
+			return err
+		}
+		members = append(members, "  "+string(k)+": "+string(val))
+		return nil
+	}
+	for _, kv := range fr.head {
+		if err := member(kv); err != nil {
+			return err
+		}
+	}
+	if inner != "" {
+		members = append(members, inner)
+	}
+	for _, kv := range fr.tail {
+		if err := member(kv); err != nil {
+			return err
+		}
+	}
+	_, err = io.WriteString(w, "{\n"+strings.Join(members, ",\n")+"\n}\n")
+	return err
+}
+
+// v1EmitFramed is v1Emit with fr framing the --json object.
+func v1EmitFramed(w io.Writer, f *v1Flags, v any, human func(io.Writer), fr *jsonFrame) error {
+	if f.json {
+		return encodeFramed(w, v, fr)
+	}
+	human(w)
+	return nil
+}
+
+// v1ExitOf is the exit code v1Fail gives err.
+func v1ExitOf(err error) int {
+	var fe *apexv1.FailError
+	var ue *apexv1.UsageError
+	var ce *apexv1.ConflictError
+	var ee *exitError
+	switch {
+	case errors.As(err, &ee):
+		return ee.code
+	case errors.As(err, &fe):
+		return ExitRunFailed
+	case errors.As(err, &ue):
+		return ExitUsage
+	case errors.As(err, &ce):
+		return exitV1Conflict
+	}
+	return ExitRunFailed
+}
+
 // v1Fail maps an apexv1 error onto the exit table, printing the findings
 // and the one-line remediation (to stdout as JSON under --json, else to
 // stderr). partial is any result worth showing beside the failure.
@@ -118,6 +214,12 @@ func v1Fail(cmd *cobra.Command, f *v1Flags, err error, partial any) error {
 // v1FailWith is v1Fail with extra top-level JSON keys (project check's
 // notices); the human output is v1Fail's.
 func v1FailWith(cmd *cobra.Command, f *v1Flags, err error, partial any, extra map[string]any) error {
+	return v1FailFramed(cmd, f, err, partial, extra, nil)
+}
+
+// v1FailFramed is v1FailWith with frame, given the exit code, framing the
+// --json object (nil frame: none).
+func v1FailFramed(cmd *cobra.Command, f *v1Flags, err error, partial any, extra map[string]any, frame func(exit int) *jsonFrame) error {
 	if err == nil {
 		return nil
 	}
@@ -139,6 +241,10 @@ func v1FailWith(cmd *cobra.Command, f *v1Flags, err error, partial any, extra ma
 		code = exitV1Conflict
 		conflicts = ce.Conflicts
 	}
+	var fr *jsonFrame
+	if f.json && frame != nil {
+		fr = frame(code)
+	}
 	if f.json {
 		out := map[string]any{"ok": false, "exit": code, "error": err.Error(), "diagnostics": apexv1.Diagnostics(err)}
 		if len(findings) > 0 {
@@ -151,9 +257,7 @@ func v1FailWith(cmd *cobra.Command, f *v1Flags, err error, partial any, extra ma
 			out["result"] = partial
 		}
 		maps.Copy(out, extra)
-		enc := json.NewEncoder(cmd.OutOrStdout())
-		enc.SetIndent("", "  ")
-		if encErr := enc.Encode(out); encErr != nil {
+		if encErr := encodeFramed(cmd.OutOrStdout(), out, fr); encErr != nil {
 			return encErr
 		}
 		return reportedErr(code, err)

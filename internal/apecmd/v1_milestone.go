@@ -317,6 +317,51 @@ func gateHuman(g *apexv1.GateResult) func(io.Writer) {
 	}
 }
 
+// gateVerdict is the one line a gate or close result ends with (F1c,
+// D456): the verdict, the exit, the gate's log and how to read the result
+// again — so a caller that cut the output with tail still has it, and does
+// not run an hour-long gate a second time to read what the first printed.
+// verb is "gate" or "close"; err is the call's error, nil on exit 0.
+func gateVerdict(verb string, g *apexv1.GateResult, err error) string {
+	exit := 0
+	if err != nil {
+		exit = v1ExitOf(err)
+	}
+	state := "green"
+	if !g.Run.Green() {
+		state = "red"
+	}
+	reread := "`ape status --json` (milestone.gate_last)"
+	if verb == "close" {
+		reread = "`ape status --json` (milestones[].last_gate)"
+		switch {
+		case err != nil:
+			state = "gate " + state + ", not closed"
+		case g.AcceptRed != nil:
+			state = "done, gate red accepted"
+		default:
+			state = "done, gate " + state
+		}
+	}
+	log := g.Run.Log
+	if log == "" {
+		log = "(none)"
+	}
+	return fmt.Sprintf("%s %s: %s (exit %d) at %.7s — log %s; this result is recorded: re-read it with %s or the log, not by running the %s again",
+		verb, g.Milestone, state, exit, g.Run.SHA, log, reread, verb)
+}
+
+// gateFrame frames a gate or close result's --json (F1c, D456): exit and
+// the gate's log first, for head; the verdict line last, for tail.
+func gateFrame(verb string, g *apexv1.GateResult, err error) func(int) *jsonFrame {
+	return func(exit int) *jsonFrame {
+		return &jsonFrame{
+			head: []jsonKV{{"exit", exit}, {"log", g.Run.Log}},
+			tail: []jsonKV{{"verdict", gateVerdict(verb, g, err)}},
+		}
+	}
+}
+
 func newMilestoneGateCmd() *cobra.Command {
 	var f v1Flags
 	var specOnly bool
@@ -389,6 +434,12 @@ result beside it in gate-<M>-spec.json (never the gate's gate-<M>.json). JSON {m
 spec_only: true, mode: "spec-only", spec_checks, spec_failed: [...], log, at, sha}; a red
 scenario is the diagnostic gate.spec-red (exit 1, action replan), the result under "result".
 
+The output ends with the verdict (F1c), so a tail of it still has it: the last stdout line
+is "gate <M>: green|red (exit N) at <sha> — log <path>; this result is recorded: re-read it
+with ` + "`ape status --json`" + ` (milestone.gate_last) or the log, not by running the gate again",
+returned results included; --json puts "exit" and "log" (the gate's log) first and that line,
+"verdict", last. Never run the gate again to read a result: the next call runs it.
+
 Exit codes: 0 gate green (--spec-only: every scenario passed) · 1 gate red (last output
 lines shown), a red scenario under --spec-only, no such milestone, a done milestone, no
 approval record, a changed gate, or HEAD on a change branch · 2 usage · 3 run.busy (--spec-only).`,
@@ -415,12 +466,17 @@ approval record, a changed gate, or HEAD on a change branch · 2 usage · 3 run.
 						return v1Fail(cmd, f, err, nil)
 					}
 					if !g.Run.Green() {
+						red := &apexv1.FailError{Code: "gate.red", Msg: fmt.Sprintf("%s gate is red (%s) — plan the next change toward it", id, g.Run.Why())}
 						if !f.json {
 							gateHuman(g)(cmd.OutOrStdout())
+							fmt.Fprintln(cmd.OutOrStdout(), gateVerdict("gate", g, red))
 						}
-						return v1Fail(cmd, f, &apexv1.FailError{Code: "gate.red", Msg: fmt.Sprintf("%s gate is red (%s) — plan the next change toward it", id, g.Run.Why())}, g)
+						return v1FailFramed(cmd, f, red, g, nil, gateFrame("gate", g, red))
 					}
-					return v1Emit(cmd.OutOrStdout(), f, g, gateHuman(g))
+					return v1EmitFramed(cmd.OutOrStdout(), f, g, func(w io.Writer) {
+						gateHuman(g)(w)
+						fmt.Fprintln(w, gateVerdict("gate", g, nil))
+					}, gateFrame("gate", g, nil)(0))
 				}
 			})
 		},
@@ -520,6 +576,10 @@ own Claude Code session, the person typed "accept red on <M>" in this turn (E2: 
 a run of the same command line: a plain close running on the milestone is run.busy (exit 3),
 never an attach that would drop the flag. A person tags after close.
 
+A close whose gate ran ends with its verdict line, as ` + "`ape milestone gate`" + `'s does ("close <M>:
+done, gate green (exit 0) …", "close <M>: gate red, not closed (exit 1) …"; re-read through
+` + "`ape status --json`" + ` milestones[].last_gate); --json puts "exit" and "log" first and "verdict" last.
+
 Exit codes: 0 done · 1 gate red (without --accept-red), changes in flight, not approved,
 no approval record, a changed gate, an archived gate/ in the way, or HEAD on a change
 branch · 2 usage, or --accept-red from a model session.`,
@@ -547,14 +607,24 @@ branch · 2 usage, or --accept-red from a model session.`,
 					g, err = p.CloseMilestone(ctx, id, opt)
 				}
 				return func(cmd *cobra.Command, f *v1Flags) error {
+					// A gate that ran ends the output with its verdict (F1c).
+					ran := g != nil && g.Run.Cmd != ""
 					if err != nil {
-						if g != nil && !f.json && g.Run.Cmd != "" {
-							gateHuman(g)(cmd.OutOrStdout())
+						if !ran {
+							return v1Fail(cmd, f, err, g)
 						}
-						return v1Fail(cmd, f, err, g)
+						if !f.json {
+							gateHuman(g)(cmd.OutOrStdout())
+							fmt.Fprintln(cmd.OutOrStdout(), gateVerdict("close", g, err))
+						}
+						return v1FailFramed(cmd, f, err, g, nil, gateFrame("close", g, err))
 					}
-					return v1Emit(cmd.OutOrStdout(), f, g, func(w io.Writer) {
-						if g.Run.Cmd != "" {
+					var fr *jsonFrame
+					if ran {
+						fr = gateFrame("close", g, nil)(0)
+					}
+					return v1EmitFramed(cmd.OutOrStdout(), f, g, func(w io.Writer) {
+						if ran {
 							gateHuman(g)(w)
 						} else {
 							fmt.Fprintf(w, "%s is already done\n", g.Milestone)
@@ -565,7 +635,10 @@ branch · 2 usage, or --accept-red from a model session.`,
 						for _, a := range g.GateArchived {
 							fmt.Fprintf(w, "gate folder archived: %s/ -> %s/\n", a.From, a.To)
 						}
-					})
+						if ran {
+							fmt.Fprintln(w, gateVerdict("close", g, nil))
+						}
+					}, fr)
 				}
 			})
 		},

@@ -5,6 +5,7 @@ package apecmd
 import (
 	"encoding/json"
 	"os"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -61,4 +62,42 @@ func TestGateRecall_DetachedAttachAfter75(t *testing.T) {
 	require.Equal(t, ExitRunFailed, exit)
 	require.False(t, recorded, "printed once: the next call runs the gate")
 	require.Equal(t, 3, gateRuns())
+}
+
+// F1c (D456): exit 75 ends with the run still going and how to attach —
+// the human message is the last stdout line, and under --json "verdict"
+// is the last key and says there is none yet.
+func TestGateVerdict_StillRunning75(t *testing.T) {
+	root, _, _ := gateRecallRepo(t)
+	require.NoError(t, os.WriteFile(gateSleepFile(root), []byte("3\n"), 0o644))
+	old := v1DetachDefault
+	v1DetachDefault = true
+	t.Setenv(asApeBinary, "1")
+	t.Cleanup(func() { v1DetachDefault = old })
+	p, err := apexv1.Open(root)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		if l := p.LoadRunLock("M1"); l != nil && l.PID > 0 && l.PID != os.Getpid() {
+			_ = syscall.Kill(l.PID, syscall.SIGKILL)
+		}
+		awaitNoProcessUnder(t, root, 20*time.Second)
+	})
+
+	stdout, _, err := v1Exec(t, newMilestoneCmd, "gate", "M1", "--json", "--wait", "0", "--cwd", root)
+	require.Equal(t, exitCodeStillRunning, exitCodeOf(t, err), stdout)
+	last := lastLine(strings.TrimSuffix(strings.TrimRight(stdout, "\n"), "}"))
+	require.True(t, strings.HasPrefix(last, "  \"verdict\": \"no verdict yet: `ape milestone gate M1` is still running since "), stdout)
+	require.Contains(t, tailC(stdout, 300), "run the same command again to attach")
+
+	stdout, stderr, err := v1Exec(t, newMilestoneCmd, "gate", "M1", "--wait", "0", "--cwd", root)
+	require.Equal(t, exitCodeStillRunning, exitCodeOf(t, err), stdout+stderr)
+	last = lastLine(stdout)
+	require.True(t, strings.HasPrefix(last, "`ape milestone gate M1` is still running since "), stdout)
+	require.Contains(t, last, "run the same command again to attach")
+	require.Contains(t, last, "log _apex/state/runs/M1.log")
+
+	lock := p.LoadRunLock("M1")
+	require.NotNil(t, lock)
+	require.Eventually(t, func() bool { return p.LoadRunLock("M1") == nil }, 30*time.Second, 50*time.Millisecond)
+	awaitExit(t, lock.PID)
 }
