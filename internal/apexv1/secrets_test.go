@@ -628,3 +628,48 @@ func TestSecretRules_AWSAccessKeyIDFromTheDefaults(t *testing.T) {
 	require.Equal(t, []string{base.Regex, base.FilterExpr}, []string{fallback.Regex, fallback.FilterExpr})
 	require.Equal(t, base.Keywords, fallback.Keywords)
 }
+
+// F-TF1 (D415): ape's own JSON records key digests by a path or name the
+// project chose — gate_own_files by a gate helper's path, base_fingerprints
+// by a requirement — and a key holding "api", "auth", "token"… beside a
+// 64-hex digest is gitleaks' generic-api-key. In those records, and only
+// there, a value that is exactly a lowercase sha256 (64 hex digits, with or
+// without "sha256:") is no secret; anything else in them is still scanned,
+// and the same digest anywhere else still refuses.
+func TestScanCommit_DigestsInApesRecordsAreNoSecret(t *testing.T) {
+	sum := sha256.Sum256([]byte("#!/bin/sh\napi() { curl -s \"$1\"; }\n"))
+	digest := hex.EncodeToString(sum[:])
+	line := `      "development/gates/lib/api.sh": "` + digest + `"`
+	root := secretRepo(t, map[string]string{"README.md": "x\n"})
+	commitAll := func() { run(t, root, "add", "-A"); run(t, root, "commit", "-q", "-m", "x") }
+
+	for _, rel := range []string{
+		"_apex/state/milestones.json",
+		"_apex/state/decisions.json",
+		"development/changes/add-auth/state.json",
+		"development/archive/changes/2026-10-22-add-auth/state.json",
+		"development/archive/2026-10-22-add-auth/state.json",
+		"development/changes/archive/2026-10-22-add-auth/state.json",
+	} {
+		writeAt(t, root, rel, "{\n  \"M1\": {\n    \"gate_own_files\": {\n"+line+"\n    },\n    \"base_fingerprints\": {\n      \"auth/Token refresh\": \"sha256:"+digest+"\"\n    }\n  }\n}\n")
+		run(t, root, "add", "-A")
+		require.NoError(t, ScanCommit(ctx(), root, "apex: M1 approved"), rel)
+		commitAll()
+	}
+
+	// The same digest line outside ape's records is still a finding: the
+	// exemption is the record's, not the value's.
+	writeAt(t, root, "config/app.json", "{\n"+line+"\n}\n")
+	run(t, root, "add", "-A")
+	fe := secretFail(t, ScanCommit(ctx(), root, "apex: x"))
+	require.Contains(t, fe.Msg, "config/app.json:2 rule generic-api-key")
+	run(t, root, "rm", "-q", "--cached", "config/app.json")
+
+	// A real secret in a record still refuses: a token, and a value of the
+	// digest's key that is not a sha256.
+	writeAt(t, root, "_apex/state/milestones.json", "{\n  \"note\": \"export GITHUB_TOKEN="+fakeToken+"\",\n  \"development/gates/lib/api.sh\": \"Zx9Qp2Lm8Rt4Vb6Nc1Hj3Kd5Fg7Wq0Ey\"\n}\n")
+	run(t, root, "add", "_apex/state/milestones.json")
+	fe = secretFail(t, ScanCommit(ctx(), root, "apex: x"))
+	require.Contains(t, fe.Msg, "_apex/state/milestones.json:2 rule github-pat")
+	require.Contains(t, fe.Msg, "_apex/state/milestones.json:3 rule generic-api-key")
+}

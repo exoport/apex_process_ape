@@ -992,7 +992,7 @@ func quoteFor(ctx context.Context, clause string) string {
 // redactText hides every secret the commit scan's rules find in s; false
 // when the scan could not run.
 func redactText(ctx context.Context, s string) (string, bool) {
-	found, err := scanAdded(ctx, []addedHunk{{path: "prompt.txt", start: 1, text: s + "\n"}}, nil)
+	found, err := scanAdded(ctx, []addedHunk{{path: "prompt.txt", start: 1, text: s + "\n"}}, nil, nil)
 	if err != nil {
 		return "", false
 	}

@@ -413,6 +413,16 @@ The APEX v1.1 work (D327, D330, D333, D337), built on v1.0.0's docs.
   ready line (V11RC1-F2: "nats: no responders" under load; the product was right). A new test
   starts the real service behind a 400 ms lagging proxy and asks right after the ready line.
 
+### rc.4 (F-TF1)
+
+- **ape's own records no longer trip the commit secret scan (F-TF1, D415; also in v1.0.0).**
+  `ape milestone approve` refused with `commit.secret` (`generic-api-key`) when the gate sourced a
+  helper whose path holds `api`, `auth`, `token`…: `milestones.json` records each gate file's
+  sha256 keyed by its path, and the rule reads a keyword in the key beside a high-entropy value as
+  a key. In ape's records (`_apex/state/milestones.json`, `decisions.json`, a change's
+  `state.json`), a value that is exactly a sha256 is now no secret; anything else in them, and the
+  same digest in any other file, is scanned as before.
+
 ## v1.0.0 (2026-10-22)
 
 APEX v1: ape runs the framework's v1 loop and owns every record in it.

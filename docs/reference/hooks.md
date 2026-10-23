@@ -251,6 +251,12 @@ scan, the same scan every commit ape makes goes through:
   baseline, so an entry counts only once a person has committed and accepted it (see
   [`_apex/config.yaml`](config-yaml.md#secrets)). Inline `betterleaks:allow`/`gitleaks:allow`
   markers and `.betterleaksignore` are not honoured.
+- **Digests in ape's own records:** in `_apex/state/milestones.json`, `_apex/state/decisions.json`
+  and a change's `state.json` (under `changes/` or the archive), a value that is exactly a sha256 —
+  64 lowercase hex digits, bare or `sha256:`-prefixed — is not a secret. Those records key digests
+  by a path or name the project chose (a gate helper named `api.sh`, a requirement about tokens),
+  which a generic rule would otherwise read as a key. Anything else in them is scanned as
+  everywhere, and the same digest in any other file is still a finding.
 - **What it prints:** each hit as `<file>:<line> rule <id>: <redacted>`, with the placeholder fix
   first and the allow entry a person may paste. The files stay staged.
 

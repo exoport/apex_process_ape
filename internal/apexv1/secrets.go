@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path"
 	"regexp"
 	"slices"
 	"sort"
@@ -175,7 +176,7 @@ func scanDiff(ctx context.Context, root, rev, subject string, sides, paths []str
 	if err != nil {
 		return &FailError{Code: CodeCommitFailed, Msg: "scanning " + subject + " for secrets: " + configYAML + " at " + base + ": " + err.Error() + " — nothing was committed; fix the secrets block"}
 	}
-	found, err := scanAdded(ctx, hunks, allow)
+	found, err := scanAdded(ctx, hunks, allow, apeRecordFilter(ctx, root))
 	if err != nil {
 		return &FailError{Code: CodeCommitFailed, Msg: "scanning " + subject + " for secrets failed: " + err.Error() + " — nothing was committed; run it again"}
 	}
@@ -222,16 +223,16 @@ func unacceptedAllow(ctx context.Context, root, rev, base string, allow []Secret
 
 // underAny reports whether a repository path is one of paths (relative to
 // the project at prefix) or inside one.
-func underAny(path, prefix string, paths []string) bool {
+func underAny(file, prefix string, paths []string) bool {
 	for _, p := range paths {
 		p = strings.TrimSuffix(strings.TrimPrefix(p, "./"), "/")
 		if p == "" || p == "." {
-			if strings.HasPrefix(path, prefix) {
+			if strings.HasPrefix(file, prefix) {
 				return true
 			}
 			continue
 		}
-		if p = prefix + p; path == p || strings.HasPrefix(path, p+"/") {
+		if p = prefix + p; file == p || strings.HasPrefix(file, p+"/") {
 			return true
 		}
 	}
@@ -286,7 +287,7 @@ var hunkRe = regexp.MustCompile(`^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@`)
 // hunk. A deleted file, a binary file and a pure deletion add none.
 func parseAddedLines(diff string) []addedHunk {
 	var out []addedHunk
-	path := ""
+	file := ""
 	var cur *addedHunk
 	var b strings.Builder
 	flush := func() {
@@ -301,17 +302,17 @@ func parseAddedLines(diff string) []addedHunk {
 		switch {
 		case strings.HasPrefix(line, "diff --git "):
 			flush()
-			path = ""
+			file = ""
 		case cur == nil && strings.HasPrefix(line, "+++ "):
-			path = diffPath(strings.TrimPrefix(line, "+++ "))
+			file = diffPath(strings.TrimPrefix(line, "+++ "))
 		case strings.HasPrefix(line, "@@ "):
 			flush()
 			m := hunkRe.FindStringSubmatch(line)
-			if m == nil || path == "" {
+			if m == nil || file == "" {
 				continue
 			}
 			start, _ := strconv.Atoi(m[1])
-			cur = &addedHunk{path: path, start: start}
+			cur = &addedHunk{path: file, start: start}
 		case cur != nil && strings.HasPrefix(line, "+"):
 			b.WriteString(line[1:])
 			b.WriteByte('\n')
@@ -444,8 +445,48 @@ func scannerFor(allow []SecretAllow) (*secretScanner, error) {
 	return s, nil
 }
 
-// scanAdded runs the scanner over the added runs.
-func scanAdded(ctx context.Context, hunks []addedHunk, allow []SecretAllow) ([]secretFinding, error) {
+// digestValueRe is a SHA-256 as ape's records hold one: 64 lowercase hex
+// digits, bare or "sha256:"-prefixed.
+var digestValueRe = regexp.MustCompile(`^(sha256:)?[0-9a-f]{64}$`)
+
+// apeRecordFilter reports, for a path as the diff names it (from the
+// repository's top), whether it is one of ape's own JSON records — the
+// tracked _apex/state/milestones.json and decisions.json (and their older
+// place, OldStateDir), and a change's state.json in changes/ or the
+// archive, either layout. Those records key digests by a path or name the
+// project chose (an approval's gate_own_files by a gate helper's path, a
+// change's base_fingerprints by a requirement), and a key that holds
+// "api", "auth", "token"… beside a digest is gitleaks' generic-api-key
+// (F-TF1, D415). scanAdded drops such a finding only when its value is a
+// digest: anything else in a record is scanned as everywhere.
+func apeRecordFilter(ctx context.Context, root string) func(string) bool {
+	p, err := Open(root)
+	if err != nil {
+		return func(string) bool { return false }
+	}
+	prefix, _ := git(ctx, root, "rev-parse", "--show-prefix")
+	rel := func(dir string) string { return path.Join(prefix, p.Rel(dir)) }
+	records := map[string]bool{}
+	for _, dir := range []string{p.StateDir(), p.OldStateDir()} {
+		records[path.Join(rel(dir), "milestones.json")] = true
+		records[path.Join(rel(dir), "decisions.json")] = true
+	}
+	stateDirs := map[string]bool{}
+	for _, dir := range []string{p.ChangesDir(), p.ArchivedChangesDir(), p.ArchiveDir(), p.OldArchiveDir()} {
+		stateDirs[rel(dir)] = true
+	}
+	return func(file string) bool {
+		if records[file] {
+			return true
+		}
+		return path.Base(file) == "state.json" && stateDirs[path.Dir(path.Dir(file))]
+	}
+}
+
+// scanAdded runs the scanner over the added runs. isRecord, when set,
+// names ape's own records, in which a digest value is no secret
+// (apeRecordFilter).
+func scanAdded(ctx context.Context, hunks []addedHunk, allow []SecretAllow, isRecord func(string) bool) ([]secretFinding, error) {
 	sc, err := scannerFor(allow)
 	if err != nil {
 		return nil, err
@@ -466,6 +507,9 @@ func scanAdded(ctx context.Context, hunks []addedHunk, allow []SecretAllow) ([]s
 		}
 		if s.Path == "" {
 			s.Path = f.Attributes[sources.AttrPath]
+		}
+		if isRecord != nil && isRecord(s.Path) && digestValueRe.MatchString(s.value) {
+			return nil
 		}
 		if !seen[s] {
 			seen[s] = true
