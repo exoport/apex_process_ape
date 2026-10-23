@@ -21,8 +21,9 @@ type MilestoneStatus struct {
 	Gate       string   `json:"gate"`
 	Budget     *float64 `json:"budget,omitempty"`
 	GateLast   *GateRun `json:"gate_last,omitempty"`
-	// ApprovalSelfCheck is the gate's run at its approval (D70 B), shown
-	// while no gate run of the milestone's own has happened since.
+	// ApprovalSelfCheck is the gate's run at its (latest) approval (D70
+	// B), shown while no gate run of the milestone's own has happened
+	// since (SelfCheckLatest).
 	ApprovalSelfCheck *GateSummary `json:"approval_self_check,omitempty"`
 	// BaseSHA is the milestone's start (D130 Q60): HEAD at its first
 	// approval, what $APE_MILESTONE_BASE holds in a gate ape runs; absent
@@ -297,6 +298,53 @@ type GateSummary struct {
 	Exit int    `json:"exit"`
 	At   string `json:"at"`
 	Log  string `json:"log"`
+	// AcceptGreen is set on an approval self-check only: the person's
+	// acceptance of a green self-check at a re-approval (Q145,
+	// approval.accept_green).
+	AcceptGreen *AcceptGreen `json:"accept_green,omitempty"`
+}
+
+// SelfCheckLatest: the approval's self-check is the milestone's newest
+// gate result — no gate run of its own yet, or a re-approval after its
+// last one (F8). False when it has no self-check.
+func (m *MilestoneStatus) SelfCheckLatest() bool {
+	sc := m.ApprovalSelfCheck
+	if sc == nil {
+		return false
+	}
+	return m.GateLast == nil || stampAfter(sc.At, m.GateLast.At)
+}
+
+// stampAfter: stamp a is later than b (both Stamp's RFC 3339); compared
+// as text when either does not parse.
+func stampAfter(a, b string) bool {
+	ta, errA := time.Parse(time.RFC3339, a)
+	tb, errB := time.Parse(time.RFC3339, b)
+	if errA != nil || errB != nil {
+		return a > b
+	}
+	return ta.After(tb)
+}
+
+// reapproved: the self-check is a re-approval's. A re-approval keeps the
+// first approval's base (D130) while its self-check runs at HEAD, past at
+// least the first approval's commit; an accepted green is a re-approval's
+// only (Q145).
+func (m *MilestoneStatus) reapproved() bool {
+	sc := m.ApprovalSelfCheck
+	return sc != nil && (sc.AcceptGreen != nil || (m.BaseSHA != "" && sc.SHA != "" && sc.SHA != m.BaseSHA))
+}
+
+// selfCheckVerdict is the self-check's result in words: red as approval
+// requires, or green as a person accepted it.
+func (sc *GateSummary) selfCheckVerdict() string {
+	if sc.Exit != 0 {
+		return fmt.Sprintf("red (exit %d, as required)", sc.Exit)
+	}
+	if a := sc.AcceptGreen; a != nil {
+		return fmt.Sprintf("green (exit 0), accepted by %s: %q", a.By, truncate(a.Reason, briefReasonMax))
+	}
+	return "green (exit 0)"
 }
 
 // StatusReport is `ape status`.
@@ -716,7 +764,18 @@ func nextStepWhy(r *StatusReport) (next, why string) {
 				"what is left of " + m.ID + " waits for a person's human-review acceptance of " + c.ID
 		}
 	}
-	if m.GateLast != nil && m.GateLast.Green() && m.GateLast.SHA != "" {
+	if m.SelfCheckLatest() {
+		// F8: a re-approval accepted green (Q145) already ran the gate
+		// green; a red self-check is the milestone's work still to do.
+		if sc := m.ApprovalSelfCheck; sc.Exit == 0 {
+			accepted := ""
+			if sc.AcceptGreen != nil {
+				accepted = ", accepted by " + sc.AcceptGreen.By
+			}
+			return fmt.Sprintf("%s gate was green at its re-approval at %s%s — `ape milestone close %s` (it runs the gate in full)", m.ID, short(sc.SHA), accepted, m.ID),
+				m.ID + "'s re-approval self-check was green (--accept-green), it is newer than any gate run, and no change of it is open"
+		}
+	} else if m.GateLast != nil && m.GateLast.Green() && m.GateLast.SHA != "" {
 		return fmt.Sprintf("%s gate was green at %s — `ape milestone close %s`", m.ID, short(m.GateLast.SHA), m.ID),
 			m.ID + "'s last gate run was green and no change of it is open"
 	}
@@ -959,12 +1018,18 @@ func (r *StatusReport) preExistingRedLine() string {
 func (m *MilestoneStatus) briefLines() []string {
 	gate := "  gate `" + m.Gate + "`"
 	switch {
-	case m.GateLast == nil && m.ApprovalSelfCheck != nil:
+	case m.SelfCheckLatest() && m.reapproved():
+		// F8: a re-approval after a gate run, or accepted green — its
+		// self-check is newer than any gate run, and says which it was.
+		sc := m.ApprovalSelfCheck
+		gate += fmt.Sprintf(" — re-approved at %s (%s), not run since; its self-check was %s, log %s",
+			sc.At, short(sc.SHA), sc.selfCheckVerdict(), sc.Log)
+	case m.SelfCheckLatest():
 		// The rehearsals (2026-10-20): "not run yet" right after approve,
 		// whose self-check had just run it.
 		sc := m.ApprovalSelfCheck
-		gate += fmt.Sprintf(" — not run since approval; the approval's self-check was red (exit %d, as required) at %s (%s), log %s",
-			sc.Exit, sc.At, short(sc.SHA), sc.Log)
+		gate += fmt.Sprintf(" — not run since approval; the approval's self-check was %s at %s (%s), log %s",
+			sc.selfCheckVerdict(), sc.At, short(sc.SHA), sc.Log)
 	case m.GateLast == nil:
 		gate += " — not run yet"
 	case m.GateLast.Green():
@@ -1029,5 +1094,5 @@ func approvalSelfCheck(rec *MilestoneRecord) *GateSummary {
 		return nil
 	}
 	sc := rec.Approval.SelfCheck
-	return &GateSummary{SHA: sc.SHA, Exit: sc.Exit, At: sc.At, Log: sc.Log}
+	return &GateSummary{SHA: sc.SHA, Exit: sc.Exit, At: sc.At, Log: sc.Log, AcceptGreen: rec.Approval.AcceptGreen}
 }

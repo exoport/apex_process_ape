@@ -90,7 +90,7 @@ A fresh project with one approved milestone gives, in part:
 | `gate` | The `Gate:` command. |
 | `budget` | The budget in USD, when the roadmap gives one. |
 | `gate_last` | The latest gate run: `exit`, `at`, `sha`, `secs`, `output_sha256`, `cmd`, `log`, `tail`, `spec_checks`, `spec_failed`, `stray_files`, `strays_kept`, `regression`, `reason`, `detail`, `shell_note`, `flaky`, `live_skipped`. A red `Gate:` command skips the live scenario checks (`live_skipped`: how many) and the regression command (`regression.skipped: "gate-red"`). Absent before the gate ran. |
-| `approval_self_check` | The approval's gate run: `{sha, exit, at, log}`. |
+| `approval_self_check` | The latest approval's gate run: `{sha, exit, at, log}`, plus `accept_green: {reason, by, at}` when a person re-approved it green (`milestone approve --accept-green`, v1.2). It is the gate's newest result when its `at` is later than `gate_last.at`, or there is no `gate_last`: the human output and the board then show it, and after an accepted green the next step is `ape milestone close`. A re-approval's `sha` differs from `base_sha`. |
 | `base_sha` | The milestone's start, HEAD at its first approval: what every gate run gets as `APE_MILESTONE_BASE`. |
 | `spent_usd` | The spend of runs started since it was approved. |
 | `budget_enforced` | `limits.budget: enforce` is set. |
@@ -105,7 +105,7 @@ A fresh project with one approved milestone gives, in part:
 | `id`, `title`, `status` | From the roadmap. |
 | `base_sha` | The milestone's start, once approved. |
 | `last_gate` | Its newest gate run, `{sha, exit, at, log}`. Absent before the gate ran. |
-| `approval_self_check` | The approval's gate run, `{sha, exit, at, log}`. |
+| `approval_self_check` | The latest approval's gate run, `{sha, exit, at, log}`, with `accept_green` as under `milestone`. |
 | `accept_red` | Present when a person closed it with its gate red: `{reason, by, at, gate}`. |
 
 ### `changes[]`
