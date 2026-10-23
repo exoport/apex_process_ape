@@ -1544,8 +1544,12 @@ type Drift struct {
 	// Ahead: the installed release is newer than the newest final release
 	// — a candidate installed by name. A default `update` keeps it rather
 	// than going backwards.
-	Ahead bool     `json:"ahead,omitempty" yaml:"ahead,omitempty"`
-	Notes []string `json:"notes,omitempty" yaml:"notes,omitempty"`
+	Ahead bool `json:"ahead,omitempty" yaml:"ahead,omitempty"`
+	// FetchFailed: the tag fetch failed, so the comparison is with the
+	// releases already in the clone; no drift then does not mean in sync
+	// (F16c). Its warning is one of the Notes.
+	FetchFailed bool     `json:"fetchFailed,omitempty" yaml:"fetchFailed,omitempty"`
+	Notes       []string `json:"notes,omitempty" yaml:"notes,omitempty"`
 }
 
 // Status reads a project's framework.yaml, optionally compares it with
@@ -1573,6 +1577,10 @@ func Status(ctx context.Context, opts StatusOptions) (*StatusResult, error) {
 	}
 	rel, err := ResolveRelease(ctx, opts.FrameworkRepo, ReleaseSelector{Version: opts.Version, Fetch: !opts.NoFetch})
 	if err != nil {
+		if rel.FetchWarning != "" {
+			// A tag missing because the fetch failed says so (F16c).
+			return nil, fmt.Errorf("%w — and %s", err, rel.FetchWarning)
+		}
 		return nil, err
 	}
 	current := &RepoInfo{Source: SourceTag, VersionTag: rel.Tag, GitHash: rel.Commit}
@@ -1582,6 +1590,7 @@ func Status(ctx context.Context, opts StatusOptions) (*StatusResult, error) {
 	res.Current = current
 	drift := &Drift{TagDrift: meta.Framework.VersionTag != rel.Tag}
 	if rel.FetchWarning != "" {
+		drift.FetchFailed = true
 		drift.Notes = append(drift.Notes, rel.FetchWarning)
 	}
 	if opts.Version != "" {

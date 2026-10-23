@@ -109,7 +109,7 @@ func TestLiftApe(t *testing.T) {
 
 	a = liftApe(root, "1.0.0", "/bin/ape", false, noBingo)
 	require.Nil(t, a.MovePin)
-	require.Contains(t, a.PinNote, "bingo is not on PATH")
+	require.Contains(t, a.PinNote, "no bingo found (not on PATH, nor the project's own in $GOBIN)")
 	require.Contains(t, a.PinNote, "APE_TOOLCHAIN=local")
 	require.Contains(t, a.PinNote, "every git commit too (the pre-commit hook runs ape)", "R33")
 	require.Contains(t, a.PinNote, "every Claude session in the project", "R33")

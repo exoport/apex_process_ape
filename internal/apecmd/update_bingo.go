@@ -1,11 +1,15 @@
 package apecmd
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strings"
 )
 
 // bingoPin is an ape binary that bingo installed: `<GOBIN>/ape-vX.Y.Z`,
@@ -100,4 +104,72 @@ func refuseBingoSelfUpdate(latest string) error {
 		"one, and every project pinned to it through the same GOBIN would silently run %s. Move the pin "+
 		"instead, in the project that pins ape, and commit .bingo/:\n  %s",
 		p.path, latest, latest, p.command(latest))
+}
+
+// goBinDir is where `go install` and bingo put binaries: $GOBIN, else the
+// first $GOPATH's bin, as `go env` reports them ("" when go cannot say).
+func goBinDir(ctx context.Context) string {
+	for _, v := range []string{"GOBIN", "GOPATH"} {
+		out, err := exec.CommandContext(ctx, "go", "env", v).Output()
+		if err != nil {
+			continue
+		}
+		if p := strings.TrimSpace(string(out)); p != "" {
+			if v == "GOPATH" {
+				p = filepath.Join(strings.Split(p, string(os.PathListSeparator))[0], "bin")
+			}
+			return p
+		}
+	}
+	return ""
+}
+
+var bingoModVersion = regexp.MustCompile(`github\.com/bwplotka/bingo\s+(v\d+\.\d+\.\d+\S*)`)
+
+// findBingo is the bingo that moves a project's pin (F16d): bingo on PATH;
+// else the project's own pinned bingo, `$GOBIN/bingo-<version>` from its
+// .bingo/bingo.mod — what its Variables.mk builds and runs; else
+// `$GOBIN/bingo`. A project that pins bingo needs none on PATH (atomix's
+// `ape update --pin` was refused for that). The error names every place
+// looked.
+func findBingo(ctx context.Context, root string) (string, error) {
+	if p, err := exec.LookPath("bingo"); err == nil {
+		return p, nil
+	}
+	gobin := goBinDir(ctx)
+	var tried []string
+	if gobin != "" {
+		var names []string
+		if data, err := os.ReadFile(filepath.Join(root, ".bingo", "bingo.mod")); err == nil {
+			if m := bingoModVersion.FindSubmatch(data); m != nil {
+				names = append(names, "bingo-"+string(m[1]))
+			}
+		}
+		names = append(names, "bingo")
+		for _, n := range names {
+			if runtime.GOOS == goosWindows {
+				n += ".exe"
+			}
+			p := filepath.Join(gobin, n)
+			if isExecutable(p) {
+				return p, nil
+			}
+			tried = append(tried, p)
+		}
+	}
+	where := "bingo is not on PATH"
+	if len(tried) > 0 {
+		where += ", nor at " + strings.Join(tried, " or ")
+	}
+	return "", errors.New(where + " (install it: go install github.com/bwplotka/bingo@latest)")
+}
+
+// isExecutable reports a regular file with an execute bit (any file on
+// Windows, where the name carries it).
+func isExecutable(p string) bool {
+	fi, err := os.Stat(p)
+	if err != nil || !fi.Mode().IsRegular() {
+		return false
+	}
+	return runtime.GOOS == goosWindows || fi.Mode()&0o111 != 0
 }

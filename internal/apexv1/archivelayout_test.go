@@ -200,16 +200,42 @@ func TestArchiveLayout_AbandonWritesTheNewerLayout(t *testing.T) {
 	require.Empty(t, res2.Moved)
 }
 
-// archive-layout is refused on a dirty tree, on a change branch, and when
-// a folder's new place is taken — writing nothing each time.
+// F16a: inside `ape framework update` (its v1.0.0_seq-06), the tree holds
+// the update's own uncommitted install — files new, changed and staged
+// outside the archive. The move goes ahead, its one commit takes the
+// archive alone, and the install is left exactly as it was. On v1.1.0 it
+// was refused as a dirty tree, so such an update could never complete.
+func TestArchiveLayout_DirtOutsideTheArchiveStays(t *testing.T) {
+	p := twoLayouts(t)
+	write(t, p, ".claude/skills/apex-new/SKILL.md", "# new\n")
+	write(t, p, "notes.txt", "wip\n")
+	write(t, p, "staged.txt", "staged\n")
+	run(t, p.Root, "add", "staged.txt")
+	before := HeadSHA(ctx(), p.Root)
+	status := run(t, p.Root, "status", "--porcelain", "--untracked-files=all")
+
+	res, err := p.ArchiveLayout(ctx())
+	require.NoError(t, err)
+	require.Len(t, res.Moved, 2)
+	require.Equal(t, before, run(t, p.Root, "rev-parse", "HEAD~1"), "one commit")
+	for _, f := range strings.Split(run(t, p.Root, "show", "--name-only", "--no-renames", "--format=", "HEAD"), "\n") {
+		require.True(t, strings.HasPrefix(f, "development/archive/"), "the commit takes the archive alone: %s", f)
+	}
+	require.Equal(t, status, run(t, p.Root, "status", "--porcelain", "--untracked-files=all"), "the rest is as it was, staged included")
+}
+
+// archive-layout is refused while the archive has uncommitted changes, on
+// a change branch, and when a folder's new place is taken — writing
+// nothing each time.
 func TestArchiveLayout_Refusals(t *testing.T) {
-	t.Run("dirty tree", func(t *testing.T) {
+	t.Run("dirty archive", func(t *testing.T) {
 		p := twoLayouts(t)
-		write(t, p, "notes.txt", "wip\n")
+		write(t, p, "development/archive/2026-01-01-add-hug/notes.md", "wip\n")
 		_, err := p.ArchiveLayout(ctx())
 		fe, ok := errors.AsType[*FailError](err)
 		require.True(t, ok, "%v", err)
 		require.Equal(t, "tree.dirty", fe.Code)
+		require.Contains(t, fe.Msg, "development/archive/ has uncommitted changes")
 		require.DirExists(t, filepath.Join(p.ArchiveDir(), "2026-01-01-add-hug"))
 	})
 	t.Run("change branch", func(t *testing.T) {

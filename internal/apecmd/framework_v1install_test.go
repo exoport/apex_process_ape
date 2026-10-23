@@ -1,6 +1,7 @@
 package apecmd
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -264,6 +265,36 @@ func TestFrameworkInstallV1_FailedBlockingMigrationCommitsNothing(t *testing.T) 
 	require.NoFileExists(t, filepath.Join(root, "_apex", "migrations", "v1.0.0_seq-01_lift.md"))
 }
 
+// F16b: a project whose .aboard/ already holds a tracked file but no board
+// state (atomix: a tracked .aboard/.gitignore) gets a board from the
+// update, which counts it as created; the revert after a failed blocking
+// migration removed the whole folder, the tracked file with it. Now it
+// removes what the update added and keeps the tracked file — `git status`
+// is as the update found it. On v1.1.0: " D .aboard/.gitignore".
+func TestFrameworkInstallV1_FailedUpdateKeepsTrackedBoardFiles(t *testing.T) {
+	fw, root := v0Installed(t)
+	v1OnTopOf(t, fw, v1LiftEntry("exit 1", "echo lift refused >&2; exit 3"))
+	// atomix's shape: the board's own .gitignore tracked, no board state.
+	require.Equal(t, ".aboard/.gitignore", gitRun(t, root, "ls-files", ".aboard"))
+	ignore, err := os.ReadFile(filepath.Join(root, ".aboard", ".gitignore"))
+	require.NoError(t, err)
+	require.NoError(t, os.RemoveAll(filepath.Join(root, ".aboard")))
+	gitRun(t, root, "checkout", "--", ".aboard")
+	head := gitRun(t, root, "rev-parse", "HEAD")
+
+	out, err := runFramework(t, "update", fw, root, "--no-fetch", "--version", "v1.0.0")
+	require.Equal(t, ExitRunFailed, exitCodeOf(t, err), out)
+	require.Contains(t, out, "the install is not committed")
+	require.Equal(t, head, gitRun(t, root, "rev-parse", "HEAD"))
+	require.Equal(t, "?? notes.txt", gitRun(t, root, "status", "--porcelain"), "the tree is as the update found it")
+	data, err := os.ReadFile(filepath.Join(root, ".aboard", ".gitignore"))
+	require.NoError(t, err)
+	require.Equal(t, string(ignore), string(data))
+	entries, err := os.ReadDir(filepath.Join(root, ".aboard"))
+	require.NoError(t, err)
+	require.Len(t, entries, 1, "only the tracked file is left: %v", entries)
+}
+
 // D162-4, not attempted: a blocking entry after a failed one is refused
 // the same way.
 func TestFrameworkInstallV1_UnattemptedBlockingMigrationCommitsNothing(t *testing.T) {
@@ -381,4 +412,31 @@ func TestFrameworkInstallV1_IgnoredClaudeCommitsSkills(t *testing.T) {
 		require.Contains(t, gitRun(t, root, "show", "--format=", "HEAD", "--", ".gitignore"), "+!.claude/skills/")
 		require.Equal(t, "?? notes.txt", gitRun(t, root, "status", "--porcelain"))
 	})
+}
+
+// F16c: a dry run whose tag fetch failed (atomix: an ssh with no agent,
+// publickey) said "framework: in sync", exit 0, no warning — it had only
+// compared with the releases already in the clone. It now prints the
+// fetch warning and says it could not check; a --version tag missing
+// because of the failed fetch says so too. --no-fetch asks for no fetch,
+// so "in sync" stays its answer.
+func TestEmitFrameworkDryRun_FailedFetchIsNotInSync(t *testing.T) {
+	fw, root := v0Installed(t)
+	gitRun(t, fw, "remote", "add", "origin", filepath.Join(t.TempDir(), "gone.git"))
+
+	var buf bytes.Buffer
+	require.NoError(t, emitFrameworkDryRun(t.Context(), &buf, fw, root, "", false, false))
+	out := buf.String()
+	require.Contains(t, out, "warning: could not fetch tags from origin")
+	require.Contains(t, out, "framework: NOT CHECKED against origin")
+	require.NotContains(t, out, "in sync")
+
+	buf.Reset()
+	require.NoError(t, emitFrameworkDryRun(t.Context(), &buf, fw, root, "v9.9.9", false, false))
+	require.Contains(t, buf.String(), "framework: cannot compare")
+	require.Contains(t, buf.String(), "could not fetch tags from origin")
+
+	buf.Reset()
+	require.NoError(t, emitFrameworkDryRun(t.Context(), &buf, fw, root, "", false, true))
+	require.Contains(t, buf.String(), "framework: in sync", "--no-fetch: nothing was meant to be fetched")
 }

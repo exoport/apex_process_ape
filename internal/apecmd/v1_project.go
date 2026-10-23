@@ -771,12 +771,15 @@ func newProjectArchiveLayoutCmd() *cobra.Command {
 	var check bool
 	cmd := &cobra.Command{
 		Use:   "archive-layout [--check]",
-		Short: "Move archived changes into development/archive/changes/ (the v1.0.0_seq-06 migration)",
+		Short: "Move archived changes into development/archive/changes/ (the v1.0.0_seq-06 / v1.2.0_seq-01 migration)",
 		Long: `Move every archived or abandoned change still in the older layout,
 development/archive/<YYYY-MM-DD>-<id>/, into development/archive/changes/<YYYY-MM-DD>-<id>/,
 where change archive and change abandon put them (D155). The framework's migration
-v1.0.0_seq-06 runs it (command: ape project archive-layout; check: ape project
-archive-layout --check). development/archive/milestones/ stays where it is.
+v1.0.0_seq-06 runs it, and from framework v1.2 v1.2.0_seq-01, which supersedes it
+(command: ape project archive-layout; check: ape project archive-layout --check, so a
+fixture elsewhere in the repo never reads as half-applied). Inside ape framework update
+the update's own install is uncommitted, so only the archive's own uncommitted changes
+stand in the way. development/archive/milestones/ stays where it is.
 
 One commit, "apex: archive layout (seq-06)": each folder moved with git mv, and in each
 moved state.json the recorded paths that named the old folder (archived_to, and an
@@ -788,7 +791,8 @@ move it writes nothing and says "nothing to move" (exit 0).
 Every ape command reads archived changes from both layouts, always, so a project that has
 not moved yet, or a branch cut before the move, works the same either way.
 
-Refused on a change branch (branch.change-branch), with uncommitted changes (tree.dirty),
+Refused on a change branch (branch.change-branch), with uncommitted changes under
+development/archive/ (tree.dirty; changes elsewhere are left out of its commit),
 outside a git repository (git.not-a-repo), and when a folder's new place already exists
 (archive.folder-exists, exit 3: nothing is written; a person merges the two by hand). A
 command any session may run (not person-only).

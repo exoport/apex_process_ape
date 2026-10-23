@@ -1127,7 +1127,12 @@ func printFrameworkStatus(res *framework.StatusResult, format output.Format) err
 				label = "Newest release"
 			}
 			fmt.Printf("\n%s: %s (%s)\n", label, defaultStr(res.Current.VersionTag, "(no tag)"), short(res.Current.GitHash))
-			if res.Drift != nil && len(res.Drift.Notes) > 0 {
+			if res.Drift != nil && res.Drift.FetchFailed && !res.Drift.HashDrift && !res.Drift.TagDrift && !res.Drift.TagMoved {
+				fmt.Println("Drift: not checked against origin (the fetch failed; a newer release may exist):")
+				for _, n := range res.Drift.Notes {
+					fmt.Println("  - " + n)
+				}
+			} else if res.Drift != nil && len(res.Drift.Notes) > 0 {
 				fmt.Println("Drift:")
 				for _, n := range res.Drift.Notes {
 					fmt.Println("  - " + n)

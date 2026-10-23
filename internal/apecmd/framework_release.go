@@ -11,9 +11,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -358,9 +360,9 @@ func updateApeViaBingo(ctx context.Context, w io.Writer, route apeRoute, project
 		return "", usageErrExit(exitCodeApeBelowMinimum, fmt.Errorf("cannot find the newest ape release: %w", err))
 	}
 	tag := "v" + trimV(latest)
-	if _, err := exec.LookPath("bingo"); err != nil {
+	if _, err := findBingo(ctx, projectRoot); err != nil {
 		fmt.Fprintf(os.Stderr, "run: %s\n", route.command(tag))
-		return "", usageErrExit(exitCodeApeBelowMinimum, errors.New("this project pins ape with bingo, and bingo is not on PATH"))
+		return "", usageErrExit(exitCodeApeBelowMinimum, fmt.Errorf("this project pins ape with bingo, and %w", err))
 	}
 	// Keep the bare `ape` with the pin when it is bingo's -l link to it.
 	launcher, isPin := runningBingoPin()
@@ -388,7 +390,11 @@ func movePin(ctx context.Context, w io.Writer, root, tag string, link bool) erro
 		args = append(args, "-l")
 	}
 	args = append(args, apeModulePath+"@"+tag)
-	get := exec.CommandContext(ctx, "bingo", args...) //nolint:gosec // the tag is GitHub's newest release, reshaped as vX.Y.Z
+	bingo, err := findBingo(ctx, root)
+	if err != nil {
+		return err
+	}
+	get := exec.CommandContext(ctx, bingo, args...) //nolint:gosec // the tag is GitHub's newest release, reshaped as vX.Y.Z
 	get.Dir, get.Stdout, get.Stderr = root, w, os.Stderr
 	if err := get.Run(); err != nil {
 		return fmt.Errorf("bingo %s: %w", strings.Join(args, " "), err)
@@ -405,21 +411,7 @@ func pinCommitMessage(tag, trailer string) string {
 // bingoBinary is where bingo put a pinned tool: $GOBIN, else $GOPATH/bin,
 // named <tool>-<version>.
 func bingoBinary(ctx context.Context, tool, version string) (string, error) {
-	dir := ""
-	for _, v := range []string{"GOBIN", "GOPATH"} {
-		out, err := exec.CommandContext(ctx, "go", "env", v).Output()
-		if err != nil {
-			continue
-		}
-		if p := strings.TrimSpace(string(out)); p != "" {
-			if v == "GOPATH" {
-				p = filepath.Join(strings.Split(p, string(os.PathListSeparator))[0], "bin")
-			}
-			dir = p
-			break
-		}
-	}
-	bin := filepath.Join(dir, tool+"-"+version)
+	bin := filepath.Join(goBinDir(ctx), tool+"-"+version)
 	if _, err := os.Stat(bin); err != nil {
 		return "", fmt.Errorf("bingo reported success but %s does not exist", bin)
 	}
@@ -622,9 +614,60 @@ func revertInstall(ctx context.Context, projectRoot string, before map[string]bo
 		pruneEmptyDirs(projectRoot, filepath.Dir(full))
 	}
 	if aboardCreated {
-		if err := os.RemoveAll(filepath.Join(projectRoot, framework.ProjectAboardDir)); err != nil {
+		if err := removeCreatedBoard(ctx, projectRoot, before); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// removeCreatedBoard undoes the board an update created: every file under
+// .aboard/ that git does not track and that was not already there,
+// untracked, when the update began. "Created" means the board's state file
+// was missing, and the folder may still hold tracked files (F16b: atomix's
+// .aboard/.gitignore, which removing the whole folder deleted).
+func removeCreatedBoard(ctx context.Context, projectRoot string, before map[string]bool) error {
+	dir := filepath.Join(projectRoot, framework.ProjectAboardDir)
+	out, err := gitOut(ctx, projectRoot, "ls-files", "-z", "--", framework.ProjectAboardDir)
+	if err != nil {
+		return err
+	}
+	tracked := map[string]bool{}
+	for f := range strings.SplitSeq(out, "\x00") {
+		if f != "" {
+			tracked[f] = true
+		}
+	}
+	if len(tracked) == 0 {
+		return os.RemoveAll(dir)
+	}
+	var dirs []string
+	err = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil
+			}
+			return err
+		}
+		rel, rerr := filepath.Rel(projectRoot, path)
+		if rerr != nil {
+			return rerr
+		}
+		rel = filepath.ToSlash(rel)
+		if d.IsDir() {
+			dirs = append(dirs, path)
+			return nil
+		}
+		if tracked[rel] || before[rel] {
+			return nil
+		}
+		return os.Remove(path)
+	})
+	if err != nil {
+		return err
+	}
+	for _, d := range slices.Backward(dirs) {
+		_ = os.Remove(d) // only an emptied one goes
 	}
 	return nil
 }

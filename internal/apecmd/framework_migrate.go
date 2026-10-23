@@ -184,5 +184,15 @@ func emitFrameworkDrift(w io.Writer, res *framework.StatusResult) {
 		}
 		return
 	}
+	if res.Drift != nil && res.Drift.FetchFailed {
+		// Not "in sync": a newer release may be one the fetch did not
+		// bring (F16c — atomix's dry run over an ssh with no agent).
+		for _, n := range res.Drift.Notes {
+			fmt.Fprintln(w, "warning: "+n)
+		}
+		fmt.Fprintln(w, "framework: NOT CHECKED against origin — no newer release among the tags already in the clone, "+
+			"but the fetch failed, so a newer one may exist: fix the fetch, then run this again")
+		return
+	}
 	fmt.Fprintln(w, "framework: in sync")
 }

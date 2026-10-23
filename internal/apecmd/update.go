@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -134,9 +133,9 @@ func runUpdate(ctx context.Context, current string, format output.Format, movePi
 // movePinAndCommit is `ape update --pin`: the project's pin moves to tag in
 // a commit of its own, and nothing else is staged.
 func movePinAndCommit(ctx context.Context, root, tag string, link bool) error {
-	if _, err := exec.LookPath("bingo"); err != nil {
-		return usageErr(fmt.Errorf("--pin: bingo is not on PATH; run in %s: bingo get %s@%s, then commit .bingo/",
-			root, apeModulePath, tag))
+	if _, err := findBingo(ctx, root); err != nil {
+		return usageErr(fmt.Errorf("--pin: %w; or run in %s: bingo get %s@%s, then commit .bingo/",
+			err, root, apeModulePath, tag))
 	}
 	if err := movePin(ctx, os.Stderr, root, tag, link); err != nil {
 		return failErr(err)

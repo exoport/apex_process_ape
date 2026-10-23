@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -330,7 +329,7 @@ Exit codes: 0 lifted (or planned) · 1 refused or failed (code in --json) · 2 u
 				return err
 			}
 			opt.Ape = liftApe(absDir, Version, self, opt.DryRun, func() bool {
-				_, err := exec.LookPath("bingo")
+				_, err := findBingo(cmd.Context(), absDir)
 				return err == nil
 			})
 			res, err := apexv1.Lift(cmd.Context(), dir, opt)
@@ -391,7 +390,7 @@ func liftApe(root, running, self string, dryRun bool, haveBingo func() bool) *ap
 		a.PinNote = "this ape (" + running + ") is no release a pin can name: the lift leaves " + pin.version +
 			"; once this version is published, run " + a.PinCommand + " and commit .bingo/; until then " + apexv1.LiftPinLocal
 	case !haveBingo():
-		a.PinNote = "bingo is not on PATH: after the lift, run " + a.PinCommand + " and commit .bingo/; until then " + apexv1.LiftPinLocal
+		a.PinNote = "no bingo found (not on PATH, nor the project's own in $GOBIN): after the lift, run " + a.PinCommand + " and commit .bingo/; until then " + apexv1.LiftPinLocal
 	case dryRun:
 		a.PinNote = "the lift moves the pin from " + pin.version + " to " + tag + " (" + a.PinCommand + ") in its commit"
 	default:

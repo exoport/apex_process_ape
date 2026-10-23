@@ -16,7 +16,7 @@ import (
 // folder in archive/changes/<YYYY-MM-DD>-<id>/; an older ape put it in
 // archive/<YYYY-MM-DD>-<id>/, beside milestones/. Every reader of an
 // archived change goes through archivedLayout, which reads both — always,
-// not only while seq-06 is pending, so a project half moved by hand, or
+// not only while the move is pending, so a project half moved by hand, or
 // a branch cut before the move, reads the same (Q75). `ape project
 // archive-layout` moves the older layout into the newer one (Q76).
 
@@ -24,7 +24,9 @@ import (
 const archivedChangesSub = "changes"
 
 // ArchiveLayoutSubject is the commit `ape project archive-layout` makes:
-// the framework's v1.0.0_seq-06 migration.
+// the framework's v1.0.0_seq-06 migration, and v1.2.0_seq-01, which
+// supersedes it with a check anchored at the development folder (F16e,
+// D467). The subject keeps its first id.
 const ArchiveLayoutSubject = "apex: archive layout (seq-06)"
 
 // datedFolderRe is an archived change's folder name, <YYYY-MM-DD>-<id>:
@@ -168,11 +170,12 @@ func movesFrom(moves []ArchiveMove) []string {
 }
 
 // ArchiveLayout is `ape project archive-layout` (Q76, the framework's
-// v1.0.0_seq-06): every archived change folder in the older layout is
+// v1.0.0_seq-06, superseded by v1.2.0_seq-01): every archived change folder in the older layout is
 // moved (git mv) into archive/changes/, each moved state.json's recorded
 // paths rewritten to the new folder, in ONE commit, ArchiveLayoutSubject.
 // Idempotent: with nothing to move it writes nothing. Refused on a change
-// branch, on a dirty tree, and when a folder's new place is taken (exit
+// branch, while the archive folder has uncommitted changes (the rest of
+// the tree may: F16a), and when a folder's new place is taken (exit
 // 3, nothing written). The refs (refs/apex/archive/<id>) and tip_ref are
 // untouched: they name commits, not folders.
 func (p *Project) ArchiveLayout(ctx context.Context) (*ArchiveLayoutResult, error) {
@@ -190,10 +193,15 @@ func (p *Project) ArchiveLayout(ctx context.Context) (*ArchiveLayoutResult, erro
 	if err := p.refuseOnChangeBranch(ctx, "the archive layout move"); err != nil {
 		return res, err
 	}
-	if dirty, err := gitRaw(ctx, p.Root, "status", "--porcelain=v1", "--untracked-files=normal"); err != nil {
+	// Only the archive's own changes stand in the way (F16a): the commit
+	// takes the archive folder alone, and inside `ape framework update`,
+	// whose v1.0.0_seq-06 (or v1.2.0_seq-01) runs this, the rest of the tree holds the
+	// update's own uncommitted install.
+	archive := p.Rel(p.ArchiveDir())
+	if dirty, err := gitRaw(ctx, p.Root, "status", "--porcelain=v1", "--untracked-files=normal", "--", archive); err != nil {
 		return res, &FailError{Code: CodeGitStatusFailed, Msg: "cannot read git status: " + err.Error()}
 	} else if strings.TrimSpace(dirty) != "" {
-		return res, &FailError{Code: "tree.dirty", Msg: "the archive layout move is one commit, and the tree has uncommitted changes — commit or discard them first, then run it again"}
+		return res, &FailError{Code: "tree.dirty", Msg: "the archive layout move is one commit, and " + archive + "/ has uncommitted changes — commit or discard them first, then run it again"}
 	}
 	for _, m := range moves {
 		if fileOrDirExists(filepath.Join(p.Root, filepath.FromSlash(m.To))) {
@@ -203,8 +211,8 @@ func (p *Project) ArchiveLayout(ctx context.Context) (*ArchiveLayoutResult, erro
 	if err := os.MkdirAll(p.ArchivedChangesDir(), 0o755); err != nil {
 		return res, err
 	}
-	archiveRel := p.Rel(p.ArchiveDir())
-	// The tree was clean: undoing is putting the folders back and the
+	archiveRel := archive
+	// The archive was clean: undoing is putting the folders back and the
 	// archive as HEAD has it.
 	var done []ArchiveMove
 	undo := func(cause string) error {
