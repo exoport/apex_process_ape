@@ -116,19 +116,22 @@ its arms differ only in the framework's `vet:` switch.
   change verbs' waits and `run stop` keep waiting. A run is lost (exit 76, `<id>.lost`) only after
   two definite negatives a second apart. Under load, a slow `ps` used to mark a live run lost.
 
-### F15: a check's exit is its own; what it leaves running is ended (eval bf `:3` M2, D460)
+### F15: a check's result is its own exit; what it leaves running is ended (eval bf `:3` M2, D460)
 
-- A check's output now goes through ape's own pipe, so its result is recorded when its shell exits.
-  What it left running in its process group gets SIGTERM, then SIGKILL after 1 s. It is recorded
-  as `leftovers` (on every check result and on `gate_last`) and named on the log's last line.
-- This applies to every check ape runs: gate, approval self-check, close, a change's task and
-  scenario checks, and the regression command.
-- Before this, a green gate script whose killed subshell orphaned a `sleep` holding the pipe was
-  recorded as exit 127 (`WaitDelay expired before I/O complete`) after 5 s, with every check
-  green. A quiet leftover, such as a server sending its output elsewhere, kept running past the
-  check and could hold the next check's port.
-- A process that left the group (`setsid`, a daemon) is not ended. ape stops reading its output 5 s
-  after the check exits and keeps the exit.
+- **Behaviour change (class C):** when a check finishes, ape now ends every process the check
+  started and left running in its process group. A server the gate script did not stop, or a
+  `sleep` left behind by a killed subshell, gets SIGTERM, then SIGKILL a second later. Each one is
+  named on the last line of the check's log and in `leftovers` (on each check result and on
+  `gate_last`). The gate prints a `note:` line for them.
+- **If something must outlive the check** (a service later steps use), start it with `setsid` so
+  it leaves the check's process group. ape does not end it. If it keeps the check's output open,
+  ape stops reading 5 s after the check exits, and the check's exit still stands.
+- This applies to every check ape runs: the gate command, approve's self-check, close, a change's
+  task and scenario checks, and the regression command.
+- The result is always the script's own exit code. Before this, a green gate script whose leftover
+  child still held ape's output was recorded as exit 127 (`WaitDelay expired before I/O complete`)
+  after 5 s, with every check green. A leftover that held no output, such as a server writing
+  elsewhere, kept running after the check and could hold the next check's port.
 
 ### C1: Claude Code 2.1.309 (D306 pattern)
 
