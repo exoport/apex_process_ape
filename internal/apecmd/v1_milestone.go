@@ -307,6 +307,10 @@ func gateHuman(g *apexv1.GateResult) func(io.Writer) {
 				fmt.Fprintln(w, "  note: "+g.Run.ShellNote)
 			}
 		}
+		if n := len(g.Run.Leftovers); n > 0 {
+			fmt.Fprintf(w, "  note: the gate command left %d process(es) running when it exited; ape ended them: %s\n",
+				n, strings.Join(g.Run.Leftovers, "; "))
+		}
 		printChecks(w, g.Run.SpecFailed, true)
 		if n := g.Run.LiveSkipped; n > 0 {
 			fmt.Fprintf(w, "  %d live scenario check(s) skipped: the Gate: command is red (close runs them)\n", n)

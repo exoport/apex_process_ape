@@ -4,6 +4,7 @@ package apexv1
 
 import (
 	"os/exec"
+	"strconv"
 	"syscall"
 	"time"
 	"unsafe"
@@ -100,3 +101,32 @@ func processAlive(pid int) bool {
 
 // ProcessGroup: Windows has no process groups to record.
 func ProcessGroup() int { return 0 }
+
+// jobProcessIDs is JOBOBJECT_BASIC_PROCESS_ID_LIST with room for 64 ids.
+type jobProcessIDs struct {
+	Assigned uint32
+	Listed   uint32
+	IDs      [64]uintptr
+}
+
+// endLeftovers ends what a check that exited on its own left running in
+// its job (F15) and names each by its pid: the check's shell has exited,
+// so every process still in the job is a leftover. A process started
+// before its parent was assigned to the job escapes it.
+func (g *checkGroup) endLeftovers() []string {
+	var l jobProcessIDs
+	if err := windows.QueryInformationJobObject(g.job, windows.JobObjectBasicProcessIdList,
+		uintptr(unsafe.Pointer(&l)), uint32(unsafe.Sizeof(l)), nil); err != nil && l.Listed == 0 {
+		return nil
+	}
+	var names []string
+	for _, id := range l.IDs[:min(int(l.Listed), len(l.IDs))] {
+		if int(id) != g.pid {
+			names = append(names, strconv.Itoa(int(id)))
+		}
+	}
+	if len(names) > 0 {
+		_ = windows.TerminateJobObject(g.job, 1)
+	}
+	return names
+}

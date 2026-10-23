@@ -5,6 +5,9 @@ package apexv1
 import (
 	"os"
 	"os/exec"
+	"slices"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -83,3 +86,83 @@ func processAlive(pid int) bool {
 
 // ProcessGroup is this process's group id.
 func ProcessGroup() int { return syscall.Getpgrp() }
+
+// groupMember is a live process of a check's process group.
+type groupMember struct {
+	pid  int
+	argv []string
+}
+
+// isWatchdog reports whether m is the check's own watchdog (checkWatchdog's
+// background subshell): ape's, not the check's. On Linux its argv holds
+// the watchdog script whole; where ps joins the arguments, the line holds
+// its start.
+func (m groupMember) isWatchdog() bool {
+	return slices.Contains(m.argv, checkWatchdog) ||
+		(len(m.argv) == 1 && strings.Contains(m.argv[0], "(read ok <&3;"))
+}
+
+// leftoverGrace is how long what a check left running is given to end on
+// SIGTERM before its group is SIGKILLed. A var so tests can shorten it.
+var leftoverGrace = time.Second
+
+// endLeftovers ends what a check that exited on its own left running in
+// its process group (F15): the check's shell has exited, so anything still
+// in the group — a server it started, a `sleep` a killed subshell
+// orphaned — is a leftover. Each is named "<pid> <command>"; the group is
+// sent SIGTERM, then SIGKILL after leftoverGrace. A process that left the
+// group (setsid, a daemon) is not seen here.
+func (g *checkGroup) endLeftovers() []string {
+	if g.pid <= 0 {
+		return nil
+	}
+	left := g.leftovers()
+	if len(left) == 0 {
+		return nil
+	}
+	names := make([]string, len(left))
+	for i, m := range left {
+		names[i] = strconv.Itoa(m.pid) + " " + clip(strings.Join(m.argv, " "), 120)
+	}
+	_ = syscall.Kill(-g.pid, syscall.SIGTERM)
+	deadline := time.Now().Add(leftoverGrace)
+	for time.Now().Before(deadline) {
+		if len(g.leftovers()) == 0 {
+			return names // an empty group's id may be reused: never signal it
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	_ = syscall.Kill(-g.pid, syscall.SIGKILL)
+	return names
+}
+
+// leftovers are the group's live members other than the watchdog.
+func (g *checkGroup) leftovers() []groupMember {
+	var left []groupMember
+	for _, m := range groupMembers(g.pid) {
+		if !m.isWatchdog() {
+			left = append(left, m)
+		}
+	}
+	return left
+}
+
+// parseGroupMembers reads ps lines "<pid> <pgid> <stat> <command…>" for the
+// processes of pgid. A line that does not parse — a command line's own
+// newline continued — is skipped.
+func parseGroupMembers(out string, pgid int) []groupMember {
+	var members []groupMember
+	for line := range strings.SplitSeq(out, "\n") {
+		f := strings.Fields(line)
+		if len(f) < 4 {
+			continue
+		}
+		pid, err1 := strconv.Atoi(f[0])
+		g, err2 := strconv.Atoi(f[1])
+		if err1 != nil || err2 != nil || g != pgid || strings.HasPrefix(f[2], "Z") {
+			continue
+		}
+		members = append(members, groupMember{pid: pid, argv: []string{strings.Join(f[3:], " ")}})
+	}
+	return members
+}

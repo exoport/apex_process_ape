@@ -48,3 +48,16 @@ func sumGroupTimes(out string, pgid int) (time.Duration, bool) {
 	}
 	return total, found
 }
+
+// groupMembers lists the live processes of process group pgid, from `ps`
+// (macOS, the BSDs): each one's pid and command line, as one argument —
+// ps prints the arguments joined. A zombie is not listed.
+func groupMembers(pgid int) []groupMember {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "ps", "-A", "-o", "pid=,pgid=,stat=,command=").Output()
+	if err != nil {
+		return nil
+	}
+	return parseGroupMembers(string(out), pgid)
+}

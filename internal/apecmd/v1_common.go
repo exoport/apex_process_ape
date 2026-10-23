@@ -312,6 +312,9 @@ func printChecks(w io.Writer, rs []apexv1.CheckResult, tails bool) {
 		if r.ShellNote != "" && r.Red() {
 			fmt.Fprintln(w, "       note: "+r.ShellNote)
 		}
+		if n := len(r.Leftovers); n > 0 {
+			fmt.Fprintf(w, "       note: left %d process(es) running when it exited; ape ended them: %s\n", n, strings.Join(r.Leftovers, "; "))
+		}
 		// rc.7d (rc7d-std): D232 Q131.
 		if s := r.StalePointer(); s != "" && r.Red() {
 			fmt.Fprintln(w, "       stale ("+apexv1.CodeSpecCheckNamesRemoved+"): "+s)

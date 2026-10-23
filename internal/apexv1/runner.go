@@ -100,6 +100,9 @@ var checkElapsed = time.Since
 // in its process group kills the group when ape's end of a pipe closes,
 // however ape ended (SIGKILL included) — on Linux the shell also has
 // Pdeathsig; on Windows the group is a job object that closes with ape.
+// Nor does anything it started outlive the check itself (F15): once its
+// shell exits, what is left in its group is ended and recorded
+// (Leftovers), and its exit is the shell's own.
 //
 // The log opens with logNote, when set, in place of the split note (R30).
 func runCheck(ctx context.Context, dir, cmd, logPath, logNote string, lim TierTimeout, vacuous []string, env ...string) CheckResult {
@@ -129,6 +132,16 @@ func runCheck(ctx context.Context, dir, cmd, logPath, logNote string, lim TierTi
 	}
 	c.Cancel = func() error { return g.kill(c) }
 	c.WaitDelay = 5 * time.Second
+	// The output goes through ape's own pipe, not one exec.Cmd copies
+	// (F15): Wait then returns when the check's shell exits, though a
+	// process it left running still holds the pipe — exec's copy would
+	// wait WaitDelay for it and then report "WaitDelay expired", not the
+	// check's exit (eval bf :3 M2: a green gate recorded as 127).
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		return CheckResult{Cmd: cmd, Exit: exitNotFound, Tail: []string{"[ape] " + err.Error()}}
+	}
+	defer func() { _ = pr.Close() }()
 
 	var buf bytes.Buffer
 	hash := sha256.New()
@@ -140,14 +153,20 @@ func runCheck(ctx context.Context, dir, cmd, logPath, logNote string, lim TierTi
 		sinks = append(sinks, logFile)
 	}
 	w := &lockedWriter{w: io.MultiWriter(sinks...)}
-	c.Stdout = w
-	c.Stderr = w
+	c.Stdout = pw
+	c.Stderr = pw
 
 	start := time.Now()
 	// Pdeathsig fires when the THREAD that started the child exits, not
 	// the process: this goroutine keeps its thread until the check ends.
 	runtime.LockOSThread()
 	err = c.Start()
+	_ = pw.Close() // the check's copies hold it now
+	copied := make(chan struct{})
+	go func() {
+		defer close(copied)
+		_, _ = io.Copy(w, pr)
+	}()
 	if err == nil {
 		g.started(c)
 		stop := make(chan struct{})
@@ -162,7 +181,25 @@ func runCheck(ctx context.Context, dir, cmd, logPath, logNote string, lim TierTi
 	}
 	runtime.UnlockOSThread()
 	secs := checkElapsed(start).Seconds()
-	g.done(runCtx.Err() == nil)
+	finished := runCtx.Err() == nil
+	g.done(finished)
+	// What a check that exited on its own left running is ended and named
+	// (F15); a check killed at a timeout or an interrupt was killed whole.
+	var leftovers []string
+	if finished {
+		leftovers = g.endLeftovers()
+	}
+	// The output is read until every holder of the pipe is gone. One that
+	// left the check's group is not ended above: it is given outputDrain,
+	// then ape stops reading — the check's exit stands.
+	held := false
+	select {
+	case <-copied:
+	case <-time.After(outputDrain):
+		held = true
+		_ = pr.Close()
+		<-copied
+	}
 
 	exit := 0
 	var reason, detail string
@@ -202,6 +239,14 @@ func runCheck(ctx context.Context, dir, cmd, logPath, logNote string, lim TierTi
 	if shellNote != "" {
 		_, _ = io.WriteString(w, "\n[ape] note: "+shellNote+"\n")
 	}
+	if len(leftovers) > 0 {
+		_, _ = io.WriteString(w, "\n[ape] the check exited with "+strconv.Itoa(len(leftovers))+
+			" process(es) it started still running; ape ended them: "+strings.Join(leftovers, "; ")+"\n")
+	}
+	if held {
+		_, _ = io.WriteString(w, "\n[ape] the output was still held open "+outputDrain.String()+
+			" after the check exited, by a process outside its process group; ape stopped reading it\n")
+	}
 	// Closed only now: the timeout, start-failure, vacuous and shell notes
 	// above belong in the log too.
 	if logFile != nil {
@@ -216,8 +261,13 @@ func runCheck(ctx context.Context, dir, cmd, logPath, logNote string, lim TierTi
 		Reason:       reason,
 		Detail:       detail,
 		ShellNote:    shellNote,
+		Leftovers:    leftovers,
 	}
 }
+
+// outputDrain bounds how long a check's output is read after the check
+// exited and its leftovers were ended (F15). A var so tests can shorten it.
+var outputDrain = 5 * time.Second
 
 // errIdle is the cause a check killed at its idle window is cancelled with.
 var errIdle = errors.New("idle")

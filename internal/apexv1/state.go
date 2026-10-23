@@ -65,6 +65,9 @@ type CheckResult struct {
 	// ShellNote: exit 127, the output saying a bash/zsh builtin was not
 	// found — /bin/sh has none of them where it is dash (RN-1).
 	ShellNote string `json:"shell_note,omitempty"`
+	// Leftovers: what the check left running when it exited — each
+	// "<pid> <command>" ("<pid>" on Windows) — and ape ended (F15).
+	Leftovers []string `json:"leftovers,omitempty"`
 	// Flaky: red, then green on a retry (H12, retries:); the result is
 	// green. Tries counts the runs when there was more than one; Log is the
 	// last run's, the earlier ones beside it as <name>.try<k>.log.

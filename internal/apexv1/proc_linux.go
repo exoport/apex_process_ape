@@ -71,3 +71,50 @@ func parseProcStat(line string) (pgid int, ticks int64, ok bool) {
 	}
 	return pgid, ticks, true
 }
+
+// groupMembers lists the live processes of process group pgid, from
+// /proc: each one's pid and command line. A zombie is not listed: it has
+// ended, and holds nothing.
+func groupMembers(pgid int) []groupMember {
+	stats, err := filepath.Glob("/proc/[0-9]*/stat")
+	if err != nil {
+		return nil
+	}
+	var out []groupMember
+	for _, path := range stats {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue // gone since the glob
+		}
+		group, _, ok := parseProcStat(string(data))
+		if !ok || group != pgid || procState(string(data)) == "Z" {
+			continue
+		}
+		dir := filepath.Dir(path)
+		pid, err := strconv.Atoi(filepath.Base(dir))
+		if err != nil {
+			continue
+		}
+		cmdline, err := os.ReadFile(filepath.Join(dir, "cmdline"))
+		if err != nil {
+			continue
+		}
+		argv := strings.Split(strings.TrimRight(string(cmdline), "\x00"), "\x00")
+		out = append(out, groupMember{pid: pid, argv: argv})
+	}
+	return out
+}
+
+// procState is a /proc/<pid>/stat line's state letter, the first field
+// after the parenthesised command name.
+func procState(line string) string {
+	_, rest, found := strings.CutLast(line, ")")
+	if !found {
+		return ""
+	}
+	f := strings.Fields(rest)
+	if len(f) == 0 {
+		return ""
+	}
+	return f[0]
+}
