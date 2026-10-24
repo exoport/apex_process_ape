@@ -12,8 +12,8 @@ rather than the model's (decisions D61 and D62).
 | 1 | A session ape launched from depth 0 | Only when it is ape's own `apex-loop` run (`ape task apex-loop`), only a skill on its allow-list, one child at a time |
 | 2 | A session a loop run started | No |
 
-The allow-list is `apex-plan`, `apex-change`, `apex-vet`, `apex-apply`,
-`apex-review`, `apex-release` and `apex-accept`, the skill `human_review:` names as its
+The allow-list is `apex-plan`, `apex-change`, `apex-apply`, `apex-review`,
+`apex-release` and `apex-accept`, the skill `human_review:` names as its
 delegate, and every skill the `tools:` slots name. `ape change review --run`
 counts as starting `apex-review`, and `ape change tool` and `ape change accept
 --delegate` start their skills through a detached `ape task` the same way, so

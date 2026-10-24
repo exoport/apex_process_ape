@@ -4656,9 +4656,9 @@ command wins over a project one). Each must
 be installed (tools.not-installed); a design or review skill must be slash-invocable
 — not user-invocable: false (tools.not-invocable) — because ape task types it as a
 slash command; a malformed block is tools.invalid. The loop may start the design and
-review skills as children, beside apex-plan, apex-change, apex-vet, apex-apply,
-apex-review, apex-release and apex-accept (D62, D76); apex-handoff, apex-loop and
-the operator's apex-orchestrator never.
+review skills as children, beside apex-plan, apex-change, apex-apply, apex-review,
+apex-release and apex-accept (D62, D76); apex-handoff, apex-loop and the operator's
+apex-orchestrator never.
 
 An advise entry (W6, Q-E1) starts no session and gives no verdict: load: names files
 under its skill's folder (the folder holding its SKILL.md: in the plugin's install for
@@ -7990,10 +7990,9 @@ caller's stamp that ape service submit adds — see ape service --help):
            ape script, the service daemon: may start any session
   depth 1  a session started from depth 0: may start a child only when it is
            ape's own apex-loop run (ape task apex-loop), only a skill on its
-           allow-list (apex-plan, apex-change, apex-vet, apex-apply,
-           apex-review, apex-release, apex-accept, the human_review:
-           delegate skill, and every skill the tools: slots name), and one
-           child at a time
+           allow-list (apex-plan, apex-change, apex-apply, apex-review,
+           apex-release, apex-accept, the human_review: delegate skill, and
+           every skill the tools: slots name), and one child at a time
   depth 2  a session a loop run started: starts nothing
 A refusal is exit 2, code session.depth or session.not-allowed (action
 stop); a second child while one runs is exit 3, session.child-running, and

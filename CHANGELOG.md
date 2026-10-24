@@ -5,12 +5,10 @@
 APEX v1.2, on v1.1.0: hardening and currency. ape stops a session's leftover servers (F3), freezes
 the files a milestone gate reaches (F4), returns a finished gate run to the call that had not seen
 it and ends a gate's output with its verdict (F1), no longer calls a live detached run lost on a slow
-`ps` (F14), confirms its NATS subscriptions before announcing ready (F2, F13), lets the loop start
-`apex-vet` (Q4a), pins aboard v0.4.1 (F10) and is measured on Claude Code 2.1.309 (C1). CI runs on
-`ci/**`, daily and on dispatch (F5), and `make check-harness` runs every gate (F6).
-
-Not yet evaluated. The Q4 A/B runs on a separate frozen build, v1.1.0 plus Q4a only (af5ef1e), so
-its arms differ only in the framework's `vet:` switch.
+`ps` (F14), confirms its NATS subscriptions before announcing ready (F2, F13), records a check's
+own exit and ends what it leaves running (F15), lets a pre-1.0 install update (F16), pins aboard
+v0.4.1 (F10) and is measured on Claude Code 2.1.309 (C1). CI runs on `ci/**`, daily and on dispatch
+(F5), and `make check-harness` runs every gate (F6).
 
 ### F1: a finished gate run, once; the verdict last (D419, D432, D455, D456)
 
@@ -140,12 +138,6 @@ its arms differ only in the framework's `vet:` switch.
 - **For cost comparisons:** on Claude Code 2.1.306 and earlier, 0.5–1 % of sub-agent messages kept a
   placeholder output token count (1–46), so sub-agent output cost recorded on those versions is
   slightly low. 2.1.309 records the final usage. A comparison within one version is unaffected.
-
-### Q4a: the loop may start `apex-vet` (D437, D439)
-
-- **Class B.** `apex-vet`, the framework's plan vetter, joins the loop's core child skills (after
-  `apex-change`, before `apex-apply`), so a change vet runs as a loop child instead of being refused
-  `session.not-allowed`. Its model defaults and state are left for its adoption.
 
 ### F16: updating a pre-1.0 install (atomix, D464, D465, D467)
 

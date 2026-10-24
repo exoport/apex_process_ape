@@ -2,7 +2,6 @@ package apexv1
 
 import (
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
@@ -137,7 +136,7 @@ func TestTools_InstalledAndInvocable(t *testing.T) {
 
 func TestChildSkillAllowList(t *testing.T) {
 	p := settingsProject(t, "")
-	require.Equal(t, []string{"apex-plan", "apex-change", "apex-vet", "apex-apply", "apex-review", "apex-release", "apex-accept"}, p.ChildSkillAllowList(Config{}))
+	require.Equal(t, []string{"apex-plan", "apex-change", "apex-apply", "apex-review", "apex-release", "apex-accept"}, p.ChildSkillAllowList(Config{}))
 	writeConfigForTest(t, p.Root, `tools:
   review:
     - {name: sec, skill: "kit:security", when: a}
@@ -150,7 +149,7 @@ func TestChildSkillAllowList(t *testing.T) {
 	cfg, err := LoadConfig(p.Root)
 	require.NoError(t, err)
 	got := p.ChildSkillAllowList(cfg)
-	require.Equal(t, []string{"apex-plan", "apex-change", "apex-vet", "apex-apply", "apex-review", "apex-release", "apex-accept", "mockups", "kit:security"}, got)
+	require.Equal(t, []string{"apex-plan", "apex-change", "apex-apply", "apex-review", "apex-release", "apex-accept", "mockups", "kit:security"}, got)
 	require.NotContains(t, got, "apex-handoff")
 	require.NotContains(t, got, "apex-orchestrator")
 }
@@ -216,24 +215,4 @@ func TestTools_LocalCommands(t *testing.T) {
 	require.NotContains(t, msgs, "tool advise/rules")
 	require.Contains(t, msgs, "skill myfmt of tool review/usercmd is installed at user scope only ("+filepath.Join(cfgDir, "commands", "myfmt.md")+
 		"), so it is this machine's, unpinned — a person moves it into the project's .claude/commands/myfmt.md (committed) and removes the user copy")
-}
-
-// Q4a: apex-vet, the framework's plan vetter, runs as the loop's child at
-// depth 1 (between apex-change's plan and apex-apply's build), so it is a
-// core child skill; a skill the framework does not ship is not.
-func TestChildSkillAllowList_VetIsACoreChild(t *testing.T) {
-	p := settingsProject(t, "")
-	allow := p.ChildSkillAllowList(Config{})
-	require.Contains(t, allow, "apex-vet")
-	require.NotContains(t, allow, "apex-nope")
-	require.Less(t, slices.Index(CoreChildSkills, "apex-change"), slices.Index(CoreChildSkills, "apex-vet"), "in loop order: vet after the plan")
-	require.Less(t, slices.Index(CoreChildSkills, "apex-vet"), slices.Index(CoreChildSkills, "apex-apply"), "and before the build")
-	at := SessionAt{Depth: 1, Kind: "task", Run: "orch-run", Skill: OrchestratorSkill}
-	depth, err := SessionStart(at, "ape task", "apex-vet", allow)
-	require.NoError(t, err)
-	require.Equal(t, 2, depth)
-	_, err = SessionStart(at, "ape task", "apex-nope", allow)
-	var ue *UsageError
-	require.ErrorAs(t, err, &ue)
-	require.Equal(t, CodeSessionNotAllowed, ue.Code)
 }

@@ -114,8 +114,8 @@ ape launched:
 
 The allow-list is:
 
-- the core skills `apex-plan`, `apex-change`, `apex-vet`, `apex-apply`, `apex-review`,
-  `apex-release` and `apex-accept`;
+- the core skills `apex-plan`, `apex-change`, `apex-apply`, `apex-review`, `apex-release` and
+  `apex-accept`;
 - the `human_review:` delegate skill, when it is not `apex-accept`;
 - every skill the `tools:` slots name.
 

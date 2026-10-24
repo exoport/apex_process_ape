@@ -142,10 +142,8 @@ func TestNesting_RefusalMatrix(t *testing.T) {
 	}
 	starters := []struct{ verb, skill string }{
 		{"ape task", "apex-change"},
-		{"ape task", "apex-vet"},
 		{"ape change review --run", apexv1.ReviewSkill},
 		{"ape task", "apex-handoff"},
-		{"ape task", "apex-nope"},
 		{"ape task", apexv1.OrchestratorSkill},
 		{"ape prompt", ""},
 		{"ape chat", ""},
@@ -170,7 +168,7 @@ func TestNesting_RefusalMatrix(t *testing.T) {
 			inSession(t, "task/orch-run", 1)
 			registerRow(t, orchestratorRow())
 		}, func(skill string) want {
-			if skill == "apex-change" || skill == "apex-vet" || skill == apexv1.ReviewSkill {
+			if skill == "apex-change" || skill == apexv1.ReviewSkill {
 				return want{depth: 2}
 			}
 			return want{code: apexv1.CodeSessionNotAllowed}
