@@ -19,6 +19,8 @@ _apex/state/runs/tasks/<skill>/<run_id>/       (APEX v1 project)
 
 plus the run's runlog streams. A symlink at `<skill>/latest` points at the most recent `<run_id>`; on filesystems without symlinks it is best-effort.
 
+A plugin skill, `<plugin>:<skill>`, is filed under the folder `<plugin>__<skill>`, because Windows does not allow a `:` in a folder name. The manifest keeps the skill's name.
+
 `<run_id>` is `YYYYMMDD-HHMMSS-<7-char-hash>` (UTC). The hash mixes the start time in nanoseconds, the skill and the project root, so concurrent runs against the same project do not collide.
 
 `ape task --manifest-dir <path>` moves the base directory; ape writes `<path>/<skill>/<run_id>/` underneath. The eval uses it to put manifests in its own results tree.

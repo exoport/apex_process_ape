@@ -231,6 +231,17 @@ ape change tool <id> ui-mockup --task T3 --wait 9m --json
 ape change tool <id> security --json
 ```
 
+A plugin tool starts the same way. `ape task` finds `<plugin>:<skill>` as `ape plugins status`
+does: the plugin is listed in `plugins:`, installed, and has the skill. So a tool the status calls
+`ok` also runs. The session is typed `/<plugin>:<skill>`, and the run is filed under
+`tasks/<plugin>__<skill>/`, because Windows does not allow a `:` in a folder name. When the skill
+cannot be found, `ape task` stops with exit 2 before it starts a session:
+
+- the plugin is not listed, or not installed: list it in `plugins:` and run `ape plugins sync`, or
+  fix the skill name;
+- the plugin has no skill of that name: fix the name, or install a version of the plugin that has
+  it.
+
 The session writes what its skill writes, and its exit is the result. `--wait` (default 9m) bounds
 one call: exit 75 means it is still running, and calling the same command again attaches to it.
 Without an entry's `model:` or `effort:`, the session takes `models.<skill>`, then the asking

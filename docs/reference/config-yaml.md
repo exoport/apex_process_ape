@@ -501,6 +501,9 @@ installed (else `tools.not-installed`). A
 `design` or `review` skill must also be slash-invocable (else `tools.not-invocable`). A malformed
 block is `tools.invalid`. Every `design` and `review` skill joins the loop's allow-list.
 `apex-change` names a tool in a change, and the loop runs it with `ape change tool <id> <name>`.
+That starts `ape task <skill>`, which finds a plugin skill the same way: an entry `ape project
+check` calls installed also runs. The run of a plugin skill is filed under
+`tasks/<plugin>__<skill>/`, because Windows does not allow a `:` in a folder name.
 
 ### `tools.advise`
 

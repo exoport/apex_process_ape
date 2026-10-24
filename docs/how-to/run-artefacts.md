@@ -87,6 +87,10 @@ _apex/state/runs/tasks/<skill>/
 
 - `<run-id>` is `YYYYMMDD-HHMMSS-<7-char hash>`. ape refuses to start a run
   whose directory already exists.
+- **A plugin skill's folder spells its `:` as `__`**: the runs of
+  `apish:nats-expert` are under `tasks/apish__nats-expert/`, because Windows
+  does not allow a `:` in a folder name. The manifest and `ape costs` still
+  name the skill `apish:nats-expert`.
 - **`manifest.yaml` is the summary**, and `stages/…/step-01-<skill>.ndjson` is
   the event stream that produced it. When a run fails, the stream is the file
   to open. See [the manifest reference](../reference/pipeline-run-manifest.md).
