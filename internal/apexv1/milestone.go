@@ -46,9 +46,14 @@ type GateRun struct {
 	// Flaky lists what passed only on a retry (H12): the gate command
 	// ("gate-<M>"), scenarios, the regression command.
 	Flaky []string `json:"flaky,omitempty"`
-	// LiveSkipped counts the live scenarios not run because the Gate:
+	// FullSkipped counts the full scenarios not run because the Gate:
 	// command was red (W2 Part 2); Regression is then skipped "gate-red".
 	// A close runs them all.
+	FullSkipped int `json:"full_skipped,omitempty"`
+	// LiveSkipped is FullSkipped under its v1.2 JSON name, always the same
+	// value (D512); a v1.2 record has it alone, and loading one fills
+	// FullSkipped from it (UnmarshalJSON). Deprecated: read full_skipped;
+	// live_skipped is removed no earlier than v1.5.
 	LiveSkipped int `json:"live_skipped,omitempty"`
 	// ScenarioSecs is each scenario check's run time, by ref (W2): what
 	// project check's test-cost notices read. Kept only in the gitignored
@@ -61,6 +66,27 @@ type GateRun struct {
 	// since its approval. A gate call returns it only if no call has
 	// printed it yet (D455); otherwise it runs the gate again.
 	Current *bool `json:"current,omitempty"`
+}
+
+// UnmarshalJSON reads a gate run, filling FullSkipped from live_skipped
+// for a record ape v1.2 wrote, which has that name alone (D512), so both
+// names carry the count whenever the run is shown again.
+func (r *GateRun) UnmarshalJSON(b []byte) error {
+	type plain GateRun
+	if err := json.Unmarshal(b, (*plain)(r)); err != nil {
+		return err
+	}
+	r.FullSkipped, r.LiveSkipped = skippedPair(r.FullSkipped, r.LiveSkipped)
+	return nil
+}
+
+// skippedPair is a record's full_skipped and live_skipped made the same:
+// the one that is set (D512).
+func skippedPair(full, live int) (int, int) {
+	if full == 0 {
+		full = live
+	}
+	return full, full
 }
 
 // Green reports a passing gate: its command exited 0, every scenario
@@ -509,7 +535,7 @@ func gateResult(run *GateRun) string {
 
 // runGate runs the gate and writes the records, committing nothing. A
 // Gate: command that is red already fails the gate, so the gate skips the
-// live scenarios and the regression command (W2 Part 2) — unless full, as
+// full scenarios and the regression command (W2 Part 2) — unless full, as
 // close runs it: everything runs.
 func (p *Project) runGate(ctx context.Context, id string, opt RunOptions, full bool) (*GateResult, error) {
 	_, rm, err := p.loadRoadmapDoc()
@@ -544,7 +570,8 @@ func (p *Project) runGate(ctx context.Context, id string, opt RunOptions, full b
 	spec := p.EffectiveSpecChecks(nil)
 	skip := gate.Exit != 0 && !full
 	if skip {
-		spec, run.LiveSkipped = withoutLive(spec)
+		spec, run.FullSkipped = withoutFull(spec)
+		run.LiveSkipped = run.FullSkipped
 	}
 	run.SpecChecks = len(spec)
 	checks := spec
@@ -615,17 +642,17 @@ func (p *Project) runGate(ctx context.Context, id string, opt RunOptions, full b
 	return g, nil
 }
 
-// withoutLive is checks without the live ones, and how many there were.
-func withoutLive(checks []PlannedCheck) (kept []PlannedCheck, live int) {
+// withoutFull is checks without the full ones, and how many there were.
+func withoutFull(checks []PlannedCheck) (kept []PlannedCheck, full int) {
 	kept = make([]PlannedCheck, 0, len(checks))
 	for i := range checks {
-		if checks[i].Live {
-			live++
+		if checks[i].Full {
+			full++
 			continue
 		}
 		kept = append(kept, checks[i])
 	}
-	return kept, live
+	return kept, full
 }
 
 // SpecOnlyResult is what `ape milestone gate <M> --spec-only` reports
@@ -636,9 +663,13 @@ type SpecOnlyResult struct {
 	// W2 build brief's "mode").
 	SpecOnly bool   `json:"spec_only"`
 	Mode     string `json:"mode"`
-	// SpecChecks is how many scenario checks ran, LiveSkipped how many
-	// live ones did not: a spec-only run runs no live check (W2 Part 2).
+	// SpecChecks is how many scenario checks ran, FullSkipped how many
+	// full ones did not: a spec-only run runs no full check (W2 Part 2).
+	// LiveSkipped is FullSkipped under its v1.2 JSON name, always the same
+	// value (D512). Deprecated: read full_skipped; live_skipped is removed
+	// no earlier than v1.5.
 	SpecChecks  int           `json:"spec_checks"`
+	FullSkipped int           `json:"full_skipped"`
 	LiveSkipped int           `json:"live_skipped"`
 	SpecFailed  []CheckResult `json:"spec_failed"`
 	// Log is the folder the checks' output went to.
@@ -703,9 +734,9 @@ func (p *Project) RunSpecOnly(ctx context.Context, id string, opt RunOptions) (*
 		}
 	}
 	dir := filepath.Join(p.LogsDir(), "gate-"+id+"-spec")
-	spec, live := withoutLive(p.EffectiveSpecChecks(nil))
+	spec, full := withoutFull(p.EffectiveSpecChecks(nil))
 	res := &SpecOnlyResult{
-		Milestone: id, SpecOnly: true, Mode: "spec-only", SpecChecks: len(spec), LiveSkipped: live, Log: p.Rel(dir),
+		Milestone: id, SpecOnly: true, Mode: "spec-only", SpecChecks: len(spec), FullSkipped: full, LiveSkipped: full, Log: p.Rel(dir),
 		At: Stamp(), SHA: HeadSHA(ctx, p.Root), SpecFailed: []CheckResult{},
 	}
 	results := p.RunChecks(ctx, dir, "", spec, opt)

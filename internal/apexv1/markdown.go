@@ -165,26 +165,36 @@ var checkLineRe = regexp.MustCompile(`^\s*(?:[-*]\s+)?check(?:\s*\(([^)]*)\))?:\
 // HumanReview is the check value that says no command can prove it.
 const HumanReview = "human-review"
 
-// CheckKindLive is the one kind a check line takes (W2 Part 2):
-// `- check (live): <command>`, a check that needs something live — a
-// service, a network, a long end-to-end run. Verify runs a live scenario
-// only when it is the change's own or was red at the last gate, and a gate
-// whose Gate: command is red skips every live check.
+// CheckKindFull is the one kind a check line takes (v1.3, D508; W2
+// Part 2): `- check (full): <command>`, a check that does not run on every
+// change — it needs a service, a network or a browser, or it is long.
+// Verify runs a full scenario only when it is the change's own or was red
+// at the last gate, and a gate whose Gate: command is red skips every full
+// check.
+const CheckKindFull = "full"
+
+// CheckKindLive is CheckKindFull's v1.2 name, `check (live):`: still
+// accepted, with no warning, in v1.3 (D512). Test a kind with isFullKind,
+// never against either constant.
 const CheckKindLive = "live"
 
-// badCheckKind is the finding for a check line's kind other than live,
-// or live on what runs no command; "" when the kind is fine. what names
+// isFullKind reports whether kind, the word in `check (<kind>):`, is the
+// full kind: `full`, or its v1.2 name `live`.
+func isFullKind(kind string) bool { return kind == CheckKindFull || kind == CheckKindLive }
+
+// badCheckKind is the finding for a check line's kind other than full,
+// or full on what runs no command; "" when the kind is fine. what names
 // the line ("scenario \"x\"'s check", "task T1's check").
 func badCheckKind(what, kind, value string, hasKind bool) string {
 	switch {
 	case !hasKind:
 		return ""
-	case kind != CheckKindLive:
-		return what + " kind `(" + kind + ")` is not `check (live):`, the one kind a check takes, so ape cannot tell how to run it" +
-			" — write `check (live): <command>` for a check that needs something live, else a plain `check: <command>`"
+	case !isFullKind(kind):
+		return what + " kind `(" + kind + ")` is not `check (full):`, the one kind a check takes (`(live)`, its v1.2 name, is still accepted), so ape cannot tell how to run it" +
+			" — write `check (full): <command>` for a check that does not run on every change (a service, a network, a browser, or long), else a plain `check: <command>`"
 	case value == HumanReview || value == "":
-		return what + " is `check (live):` on " + map[bool]string{true: "human-review", false: "nothing"}[value == HumanReview] +
-			", but only a command is live — write `check (live): <command>`, or a plain `check: " + HumanReview + "`"
+		return what + " is `check (" + kind + "):` on " + map[bool]string{true: "human-review", false: "nothing"}[value == HumanReview] +
+			", but only a command runs in a full run — write `check (full): <command>`, or a plain `check: " + HumanReview + "`"
 	}
 	return ""
 }

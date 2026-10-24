@@ -43,10 +43,10 @@ type PlannedCheck struct {
 	LogNote string
 	// Line is a scenario's heading line in its spec or change.md.
 	Line int
-	// Live: written `check (live):` (W2 Part 2) — run by verify only when
-	// it is the change's own or was red at the last gate, and skipped by
-	// a gate whose Gate: command is red.
-	Live bool
+	// Full: written `check (full):`, or `(live)`, its v1.2 name (W2 Part
+	// 2, D508) — run by verify only when it is the change's own or was red
+	// at the last gate, and skipped by a gate whose Gate: command is red.
+	Full bool
 }
 
 func scenarioRef(capName, req, scen string) string { return capName + "/" + req + "/" + scen }
@@ -64,7 +64,7 @@ func scenarioChecks(capName string, reqs []Requirement, delta bool) []PlannedChe
 			}
 			out = append(out, PlannedCheck{
 				Ref: scenarioRef(capName, r.Name, s.Name), Kind: KindScenario,
-				Capability: capName, Requirement: r.Name, Scenario: s.Name, Delta: delta, Cmd: cmd, Line: s.Line, Live: s.Live(),
+				Capability: capName, Requirement: r.Name, Scenario: s.Name, Delta: delta, Cmd: cmd, Line: s.Line, Full: s.Full(),
 			})
 		}
 	}
@@ -121,20 +121,20 @@ func (p *Project) EffectiveSpecChecks(c *Change) []PlannedCheck {
 // plus any other scenario whose command is one of its tasks' — free, as a
 // shared command runs once. The rest of the spec is the milestone gate's
 // to run (EffectiveSpecChecks(nil)), so a verify does not pay for a spec
-// of hundreds of scenarios the change cannot have broken. Of the live
+// of hundreds of scenarios the change cannot have broken. Of the full
 // scenarios (W2 Part 2) it keeps the change's own — its delta's — and
-// those red at the last gate (or sharing a task's command); a live task
+// those red at the last gate (or sharing a task's command); a full task
 // is always the change's own.
 func (p *Project) ChangeChecks(c *Change) []PlannedCheck {
 	out, _ := p.changeChecks(c)
 	return out
 }
 
-// changeChecks is ChangeChecks and how many live scenarios it left out.
-func (p *Project) changeChecks(c *Change) (out []PlannedCheck, liveSkipped int) {
+// changeChecks is ChangeChecks and how many full scenarios it left out.
+func (p *Project) changeChecks(c *Change) (out []PlannedCheck, fullSkipped int) {
 	taskCmds := map[string]bool{}
 	for _, t := range c.CommandTasks() {
-		out = append(out, PlannedCheck{Ref: t.ID, Kind: KindTask, Cmd: t.Check, Live: t.Live})
+		out = append(out, PlannedCheck{Ref: t.ID, Kind: KindTask, Cmd: t.Check, Full: t.Full})
 		taskCmds[t.Check] = true
 	}
 	touched := map[string]bool{}
@@ -148,22 +148,22 @@ func (p *Project) changeChecks(c *Change) (out []PlannedCheck, liveSkipped int) 
 		if !pc.Delta && !touched[pc.Capability] && !taskCmds[pc.Cmd] {
 			continue
 		}
-		if pc.Live && !pc.Delta && !taskCmds[pc.Cmd] {
+		if pc.Full && !pc.Delta && !taskCmds[pc.Cmd] {
 			if redAtGate == nil {
 				redAtGate = p.lastGateRed()
 			}
 			if !redAtGate[pc.Ref] {
-				liveSkipped++
+				fullSkipped++
 				continue
 			}
 		}
 		out = append(out, pc)
 	}
-	return out, liveSkipped
+	return out, fullSkipped
 }
 
 // lastGateRed are the scenario refs red at the newest gate run of any
-// milestone of the roadmap (W2 Part 2): the live scenarios verify runs
+// milestone of the roadmap (W2 Part 2): the full scenarios verify runs
 // although they are not the change's own. Empty when no gate ran.
 func (p *Project) lastGateRed() map[string]bool {
 	out := map[string]bool{}

@@ -26,8 +26,9 @@ type Scenario struct {
 	tagged []bool
 }
 
-// Live reports a scenario whose check is `check (live):`.
-func (s *Scenario) Live() bool { return len(s.Kinds) > 0 && s.Kinds[0] == CheckKindLive }
+// Full reports a scenario whose check is `check (full):`, or `check
+// (live):`, its v1.2 name (D512).
+func (s *Scenario) Full() bool { return len(s.Kinds) > 0 && isFullKind(s.Kinds[0]) }
 
 // Requirement is one `### Requirement:` block. Text is the block verbatim,
 // heading included, with trailing blank lines trimmed: it is what a delta

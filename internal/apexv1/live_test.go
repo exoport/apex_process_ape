@@ -42,9 +42,9 @@ func liveRuns(t *testing.T, p *Project) int {
 func TestLiveCheck_Parse(t *testing.T) {
 	s := ParseSpec(liveSpec)
 	served := s.Find("Serve").Scenarios[0]
-	require.True(t, served.Live())
+	require.True(t, served.Full())
 	require.Equal(t, []string{"./svc.sh"}, served.Checks)
-	require.False(t, s.Find("Say hello").Scenarios[0].Live())
+	require.False(t, s.Find("Say hello").Scenarios[0].Full())
 	require.Empty(t, findingMessages(ValidateSpec("s.md", liveSpec, 1<<20)))
 
 	codes := func(fs []Finding) []string {
@@ -62,9 +62,11 @@ func TestLiveCheck_Parse(t *testing.T) {
 
 	c := ParseChange("c.md", changeDoc("add-svc", "greeting", addedWave,
 		"- T1 serve — check (live): ./svc.sh\n- T2 add wave — check: ./wave.sh\n"))
-	require.True(t, c.Tasks[0].Live)
+	require.True(t, c.Tasks[0].Full)
+	require.True(t, c.Tasks[0].Live, "the deprecated mirror")
 	require.Equal(t, "./svc.sh", c.Tasks[0].Check)
 	require.Equal(t, "serve", c.Tasks[0].What)
+	require.False(t, c.Tasks[1].Full)
 	require.False(t, c.Tasks[1].Live)
 	require.Empty(t, c.parse)
 	for _, bad := range []string{"- T1 serve — check (slow): ./svc.sh\n", "- T1 serve — regression (live): ./svc.sh\n", "- T1 serve — check (live): human-review\n"} {
@@ -91,8 +93,18 @@ func TestLiveCheck_VerifyRunsOnlyOwnOrRedAtGate(t *testing.T) {
 	v, err := p.Verify(ctx(), "add-wave", RunOptions{})
 	require.NoError(t, err)
 	require.True(t, v.Green)
-	require.Equal(t, 1, v.LiveSkipped)
+	require.Equal(t, 1, v.FullSkipped)
+	require.Equal(t, 1, v.LiveSkipped, "the deprecated v1.2 name carries the same count")
+	require.Equal(t, 1, state(t, p, "add-wave").Verify.FullSkipped)
 	require.Equal(t, 1, state(t, p, "add-wave").Verify.LiveSkipped)
+	vj, err := json.Marshal(v)
+	require.NoError(t, err)
+	require.Contains(t, string(vj), `"full_skipped":1`)
+	require.Contains(t, string(vj), `"live_skipped":1`)
+	raw, err := os.ReadFile(p.StateFile("add-wave"))
+	require.NoError(t, err)
+	require.Contains(t, string(raw), `"full_skipped": 1`, "state.json records both names")
+	require.Contains(t, string(raw), `"live_skipped": 1`)
 	require.Zero(t, liveRuns(t, p))
 
 	// Red at the last gate: verify runs it.
@@ -132,14 +144,17 @@ func TestLiveCheck_GateSkipsOnARedGateCommand(t *testing.T) {
 	g, err := p.RunGate(ctx(), "M1", RunOptions{})
 	require.NoError(t, err)
 	require.False(t, g.Run.Green())
-	require.Equal(t, 1, g.Run.LiveSkipped)
-	require.Equal(t, 2, g.Run.SpecChecks, "the two scenarios that are not live ran")
+	require.Equal(t, 1, g.Run.FullSkipped)
+	require.Equal(t, 1, g.Run.LiveSkipped, "the deprecated v1.2 name carries the same count")
+	require.Equal(t, 2, g.Run.SpecChecks, "the two scenarios that are not full ran")
 	require.Equal(t, &RegressionVerdict{Cmd: "./suite.sh", Skipped: RegressionSkippedGateRed}, g.Run.Regression)
 	require.Zero(t, liveRuns(t, p))
 	require.NoFileExists(t, p.Root+"/development/evidence/suite.txt", "no regression run")
-	require.Equal(t, 1, p.LastGateRun("M1").LiveSkipped, "ape status carries it")
+	require.Equal(t, 1, p.LastGateRun("M1").FullSkipped, "ape status carries it")
+	require.Equal(t, 1, p.LastGateRun("M1").LiveSkipped)
 	out, err := json.Marshal(g)
 	require.NoError(t, err)
+	require.Contains(t, string(out), `"full_skipped":1`)
 	require.Contains(t, string(out), `"live_skipped":1`)
 	require.Contains(t, string(out), `"skipped":"gate-red"`)
 
@@ -147,6 +162,7 @@ func TestLiveCheck_GateSkipsOnARedGateCommand(t *testing.T) {
 	g, err = p.RunGate(ctx(), "M1", RunOptions{})
 	require.NoError(t, err)
 	require.True(t, g.Run.Green(), g.Run.Why())
+	require.Zero(t, g.Run.FullSkipped)
 	require.Zero(t, g.Run.LiveSkipped)
 	require.Equal(t, 3, g.Run.SpecChecks)
 	require.Equal(t, 1, liveRuns(t, p))
@@ -159,11 +175,12 @@ func TestLiveCheck_GateSkipsOnARedGateCommand(t *testing.T) {
 	require.Error(t, err, "red: not closed")
 	require.Equal(t, 2, liveRuns(t, p), "close ran the live check")
 	require.FileExists(t, p.Root+"/development/evidence/suite.txt", "and the regression")
-	require.Zero(t, p.LastGateRun("M1").LiveSkipped)
+	require.Zero(t, p.LastGateRun("M1").FullSkipped)
 
 	// --spec-only never runs a live check.
 	r, err := p.RunSpecOnly(ctx(), "M1", RunOptions{})
 	require.NoError(t, err)
+	require.Equal(t, 1, r.FullSkipped)
 	require.Equal(t, 1, r.LiveSkipped)
 	require.Equal(t, 2, r.SpecChecks)
 	require.Equal(t, 2, liveRuns(t, p))
@@ -191,7 +208,7 @@ func TestLiveCheck_Notices(t *testing.T) {
 	dup := byCode(CodeChecksDuplicateRun)
 	require.Len(t, dup, 1, "live: no timing needed")
 	require.Contains(t, dup[0].Message, "start with `./svc.sh`")
-	require.Contains(t, dup[0].Message, "not timed at a gate yet, live")
+	require.Contains(t, dup[0].Message, "not timed at a gate yet, full")
 	require.Empty(t, byCode(CodeCheckLiveSuggested))
 
 	run := GateRun{At: Stamp(), ScenarioSecs: map[string]float64{
@@ -206,5 +223,5 @@ func TestLiveCheck_Notices(t *testing.T) {
 	require.Equal(t, 6, ls[0].Line)
 	require.Equal(t, "replan", ls[0].Action)
 	require.Contains(t, ls[0].Message, "scenario greeting/Say hello/plain run's check took 1m15s at M1's last gate")
-	require.Contains(t, ls[0].Fix, "`- check (live): ./greet.sh | grep -q Hello`")
+	require.Contains(t, ls[0].Fix, "`- check (full): ./greet.sh | grep -q Hello`")
 }

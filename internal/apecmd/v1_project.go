@@ -636,12 +636,12 @@ line}; [] when none, beside the findings on a failure too), they never change th
                            regression: {change: <fast>, milestone: <the suite>} (W2)
   checks.duplicate-run     (action replan) two or more scenario checks start with the same
                            command (to the first top-level && or |) and differ after it,
-                           and one is live or each ran over a minute at the last gate: a
+                           and one is full or each ran over a minute at the last gate: a
                            gate runs that command once per check (ape memoizes nothing);
                            names the scenarios and their time per gate (W2)
-  check.live-suggested     (action replan) a scenario check that is not live ran over a
-                           minute at the last gate: mark it ` + "`- check (live): <cmd>`" + ` if it
-                           needs something live (W2; see ape change verify --help)
+  check.live-suggested     (action replan) a scenario check that is not full ran over a
+                           minute at the last gate: mark it ` + "`- check (full): <cmd>`" + ` if it
+                           need not run on every change (W2; see ape change verify --help)
   gate.root-module-change  (action replan) a library's gate program (Go files under
                            development/gates/) imports a package its module does not
                            provide — not the standard library's, the module's own, or a
@@ -1221,16 +1221,16 @@ type statusWithBoard struct {
 	Board *statusboard.Outcome `json:"board"`
 }
 
-// liveSkippedLines is status's account of the live checks not run (W2
+// fullSkippedLines is status's account of the full checks not run (W2
 // Part 2): by the milestone's last gate, whose Gate: command was red, and
 // by each change's last verify. "" when none were skipped.
-func liveSkippedLines(r *apexv1.StatusReport) string {
+func fullSkippedLines(r *apexv1.StatusReport) string {
 	var lines []string
 	if m := r.Milestone; m != nil && m.GateLast != nil {
 		g := m.GateLast
 		regression := g.Regression != nil && g.Regression.Skipped == apexv1.RegressionSkippedGateRed
-		if g.LiveSkipped > 0 || regression {
-			what := fmt.Sprintf("%d live scenario check(s)", g.LiveSkipped)
+		if g.FullSkipped > 0 || regression {
+			what := fmt.Sprintf("%d full scenario check(s)", g.FullSkipped)
 			if regression {
 				what += " and the regression command"
 			}
@@ -1238,14 +1238,14 @@ func liveSkippedLines(r *apexv1.StatusReport) string {
 		}
 	}
 	for i := range r.Changes {
-		if c := &r.Changes[i]; c.LiveSkipped > 0 {
-			lines = append(lines, fmt.Sprintf("  %s verify %.7s: %d live scenario check(s), neither its own nor red at the last gate", c.ID, c.VerifySHA, c.LiveSkipped))
+		if c := &r.Changes[i]; c.FullSkipped > 0 {
+			lines = append(lines, fmt.Sprintf("  %s verify %.7s: %d full scenario check(s), neither its own nor red at the last gate", c.ID, c.VerifySHA, c.FullSkipped))
 		}
 	}
 	if len(lines) == 0 {
 		return ""
 	}
-	return "\nLive checks not run:\n" + strings.Join(lines, "\n") + "\n"
+	return "\nFull checks not run:\n" + strings.Join(lines, "\n") + "\n"
 }
 
 func statusLong(r *apexv1.StatusReport) string {
@@ -1282,7 +1282,7 @@ func statusLong(r *apexv1.StatusReport) string {
 			b.WriteString("  | " + l + "\n")
 		}
 	}
-	b.WriteString(liveSkippedLines(r))
+	b.WriteString(fullSkippedLines(r))
 	if n := len(r.OutsideFlow); n > 0 {
 		fmt.Fprintf(&b, "\nOutside the change flow: %d commit(s) on the base since the last archive touch code with no Change: trailer (newest %.7s %s; ape status --json: outside_flow)\n",
 			n, r.OutsideFlow[0].SHA, r.OutsideFlow[0].Subject)

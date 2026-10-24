@@ -84,9 +84,12 @@ type Task struct {
 	Check      string `json:"check"`
 	Regression bool   `json:"regression,omitempty"`
 	Tool       string `json:"tool,omitempty"`
-	// Live: written `— check (live): <command>` (W2 Part 2), a check that
-	// needs something live; a task's is the change's own, so verify always
-	// runs it.
+	// Full: written `— check (full): <command>` (v1.3, D508; W2 Part 2),
+	// or `(live)`, its v1.2 name: a check that does not run on every
+	// change. A task's is the change's own, so verify always runs it.
+	Full bool `json:"full,omitempty"`
+	// Live is Full under its v1.2 JSON name, always the same value
+	// (D512). Deprecated: read full; live is removed no earlier than v1.5.
 	Live bool `json:"live,omitempty"`
 	Line int  `json:"line"`
 }
@@ -164,7 +167,7 @@ var (
 	taskItemRe  = regexp.MustCompile(`^\s{0,3}[-*+]\s+(.*)$`)
 	taskIDRe    = regexp.MustCompile(`^(\[[ xX]\]\s*)?(T\d+)\b[:.)]?\s*(.*)$`)
 	// taskCheckRe is a task line's separator: a dash, then check: or
-	// regression:, either with a kind, `check (live):` (W2). The first one
+	// regression:, either with a kind, `check (full):` (W2). The first one
 	// ends <what>.
 	taskCheckRe = regexp.MustCompile(`(?:^|\s)[—–-]+\s*(check|regression)(?:\s*\(([^)]*)\))?:`)
 	// taskToolRe is the `— tool: <name>` segment that ends <what>.
@@ -349,7 +352,8 @@ func (c *Change) parseTasks(body []mdLine) {
 			t.Check = strings.Trim(strings.TrimSpace(rest[loc[1]:]), "`")
 			t.Regression = rest[loc[2]:loc[3]] == "regression"
 			if loc[4] >= 0 {
-				t.Live, badKind = taskCheckKind(&t, strings.TrimSpace(rest[loc[4]:loc[5]]))
+				t.Full, badKind = taskCheckKind(&t, strings.TrimSpace(rest[loc[4]:loc[5]]))
+				t.Live = t.Full
 			}
 		} else if what, check, ok := strings.CutLast(rest, "check:"); ok {
 			t.What = strings.TrimRight(strings.TrimSpace(what), " \t—–-")
@@ -374,22 +378,22 @@ func (c *Change) parseTasks(body []mdLine) {
 	}
 }
 
-// taskCheckKind judges a task's `check (<kind>):` (W2): live, or why not.
-func taskCheckKind(t *Task, kind string) (live bool, why string) {
+// taskCheckKind judges a task's `check (<kind>):` (W2): full, or why not.
+func taskCheckKind(t *Task, kind string) (full bool, why string) {
 	if t.Regression {
 		// A kind goes on check: alone.
-		return false, "task " + t.ID + "'s regression: kind `(" + kind + ")` is not `check (live):`, as a kind goes on check: alone" +
-			" — write `— check (live): <command>`, or a plain `— regression: <command>`"
+		return false, "task " + t.ID + "'s regression: kind `(" + kind + ")` is not `check (full):`, as a kind goes on check: alone" +
+			" — write `— check (full): <command>`, or a plain `— regression: <command>`"
 	}
 	if why := badCheckKind("task "+t.ID+"'s check", kind, t.Check, true); why != "" {
 		return false, why
 	}
-	return kind == CheckKindLive, ""
+	return isFullKind(kind), ""
 }
 
 // TaskLineGrammar is the task line's shape, as findings quote it.
 const TaskLineGrammar = "task line must read `- T<n> <what> — check: <command> | human-review` or `- T<n> <what> — regression: <command>`" +
-	" (a design-tool task: `- T<n> <what> — tool: <name> — check: …`; a check that needs something live: `— check (live): <command>`)"
+	" (a design-tool task: `- T<n> <what> — tool: <name> — check: …`; a check that does not run on every change: `— check (full): <command>`)"
 
 // Task returns the task with id, or nil.
 func (c *Change) Task(id string) *Task {

@@ -137,12 +137,29 @@ type Verify struct {
 	// (Q87): skipped "docs-only" and the docs paths the change touched.
 	// A verify that ran it has it in Results (kind regression).
 	Regression *RegressionVerdict `json:"regression,omitempty"`
-	// LiveSkipped counts the live scenarios it did not run (W2 Part 2).
+	// FullSkipped counts the full scenarios it did not run (W2 Part 2).
+	FullSkipped int `json:"full_skipped,omitempty"`
+	// LiveSkipped is FullSkipped under its v1.2 JSON name, always the same
+	// value (D512); a v1.2 record has it alone, and loading one fills
+	// FullSkipped from it (UnmarshalJSON). Deprecated: read full_skipped;
+	// live_skipped is removed no earlier than v1.5.
 	LiveSkipped int `json:"live_skipped,omitempty"`
 	// Advise is the change's advise files as this verify found them (W6,
 	// Q-E11): {name, skill, file, bytes, sha256}, so an expert updated in
 	// the middle of a change shows in the record.
 	Advise []AdviseFile `json:"advise,omitempty"`
+}
+
+// UnmarshalJSON reads a verify record, filling FullSkipped from
+// live_skipped for a record ape v1.2 wrote, which has that name alone
+// (D512).
+func (v *Verify) UnmarshalJSON(b []byte) error {
+	type plain Verify
+	if err := json.Unmarshal(b, (*plain)(v)); err != nil {
+		return err
+	}
+	v.FullSkipped, v.LiveSkipped = skippedPair(v.FullSkipped, v.LiveSkipped)
+	return nil
 }
 
 // Approval records a person approving a tweak — a change with

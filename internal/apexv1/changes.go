@@ -558,7 +558,7 @@ func changeSkeleton(id, milestone, typ string, touches, paths, outOfScope []stri
 	b.WriteString("     and one `- check: <command> | human-review` per scenario; or the single line `none — <reason>` -->\n\n")
 	b.WriteString("## Tasks\n<!-- - T1 <what> — check: <command> | human-review   (no checkboxes)\n")
 	b.WriteString("     - T2 <what> — regression: <command>   (a check that may already pass before the change)\n")
-	b.WriteString("     - T3 <what> — check (live): <command>   (needs something live; a scenario takes it too) -->\n\n")
+	b.WriteString("     - T3 <what> — check (full): <command>   (does not run on every change: a service, a network, a browser, or long; a scenario takes it too) -->\n\n")
 	b.WriteString("## Notes\n")
 	return b.String()
 }

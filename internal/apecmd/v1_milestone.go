@@ -312,8 +312,8 @@ func gateHuman(g *apexv1.GateResult) func(io.Writer) {
 				n, strings.Join(g.Run.Leftovers, "; "))
 		}
 		printChecks(w, g.Run.SpecFailed, true)
-		if n := g.Run.LiveSkipped; n > 0 {
-			fmt.Fprintf(w, "  %d live scenario check(s) skipped: the Gate: command is red (close runs them)\n", n)
+		if n := g.Run.FullSkipped; n > 0 {
+			fmt.Fprintf(w, "  %d full scenario check(s) skipped: the Gate: command is red (close runs them)\n", n)
 		}
 		printRegression(w, g.Run.Regression)
 		printStrays(w, g.Run.StrayFiles, g.Run.StraysKept)
@@ -391,9 +391,9 @@ For a milestone tier that differs from the change tier, the baseline is the one 
 milestone's first change to start recorded for that tier (milestone_regression_baseline,
 W2). When no change of the milestone has a baseline for the command, a red regression fails
 the gate: nothing shows it was red before the milestone's work. The
-Gate: command runs first; when it is red the gate is red already, and it skips the live
-scenario checks (` + "`- check (live):`" + `, W2) and the regression command (JSON run.live_skipped: N,
-run.regression.skipped: "gate-red"); ` + "`ape milestone close`" + ` runs everything. Each run's
+Gate: command runs first; when it is red the gate is red already, and it skips the full
+scenario checks (` + "`- check (full):`" + `, W2) and the regression command (JSON run.full_skipped: N,
+and run.live_skipped, its deprecated v1.2 name; run.regression.skipped: "gate-red"); ` + "`ape milestone close`" + ` runs everything. Each run's
 per-scenario times go to logs/gate-<M>.json (scenario_secs), for project check. Timeouts:
 the Gate: command runs under timeouts.gate (default idle 30m, max 4h), each scenario check
 under timeouts.check (idle 15m, max 2h), the regression command under timeouts.regression
@@ -429,7 +429,7 @@ run. --rerun runs the gate even when an unprinted result would be returned (it n
 attaches a different run: a run in progress is still attached to).
 
 --spec-only (W2): runs the spec's scenario checks alone, as the gate runs them — no Gate:
-command, no regression command, no live check (JSON live_skipped) — and records nothing: no milestones.json, no gate-<M>.json,
+command, no regression command, no full check (JSON full_skipped, and live_skipped) — and records nothing: no milestones.json, no gate-<M>.json,
 no commit — so it always runs, and a full gate call never returns it. It runs in this process (no detached worker, so never exit 75) under the
 milestone's run lock (run.busy beside a gate or close of it), with the same refusals as
 the gate (a done milestone's milestone.done included), and is allowed on a proposed milestone: apex-plan runs it before the approval to
@@ -511,8 +511,8 @@ func runSpecOnly(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, id string) e
 	}
 	human := func(w io.Writer) {
 		fmt.Fprintf(w, "%s spec-only: %d scenario check(s), %d red — nothing recorded (log %s/)\n", id, r.SpecChecks, len(r.SpecFailed), r.Log)
-		if r.LiveSkipped > 0 {
-			fmt.Fprintf(w, "  %d live scenario check(s) not run: a spec-only run runs no live check\n", r.LiveSkipped)
+		if r.FullSkipped > 0 {
+			fmt.Fprintf(w, "  %d full scenario check(s) not run: a spec-only run runs no full check\n", r.FullSkipped)
 		}
 		for i := range r.SpecFailed {
 			fmt.Fprintf(w, "  red  %s: %s\n", r.SpecFailed[i].Task, r.SpecFailed[i].Cmd)

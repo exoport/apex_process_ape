@@ -113,10 +113,14 @@ const (
 	// CodeChecksDuplicateRun: project check's notice for scenario checks
 	// that start with the same slow command (checkcost.go).
 	CodeChecksDuplicateRun = "checks.duplicate-run"
-	// CodeCheckBadKind: a check line's kind is not live, or live on
-	// human-review (W2 Part 2). CodeCheckLiveSuggested: project check's
-	// notice for a slow check not marked live.
-	CodeCheckBadKind       = "check.bad-kind"
+	// CodeCheckBadKind: a check line's kind is not full (or live, its
+	// v1.2 name), or full on human-review (W2 Part 2, D508).
+	// CodeCheckLiveSuggested: project check's notice for a slow check not
+	// marked full.
+	CodeCheckBadKind = "check.bad-kind"
+	// TODO(v13-codes alias): rename to check.full-suggested (D512), with
+	// check.live-suggested kept as its alias through v13-codes' mechanism
+	// (Diagnostic.Alias, the codes table's alias rows).
 	CodeCheckLiveSuggested = "check.live-suggested"
 )
 
@@ -502,8 +506,8 @@ var DiagnosticCodes = []CodeDoc{
 	{CodeGateSpecRed, 1, "replan", "`ape milestone gate <M> --spec-only` (W2): a scenario check of the effective spec is red now (JSON spec_failed) — apex-plan fixes the plan's scenarios or their checks before the milestone is approved; nothing was recorded"},
 	{CodeRegressionSlow, 0, "replan", "a notice, never a finding (project check's notices; the exit is unchanged): regression: is a single command, so every change's start and verify runs the whole suite, and its last recorded run (a change's baseline or verify, or a milestone's last gate) took longer than checks.slow_regression (default 5m; W2) — apex-plan splits it into tiers, regression: {change: <a fast subset>, milestone: <the suite>}, whose milestone tier is baselined once per milestone"},
 	{CodeChecksDuplicateRun, 0, "replan", "a notice, never a finding (project check's notices; the exit is unchanged): two or more scenario checks of the spec start with the same command (up to the first top-level && or |) and differ after it, and each ran over a minute at the last gate (W2) — so every gate runs that command once per check, which ape does not memoize; the notice names the scenarios and their time per gate: apex-plan gives the command one scenario and has the others check what it leaves under development/, or merges them"},
-	{CodeCheckBadKind, 1, "replan", "a check line's kind is not `live` — `check (<kind>):` takes one kind, `- check (live): <command>` (W2) — or is live on human-review or on nothing, or sits on a `regression:` task: ape cannot tell how to run it; write `check (live): <command>` for a check that needs something live, else a plain `check:`"},
-	{CodeCheckLiveSuggested, 0, "replan", "a notice, never a finding (project check's notices; the exit is unchanged): a scenario check of the spec, not live, ran over a minute at the last gate (W2), and every verify of a change touching its capability runs it — if it needs something live (a service, a network, a long end-to-end run), apex-plan writes it `- check (live): <command>`: verify then runs it only for the change's own scenarios or when it was red at the last gate, and a gate whose Gate: command is red skips it"},
+	{CodeCheckBadKind, 1, "replan", "a check line's kind is not `full` — `check (<kind>):` takes one kind, `- check (full): <command>` (W2, D508; `(live)`, its v1.2 name, is still accepted) — or is full on human-review or on nothing, or sits on a `regression:` task: ape cannot tell how to run it; write `check (full): <command>` for a check that does not run on every change (a service, a network, a browser, or long), else a plain `check:`"},
+	{CodeCheckLiveSuggested, 0, "replan", "a notice, never a finding (project check's notices; the exit is unchanged): a scenario check of the spec, not full, ran over a minute at the last gate (W2), and every verify of a change touching its capability runs it — if it need not run on every change (a full check: a service, a network, a browser, or long), apex-plan writes it `- check (full): <command>`: verify then runs it only for the change's own scenarios or when it was red at the last gate, and a gate whose Gate: command is red skips it"},
 	// v1.1 W7.
 	{CodeFenceMissing, 1, "replan", "a library (_apex/config.yaml library: true) with a go.mod at the root lacks a module fence (W7, D207): an APEX folder that exists — .claude/, _apex/, the development folder, a root evidence/ — has no go.mod, or git does not track it (the module zip is built from git), so the library's module zip carries the folder (project check, and `ape project fence --check`: exit 1) — a person runs `ape project fence`, which writes and commits it (init and the lift write them for a v0 library)"},
 	{CodeFenceAltered, 1, "replan", "a library's module fence (<folder>/go.mod) has a module line other than apex.invalid/fence/<folder>, or a go line other than the root go.mod's (W7), or does not parse — `ape project fence` restores the module and go lines and keeps every other line (a gate's require and replace); one that does not parse a person fixes or deletes (ape does not overwrite it)"},

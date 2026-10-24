@@ -56,18 +56,18 @@ func TestV1Commands_GateSpecOnly(t *testing.T) {
 	require.Contains(t, stdout, "M1 spec-only: 1 scenario check(s), 0 red — nothing recorded")
 }
 
-// W2 Part 2: ape status says how many live checks were not run, and why.
-func TestStatus_LiveSkippedLines(t *testing.T) {
-	require.Empty(t, liveSkippedLines(&apexv1.StatusReport{}))
+// W2 Part 2: ape status says how many full checks were not run, and why.
+func TestStatus_FullSkippedLines(t *testing.T) {
+	require.Empty(t, fullSkippedLines(&apexv1.StatusReport{}))
 	r := &apexv1.StatusReport{
 		Milestone: &apexv1.MilestoneStatus{ID: "M2", GateLast: &apexv1.GateRun{
-			SHA: "abcdef1234", Exit: 1, LiveSkipped: 3,
+			SHA: "abcdef1234", Exit: 1, FullSkipped: 3, LiveSkipped: 3,
 			Regression: &apexv1.RegressionVerdict{Cmd: "make test-all", Skipped: apexv1.RegressionSkippedGateRed},
 		}},
-		Changes: []apexv1.ChangeStatus{{ID: "add-svc", VerifySHA: "1234567890", LiveSkipped: 2}, {ID: "add-wave"}},
+		Changes: []apexv1.ChangeStatus{{ID: "add-svc", VerifySHA: "1234567890", FullSkipped: 2, LiveSkipped: 2}, {ID: "add-wave"}},
 	}
-	require.Equal(t, "\nLive checks not run:\n"+
-		"  M2 gate abcdef1: 3 live scenario check(s) and the regression command, as its Gate: command was red (close runs everything)\n"+
-		"  add-svc verify 1234567: 2 live scenario check(s), neither its own nor red at the last gate\n", liveSkippedLines(r))
-	require.Contains(t, statusLong(r), "Live checks not run:")
+	require.Equal(t, "\nFull checks not run:\n"+
+		"  M2 gate abcdef1: 3 full scenario check(s) and the regression command, as its Gate: command was red (close runs everything)\n"+
+		"  add-svc verify 1234567: 2 full scenario check(s), neither its own nor red at the last gate\n", fullSkippedLines(r))
+	require.Contains(t, statusLong(r), "Full checks not run:")
 }

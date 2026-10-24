@@ -85,7 +85,7 @@ func sharedFirstCommands(checks []PlannedCheck) []sharedFirstCommand {
 
 // duplicateRunNotices are project check's checks.duplicate-run notices (W2
 // Part 3): scenario checks of the spec that start with the same command,
-// which a gate then runs once per check, when one of them is live or each
+// which a gate then runs once per check, when one of them is full or each
 // of them ran over a minute at the last gate. One notice per shared
 // command, at its first scenario, naming the scenarios and what they cost
 // per gate.
@@ -95,12 +95,12 @@ func (p *Project) duplicateRunNotices() []Diagnostic {
 	for _, g := range sharedFirstCommands(p.EffectiveSpecChecks(nil)) {
 		var total float64
 		names := make([]string, 0, len(g.checks))
-		slow, live := gate != nil, false
+		slow, full := gate != nil, false
 		seen := map[string]bool{}
 		for i := range g.checks {
 			pc := &g.checks[i]
 			names = append(names, pc.Ref)
-			live = live || pc.Live
+			full = full || pc.Full
 			var secs float64
 			ok := false
 			if gate != nil {
@@ -112,7 +112,7 @@ func (p *Project) duplicateRunNotices() []Diagnostic {
 				total += secs
 			}
 		}
-		if !slow && !live {
+		if !slow && !full {
 			continue
 		}
 		sort.Strings(names)
@@ -121,8 +121,8 @@ func (p *Project) duplicateRunNotices() []Diagnostic {
 			cost = fmt.Sprintf("%s of scenario time at %s's last gate", roundSecs(total), gateID)
 		}
 		why := "each over a minute"
-		if live {
-			why = "live"
+		if full {
+			why = "full"
 		}
 		pc := &g.checks[0]
 		out = append(out, notice(Diagnostic{Code: CodeChecksDuplicateRun, File: p.Rel(p.SpecFile(pc.Capability)), Line: pc.Line, Message: fmt.Sprintf(
@@ -144,9 +144,9 @@ func distinctCmds(checks []PlannedCheck) int {
 }
 
 // liveSuggestedNotices are project check's check.live-suggested notices
-// (W2 Part 2): a scenario check of the spec, not live, that ran over a
+// (W2 Part 2): a scenario check of the spec, not full, that ran over a
 // minute at the last gate — every verify of a change touching its
-// capability pays for it. Marked live, verify runs it only when it is the
+// capability pays for it. Marked full, verify runs it only when it is the
 // change's own or was red at the last gate.
 func (p *Project) liveSuggestedNotices() []Diagnostic {
 	gateID, gate := p.latestGate()
@@ -158,12 +158,12 @@ func (p *Project) liveSuggestedNotices() []Diagnostic {
 	for i := range spec {
 		pc := &spec[i]
 		secs, ok := gate.ScenarioSecs[pc.Ref]
-		if pc.Live || !ok || secs <= slowCheckSecs {
+		if pc.Full || !ok || secs <= slowCheckSecs {
 			continue
 		}
 		out = append(out, notice(Diagnostic{Code: CodeCheckLiveSuggested, File: p.Rel(p.SpecFile(pc.Capability)), Line: pc.Line, Message: fmt.Sprintf(
 			"scenario %s's check took %s at %s's last gate, and every verify of a change touching %s runs it"+
-				" — if it needs something live (a service, a network, a long end-to-end run), write it `- check (live): %s`: verify then runs it only for the change's own scenarios or when it was red at the last gate, and a gate whose Gate: command is red skips it",
+				" — if it need not run on every change (it needs a service, a network or a browser, or it is long), write it `- check (full): %s`: verify then runs it only for the change's own scenarios or when it was red at the last gate, and a gate whose Gate: command is red skips it",
 			pc.Ref, roundSecs(secs), gateID, pc.Capability, pc.Cmd)}))
 	}
 	return out

@@ -59,8 +59,12 @@ type ChangeStatus struct {
 	PendingHuman  []string `json:"pending_human,omitempty"`
 	Failing       []string `json:"failing,omitempty"`
 	VerifySHA     string   `json:"verify_sha,omitempty"`
-	// LiveSkipped: the live scenarios the last green verify did not run,
+	// FullSkipped: the full scenarios the last green verify did not run,
 	// neither the change's own nor red at the last gate (W2 Part 2).
+	// LiveSkipped is it under its v1.2 JSON name, always the same value
+	// (D512). Deprecated: read full_skipped; live_skipped is removed no
+	// earlier than v1.5.
+	FullSkipped int    `json:"full_skipped,omitempty"`
 	LiveSkipped int    `json:"live_skipped,omitempty"`
 	Error       string `json:"error,omitempty"`
 	// Attempts / AttemptsCap: red verifies since the change started, and
@@ -535,7 +539,7 @@ func (p *Project) Status() *StatusReport {
 		}
 		cs.Tools, cs.ReviewTools = changeTools(cfg.Tools, c.Doc, c.State, p.currentLastVerify(c.ID, c.State), pendingHuman)
 		if v := c.State.Verify; v != nil {
-			cs.VerifySHA, cs.LiveSkipped = v.SHA, v.LiveSkipped
+			cs.VerifySHA, cs.FullSkipped, cs.LiveSkipped = v.SHA, v.FullSkipped, v.FullSkipped
 			for i := range v.Results {
 				if v.Results[i].Red() {
 					cs.Failing = append(cs.Failing, fmt.Sprintf("%s (%s)", v.Results[i].Task, v.Results[i].Outcome()))

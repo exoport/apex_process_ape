@@ -237,7 +237,8 @@ var findingRules = []findingRule{
 	rule("", `^limits\.\S+ is not a key of limits:`, CodeConfigUnknownKey),
 	rule("", `^(models\.\S+\.)?effort: .* is not a level`, CodeConfigInvalid),
 	// v1.1 W2.
-	rule("", "(kind `\\(.*\\)` is not `check \\(live\\):`|is `check \\(live\\):` on )", CodeCheckBadKind),
+	// v1.3 (D508): the kind is named full; live is its v1.2 name.
+	rule("", "(kind `\\(.*\\)` is not `check \\(full\\):`|is `check \\((full|live)\\):` on )", CodeCheckBadKind),
 	// v1.1 W6.
 	rule("", `^(tool advise/\S+: skill \S+ loads |advise: ).* over the .* cap \(caps\.advise(_session)?\)`, CodeToolsTooBig),
 	rule("", `^(plugin \S+ is also installed at user scope|skill \S+ of tool \S+ is (also )?installed at user scope)`, CodePluginsUserScope),
