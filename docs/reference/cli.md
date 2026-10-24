@@ -2205,12 +2205,13 @@ change does not MODIFY or REMOVE (regression), plus the scenarios of its own ADD
 MODIFIED blocks — of the capabilities the change touches (frontmatter touches:), plus any
 other scenario whose check command is identical to a task's (H10). The rest of the spec
 is the milestone gate's to run (`ape milestone gate` runs all of it). human-review checks
-are not run. Live checks (W2): a check written `- check (live): <command>` (a scenario's,
-or a task's `— check (live): <command>`) needs something live — a service, a network, a
-long end-to-end run. Verify runs the change's own (its tasks', its delta's scenarios') and a
-live scenario red at the last gate of any milestone; the others it leaves to the gate (JSON
-live_skipped: how many, also in state.json and ape status). Any other kind, `check (x):`, is
-the finding check.bad-kind. A command shared by several checks runs once. A check, regression or gate
+are not run. Full checks (W2, v1.3): a check written `- check (full): <command>` (a
+scenario's, or a task's `— check (full): <command>`; `(live)`, its v1.2 name, is still
+accepted) does not run on every change — it needs a service, a network or a browser, or it
+is long. Verify runs the change's own (its tasks', its delta's scenarios') and a full
+scenario red at the last gate of any milestone; the others it leaves to the gate (JSON
+full_skipped: how many, also in state.json and ape status; live_skipped, the same number, is
+deprecated). Any other kind, `check (x):`, is the finding check.bad-kind. A command shared by several checks runs once. A check, regression or gate
 command that is one ( … ) block of several lines, each a simple command (a first line of
 set -e, as the lift writes, is dropped), runs as its lines joined by && — each line's exit counts, as under set -e (a line that is itself a ;, & or
 || list goes in { …; }) — and its log opens with "split into N commands". A line's
@@ -4333,9 +4334,9 @@ For a milestone tier that differs from the change tier, the baseline is the one 
 milestone's first change to start recorded for that tier (milestone_regression_baseline,
 W2). When no change of the milestone has a baseline for the command, a red regression fails
 the gate: nothing shows it was red before the milestone's work. The
-Gate: command runs first; when it is red the gate is red already, and it skips the live
-scenario checks (`- check (live):`, W2) and the regression command (JSON run.live_skipped: N,
-run.regression.skipped: "gate-red"); `ape milestone close` runs everything. Each run's
+Gate: command runs first; when it is red the gate is red already, and it skips the full
+scenario checks (`- check (full):`, W2) and the regression command (JSON run.full_skipped: N,
+and run.live_skipped, its deprecated v1.2 name; run.regression.skipped: "gate-red"); `ape milestone close` runs everything. Each run's
 per-scenario times go to logs/gate-<M>.json (scenario_secs), for project check. Timeouts:
 the Gate: command runs under timeouts.gate (default idle 30m, max 4h), each scenario check
 under timeouts.check (idle 15m, max 2h), the regression command under timeouts.regression
@@ -4371,7 +4372,7 @@ run. --rerun runs the gate even when an unprinted result would be returned (it n
 attaches a different run: a run in progress is still attached to).
 
 --spec-only (W2): runs the spec's scenario checks alone, as the gate runs them — no Gate:
-command, no regression command, no live check (JSON live_skipped) — and records nothing: no milestones.json, no gate-<M>.json,
+command, no regression command, no full check (JSON full_skipped, and live_skipped) — and records nothing: no milestones.json, no gate-<M>.json,
 no commit — so it always runs, and a full gate call never returns it. It runs in this process (no detached worker, so never exit 75) under the
 milestone's run lock (run.busy beside a gate or close of it), with the same refusals as
 the gate (a done milestone's milestone.done included), and is allowed on a proposed milestone: apex-plan runs it before the approval to
@@ -5148,12 +5149,12 @@ line}; [] when none, beside the findings on a failure too), they never change th
                            regression: {change: <fast>, milestone: <the suite>} (W2)
   checks.duplicate-run     (action replan) two or more scenario checks start with the same
                            command (to the first top-level && or |) and differ after it,
-                           and one is live or each ran over a minute at the last gate: a
+                           and one is full or each ran over a minute at the last gate: a
                            gate runs that command once per check (ape memoizes nothing);
                            names the scenarios and their time per gate (W2)
-  check.live-suggested     (action replan) a scenario check that is not live ran over a
-                           minute at the last gate: mark it `- check (live): <cmd>` if it
-                           needs something live (W2; see ape change verify --help)
+  check.live-suggested     (action replan) a scenario check that is not full ran over a
+                           minute at the last gate: mark it `- check (full): <cmd>` if it
+                           need not run on every change (W2; see ape change verify --help)
   gate.root-module-change  (action replan) a library's gate program (Go files under
                            development/gates/) imports a package its module does not
                            provide — not the standard library's, the module's own, or a

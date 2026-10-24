@@ -186,22 +186,28 @@ blocks the change and the loop re-plans it.
 Checks run from the project root with `sh -c`, output under `_apex/state/logs/<id>/`.
 `human-review` checks never run: they wait for an acceptance.
 
-### Live checks
+### Full checks
 
-A check that needs something live, such as a service, a network or a long end-to-end run, is
-written `- check (live): <command>` on a scenario, or `— check (live): <command>` on a task.
-`live` is the only kind. Any other, live on `human-review`, or a kind on `regression:` is the
-finding `check.bad-kind` (action replan).
+A full check is a check that does not run on every change: it needs a service, a network or a
+browser, or it is long. It is written `- check (full): <command>` on a scenario, or
+`— check (full): <command>` on a task. `full` is the only kind. `(live)`, its name in ape v1.2,
+is still accepted and means the same, with no warning. Any other kind, full on `human-review`,
+or a kind on `regression:` is the finding `check.bad-kind` (action replan). ape rewrites no spec:
+a `(live)` line changes only when a change rewrites it.
 
-| Run | Live checks it runs |
+| Run | Full checks it runs |
 | --- | --- |
-| `verify` (and the baseline at `start`) | The change's own: its live tasks and the live scenarios of its delta. Also a live scenario red at the last gate of any milestone. The rest are counted as `live_skipped`. |
+| `verify` (and the baseline at `start`) | The change's own: its full tasks and the full scenarios of its delta. Also a full scenario red at the last gate of any milestone. The rest are counted as `full_skipped`. |
 | `milestone gate`, `Gate:` command green | All of them. |
-| `milestone gate`, `Gate:` command red | None, and no regression command: the gate is red already. JSON `run.live_skipped: N` and `run.regression.skipped: "gate-red"`. |
+| `milestone gate`, `Gate:` command red | None, and no regression command: the gate is red already. JSON `run.full_skipped: N` and `run.regression.skipped: "gate-red"`. |
 | `milestone close` | All of them, whatever the `Gate:` command did. |
-| `milestone gate --spec-only` | None (`live_skipped`). |
+| `milestone gate --spec-only` | None (`full_skipped`). |
 
-`ape status` lists what was skipped and why. A live check's evidence written under `development/`
+Every JSON object that carries `full_skipped` also carries `live_skipped` with the same number,
+and a task's `full` comes with `live`: the v1.2 names, deprecated, removed no earlier than v1.5.
+A record ape v1.2 wrote has `live_skipped` alone, and ape reads it as both.
+
+`ape status` lists what was skipped and why. A full check's evidence written under `development/`
 is never undone as a stray file.
 
 ### Green before the work: vacuous checks
@@ -273,11 +279,11 @@ The gate records each scenario check's run time in `_apex/state/logs/gate-<M>.js
   the last gate. ape runs a shared command once only when the whole check is the same, so the gate
   runs that command once per check. The notice names the scenarios and their time per gate. Give
   the command one scenario and have the others check what it leaves under `development/`, or merge
-  the scenarios. ape memoizes nothing. A shared command in a live check is noticed whatever its
+  the scenarios. ape memoizes nothing. A shared command in a full check is noticed whatever its
   time.
-- `check.live-suggested` (notice, action replan): a scenario check that is not live ran over a
+- `check.live-suggested` (notice, action replan): a scenario check that is not full ran over a
   minute at the last gate. Every verify touching its capability runs it, so mark it
-  `check (live):` if it needs something live.
+  `check (full):` if it need not run on every change.
 
 ### Flaky checks
 

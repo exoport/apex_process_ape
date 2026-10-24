@@ -188,7 +188,12 @@ ape milestone gate M1
 The gate is green only when all of these pass:
 
 - the `Gate:` command;
-- every scenario check of the whole spec (human-review ones are not run);
+- every scenario check of the whole spec (human-review ones are not run). When the `Gate:`
+  command is red the gate is red already, so it skips the full checks (scenarios written
+  `- check (full): <command>`, see [Full checks](../reference/change-lifecycle.md#full-checks))
+  and the regression command: JSON `run.full_skipped: N` (and `run.live_skipped`, its deprecated
+  v1.2 name, with the same number) and `run.regression.skipped: "gate-red"`. `ape milestone
+  close` runs everything;
 - the project's regression command, when `_apex/config.yaml` sets `regression:` (its `milestone`
   tier, else the one command). It only needs to be not newly red: it is judged against the
   earliest baseline any change of the milestone recorded for the same command. A milestone tier
@@ -263,7 +268,7 @@ its gate folder. `gate` refuses it with `milestone.done` (exit 1, action `stop`)
 runs, and writes and commits nothing.
 
 `ape milestone gate <M> --spec-only` runs only the scenario checks, in the foreground under the
-milestone's run lock. It runs no `Gate:` command and no regression command, and records nothing:
+milestone's run lock. It runs no `Gate:` command, no regression command and no full check (`full_skipped`), and records nothing:
 no `milestones.json`, no `gate-<M>.json`, no commit. It is allowed on a proposed milestone, which
 is when apex-plan runs it to see which of the plan's scenarios are red. Its output goes to
 `_apex/state/logs/gate-<M>-spec/` and `gate-<M>-spec.json`. JSON carries `spec_only: true` and
