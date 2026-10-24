@@ -96,6 +96,14 @@ Run artifacts land under <project>/_output/ape/tasks/<skill>/<run-id>/
 (_apex/state/ exists) under _apex/state/runs/tasks/ instead, a directory
 git ignores, where a model clearing _output/ cannot reach.
 
+The skill must exist before anything spawns (exit 2 otherwise): a
+.claude/skills/<skill>/SKILL.md in the project or in ~/.claude. In an
+APEX v1 project a plugin skill, <plugin>:<skill> (a tools: entry's), is
+found as ape project check finds it instead: its plugin listed in
+plugins: and installed, carrying the skill. Its run folder spells the
+':' as "__" (tasks/apish__nats-expert/), which every system can store;
+the session is still typed /apish:nats-expert.
+
 In an APEX v1 project (development/project.md exists) ape decides the
 session's model and effort itself, and records the decision in the run
 manifest as launch: {model, model_source, effort, effort_source}:
@@ -1045,6 +1053,10 @@ func prepareV1Task(ctx context.Context, p *apexv1.Project, o *taskOptions, cfg *
 		return nil, &taskPreflightError{err: err}
 	}
 	cfg.spawnSettings.settings = plugins
+	// F-E1-1: a plugin skill (<plugin>:<skill>, a tools: entry's) resolves
+	// as `ape project check` resolves it — listed, installed, carrying the
+	// skill — never by a SKILL.md under .claude/skills.
+	cfg.pluginSkills = p.PluginSkillResolver(ctx, apexv1.ClaudePluginCLI{Bin: cfg.claudeBin})
 	// W4: the usage guard decides before the session is spawned.
 	cfg.usageGuard = newUsageGuard(p, o.skill, o.args, o.usageOK)
 	return &l, nil

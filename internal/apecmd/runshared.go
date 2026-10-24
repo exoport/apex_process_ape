@@ -321,6 +321,11 @@ type runConfig struct {
 	// test seam — `apescript` orchestration runs set it to a bash stand-in
 	// so a RunTask can be exercised without a real claude.
 	claudeBin string
+
+	// pluginSkills resolves a plugin skill (<plugin>:<skill>) at the
+	// preflight: an APEX v1 project's listed plugins (F-E1-1). Nil leaves
+	// it to the SKILL.md lookup.
+	pluginSkills pipeline.PluginSkillResolver
 }
 
 // spawnSettings is what a caller adds to a spawn's --settings: hooks beside

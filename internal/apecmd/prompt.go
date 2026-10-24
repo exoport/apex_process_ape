@@ -618,11 +618,31 @@ func promptPreflight(o *promptOptions) (string, error) {
 		o.launch = l
 	}
 	if o.agent != "" {
-		if _, _, found := framework.ResolveSkill(o.agent, o.projectRoot); !found {
-			return "", fmt.Errorf("--agent %q did not resolve under .claude/skills (project or user)", o.agent)
+		if err := resolvePromptAgent(o.agent, o.projectRoot); err != nil {
+			return "", err
 		}
 	}
 	return resolveDeliveredPrompt(*o)
+}
+
+// resolvePromptAgent is --agent's preflight. A plugin skill
+// (<plugin>:<skill>) in an APEX v1 project resolves as ape task resolves
+// it (F-E1-1): its plugin listed in plugins:, installed, carrying it.
+// Anything else needs a SKILL.md under the project's or the user's
+// .claude/skills.
+func resolvePromptAgent(agent, projectRoot string) error {
+	if strings.Contains(agent, ":") {
+		if p, ok := v1ProjectAt(projectRoot); ok {
+			if err := p.PluginSkillResolver(context.Background(), apexv1.ClaudePluginCLI{})(agent); err != nil {
+				return fmt.Errorf("--agent %q did not resolve: %w", agent, err)
+			}
+			return nil
+		}
+	}
+	if _, _, found := framework.ResolveSkill(agent, projectRoot); !found {
+		return fmt.Errorf("--agent %q did not resolve under .claude/skills (project or user)", agent)
+	}
+	return nil
 }
 
 // finishPrompt persists the session record, folds the cost rollup, and

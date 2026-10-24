@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/exoport/apex_process_ape/internal/pipeline"
+	"github.com/stretchr/testify/require"
 )
 
 // installPipelines materializes the canonical three pipeline yamls
@@ -138,7 +139,7 @@ func TestPreflightSkills_AllPresent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := pipeline.PreflightSkills(spec, dir); err != nil {
+	if err := pipeline.PreflightSkills(spec, dir, nil); err != nil {
 		t.Errorf("expected pass with all skills stubbed, got: %v", err)
 	}
 }
@@ -162,7 +163,7 @@ func TestPreflightSkills_MissingSkill(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = pipeline.PreflightSkills(spec, dir)
+	err = pipeline.PreflightSkills(spec, dir, nil)
 	if err == nil {
 		t.Fatal("expected error for missing skill")
 	}
@@ -210,7 +211,7 @@ func TestPreflightSkills_UserScopeFallback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := pipeline.PreflightSkills(spec, dir); err != nil {
+	if err := pipeline.PreflightSkills(spec, dir, nil); err != nil {
 		t.Errorf("expected pass with skill in user-scope; got: %v", err)
 	}
 }
@@ -229,7 +230,7 @@ func TestPreflightSkills_AggregatesMultipleMissing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = pipeline.PreflightSkills(spec, dir)
+	err = pipeline.PreflightSkills(spec, dir, nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -243,4 +244,38 @@ func TestPreflightSkills_AggregatesMultipleMissing(t *testing.T) {
 	if len(pfe.Missing) != want {
 		t.Errorf("missing count: got %d, want %d (entries: %v)", len(pfe.Missing), want, pfe.Missing)
 	}
+}
+
+// F-E1-1: a plugin skill (<plugin>:<skill>) has no SKILL.md under
+// .claude/skills. With a resolver it is the resolver's to judge, and only
+// it: a name without a ':' is still looked up on disk, never asked.
+func TestPreflightSkills_PluginSkillResolver(t *testing.T) {
+	dir := t.TempDir()
+	setFakeHome(t, t.TempDir())
+	installSkillStubs(t, dir, "apex-foo")
+	var asked []string
+	resolve := func(name string) error {
+		asked = append(asked, name)
+		if name == "apish:nats-expert" {
+			return nil
+		}
+		return errors.New("no plugin nope in plugins: — list the plugin nope in plugins: and run `ape plugins sync`, or fix the skill name")
+	}
+	step := pipeline.Step{Skill: "apish:nats-expert"}
+	require.NoError(t, pipeline.PreflightSkills(pipeline.NewSingleStepSpec("apish:nats-expert", step, nil), dir, resolve))
+
+	err := pipeline.PreflightSkills(pipeline.NewSingleStepSpec("nope:x", pipeline.Step{Skill: "nope:x"}, nil), dir, resolve)
+	var pfe *pipeline.PreflightError
+	require.ErrorAs(t, err, &pfe)
+	require.Equal(t, pipeline.PreflightKindSkills, pfe.Kind)
+	require.Equal(t, `pipeline "nope:x": skill missing: "nope:x" (stage nope:x, step 1): no plugin nope in plugins: — list the plugin nope in plugins: and run `+"`ape plugins sync`"+`, or fix the skill name`, err.Error())
+
+	require.NoError(t, pipeline.PreflightSkills(pipeline.NewSingleStepSpec("apex-foo", pipeline.Step{Skill: "apex-foo"}, nil), dir, resolve))
+	err = pipeline.PreflightSkills(pipeline.NewSingleStepSpec("apex-bar", pipeline.Step{Skill: "apex-bar"}, nil), dir, resolve)
+	require.ErrorContains(t, err, `"apex-bar" (stage apex-bar, step 1): SKILL.md not found in`)
+	require.Equal(t, []string{"apish:nats-expert", "nope:x"}, asked, "a name without a ':' never reaches the resolver")
+
+	// No resolver: a plugin skill is looked up on disk, as before.
+	err = pipeline.PreflightSkills(pipeline.NewSingleStepSpec("apish:nats-expert", step, nil), dir, nil)
+	require.ErrorContains(t, err, `"apish:nats-expert" (stage apish:nats-expert, step 1): SKILL.md not found in`)
 }

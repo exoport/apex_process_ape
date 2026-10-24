@@ -7804,6 +7804,14 @@ Run artifacts land under <project>/_output/ape/tasks/<skill>/<run-id>/
 (_apex/state/ exists) under _apex/state/runs/tasks/ instead, a directory
 git ignores, where a model clearing _output/ cannot reach.
 
+The skill must exist before anything spawns (exit 2 otherwise): a
+.claude/skills/<skill>/SKILL.md in the project or in ~/.claude. In an
+APEX v1 project a plugin skill, <plugin>:<skill> (a tools: entry's), is
+found as ape project check finds it instead: its plugin listed in
+plugins: and installed, carrying the skill. Its run folder spells the
+':' as "__" (tasks/apish__nats-expert/), which every system can store;
+the session is still typed /apish:nats-expert.
+
 In an APEX v1 project (development/project.md exists) ape decides the
 session's model and effort itself, and records the decision in the run
 manifest as launch: {model, model_source, effort, effort_source}:

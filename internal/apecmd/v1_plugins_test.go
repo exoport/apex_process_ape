@@ -279,3 +279,27 @@ func TestPrintOutdated_BranchRefNamesTheLatestTag(t *testing.T) {
 	}})
 	require.Equal(t, "market  experts  ref main  ref main is not a version tag; pin a tag to compare (latest v0.2.0)\n", b.String())
 }
+
+// F-E1-1: `ape prompt --agent <plugin>:<skill>` resolves a plugin skill as
+// ape task does — listed, installed, carrying it — and refuses the rest
+// with what is missing; a plain agent still needs a SKILL.md.
+func TestPromptAgent_PluginSkill(t *testing.T) {
+	root := seedV1Fixture(t)
+	plugin := filepath.Join(t.TempDir(), "kit")
+	require.NoError(t, os.MkdirAll(filepath.Join(plugin, "skills", "security"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(plugin, "skills", "security", "SKILL.md"), []byte("---\nname: security\ndescription: s\n---\n"), 0o644))
+	list, err := json.Marshal([]map[string]string{{"id": "kit@team", "version": "1.0.0", "scope": "project", "projectPath": root, "installPath": plugin}})
+	require.NoError(t, err)
+	fakeClaudePlugins(t, string(list))
+	cfg := filepath.Join(root, "_apex", "config.yaml")
+	base, err := os.ReadFile(cfg)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(cfg, append(base, []byte("marketplaces:\n  team: {source: github, repo: org/kit}\nplugins:\n  - {name: kit, marketplace: team, ref: v1.0.0}\n")...), 0o644))
+
+	require.NoError(t, resolvePromptAgent("kit:security", root))
+	require.EqualError(t, resolvePromptAgent("kit:nope", root),
+		`--agent "kit:nope" did not resolve: plugin kit has no skill nope — fix the skill name, or install a version of kit that ships it`)
+	require.EqualError(t, resolvePromptAgent("zed:x", root),
+		`--agent "zed:x" did not resolve: no plugin zed in plugins: — list the plugin zed in plugins: and run `+"`ape plugins sync`"+`, or fix the skill name`)
+	require.EqualError(t, resolvePromptAgent("apex-nope", root), `--agent "apex-nope" did not resolve under .claude/skills (project or user)`)
+}

@@ -79,6 +79,11 @@ func Preflight(spec *Spec, projectRoot string, ext *Extensions) error {
 	return nil
 }
 
+// PluginSkillResolver resolves a plugin skill, <plugin>:<skill>, for
+// PreflightSkills: nil when Claude Code would load it, else an error that
+// says what is missing and how to fix it.
+type PluginSkillResolver func(name string) error
+
 // PreflightSkills verifies that every skill (and agent) referenced by
 // the pipeline's stage chains resolves to a SKILL.md on disk. The
 // resolver mirrors claude's lookup order: project-scoped
@@ -91,7 +96,12 @@ func Preflight(spec *Spec, projectRoot string, ext *Extensions) error {
 // and exits 0 — which the runner records as "completed" because the
 // subprocess succeeded. See the sandbox `sketch` regression for the
 // canonical failure mode this guards against.
-func PreflightSkills(spec *Spec, projectRoot string) error {
+//
+// A plugin skill, <plugin>:<skill>, has no SKILL.md under either tree:
+// Claude Code loads it from the plugin's install. plugins resolves such a
+// name when the caller has one (ape task in an APEX v1 project); a name
+// without a ':', or any name when plugins is nil, resolves as above.
+func PreflightSkills(spec *Spec, projectRoot string, plugins PluginSkillResolver) error {
 	projDir := framework.ProjectSkillsPath(projectRoot)
 	seen := make(map[string]struct{})
 	var missing []string
@@ -104,6 +114,12 @@ func PreflightSkills(spec *Spec, projectRoot string) error {
 			return
 		}
 		seen[name] = struct{}{}
+		if plugins != nil && strings.Contains(name, ":") {
+			if err := plugins(name); err != nil {
+				missing = append(missing, fmt.Sprintf("%q (%s): %s", name, where, err))
+			}
+			return
+		}
 		if _, _, found := framework.ResolveSkill(name, projectRoot); found {
 			return
 		}

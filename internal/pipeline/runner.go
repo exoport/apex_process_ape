@@ -32,6 +32,11 @@ type RunOptions struct {
 	// All claude invocations are spawned with this as cwd.
 	ProjectRoot string
 
+	// PluginSkills, when set, resolves the plugin skills
+	// (<plugin>:<skill>) PreflightSkills meets; nil leaves them to the
+	// SKILL.md lookup, which never finds one.
+	PluginSkills PluginSkillResolver
+
 	// Prompt is forwarded to steps that reference {{ .Prompt }} in
 	// their args_template (currently only apex-create-epics-and-stories).
 	// Empty string means no prompt; the template's {{ if .Prompt }}
@@ -415,7 +420,7 @@ func Run(ctx context.Context, spec *Spec, opts RunOptions) error {
 	if err := Preflight(spec, opts.ProjectRoot, ext); err != nil {
 		return err
 	}
-	if err := PreflightSkills(spec, opts.ProjectRoot); err != nil {
+	if err := PreflightSkills(spec, opts.ProjectRoot, opts.PluginSkills); err != nil {
 		return err
 	}
 

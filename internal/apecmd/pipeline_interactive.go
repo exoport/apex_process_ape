@@ -1009,6 +1009,7 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 	obs := newPlainObserver(progressW, projectRoot, cfg.quiet)
 	runErr := pipeline.Run(runCtx, spec, pipeline.RunOptions{
 		ProjectRoot:       projectRoot,
+		PluginSkills:      cfg.pluginSkills,
 		Prompt:            cfg.prompt,
 		Observer:          obs,
 		ClaudeBin:         cfg.claudeBin,
