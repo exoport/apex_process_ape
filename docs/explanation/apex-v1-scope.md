@@ -7,8 +7,10 @@ when a record would be wrong. This page says what that buys you, and the shape o
 built and measured for. The reference for each command is `ape <command> --help` and
 [cli.md](../reference/cli.md).
 
-v1.1 keeps this promise and the shape below, and adds to it (usage-aware launching, waiting on
-events, module fences for libraries, expert advise); the repository's `CHANGELOG.md` lists what.
+v1.1 and v1.2 keep this promise and the shape below, and add to it (v1.1: usage-aware launching,
+waiting on events, module fences for libraries, expert advise; v1.2: a check's own exit and its
+leftovers ended, a gate's verdict last, approval freezing what a gate reaches); the repository's
+`CHANGELOG.md` lists what.
 
 ## The shape v1.0 is built for
 

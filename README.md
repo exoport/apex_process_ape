@@ -8,20 +8,19 @@ framework's v1 skills do the work, each in a Claude Code session that ape
 drives through a PTY; ape keeps the records (`development/`, `_apex/state/`)
 and refuses what a session may not do.
 
-> **Status:** v1.1. It is built for one operator per checkout, working on a
+> **Status:** v1.2. It is built for one operator per checkout, working on a
 > local trunk; what v1 promises, and what it leaves out, is in
 > [What APEX v1.0 promises](docs/explanation/apex-v1-scope.md). An APEX v0 project keeps
 > the v0 ape its `.bingo` pins until it is lifted to v1
 > ([How to lift a v0 project](docs/how-to/lift-a-v0-project.md)). See
 > [CHANGELOG.md](CHANGELOG.md).
 >
-> **New in v1.1:** an unattended launch holds or stops when the claude.ai plan's usage would
-> pass the project's `limits.usage` (`ape usage` shows the reading); `ape status --wait
-> --until …` waits until a person is needed or the loop stops, finishes or is blocked; a
-> library keeps APEX's folders out of its package (`ape project fence`, `ape project
-> package-check`); expert skills feed their rules to the change, apply and review sessions
-> (`tools.advise`); measured on Claude Code 2.1.306. A framework release that uses these
-> declares `min_ape_version: "1.1.0"`.
+> **New in v1.2:** a check's result is the script's own exit, and what it leaves running is
+> ended and named; a finished gate run is returned once and its output ends with its verdict;
+> approval freezes the files a gate's scripts reach; a session's leftover servers are stopped;
+> a pre-1.0 install updates; measured on Claude Code 2.1.309. A framework release that uses
+> these declares `min_ape_version: "1.2.0"`. Known issue: a plugin's skill in a `tools:` slot
+> does not run yet (see [CHANGELOG.md](CHANGELOG.md)).
 
 ## Install
 
@@ -42,7 +41,7 @@ A project can pin its ape with [bingo](https://github.com/bwplotka/bingo):
 
 ```bash
 # In your project repo:
-bingo get -l github.com/exoport/apex_process_ape/cmd/ape@v1.1.0
+bingo get -l github.com/exoport/apex_process_ape/cmd/ape@v1.2.0
 ```
 
 A bare `ape` run inside that project then runs the pinned version. See
