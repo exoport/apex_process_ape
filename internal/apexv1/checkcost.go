@@ -143,12 +143,12 @@ func distinctCmds(checks []PlannedCheck) int {
 	return len(seen)
 }
 
-// liveSuggestedNotices are project check's check.live-suggested notices
+// fullSuggestedNotices are project check's check.full-suggested notices
 // (W2 Part 2): a scenario check of the spec, not full, that ran over a
 // minute at the last gate — every verify of a change touching its
 // capability pays for it. Marked full, verify runs it only when it is the
 // change's own or was red at the last gate.
-func (p *Project) liveSuggestedNotices() []Diagnostic {
+func (p *Project) fullSuggestedNotices() []Diagnostic {
 	gateID, gate := p.latestGate()
 	if gate == nil {
 		return nil
@@ -161,7 +161,7 @@ func (p *Project) liveSuggestedNotices() []Diagnostic {
 		if pc.Full || !ok || secs <= slowCheckSecs {
 			continue
 		}
-		out = append(out, notice(Diagnostic{Code: CodeCheckLiveSuggested, File: p.Rel(p.SpecFile(pc.Capability)), Line: pc.Line, Message: fmt.Sprintf(
+		out = append(out, notice(Diagnostic{Code: CodeCheckFullSuggested, File: p.Rel(p.SpecFile(pc.Capability)), Line: pc.Line, Message: fmt.Sprintf(
 			"scenario %s's check took %s at %s's last gate, and every verify of a change touching %s runs it"+
 				" — if it need not run on every change (it needs a service, a network or a browser, or it is long), write it `- check (full): %s`: verify then runs it only for the change's own scenarios or when it was red at the last gate, and a gate whose Gate: command is red skips it",
 			pc.Ref, roundSecs(secs), gateID, pc.Capability, pc.Cmd)}))

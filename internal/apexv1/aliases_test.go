@@ -53,6 +53,7 @@ func TestPublishedCodes_AliasRows(t *testing.T) {
 	for _, c := range []struct{ code, alias string }{
 		{"session.loop-running", "session.orchestrator-running"},
 		{"models.orchestrator-row", "models.operator-row"},
+		{"check.full-suggested", "check.live-suggested"},
 	} {
 		i, j := idx(c.code), idx(c.alias)
 		require.GreaterOrEqual(t, i, 0, c.code)

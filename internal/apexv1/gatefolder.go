@@ -203,7 +203,7 @@ func (p *Project) Notices() []Diagnostic {
 	// v1.1 W2.
 	out = append(out, p.regressionSlowNotices(context.Background())...)
 	out = append(out, p.duplicateRunNotices()...)
-	out = append(out, p.liveSuggestedNotices()...)
+	out = append(out, p.fullSuggestedNotices()...)
 	// v1.1 W7.
 	out = append(out, p.gateRootModuleNotices()...)
 	// v1.1 W8.

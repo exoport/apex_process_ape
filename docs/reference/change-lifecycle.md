@@ -281,9 +281,10 @@ The gate records each scenario check's run time in `_apex/state/logs/gate-<M>.js
   the command one scenario and have the others check what it leaves under `development/`, or merge
   the scenarios. ape memoizes nothing. A shared command in a full check is noticed whatever its
   time.
-- `check.live-suggested` (notice, action replan): a scenario check that is not full ran over a
+- `check.full-suggested` (notice, action replan): a scenario check that is not full ran over a
   minute at the last gate. Every verify touching its capability runs it, so mark it
-  `check (full):` if it need not run on every change.
+  `check (full):` if it need not run on every change. Formerly `check.live-suggested`, kept as
+  its alias until v1.5.
 
 ### Flaky checks
 

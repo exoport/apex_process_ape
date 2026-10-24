@@ -639,9 +639,10 @@ line}; [] when none, beside the findings on a failure too), they never change th
                            and one is full or each ran over a minute at the last gate: a
                            gate runs that command once per check (ape memoizes nothing);
                            names the scenarios and their time per gate (W2)
-  check.live-suggested     (action replan) a scenario check that is not full ran over a
+  check.full-suggested     (action replan) a scenario check that is not full ran over a
                            minute at the last gate: mark it ` + "`- check (full): <cmd>`" + ` if it
-                           need not run on every change (W2; see ape change verify --help)
+                           need not run on every change (W2; see ape change verify --help;
+                           formerly check.live-suggested, kept as its alias until v1.5)
   gate.root-module-change  (action replan) a library's gate program (Go files under
                            development/gates/) imports a package its module does not
                            provide — not the standard library's, the module's own, or a

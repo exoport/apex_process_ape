@@ -28,6 +28,8 @@ var CodeAliases = []CodeAlias{
 	{Code: CodeLoopRunning, Alias: "session.orchestrator-running", Until: "v1.5"},
 	// "operator" is the person; the row is models.apex-orchestrator.
 	{Code: CodeModelsOrchestratorRow, Alias: "models.operator-row", Until: "v1.5"},
+	// The check kind (live) is named (full) (D508).
+	{Code: CodeCheckFullSuggested, Alias: "check.live-suggested", Until: "v1.5"},
 }
 
 // AliasOf is code's former name, "" when code was never renamed.

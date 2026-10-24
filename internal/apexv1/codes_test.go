@@ -28,7 +28,7 @@ var noticeCodes = []string{
 	// v1.1 follow-ups (Q154, Q155).
 	CodeConfigUnknownTopKey, CodeDecisionPlaceholderAccepted,
 	// v1.1 W2.
-	CodeRegressionSlow, CodeChecksDuplicateRun, CodeCheckLiveSuggested,
+	CodeRegressionSlow, CodeChecksDuplicateRun, CodeCheckFullSuggested,
 	// v1.1 W6: change check's and verify's notice.
 	CodeToolsUnmatched,
 	// v1.1 W7: package-check's notice, project check's gate rule.
@@ -110,7 +110,7 @@ func TestDiagnosticCodes_PublishedListMatchesTheCode(t *testing.T) {
 		"CodeDecisionPlaceholderAccepted": CodeDecisionPlaceholderAccepted,
 		// v1.1 W2.
 		"CodeGateSpecRed": CodeGateSpecRed, "CodeRegressionSlow": CodeRegressionSlow,
-		"CodeChecksDuplicateRun": CodeChecksDuplicateRun, "CodeCheckLiveSuggested": CodeCheckLiveSuggested,
+		"CodeChecksDuplicateRun": CodeChecksDuplicateRun, "CodeCheckFullSuggested": CodeCheckFullSuggested,
 		// v1.1 W6.
 		"CodeToolsUnmatched": CodeToolsUnmatched, "CodeToolsTooBig": CodeToolsTooBig, "CodePluginsUserScope": CodePluginsUserScope,
 		// v1.1 W7.

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/exoport/apex_process_ape/internal/apexv1"
@@ -70,4 +71,17 @@ func TestStatus_FullSkippedLines(t *testing.T) {
 		"  M2 gate abcdef1: 3 full scenario check(s) and the regression command, as its Gate: command was red (close runs everything)\n"+
 		"  add-svc verify 1234567: 2 full scenario check(s), neither its own nor red at the last gate\n", fullSkippedLines(r))
 	require.Contains(t, statusLong(r), "Full checks not run:")
+}
+
+// v1.3 (D508, D512): the slow-check notice prints as check.full-suggested,
+// naming its v1.2 code beside it.
+func TestPrintNotices_FullSuggestedNamesItsFormerCode(t *testing.T) {
+	var b strings.Builder
+	printNotices(&b, []apexv1.Diagnostic{{
+		Code: apexv1.CodeCheckFullSuggested, Severity: "notice", File: "development/specs/greeting/spec.md", Line: 6,
+		Message: "scenario greeting/Hello/hello's check took 1m15s at M1's last gate",
+		Fix:     "write it `- check (full): test -f hello.txt`",
+	}})
+	require.Contains(t, b.String(), "(code check.full-suggested; formerly check.live-suggested)")
+	require.Contains(t, b.String(), "`- check (full): test -f hello.txt`")
 }

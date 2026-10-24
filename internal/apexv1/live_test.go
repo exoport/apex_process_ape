@@ -187,7 +187,7 @@ func TestLiveCheck_GateSkipsOnARedGateCommand(t *testing.T) {
 }
 
 // W2 Parts 2, 3: a slow scenario check that is not live is a
-// check.live-suggested notice; scenarios sharing a live first command are
+// check.full-suggested notice; scenarios sharing a full first command are
 // checks.duplicate-run without any timing.
 func TestLiveCheck_Notices(t *testing.T) {
 	files := liveFiles()
@@ -209,7 +209,7 @@ func TestLiveCheck_Notices(t *testing.T) {
 	require.Len(t, dup, 1, "live: no timing needed")
 	require.Contains(t, dup[0].Message, "start with `./svc.sh`")
 	require.Contains(t, dup[0].Message, "not timed at a gate yet, full")
-	require.Empty(t, byCode(CodeCheckLiveSuggested))
+	require.Empty(t, byCode(CodeCheckFullSuggested))
 
 	run := GateRun{At: Stamp(), ScenarioSecs: map[string]float64{
 		"greeting/Say hello/plain run": 75, "greeting/Say name/named": 10, "greeting/Serve/served": 300,
@@ -217,11 +217,19 @@ func TestLiveCheck_Notices(t *testing.T) {
 	data, err := json.Marshal(run)
 	require.NoError(t, err)
 	write(t, p, "_apex/state/logs/gate-M1.json", string(data))
-	ls := byCode(CodeCheckLiveSuggested)
+	ls := byCode(CodeCheckFullSuggested)
 	require.Len(t, ls, 1, "the slow one that is not live")
 	require.Equal(t, "development/specs/greeting/spec.md", ls[0].File)
 	require.Equal(t, 6, ls[0].Line)
 	require.Equal(t, "replan", ls[0].Action)
 	require.Contains(t, ls[0].Message, "scenario greeting/Say hello/plain run's check took 1m15s at M1's last gate")
 	require.Contains(t, ls[0].Fix, "`- check (full): ./greet.sh | grep -q Hello`")
+	// v1.3 (D512): the code is check.full-suggested, its v1.2 name in alias.
+	require.Equal(t, "check.full-suggested", ls[0].Code)
+	nj, err := json.Marshal(ls[0])
+	require.NoError(t, err)
+	require.Contains(t, string(nj), `"code":"check.full-suggested"`)
+	require.Contains(t, string(nj), `"alias":"check.live-suggested"`)
+	require.Equal(t, "; formerly check.live-suggested", FormerlyNote(ls[0].Code))
+	require.Equal(t, CodeCheckFullSuggested, CanonicalCode("check.live-suggested"))
 }

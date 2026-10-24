@@ -345,6 +345,7 @@ A code whose name came to read wrong is renamed, and its old name stays an alias
 | --- | --- |
 | `session.loop-running` | `session.orchestrator-running` |
 | `models.orchestrator-row` | `models.operator-row` |
+| `check.full-suggested` | `check.live-suggested` |
 
 A diagnostic of a renamed code carries the new code in `code` and the old one in `alias`, and the
 human line names both (`code session.loop-running, action retry; formerly
