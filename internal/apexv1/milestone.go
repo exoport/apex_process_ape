@@ -76,17 +76,18 @@ func (r *GateRun) UnmarshalJSON(b []byte) error {
 	if err := json.Unmarshal(b, (*plain)(r)); err != nil {
 		return err
 	}
-	r.FullSkipped, r.LiveSkipped = skippedPair(r.FullSkipped, r.LiveSkipped)
+	r.FullSkipped = fullSkippedOf(r.FullSkipped, r.LiveSkipped)
+	r.LiveSkipped = r.FullSkipped
 	return nil
 }
 
-// skippedPair is a record's full_skipped and live_skipped made the same:
-// the one that is set (D512).
-func skippedPair(full, live int) (int, int) {
+// fullSkippedOf is a record's full-skipped count from its full_skipped
+// and live_skipped: the one that is set (D512).
+func fullSkippedOf(full, live int) int {
 	if full == 0 {
-		full = live
+		return live
 	}
-	return full, full
+	return full
 }
 
 // Green reports a passing gate: its command exited 0, every scenario

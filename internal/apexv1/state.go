@@ -158,7 +158,8 @@ func (v *Verify) UnmarshalJSON(b []byte) error {
 	if err := json.Unmarshal(b, (*plain)(v)); err != nil {
 		return err
 	}
-	v.FullSkipped, v.LiveSkipped = skippedPair(v.FullSkipped, v.LiveSkipped)
+	v.FullSkipped = fullSkippedOf(v.FullSkipped, v.LiveSkipped)
+	v.LiveSkipped = v.FullSkipped
 	return nil
 }
 
