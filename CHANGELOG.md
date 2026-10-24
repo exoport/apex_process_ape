@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## v1.2.0 (draft)
+## v1.2.0 (2026-10-24)
 
 APEX v1.2, on v1.1.0: hardening and currency. ape stops a session's leftover servers (F3), freezes
 the files a milestone gate reaches (F4), returns a finished gate run to the call that had not seen
@@ -9,6 +9,22 @@ it and ends a gate's output with its verdict (F1), no longer calls a live detach
 own exit and ends what it leaves running (F15), lets a pre-1.0 install update (F16), pins aboard
 v0.4.1 (F10) and is measured on Claude Code 2.1.309 (C1). CI runs on `ci/**`, daily and on dispatch
 (F5), and `make check-harness` runs every gate (F6).
+A framework payload that uses it declares `min_ape_version: "1.2.0"`.
+
+Evaluated end to end on Claude Code 2.1.309 with the release build, rc.1 (559970b), and the
+framework's v1.2.0-rc.1 payload: of the four release runs, brownfield, ledger and taskforge did as
+well as v1.1's, and greenfield missed one end-to-end row (8/9), read as the planner's reading of
+its brief, not a release defect. Every must-pass row held: no live detached run called lost, and no process a gate
+started survived its gate run (126 runs). ape's harness gates and `make check-framework` against the
+v1.2.0-rc.1 payload pass on Claude Code 2.1.309. GitHub CI green twice on rc.1's tree on
+ci/v1.2.0-check: ubuntu-latest (`make test`), windows-latest (`make test-portable`), lint and
+govulncheck.
+
+Promoted from the release build at 559970b. Nothing compiled into the binary changed after that
+build: docs commits (this file's known-issue paragraph, the operator/orchestrator wording, README's
+status and bingo pin, the install examples) and the release commit, which touches only this file.
+rc.1 was the only candidate: an earlier build of the same items failed CI on a racy test and was
+fixed by the test-only commit 559970b before any evaluation.
 
 **Known issue (F-E1-1; fix planned for v1.3):** a tool whose skill is a plugin's (`<plugin>:<skill>` in a
 `tools:` design, review or delegate slot) does not run. `ape project check` reports it installed,
