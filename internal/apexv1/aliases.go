@@ -105,10 +105,11 @@ func PublishedCodes() []PublishedCode {
 			if a.Code != c.Code {
 				continue
 			}
-			out = append(out, PublishedCode{CodeDoc: CodeDoc{
+			out = append(out, PublishedCode{
 				Code: a.Alias, Exit: c.Exit, Action: c.Action,
-				Meaning: "renamed to `" + a.Code + "`; kept as an alias until " + a.Until + ": a diagnostic carries `" + a.Code + "` in code and this name in alias",
-			}, RenamedTo: a.Code})
+				Meaning:   "renamed to `" + a.Code + "`; kept as an alias until " + a.Until + ": a diagnostic carries `" + a.Code + "` in code and this name in alias",
+				RenamedTo: a.Code,
+			})
 		}
 	}
 	return out
