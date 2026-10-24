@@ -307,7 +307,7 @@ func sessionRefusal(err error) error {
 	default:
 		return usageErr(err)
 	}
-	return usageErrExit(exit, fmt.Errorf("%w (code %s, action %s)", err, code, action))
+	return usageErrExit(exit, fmt.Errorf("%w (code %s, action %s%s)", err, code, action, apexv1.FormerlyNote(code)))
 }
 
 // acquireSessionLocks takes the locks the launch needs in projectRoot: the

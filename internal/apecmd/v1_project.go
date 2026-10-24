@@ -603,7 +603,8 @@ line}; [] when none, beside the findings on a failure too), they never change th
                            not recorded and a person act from a Claude Code session is
                            refused (E2); ` + "`ape project init`" + ` merges it back. ape doctor
                            reports it too (hooks.prompt). See ape hook pre-tool --help
-  models.operator-row      _apex/config.yaml has a models.apex-orchestrator row (Q96):
+  models.orchestrator-row  _apex/config.yaml has a models.apex-orchestrator row (Q96;
+                           formerly models.operator-row, kept as its alias until v1.5):
                            with no models.apex-loop row it is read as apex-loop's (a
                            project made before rc.7: ` + "`ape project operator-interface`" + `
                            renames it); beside one it is a leftover apex-loop's row
@@ -727,6 +728,11 @@ func printNotices(w io.Writer, notices []apexv1.Diagnostic) {
 		if n.Fix != "" {
 			line += " — " + n.Fix
 		}
+		// A renamed code names itself and its former name, which readers
+		// still count (CodeAliases, D512).
+		if n = n.WithAlias(); n.Alias != "" {
+			line += " (code " + n.Code + apexv1.FormerlyNote(n.Code) + ")"
+		}
 		fmt.Fprintln(w, line)
 	}
 }
@@ -749,14 +755,18 @@ where its meaning names a case that changes it (milestone.changes-in-flight), th
 carries the action of the case (D49). "code" says which rule; "message" and
 "fix" are for people: message is the sentence up to its first " — ", fix the rest
 (the human line joins them). Codes are stable: a new rule gets a new
-code, and a code's meaning never changes. severity is always "error" (no warning tier);
+code, and a code's meaning never changes. A code whose name came to read wrong is renamed:
+its old name stays an alias for a while, as a row of its own here ("renamed to <code>",
+with renamed_to in --json; the new code's row lists aliases), and each diagnostic of the
+code carries the old name in "alias" (the human line: "formerly <alias>"). severity is always "error" (no warning tier);
 project check's notices, severity "notice", are no failure's diagnostics (exit 0 here).
 Exit: 1 check failed · 2 usage · 3 conflict (nothing written).`,
 		Example: "  ape project codes\n  ape project codes --json",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return v1Emit(cmd.OutOrStdout(), &f, apexv1.DiagnosticCodes, func(w io.Writer) {
-				for _, c := range apexv1.DiagnosticCodes {
+			codes := apexv1.PublishedCodes()
+			return v1Emit(cmd.OutOrStdout(), &f, codes, func(w io.Writer) {
+				for _, c := range codes {
 					fmt.Fprintf(w, "%-30s %d  %-7s %s\n", c.Code, c.Exit, c.Action, c.Meaning)
 				}
 			})
@@ -891,7 +901,7 @@ Idempotent: with nothing left it writes nothing and says "nothing to do" (exit 0
 How ape knows seq-07 ran: from the config, not a marker (a fresh clone would lose one). A
 models.apex-orchestrator row with no models.apex-loop row is the state before seq-07:
 ` + "`ape task apex-loop`" + ` reads it as apex-loop's, with a warning on stderr, and ape project
-check lists the notice models.operator-row. Beside an apex-loop row it is a leftover,
+check lists the notice models.orchestrator-row (formerly models.operator-row). Beside an apex-loop row it is a leftover,
 the notice says to drop it, and apex-loop's row is the one read.
 
 Refused on a change branch (branch.change-branch), outside a git repository

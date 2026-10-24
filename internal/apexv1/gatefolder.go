@@ -182,7 +182,7 @@ func notice(d Diagnostic) Diagnostic {
 	d.Severity = SeverityNotice
 	d.Message, d.Fix = splitFix(d.Message)
 	d.Action = ActionFor(d.Code)
-	return d
+	return d.WithAlias()
 }
 
 // Notices are `ape project check`'s notices (D155 Q73): what is worth a

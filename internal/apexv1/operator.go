@@ -53,9 +53,10 @@ const (
 	// CodeOperatorInterfacePending: `ape project operator-interface
 	// --check` while seq-07 has work left (Q97).
 	CodeOperatorInterfacePending = "project.operator-interface-pending"
-	// CodeModelsOperatorRow: project check's notice for a
-	// models.apex-orchestrator row (Q96).
-	CodeModelsOperatorRow = "models.operator-row"
+	// CodeModelsOrchestratorRow: project check's notice for a
+	// models.apex-orchestrator row (Q96). It was models.operator-row until
+	// v1.3, kept as its alias (CodeAliases, D510).
+	CodeModelsOrchestratorRow = "models.orchestrator-row"
 )
 
 // LoopModel is the models: entry apex-loop's session reads: models.apex-loop,
@@ -470,5 +471,5 @@ func (p *Project) operatorRowNotices() []Diagnostic {
 		msg = "models.apex-orchestrator is a leftover: the operator runs in your session and has no models row, and apex-loop's row is the loop's" +
 			" — drop it (`ape project operator-interface` removes it)"
 	}
-	return []Diagnostic{notice(Diagnostic{Code: CodeModelsOperatorRow, File: configYAML, Line: row.key.Line, Message: msg})}
+	return []Diagnostic{notice(Diagnostic{Code: CodeModelsOrchestratorRow, File: configYAML, Line: row.key.Line, Message: msg})}
 }

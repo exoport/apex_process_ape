@@ -14,7 +14,7 @@ import (
 var noticeCodes = []string{
 	CodeGateOutsideGates, CodeHooksPreCommitAbsent, CodeHooksPromptAbsent,
 	// rc.7 (rc7-rename).
-	CodeModelsOperatorRow,
+	CodeModelsOrchestratorRow,
 	// rc.7b (rc7b-adr).
 	CodeStandardDiffers, CodeStandardSuperseded, CodeStandardStale,
 	// rc.7b (rc7b-next).
@@ -65,7 +65,7 @@ func TestDiagnosticCodes_PublishedListMatchesTheCode(t *testing.T) {
 		"CodeNothingToRebaseline": CodeNothingToRebaseline, "CodeGitStatusFailed": CodeGitStatusFailed,
 		"CodeConflicted": CodeConflicted, "CodeUnresolvedConflict": CodeUnresolvedConflict, "CodeNotApproved": CodeNotApproved, "CodeCheckFailed": CodeCheckFailed, "CodeVacuousCheck": CodeVacuousCheck,
 		"CodePersonOnly": CodePersonOnly, "CodeSessionDepth": CodeSessionDepth, "CodeSessionNotAllowed": CodeSessionNotAllowed,
-		"CodeChildRunning": CodeChildRunning, "CodeOrchestratorRunning": CodeOrchestratorRunning, "CodeBaseCheckedOut": CodeBaseCheckedOut,
+		"CodeChildRunning": CodeChildRunning, "CodeLoopRunning": CodeLoopRunning, "CodeBaseCheckedOut": CodeBaseCheckedOut,
 		"CodeBehindUpstream": CodeBehindUpstream, "CodeHookFailed": CodeHookFailed,
 		"CodeArchiveInterrupted": CodeArchiveInterrupted, "CodeRunInterrupted": CodeRunInterrupted, "CodeRunBusy": CodeRunBusy,
 		"CodeRefMoved":         CodeRefMoved,
@@ -95,7 +95,7 @@ func TestDiagnosticCodes_PublishedListMatchesTheCode(t *testing.T) {
 		// rc.7 (rc7-e2).
 		"CodeByMismatch": CodeByMismatch, "CodeHooksPromptAbsent": CodeHooksPromptAbsent,
 		// rc.7 (rc7-rename).
-		"CodeSkillRenamed": CodeSkillRenamed, "CodeOperatorInterfacePending": CodeOperatorInterfacePending, "CodeModelsOperatorRow": CodeModelsOperatorRow,
+		"CodeSkillRenamed": CodeSkillRenamed, "CodeOperatorInterfacePending": CodeOperatorInterfacePending, "CodeModelsOrchestratorRow": CodeModelsOrchestratorRow,
 		// rc.7b (rc7b-adr).
 		"CodeStandardDiffers": CodeStandardDiffers, "CodeStandardSuperseded": CodeStandardSuperseded,
 		"CodeStandardStale": CodeStandardStale, "CodeStandardPending": CodeStandardPending,

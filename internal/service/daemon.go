@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/exoport/apex_process_ape/internal/apexv1"
 	"github.com/exoport/apex_process_ape/internal/eventing"
 	"github.com/exoport/apex_process_ape/internal/natsconn"
 	"github.com/nats-io/nats.go"
@@ -218,7 +219,7 @@ func (d *Daemon) handleRun(kind Kind, req micro.Request) {
 			"caller": rr.Caller,
 		})
 		var body []byte
-		if data, err := json.Marshal(refusalBody{Action: refusal.Action, Code: refusal.Code, Message: refusal.Msg, V: WireVersion}); err == nil {
+		if data, err := json.Marshal(refusalBody{Action: refusal.Action, Alias: apexv1.AliasOf(refusal.Code), Code: refusal.Code, Message: refusal.Msg, V: WireVersion}); err == nil {
 			body = data
 		}
 		_ = req.Error(refusal.Code, refusal.Error(), body)

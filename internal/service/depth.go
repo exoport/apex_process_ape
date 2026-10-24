@@ -43,7 +43,7 @@ type SessionGate func(kind Kind, req RunRequest) (env []string, err error)
 
 // RefusalError is a job the nesting rule refuses: Code is the apexv1 code
 // (session.depth, session.not-allowed, session.child-running,
-// session.orchestrator-running), Action its action.
+// session.loop-running), Action its action.
 type RefusalError struct {
 	Code, Action, Msg string
 }
@@ -51,14 +51,16 @@ type RefusalError struct {
 // refusalBody is the data of a refused *.run reply: the refusal's code,
 // action and message, and the wire version.
 type refusalBody struct {
-	Action  string `json:"action"`
+	Action string `json:"action"`
+	// Alias is the code's former name while it is kept (apexv1.CodeAliases).
+	Alias   string `json:"alias,omitempty"`
 	Code    string `json:"code"`
 	Message string `json:"message"`
 	V       int    `json:"v"`
 }
 
 func (r *RefusalError) Error() string {
-	return fmt.Sprintf("%s (code %s, action %s)", r.Msg, r.Code, r.Action)
+	return fmt.Sprintf("%s (code %s, action %s%s)", r.Msg, r.Code, r.Action, apexv1.FormerlyNote(r.Code))
 }
 
 // runIDRe is the shape of a run id a stamp may name (it becomes a path

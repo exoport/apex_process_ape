@@ -544,7 +544,7 @@ func (p *Project) modelsFindings() []Finding {
 			}
 			out = append(out, Finding{File: configYAML, Line: k.Line, Message: "models." + skill + " is not a skill — " + fix})
 		case skill == OperatorSkill:
-			// Its own notice (models.operator-row, Q96): read as
+			// Its own notice (models.orchestrator-row, Q96): read as
 			// apex-loop's before seq-07, a leftover after.
 		case !known[skill] && !installed:
 			out = append(out, Finding{File: configYAML, Line: k.Line, Message: "models." + skill + " names no skill installed in the project (.claude/skills/" + skill +

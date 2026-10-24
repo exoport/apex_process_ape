@@ -392,7 +392,7 @@ func TestNesting_SessionLocks(t *testing.T) {
 	require.NoError(t, orch.acquire(root, "pid-5"))
 	err = (&sessionLaunch{depth: 1, skill: apexv1.OrchestratorSkill}).acquire(root, "pid-6")
 	require.ErrorAs(t, err, &ce, "%v", err)
-	require.Equal(t, apexv1.CodeOrchestratorRunning, ce.Code)
+	require.Equal(t, apexv1.CodeLoopRunning, ce.Code)
 	orch.release()
 	require.NoError(t, (&sessionLaunch{depth: 1, skill: apexv1.OrchestratorSkill}).acquire(root, "pid-6"))
 
@@ -405,7 +405,13 @@ func TestNesting_SessionLocks(t *testing.T) {
 func TestNesting_ARefusalCarriesItsCode(t *testing.T) {
 	err := sessionRefusal(apexv1.SessionBusy(true, "apex-apply, pid 1"))
 	require.Equal(t, exitV1Conflict, exitCodeOf(t, err))
-	require.Contains(t, err.Error(), "code session.child-running, action retry")
+	require.Contains(t, err.Error(), "code session.child-running, action retry)")
+	require.NotContains(t, err.Error(), "formerly")
+
+	// A renamed code names its former name too, which readers count (D512).
+	err = sessionRefusal(apexv1.SessionBusy(false, "apex-loop, pid 1"))
+	require.Equal(t, exitV1Conflict, exitCodeOf(t, err))
+	require.Contains(t, err.Error(), "(code session.loop-running, action retry; formerly session.orchestrator-running)")
 }
 
 // requireSessionDepth requires err to be the session.depth refusal.

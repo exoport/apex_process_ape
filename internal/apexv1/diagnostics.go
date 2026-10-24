@@ -23,6 +23,10 @@ type Diagnostic struct {
 	Action string `json:"action"`
 	File   string `json:"file,omitempty"`
 	Line   int    `json:"line,omitempty"`
+	// Alias is the code's former name while it is kept (CodeAliases, D512):
+	// a renamed code's diagnostic carries the new code in Code and the old
+	// one here. Filled from the code; omitted for a code never renamed.
+	Alias string `json:"alias,omitempty"`
 }
 
 // SeverityError is the only severity of a finding: v1 has no warning
@@ -56,7 +60,7 @@ func Diagnostics(err error) []Diagnostic {
 	case errors.As(err, &fe):
 		out = append(out, newDiagnostic(codeOr(fe.Code, "error.unclassified"), fe.Msg, fe.Action))
 		for _, f := range ClassifyFindings(fe.Findings) {
-			out = append(out, Diagnostic{Severity: SeverityError, Code: f.Code, Message: f.Message, Fix: f.Fix, Action: ActionFor(f.Code), File: f.File, Line: f.Line})
+			out = append(out, Diagnostic{Severity: SeverityError, Code: f.Code, Message: f.Message, Fix: f.Fix, Action: ActionFor(f.Code), File: f.File, Line: f.Line}.WithAlias())
 		}
 	case errors.As(err, &ue):
 		out = append(out, newDiagnostic(codeOr(ue.Code, "usage.unclassified"), ue.Msg, ue.Action))
@@ -64,7 +68,7 @@ func Diagnostics(err error) []Diagnostic {
 		out = append(out, newDiagnostic(codeOr(ce.Code, "conflict.unclassified"), ce.Msg, ce.Action))
 		for _, c := range ce.Conflicts {
 			code := codeOr(ce.Code, "conflict.unclassified")
-			out = append(out, Diagnostic{Severity: SeverityError, Code: code, Message: c, Action: actionOr(ce.Action, code)})
+			out = append(out, Diagnostic{Severity: SeverityError, Code: code, Message: c, Action: actionOr(ce.Action, code)}.WithAlias())
 		}
 	case err != nil:
 		out = append(out, newDiagnostic("error.unclassified", err.Error(), ""))
@@ -76,7 +80,7 @@ func Diagnostics(err error) []Diagnostic {
 // error's override of the code's published action (D49).
 func newDiagnostic(code, msg, action string) Diagnostic {
 	m, fix := splitFix(msg)
-	return Diagnostic{Severity: SeverityError, Code: code, Message: m, Fix: fix, Action: actionOr(action, code)}
+	return Diagnostic{Severity: SeverityError, Code: code, Message: m, Fix: fix, Action: actionOr(action, code)}.WithAlias()
 }
 
 func actionOr(action, code string) string {

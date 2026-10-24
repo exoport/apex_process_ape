@@ -135,7 +135,7 @@ unattended runner is apex-loop (see ape task --help).
 Exit codes: 0 accepted (the reply on stdout) · 1 no daemon answered, or NATS
 failed · 2 usage, a malformed request, or a refusal (skill.renamed, session.depth,
 session.not-allowed, VALIDATION, PROJECT_NOT_ALLOWED) · 3 busy
-(session.child-running, session.orchestrator-running, BUSY_EXCLUSIVE,
+(session.child-running, session.loop-running — formerly session.orchestrator-running —, BUSY_EXCLUSIVE,
 BUSY_KEY): retry later. A refusal prints the daemon's message with its code.`,
 		Example: `  ape service submit task '{"skill":"apex-plan","args":"add a --name flag to greet"}'
   ape service submit task '{"project_root":"/abs/repo","skill":"apex-loop","args":"M1"}' --name ci`,
@@ -210,9 +210,10 @@ BUSY_KEY): retry later. A refusal prints the daemon's message with its code.`,
 
 // submitExitCode maps a daemon refusal's code onto submit's exit codes: 3
 // for a busy slot or lock (retry), 2 for everything else it refuses.
+// A former code name (an older daemon's) maps as its new one.
 func submitExitCode(code string) int {
-	switch code {
-	case apexv1.CodeChildRunning, apexv1.CodeOrchestratorRunning, service.CodeBusyExclusive, service.CodeBusyKey:
+	switch apexv1.CanonicalCode(code) {
+	case apexv1.CodeChildRunning, apexv1.CodeLoopRunning, service.CodeBusyExclusive, service.CodeBusyKey:
 		return exitV1Conflict
 	}
 	return ExitUsage

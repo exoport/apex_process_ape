@@ -76,8 +76,8 @@ func TestOperatorInterface_Rc6eProjects(t *testing.T) {
 			require.NoError(t, err)
 			_, legacy := LoopModel(cfg.Models)
 			require.True(t, legacy)
-			require.Equal(t, []string{CodeModelsOperatorRow}, noticeCodesOf(p.operatorRowNotices()))
-			require.Contains(t, noticeCodesOf(p.Notices()), CodeModelsOperatorRow, "a project check notice")
+			require.Equal(t, []string{CodeModelsOrchestratorRow}, noticeCodesOf(p.operatorRowNotices()))
+			require.Contains(t, noticeCodesOf(p.Notices()), CodeModelsOrchestratorRow, "a project check notice")
 			require.Contains(t, p.operatorRowNotices()[0].Message, "read as apex-loop's until")
 
 			res, err := p.OperatorInterfaceCheck()

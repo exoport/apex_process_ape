@@ -291,7 +291,8 @@ caller's stamp that ape service submit adds — see ape service --help):
 A refusal is exit 2, code session.depth or session.not-allowed (action
 stop); a second child while one runs is exit 3, session.child-running, and
 a second apex-loop run in a project exit 3,
-session.orchestrator-running (action retry). Deterministic ape commands are
+session.loop-running (action retry; formerly session.orchestrator-running, kept as its
+alias until v1.5). Deterministic ape commands are
 never limited. ape decides the depth from what it recorded, never from the
 model: the session's marker (APE_SESSION, APE_DEPTH) and the process
 ancestry — every session it launches is a row in ~/.ape/registry.json
@@ -338,7 +339,8 @@ preflight error, an APEX v0 project (run its pinned v0 ape), apex-orchestrator
 (skill.renamed), or the nesting rule refused the session (session.depth,
 session.not-allowed), or the loop relay refused a child launch (session.relay) · 3 REPL
 never became ready (last pane on stderr), or a session lock another run
-holds (session.child-running, session.orchestrator-running) · 5 upstream
+holds (session.child-running, session.loop-running — formerly
+session.orchestrator-running) · 5 upstream
 API failure · 6 the dispatch violated its declared commit ownership (the run
 itself may have succeeded) · 14 a claude.ai usage limit stopped the session,
 or ape's usage guard did not start it (termination usage_guard).`

@@ -504,9 +504,24 @@ func TestV1Commands_DiagnosticEnvelope(t *testing.T) {
 
 	stdout, _, err = v1Exec(t, newProjectCmd, "codes", "--json")
 	require.NoError(t, err)
-	var list []apexv1.CodeDoc
+	var list []apexv1.PublishedCode
 	require.NoError(t, json.Unmarshal([]byte(stdout), &list))
-	require.Len(t, list, len(apexv1.DiagnosticCodes))
+	require.Len(t, list, len(apexv1.DiagnosticCodes)+len(apexv1.CodeAliases), "a row per code, and one per former name")
+	byCode := map[string]apexv1.PublishedCode{}
+	for _, c := range list {
+		byCode[c.Code] = c
+	}
+	for _, a := range apexv1.CodeAliases {
+		require.Equal(t, []string{a.Alias}, byCode[a.Code].Aliases, a.Code)
+		require.Equal(t, a.Code, byCode[a.Alias].RenamedTo, a.Alias)
+		require.Equal(t, byCode[a.Code].Exit, byCode[a.Alias].Exit, a.Alias)
+		require.Equal(t, byCode[a.Code].Action, byCode[a.Alias].Action, a.Alias)
+	}
+	stdout, _, err = v1Exec(t, newProjectCmd, "codes")
+	require.NoError(t, err)
+	require.Regexp(t, `(?m)^session\.loop-running +3  retry `, stdout)
+	require.Regexp(t, "(?m)^session\\.orchestrator-running +3  retry +renamed to `session\\.loop-running`; kept as an alias until v1\\.5", stdout)
+	require.Regexp(t, "(?m)^models\\.operator-row +0  person +renamed to `models\\.orchestrator-row`; kept as an alias until v1\\.5", stdout)
 }
 
 // Backlog 32, 37 through the CLI: a regression command red at baseline is

@@ -33,9 +33,10 @@ const (
 	// CodeChildRunning: the loop run already has a child session running;
 	// one at a time.
 	CodeChildRunning = "session.child-running"
-	// CodeOrchestratorRunning: the project already has an apex-loop run;
-	// one per project.
-	CodeOrchestratorRunning = "session.orchestrator-running"
+	// CodeLoopRunning: the project already has an apex-loop run; one per
+	// project. It was session.orchestrator-running until v1.3, kept as its
+	// alias (CodeAliases, D510).
+	CodeLoopRunning = "session.loop-running"
 )
 
 // OrchestratorSkill is the loop skill, apex-loop: the unattended runner of
@@ -122,14 +123,14 @@ func describeSession(at SessionAt) string {
 
 // SessionBusy is the refusal for a session lock another live run holds:
 // CodeChildRunning for a loop run's second child, else
-// CodeOrchestratorRunning. Both are conflicts with action retry: wait for
+// CodeLoopRunning. Both are conflicts with action retry: wait for
 // that run (`ape run wait <id>`), then run the command again.
 func SessionBusy(child bool, holder string) error {
 	if child {
 		return &ConflictError{Code: CodeChildRunning, Action: ActionRetry, Msg: "this apex-loop run already has a child session running (" + holder +
 			") — one at a time: wait for it (`ape run wait <id> --wait 9m`), then start the next"}
 	}
-	return &ConflictError{Code: CodeOrchestratorRunning, Action: ActionRetry, Msg: "this project already has an apex-loop run (" + holder +
+	return &ConflictError{Code: CodeLoopRunning, Action: ActionRetry, Msg: "this project already has an apex-loop run (" + holder +
 		") — one per project: wait for it to end, or stop it (`ape run stop <id>`), then start again"}
 }
 
