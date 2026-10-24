@@ -10,6 +10,11 @@ own exit and ends what it leaves running (F15), lets a pre-1.0 install update (F
 v0.4.1 (F10) and is measured on Claude Code 2.1.309 (C1). CI runs on `ci/**`, daily and on dispatch
 (F5), and `make check-harness` runs every gate (F6).
 
+**Known issue (F-E1-1; fix planned for v1.3):** a tool whose skill is a plugin's (`<plugin>:<skill>` in a
+`tools:` design, review or delegate slot) does not run. `ape project check` reports it installed,
+but `ape task`, which `ape change tool` and `ape change review --run` start it through, refuses it
+as a missing skill (exit 2), as v1.1.0 does. An `advise:` entry naming a plugin skill works.
+
 ### F1: a finished gate run, once; the verdict last (D419, D432, D455, D456)
 
 - **A finished run is returned once, to the call that had not seen it.** A `milestone gate` call
