@@ -179,7 +179,7 @@ func runningTaskSkill(projectRoot, run string) string {
 			Status string `yaml:"status"`
 		}
 		if yaml.Unmarshal(data, &mf) == nil && mf.Status == "running" {
-			return filepath.Base(filepath.Dir(filepath.Dir(m)))
+			return runlog.RunGroupName(filepath.Base(filepath.Dir(filepath.Dir(m))))
 		}
 	}
 	return ""

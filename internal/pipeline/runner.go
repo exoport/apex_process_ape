@@ -1021,7 +1021,7 @@ func latestRunDir(projectRoot, pipelineName, manifestDir string) string {
 	if manifestDir == "" {
 		manifestDir = runlog.PipelinesRoot(projectRoot)
 	}
-	link := filepath.Join(manifestDir, pipelineName, "latest")
+	link := filepath.Join(manifestDir, runlog.RunGroupDir(pipelineName), "latest")
 	target, err := os.Readlink(link)
 	if err != nil {
 		return ""

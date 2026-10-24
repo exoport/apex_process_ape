@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/exoport/apex_process_ape/internal/proctree"
+	"github.com/exoport/apex_process_ape/internal/runlog"
 	"github.com/exoport/apex_process_ape/internal/stamp"
 	"gopkg.in/yaml.v3"
 )
@@ -46,7 +47,7 @@ func newManifestWriter(
 	startedAt time.Time,
 ) (*manifestWriter, error) {
 	runID := computeRunID(startedAt, pipelineName, projectRoot)
-	runDir := filepath.Join(baseDir, pipelineName, runID)
+	runDir := filepath.Join(baseDir, runlog.RunGroupDir(pipelineName), runID)
 	if err := os.MkdirAll(filepath.Join(runDir, "stages"), 0o755); err != nil {
 		return nil, fmt.Errorf("create run dir: %w", err)
 	}
@@ -322,7 +323,7 @@ func (w *manifestWriter) persist() error {
 // current run_id. Best-effort: failure is logged-by-omission, the run's
 // own dir is still well-formed.
 func (w *manifestWriter) updateLatestSymlink() {
-	linkParent := filepath.Join(w.baseDir, w.pipelineName)
+	linkParent := filepath.Join(w.baseDir, runlog.RunGroupDir(w.pipelineName))
 	link := filepath.Join(linkParent, "latest")
 	tmp := link + ".tmp"
 	_ = os.Remove(tmp)

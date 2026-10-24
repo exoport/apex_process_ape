@@ -115,7 +115,7 @@ func (p *Project) LatestRun() *LatestRun {
 			continue
 		}
 		if newest == "" || run > filepath.Base(filepath.Dir(newest)) {
-			newest, newestSkill = m, filepath.Base(filepath.Dir(filepath.Dir(m)))
+			newest, newestSkill = m, runlog.RunGroupName(filepath.Base(filepath.Dir(filepath.Dir(m))))
 		}
 	}
 	if newest == "" {

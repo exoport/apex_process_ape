@@ -231,3 +231,16 @@ func TestMigrate_RenamedOutputFolderMovesPromptsAndChats(t *testing.T) {
 	require.NoDirExists(t, filepath.Join(root, "_output"))
 	require.DirExists(t, filepath.Join(root, "build", "out"))
 }
+
+// F-E1-1: a plugin skill's ':' is invalid in a Windows file name, so its
+// run folder spells it "__" — the folder only — and reads back.
+func TestRunGroupDir_PluginSkill(t *testing.T) {
+	root := t.TempDir()
+	require.Equal(t, filepath.Join(TasksRoot(root), "apish__nats-expert", "r1"), TaskRunDir(root, "apish:nats-expert", "r1"))
+	require.Equal(t, filepath.Join(PipelinesRoot(root), "a__b", "r1"), PipelineRunDir(root, "a:b", "r1"))
+	require.Equal(t, filepath.Join(TasksRoot(root), "apex-apply", "r1"), TaskRunDir(root, "apex-apply", "r1"), "a plain skill is its own folder")
+	for _, name := range []string{"apish:nats-expert", "apex-apply", "frontend-design:mock-up"} {
+		require.NotContains(t, RunGroupDir(name), ":")
+		require.Equal(t, name, RunGroupName(RunGroupDir(name)))
+	}
+}

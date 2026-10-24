@@ -152,7 +152,7 @@ func walkManifests(root string, visit func(name string, m *manifestForRollup, da
 					day = time.Now().UTC()
 				}
 			}
-			visit(name, &m, day)
+			visit(runlog.RunGroupName(name), &m, day)
 		}
 	}
 	return nil
@@ -378,7 +378,7 @@ func FindRunManifest(projectRoot, runID string) (RunManifest, bool) {
 			}
 			children, childCost := ChildRuns(projectRoot, m.RunID)
 			rm := RunManifest{
-				Name:      ent.Name(),
+				Name:      runlog.RunGroupName(ent.Name()),
 				RunID:     m.RunID,
 				Kind:      tree.Kind,
 				ParentRun: m.ParentRun,

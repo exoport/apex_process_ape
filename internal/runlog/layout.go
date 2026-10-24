@@ -174,10 +174,28 @@ func PipelinesRoot(projectRoot string) string {
 	return filepath.Join(ApeRoot(projectRoot), "pipelines")
 }
 
-// TasksRoot holds one directory per skill, each holding run dirs.
+// TasksRoot holds one directory per skill, each holding run dirs. The
+// directory is named RunGroupDir(skill).
 func TasksRoot(projectRoot string) string {
 	return filepath.Join(ApeRoot(projectRoot), "tasks")
 }
+
+// RunGroupDir is the name of the directory a grouped run root files a
+// skill's (or a pipeline's) runs under. A plugin skill is named
+// <plugin>:<skill>, and no Windows file name may hold a ':', so the ':'
+// is written "__" — here, in the directory's name, and nowhere else: the
+// manifest, the typed slash command, the nesting allow-list and the
+// commit-owners lookup all keep the name. RunGroupName reads it back.
+//
+// Every consumer that joins a skill into a run path, or reads a skill off
+// one, goes through these two.
+func RunGroupDir(name string) string { return strings.ReplaceAll(name, ":", "__") }
+
+// RunGroupName is the skill (or pipeline) a RunGroupDir directory holds
+// the runs of. A Claude Code skill name is lowercase letters, digits and
+// hyphens, so a "__" in a directory's name can only be a plugin skill's
+// ':'.
+func RunGroupName(dir string) string { return strings.ReplaceAll(dir, "__", ":") }
 
 // ChangesRoot holds one directory per `ape change` run.
 //
@@ -263,12 +281,13 @@ func TimestampStatePath(projectRoot string) string {
 
 // PipelineRunDir is where one pipeline run's artifacts live.
 func PipelineRunDir(projectRoot, pipelineName, runID string) string {
-	return filepath.Join(PipelinesRoot(projectRoot), pipelineName, runID)
+	return filepath.Join(PipelinesRoot(projectRoot), RunGroupDir(pipelineName), runID)
 }
 
-// TaskRunDir is where one `ape task` run's artifacts live.
+// TaskRunDir is where one `ape task` run's artifacts live: a plugin skill's
+// under RunGroupDir's "__" spelling.
 func TaskRunDir(projectRoot, skill, runID string) string {
-	return filepath.Join(TasksRoot(projectRoot), skill, runID)
+	return filepath.Join(TasksRoot(projectRoot), RunGroupDir(skill), runID)
 }
 
 // PromptRunDir is where one `ape prompt` run's artifacts live.
