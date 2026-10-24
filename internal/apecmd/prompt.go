@@ -407,7 +407,7 @@ func runPromptCore(ctx context.Context, o promptOptions) (promptResult, int, err
 	// the value loses nothing.
 	o.model = resolveModelArg(o.model)
 
-	delivered, err := promptPreflight(&o)
+	delivered, err := promptPreflight(ctx, &o)
 	if err != nil {
 		return promptResult{}, ExitUsage, err
 	}
@@ -606,7 +606,7 @@ func promptStopGate(o promptOptions) *stopGateRecorder {
 // any claude process spawns: the agent must resolve and the handoff/prompt
 // derivation succeed. It fills o.launch when the caller did not, and
 // returns the prompt to deliver.
-func promptPreflight(o *promptOptions) (string, error) {
+func promptPreflight(ctx context.Context, o *promptOptions) (string, error) {
 	if err := refuseOrchestrator(o.agent); err != nil {
 		return "", err
 	}
@@ -618,7 +618,7 @@ func promptPreflight(o *promptOptions) (string, error) {
 		o.launch = l
 	}
 	if o.agent != "" {
-		if err := resolvePromptAgent(o.agent, o.projectRoot); err != nil {
+		if err := resolvePromptAgent(ctx, o.agent, o.projectRoot); err != nil {
 			return "", err
 		}
 	}
@@ -630,10 +630,10 @@ func promptPreflight(o *promptOptions) (string, error) {
 // it (F-E1-1): its plugin listed in plugins:, installed, carrying it.
 // Anything else needs a SKILL.md under the project's or the user's
 // .claude/skills.
-func resolvePromptAgent(agent, projectRoot string) error {
+func resolvePromptAgent(ctx context.Context, agent, projectRoot string) error {
 	if strings.Contains(agent, ":") {
 		if p, ok := v1ProjectAt(projectRoot); ok {
-			if err := p.PluginSkillResolver(context.Background(), apexv1.ClaudePluginCLI{})(agent); err != nil {
+			if err := p.PluginSkillResolver(ctx, apexv1.ClaudePluginCLI{})(agent); err != nil {
 				return fmt.Errorf("--agent %q did not resolve: %w", agent, err)
 			}
 			return nil

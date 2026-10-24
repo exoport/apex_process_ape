@@ -534,6 +534,7 @@ func PluginSkill(cfg Config, rows []PluginStatus, checked bool, name string) (s 
 		return s, ToolUnchecked, "claude is not on PATH: the installs were not read"
 	case pluginNotInstalled:
 		return s, ToolNotInstalled, "plugin " + plugin + " is not installed"
+	case pluginLacksSkill: // the return below
 	}
 	return s, ToolNotInstalled, "plugin " + plugin + " has no skill " + skill
 }

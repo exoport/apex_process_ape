@@ -296,10 +296,10 @@ func TestPromptAgent_PluginSkill(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(cfg, append(base, []byte("marketplaces:\n  team: {source: github, repo: org/kit}\nplugins:\n  - {name: kit, marketplace: team, ref: v1.0.0}\n")...), 0o644))
 
-	require.NoError(t, resolvePromptAgent("kit:security", root))
-	require.EqualError(t, resolvePromptAgent("kit:nope", root),
+	require.NoError(t, resolvePromptAgent(t.Context(), "kit:security", root))
+	require.EqualError(t, resolvePromptAgent(t.Context(), "kit:nope", root),
 		`--agent "kit:nope" did not resolve: plugin kit has no skill nope — fix the skill name, or install a version of kit that ships it`)
-	require.EqualError(t, resolvePromptAgent("zed:x", root),
+	require.EqualError(t, resolvePromptAgent(t.Context(), "zed:x", root),
 		`--agent "zed:x" did not resolve: no plugin zed in plugins: — list the plugin zed in plugins: and run `+"`ape plugins sync`"+`, or fix the skill name`)
-	require.EqualError(t, resolvePromptAgent("apex-nope", root), `--agent "apex-nope" did not resolve under .claude/skills (project or user)`)
+	require.EqualError(t, resolvePromptAgent(t.Context(), "apex-nope", root), `--agent "apex-nope" did not resolve under .claude/skills (project or user)`)
 }
