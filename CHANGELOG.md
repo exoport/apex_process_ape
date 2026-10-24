@@ -1,5 +1,44 @@
 # CHANGELOG
 
+## v1.3.0 (draft)
+
+APEX v1.3, on v1.2.0: fixes. A plugin's skill in `tools:` now runs (F-E1-1); two diagnostic codes
+and the check kind `(live)` get names that read right, the old names kept as aliases until v1.5 at
+the earliest. A framework payload that uses these declares `min_ape_version: "1.3.0"`. Not yet
+evaluated.
+
+### F-E1-1: a plugin tool runs (D488, D512)
+
+- A tool whose skill is a plugin's, `<plugin>:<skill>` in a `tools:` design, review or delegate
+  slot, now starts. `ape task`, `ape change tool`, `ape change review --run` and
+  `ape prompt --agent` resolve the name the way `ape project check` does: the plugin is listed in
+  `plugins:`, installed, and has that skill. v1.1 and v1.2 refused it as a missing skill (exit 2).
+- An unlisted or uninstalled plugin is still refused (exit 2), with the hint to list it in
+  `plugins:` and run `ape plugins sync`. A skill the plugin lacks is refused, naming the plugin.
+- On disk the run folder spells the `:` as `__` (`tasks/apish__nats-expert/`), so it is a valid
+  path on Windows. The skill keeps its name everywhere else.
+
+### Renamed codes, with aliases (D503, D510, D512)
+
+- `session.orchestrator-running` is now **`session.loop-running`**: it means a second `apex-loop`
+  run. `models.operator-row` is now **`models.orchestrator-row`**. `check.live-suggested` is now
+  **`check.full-suggested`** (below).
+- Each diagnostic carries the new code in `code` and the old one in a new `alias` field, and the
+  human line names both (`… ; formerly session.orchestrator-running`). `ape project codes` lists
+  the old names as their own rows, pointing at the new ones. Exit codes and actions are unchanged.
+  The old names go no earlier than v1.5.
+
+### `(full)` checks (D508, D512)
+
+- The check kind `check (live):` is now **`check (full):`**: a check that does not run on every
+  change (a service, a network, a browser, or long). `check (live):` is still accepted, with no
+  warning. `check.bad-kind` names `(full)`.
+- JSON gains `full_skipped` beside `live_skipped` (gate run, `gate_last`, verify, status, spec-only
+  run), with the same value, and a task's `full` beside `live`. A record written by v1.2 reads back
+  with both. `live_skipped` and `live` are deprecated and go no earlier than v1.5.
+- Human lines say "Full checks not run" and "N full scenario check(s)". No migration rewrites a
+  project's specs: a spec changes only through a change.
+
 ## v1.2.0 (2026-10-24)
 
 APEX v1.2, on v1.1.0: hardening and currency. ape stops a session's leftover servers (F3), freezes
