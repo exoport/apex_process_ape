@@ -59,7 +59,7 @@ Code session, and it starts `apex-loop` for you. `ape task apex-orchestrator`
 is refused with exit 2, code `skill.renamed`, and the message names both
 `ape task apex-loop --args <M>` and `/apex-orchestrator`. It is not an alias,
 so an old resume line fails loudly instead of starting the wrong skill. See
-[The operator and the loop](../explanation/operator-and-loop.md).
+[The orchestrator and the loop](../explanation/orchestrator-and-loop.md).
 
 ## Choose the model and effort
 

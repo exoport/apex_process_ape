@@ -164,6 +164,15 @@ as a missing skill (exit 2), as v1.1.0 does. An `advise:` entry naming a plugin 
 - `migrations.pending` keeps WARN for a half-applied entry whose command ran (F16e, D467): the
   framework's `v1.2.0_seq-01` fixes the check that made seq-06 half-applied.
 
+### Docs: operator and orchestrator (D503)
+
+- In ape's docs, **operator** now always means you, the person who runs the project, as ape's own
+  messages and `aped`'s operator credential already did. The `/apex-orchestrator` session is
+  **the orchestrator**. "The operator and the loop" is now
+  [The orchestrator and the loop](docs/explanation/orchestrator-and-loop.md).
+- No command, message or code changes: `ape project operator-interface`, the `models.operator-row`
+  notice and `/apex-handoff --peer operator` keep their names.
+
 ## v1.1.0 (2026-10-23)
 
 APEX v1.1, on v1.0.0: ape measures what a run costs and waits for what it needs — test-time cost

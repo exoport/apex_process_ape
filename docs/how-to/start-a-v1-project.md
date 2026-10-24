@@ -84,7 +84,7 @@ gates. It commits as `plan: <summary>` and ends with the words for you to type: 
 person accepts the change (`ape project accept-config --by <you>`), `ape project check` reports
 `config.changed`, and `ape change start`, `verify` and `archive` refuse. See [What only a person does](../explanation/person-acts.md),
 [How to run a milestone](run-a-milestone.md), and
-[The operator and the loop](../explanation/operator-and-loop.md).
+[The orchestrator and the loop](../explanation/orchestrator-and-loop.md).
 
 ## What init writes
 

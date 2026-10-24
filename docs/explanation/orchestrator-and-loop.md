@@ -1,17 +1,21 @@
-# The operator and the loop
+# The orchestrator and the loop
 
 An APEX v1 project is driven by two skills with different jobs. `/apex-orchestrator` is
-the operator: the skill you open in your own Claude Code session to ask where the project stands,
+the orchestrator: the skill you open in your own Claude Code session to ask where the project stands,
 turn a request into a milestone or a tweak, and start work. `apex-loop` is the unattended runner:
 ape starts it as `ape task apex-loop --args <M>`, and it takes one approved milestone or tweak to
 its end without asking anyone. This page explains why they are separate, how ape keeps the loop
 bounded (the nesting rule and the relay), and how human-review tasks are handed to a delegate.
 
+In these docs the **operator** is you, the person who runs the project: you approve, answer,
+accept, tag and push. The **orchestrator** is the `/apex-orchestrator` skill and its session.
+(Framework v1.0 and v1.1 docs called that session "the operator".)
+
 ## Two skills, two places
 
-| | `/apex-orchestrator` (the operator) | `apex-loop` (the runner) |
+| | `/apex-orchestrator` (the orchestrator) | `apex-loop` (the runner) |
 | --- | --- | --- |
-| Who starts it | You, by typing `/apex-orchestrator` in `claude` in the project | `ape task apex-loop --args <M\|tweak-id>`, usually started by the operator |
+| Who starts it | You, by typing `/apex-orchestrator` in `claude` in the project | `ape task apex-loop --args <M\|tweak-id>`, usually started by the orchestrator |
 | Where it runs | Your own Claude Code session, on the model you chose | A session ape launched, on `models.apex-loop` (sonnet, effort high, by default) |
 | What it does | Explains `ape status`, recommends, starts planning and delivery as detached ape runs, brings a blocked change's question to you | Runs each change through apply, verify, review and archive, then the gate, the close and the release |
 | Person acts | Proposes them with the exact words to type; runs one only on your words | Never |
@@ -20,7 +24,7 @@ bounded (the nesting rule and the relay), and how human-review tasks are handed 
 `ape project init` writes the line `Talk to APEX: type /apex-orchestrator in Claude Code.` into
 `AGENTS.md`. Both skills are `disable-model-invocation: true`: a model never opens one on its own.
 
-## The operator is your session
+## The orchestrator is your session
 
 `/apex-orchestrator` holds no right ape would not give any terminal. It reads `ape status --json`,
 explains the state in plain words, and gives options with one recommendation. Every skill it
@@ -36,25 +40,26 @@ When it starts the loop, it arms one waiter for that run, a background `ape run 
 you when the run ends. You can keep talking to it meanwhile. The run is detached, so a `/clear`
 loses nothing.
 
-Approvals, answers and acceptances are yours. The operator ends a proposal with the words to type,
+Approvals, answers and acceptances are yours. The orchestrator ends a proposal with the words to type,
 such as `approve M2` or `accept T3 of add-cache`, and runs the command only after you type them.
 [What only a person does](person-acts.md) explains how ape checks that.
 
-ape never starts the operator itself:
+ape never starts the orchestrator itself:
 
 - **`ape task apex-orchestrator`** is refused with exit 2, code `skill.renamed`, action `stop`.
   The message points at both `ape task apex-loop --args <M>` and `/apex-orchestrator`. It is not an
   alias, so a stopped run's older resume line fails loudly instead of starting the wrong skill. The
   same refusal covers `ape service submit task` and an `ape script`'s `RunTask`.
 - **`ape prompt --agent apex-orchestrator`** is refused too, and so is `--agent apex-loop`.
-- **No `models` row.** The operator has none in `_apex/config.yaml`. A `models.apex-orchestrator`
+- **No `models` row.** The orchestrator has none in `_apex/config.yaml`. A `models.apex-orchestrator`
   row in a project made before the rename is read as apex-loop's while there is no apex-loop row,
   and `ape project check` lists the notice `models.operator-row`.
   `ape project operator-interface` moves it (the framework's migration `v1.0.0_seq-07` runs it).
 
-When the operator's session gets long, run `/apex-handoff --peer operator`, then `/clear`, then
-paste the one line it prints. That line starts with `/apex-orchestrator`, so it loads the
-operator again. A running loop does not stop.
+When the orchestrator's session gets long, run `/apex-handoff --peer operator`, then `/clear`,
+then paste the one line it prints. `operator` is the orchestrator's handoff value, kept under that
+name for compatibility. That line starts with `/apex-orchestrator`, so it loads the orchestrator
+again. A running loop does not stop.
 
 ## The loop is ape's runner
 
@@ -107,7 +112,7 @@ The loop is the only session ape lets start another model session. Depth counts 
 ape launched:
 
 - **Depth 0** is your terminal, and also your own Claude Code session, which ape did not launch.
-  The operator is at depth 0, so it may start `apex-loop`.
+  The orchestrator is at depth 0, so it may start `apex-loop`.
 - **Depth 1** is the `apex-loop` session. It may start a child only when it is ape's own loop run,
   one child at a time, and only a skill on its allow-list.
 - **Depth 2** is the loop's child. It starts nothing.

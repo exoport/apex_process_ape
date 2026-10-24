@@ -33,7 +33,7 @@ allow-list), both action `stop`. A second child while one runs is exit 3,
 `session.child-running`, and a second `apex-loop` run in the same project
 exit 3, `session.orchestrator-running`, both action `retry`.
 
-## The operator's session is depth 0
+## The orchestrator's session is depth 0
 
 You talk to APEX v1 by typing `/apex-orchestrator` in your own Claude Code
 session. ape did not launch that session, so it is depth 0, like a terminal:
@@ -42,7 +42,7 @@ it may start any session. That is how the orchestrator starts `apex-plan`,
 depth 1. Only the loop goes on to start children. The orchestrator itself is
 never an ape run: `ape task apex-orchestrator` is refused with
 `skill.renamed`, and `ape prompt --agent apex-orchestrator` too. See
-[The operator and the loop](operator-and-loop.md).
+[The orchestrator and the loop](orchestrator-and-loop.md).
 
 ## How ape knows
 

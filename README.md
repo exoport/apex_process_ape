@@ -92,7 +92,7 @@ the lift broke anything. See
 5. The milestone closes when its gate passes (`ape milestone close`), or a person accepts it red.
 
 [The change lifecycle](docs/reference/change-lifecycle.md) lists every state
-and verb. [The operator and the loop](docs/explanation/operator-and-loop.md)
+and verb. [The orchestrator and the loop](docs/explanation/orchestrator-and-loop.md)
 explains the `/apex-orchestrator` session and the `apex-loop` runner.
 
 ## What only a person does

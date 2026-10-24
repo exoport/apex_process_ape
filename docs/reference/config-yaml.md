@@ -118,8 +118,8 @@ was chosen for another model. The effort goes to `claude --effort <level>`.
 - `models.unknown-field`: a field other than `model` and `effort`.
 
 `models.effort` is not a skill: the default effort of every session is the top-level `effort:`.
-The operator, `apex-orchestrator`, has no row: it runs in your own session (notice
-`models.operator-row`; see [The operator and the loop](../explanation/operator-and-loop.md#the-operator-is-your-session)).
+The orchestrator, `apex-orchestrator`, has no row: it runs in your own session (notice
+`models.operator-row`; see [The orchestrator and the loop](../explanation/orchestrator-and-loop.md#the-orchestrator-is-your-session)).
 
 Not guarded: a model choice loosens nothing.
 
@@ -198,7 +198,7 @@ A value outside these ranges fails the config's parse, as every limit does, and 
 check` reports a key of `limits.usage` it does not know as `config.unknown-key`. Guarded, like
 the rest of `limits:`.
 
-[The operator and the loop](../explanation/operator-and-loop.md#the-loop-relay) explains the relay.
+[The orchestrator and the loop](../explanation/orchestrator-and-loop.md#the-loop-relay) explains the relay.
 An unknown key in this block is the `ape project check` finding `config.unknown-key`.
 
 ## `regression`
@@ -393,7 +393,7 @@ accuracy check.
 
 The delegate skill joins the loop's allow-list. `--delegate` refuses
 (`delegate.unaccepted-config`) while the block is a change nobody accepted. Guarded.
-See [The operator and the loop](../explanation/operator-and-loop.md#human-review-and-delegates).
+See [The orchestrator and the loop](../explanation/orchestrator-and-loop.md#human-review-and-delegates).
 
 ## `release`
 

@@ -96,7 +96,7 @@ the nesting rule and the loop relay.
 Your own work with APEX v1 happens in none of these: you open
 `/apex-orchestrator` in your own Claude Code session, and it starts
 `apex-plan`, `apex-change` and `apex-loop` as detached `ape task` runs. See
-[The operator and the loop](operator-and-loop.md).
+[The orchestrator and the loop](orchestrator-and-loop.md).
 
 `ape prompt` is singular and distinct from `ape sessions`, the inspector of
 the live-session registry. A prompt session is a single unattended run; it is

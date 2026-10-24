@@ -108,6 +108,6 @@ work in one of two ways:
   session: it plans with you and starts the unattended run.
 - From a terminal, run the milestone unattended with `ape task apex-loop --args M1`.
 
-[The operator and the loop](../explanation/operator-and-loop.md) explains the
+[The orchestrator and the loop](../explanation/orchestrator-and-loop.md) explains the
 difference. To run one skill yourself, see
 [How to run a single skill with `ape task`](../how-to/run-a-single-skill.md).

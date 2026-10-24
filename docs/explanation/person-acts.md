@@ -85,7 +85,7 @@ ape milestone close M3 --accept-red "ships with the known RF drift; fixed in M4"
 In a Claude Code session you started yourself (plain `claude` in the project, usually with
 `/apex-orchestrator` open), you can grant an act with your own words. You type the act's
 phrase, and the model runs the command in that turn. This is how
-[`/apex-orchestrator`](operator-and-loop.md) works: it proposes an act and ends with the exact
+[`/apex-orchestrator`](orchestrator-and-loop.md) works: it proposes an act and ends with the exact
 words to type, for example: Say `approve M2` to approve it.
 
 What happens:
@@ -235,4 +235,4 @@ A project can hand human-review tasks to a skill through the `human_review:` blo
 `apex-accept`, in its own read-only session. A pass is recorded as `delegate:<skill>` with the
 run's id, never as a person. Without the block, only a person accepts a task, with one default-on
 exception: the docs check of a milestone's docs change.
-[The operator and the loop](operator-and-loop.md#human-review-and-delegates) explains it.
+[The orchestrator and the loop](orchestrator-and-loop.md#human-review-and-delegates) explains it.

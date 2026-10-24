@@ -105,7 +105,7 @@ that promise and adds to it: the repository's `CHANGELOG.md` lists what), then
 
 - [What APEX v1.0 promises, and where it stops](explanation/apex-v1-scope.md) — start here
 - [What only a person does](explanation/person-acts.md) — the person acts, and typing them in your own Claude Code session
-- [The operator and the loop](explanation/operator-and-loop.md) — `/apex-orchestrator` and `ape task apex-loop`
+- [The orchestrator and the loop](explanation/orchestrator-and-loop.md) — `/apex-orchestrator` and `ape task apex-loop`
 - [When `ape` runs inside a session `ape` started](explanation/nested-ape-runs.md) — the nesting rule
 - [Choosing between `ape chat`, `ape task`, and `ape prompt`](explanation/chat-task-prompt.md)
 - [Why PTY-only execution](explanation/why-pty-only.md)

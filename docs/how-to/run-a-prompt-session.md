@@ -71,7 +71,7 @@ runs as one. So past 700 characters the prompt goes to `prompt.md`, as above.
   [How to run a single skill](run-a-single-skill.md).
 - **`--agent apex-orchestrator`** exits 2: it is the operator's interface,
   opened by typing `/apex-orchestrator` in a person's own Claude Code session.
-  See [The operator and the loop](../explanation/operator-and-loop.md).
+  See [The orchestrator and the loop](../explanation/orchestrator-and-loop.md).
 - **`ape prompt` inside any ape-launched session** exits 2, code
   `session.depth`, or `session.not-allowed` from an `apex-loop` run, which
   starts only allow-listed skills with `ape task`. A prompt session starts

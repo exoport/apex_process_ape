@@ -176,7 +176,7 @@ session, or from a terminal:
 ape task apex-loop --args M1 --detach --output-format json
 ```
 
-See [The operator and the loop](../explanation/operator-and-loop.md) and
+See [The orchestrator and the loop](../explanation/orchestrator-and-loop.md) and
 [The change lifecycle](../reference/change-lifecycle.md).
 
 ## 5. Run the gate
