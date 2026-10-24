@@ -139,7 +139,7 @@ A session that ape started may start another only when it is ape's own
 a time. Anything else is refused with exit 2 (`session.depth`,
 `session.not-allowed`), or exit 3 when the loop already has a child running
 (`session.child-running`) or the project already has a loop run
-(`session.orchestrator-running`). There is no switch to turn the rule off. See
+(`session.loop-running`, formerly `session.orchestrator-running`). There is no switch to turn the rule off. See
 [When ape runs inside a session ape started](../explanation/nested-ape-runs.md).
 
 ## The loop relay
@@ -306,7 +306,7 @@ Task runs appear in `ape costs` under `task:<skill>` after `ape costs roll`;
 | 0 | Success. |
 | 1 | The run failed: the skill failed, the idle window (`--idle-timeout`, default 60m) or a ceiling a person set (`--max-duration`) fired, or the typed line never submitted. Also a v1 refusal or stop: `ape.below-floor`, `milestone.budget-exceeded`, `milestone.blocks-exceeded`, `limits.relays`. |
 | 2 | Usage or preflight error: an unknown skill, bad flags, an unparseable v1 config, an APEX v0 project, `skill.renamed`, or the nesting rule (`session.depth`, `session.not-allowed`, `session.relay`). |
-| 3 | The REPL never became ready (the last pane is on stderr, and the raw bytes are saved beside the run), or a session lock another run holds (`session.child-running`, `session.orchestrator-running`). |
+| 3 | The REPL never became ready (the last pane is on stderr, and the raw bytes are saved beside the run), or a session lock another run holds (`session.child-running`, `session.loop-running` — formerly `session.orchestrator-running`). |
 | 5 | The session's own turn failed against the API and nothing followed. Upstream and retryable. |
 | 6 | The dispatch violated a declared commit ownership. The run itself may have succeeded. |
 | 14 | A claude.ai usage limit stopped the session. Run again after the reset. |

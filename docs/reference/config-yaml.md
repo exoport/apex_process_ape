@@ -119,7 +119,7 @@ was chosen for another model. The effort goes to `claude --effort <level>`.
 
 `models.effort` is not a skill: the default effort of every session is the top-level `effort:`.
 The orchestrator, `apex-orchestrator`, has no row: it runs in your own session (notice
-`models.operator-row`; see [The orchestrator and the loop](../explanation/orchestrator-and-loop.md#the-orchestrator-is-your-session)).
+`models.orchestrator-row`, formerly `models.operator-row`, kept as its alias until v1.5; see [The orchestrator and the loop](../explanation/orchestrator-and-loop.md#the-orchestrator-is-your-session)).
 
 Not guarded: a model choice loosens nothing.
 

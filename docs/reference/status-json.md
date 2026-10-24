@@ -304,6 +304,7 @@ diagnostic is:
 | `message`, `fix` | For people. `message` is the sentence up to its first ` — `, `fix` the rest (empty when it has none); the human line joins them with ` — `. Findings and notices alike, since v1.1 (until then a finding's `message` also carried its fix). |
 | `action` | What to do next (below). |
 | `file`, `line` | Where, when it is about a file. |
+| `alias` | A renamed code's former name, while it is kept (absent otherwise). Since v1.3. |
 
 Branch on `action`:
 
@@ -323,7 +324,9 @@ statuses: 1 a check failed, 2 usage, 3 conflict (nothing written).
 ### The list of codes
 
 `ape project codes` prints every code a v1 command can report, with its exit status, its action
-and what it means. `--json` gives the same as an array of `{code, exit, action, meaning}`:
+and what it means. `--json` gives the same as an array of `{code, exit, action, meaning}`;
+a renamed code's row adds `aliases`, and each former name has a row of its own, with the new
+code's exit and action and `renamed_to` naming the new code:
 
 ```bash
 ape project codes
@@ -331,3 +334,18 @@ ape project codes --json
 ```
 
 Read it from the installed ape rather than from a copy: a new rule gets a new code.
+
+### Renamed codes
+
+A code whose name came to read wrong is renamed, and its old name stays an alias for a while
+(v1.3, kept until v1.5):
+
+| Code | Formerly |
+| --- | --- |
+| `session.loop-running` | `session.orchestrator-running` |
+| `models.orchestrator-row` | `models.operator-row` |
+
+A diagnostic of a renamed code carries the new code in `code` and the old one in `alias`, and the
+human line names both (`code session.loop-running, action retry; formerly
+session.orchestrator-running`). Branch on `code`, and accept the old name there too while you
+read output from an ape before v1.3, which puts it in `code`.

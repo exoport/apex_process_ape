@@ -5115,7 +5115,8 @@ line}; [] when none, beside the findings on a failure too), they never change th
                            not recorded and a person act from a Claude Code session is
                            refused (E2); `ape project init` merges it back. ape doctor
                            reports it too (hooks.prompt). See ape hook pre-tool --help
-  models.operator-row      _apex/config.yaml has a models.apex-orchestrator row (Q96):
+  models.orchestrator-row  _apex/config.yaml has a models.apex-orchestrator row (Q96;
+                           formerly models.operator-row, kept as its alias until v1.5):
                            with no models.apex-loop row it is read as apex-loop's (a
                            project made before rc.7: `ape project operator-interface`
                            renames it); beside one it is a leftover apex-loop's row
@@ -5226,7 +5227,10 @@ where its meaning names a case that changes it (milestone.changes-in-flight), th
 carries the action of the case (D49). "code" says which rule; "message" and
 "fix" are for people: message is the sentence up to its first " — ", fix the rest
 (the human line joins them). Codes are stable: a new rule gets a new
-code, and a code's meaning never changes. severity is always "error" (no warning tier);
+code, and a code's meaning never changes. A code whose name came to read wrong is renamed:
+its old name stays an alias for a while, as a row of its own here ("renamed to <code>",
+with renamed_to in --json; the new code's row lists aliases), and each diagnostic of the
+code carries the old name in "alias" (the human line: "formerly <alias>"). severity is always "error" (no warning tier);
 project check's notices, severity "notice", are no failure's diagnostics (exit 0 here).
 Exit: 1 check failed · 2 usage · 3 conflict (nothing written).
 
@@ -5962,7 +5966,7 @@ Idempotent: with nothing left it writes nothing and says "nothing to do" (exit 0
 How ape knows seq-07 ran: from the config, not a marker (a fresh clone would lose one). A
 models.apex-orchestrator row with no models.apex-loop row is the state before seq-07:
 `ape task apex-loop` reads it as apex-loop's, with a warning on stderr, and ape project
-check lists the notice models.operator-row. Beside an apex-loop row it is a leftover,
+check lists the notice models.orchestrator-row (formerly models.operator-row). Beside an apex-loop row it is a leftover,
 the notice says to drop it, and apex-loop's row is the one read.
 
 Refused on a change branch (branch.change-branch), outside a git repository
@@ -7437,7 +7441,7 @@ unattended runner is apex-loop (see ape task --help).
 Exit codes: 0 accepted (the reply on stdout) · 1 no daemon answered, or NATS
 failed · 2 usage, a malformed request, or a refusal (skill.renamed, session.depth,
 session.not-allowed, VALIDATION, PROJECT_NOT_ALLOWED) · 3 busy
-(session.child-running, session.orchestrator-running, BUSY_EXCLUSIVE,
+(session.child-running, session.loop-running — formerly session.orchestrator-running —, BUSY_EXCLUSIVE,
 BUSY_KEY): retry later. A refusal prints the daemon's message with its code.
 
 Examples:
@@ -7997,7 +8001,8 @@ caller's stamp that ape service submit adds — see ape service --help):
 A refusal is exit 2, code session.depth or session.not-allowed (action
 stop); a second child while one runs is exit 3, session.child-running, and
 a second apex-loop run in a project exit 3,
-session.orchestrator-running (action retry). Deterministic ape commands are
+session.loop-running (action retry; formerly session.orchestrator-running, kept as its
+alias until v1.5). Deterministic ape commands are
 never limited. ape decides the depth from what it recorded, never from the
 model: the session's marker (APE_SESSION, APE_DEPTH) and the process
 ancestry — every session it launches is a row in ~/.ape/registry.json
@@ -8044,7 +8049,8 @@ preflight error, an APEX v0 project (run its pinned v0 ape), apex-orchestrator
 (skill.renamed), or the nesting rule refused the session (session.depth,
 session.not-allowed), or the loop relay refused a child launch (session.relay) · 3 REPL
 never became ready (last pane on stderr), or a session lock another run
-holds (session.child-running, session.orchestrator-running) · 5 upstream
+holds (session.child-running, session.loop-running — formerly
+session.orchestrator-running) · 5 upstream
 API failure · 6 the dispatch violated its declared commit ownership (the run
 itself may have succeeded) · 14 a claude.ai usage limit stopped the session,
 or ape's usage guard did not start it (termination usage_guard).

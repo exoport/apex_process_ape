@@ -53,7 +53,8 @@ ape never starts the orchestrator itself:
 - **`ape prompt --agent apex-orchestrator`** is refused too, and so is `--agent apex-loop`.
 - **No `models` row.** The orchestrator has none in `_apex/config.yaml`. A `models.apex-orchestrator`
   row in a project made before the rename is read as apex-loop's while there is no apex-loop row,
-  and `ape project check` lists the notice `models.operator-row`.
+  and `ape project check` lists the notice `models.orchestrator-row` (formerly
+  `models.operator-row`: the notice carries the old name in `alias` until v1.5).
   `ape project operator-interface` moves it (the framework's migration `v1.0.0_seq-07` runs it).
 
 When the orchestrator's session gets long, run `/apex-handoff --peer operator`, then `/clear`,
@@ -91,7 +92,9 @@ in-progress (never a queued tweak) with the reason, and switches back to the bas
 
 ape bounds the loop from outside:
 
-- **One loop per project.** A second `apex-loop` run is exit 3, `session.orchestrator-running`.
+- **One loop per project.** A second `apex-loop` run is exit 3, `session.loop-running`
+  (formerly `session.orchestrator-running`, from the loop's name before rc.7; kept as its alias
+  until v1.5).
 - **Consecutive blocks.** A loop session is refused (exit 1, `milestone.blocks-exceeded`) once
   `limits.consecutive_blocks` changes of its milestone (default 2) have blocked in a row. A person
   deals with them and re-approves the milestone, which resets the count. A tweak's run is not

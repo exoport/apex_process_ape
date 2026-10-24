@@ -31,7 +31,14 @@ A refusal is exit 2 with code `session.depth` (a session that may not start
 one) or `session.not-allowed` (a loop run starting a skill outside its
 allow-list), both action `stop`. A second child while one runs is exit 3,
 `session.child-running`, and a second `apex-loop` run in the same project
-exit 3, `session.orchestrator-running`, both action `retry`.
+exit 3, `session.loop-running`, both action `retry`.
+
+`session.loop-running` was `session.orchestrator-running` until v1.3: the loop
+was named `apex-orchestrator` before rc.7, and that name now belongs to the
+operator's skill. The old code is kept as an alias until v1.5: the refusal
+names both (`code session.loop-running, action retry; formerly
+session.orchestrator-running`), a diagnostic carries the old one in `alias`,
+and `ape project codes` lists it as a row of its own.
 
 ## The orchestrator's session is depth 0
 
