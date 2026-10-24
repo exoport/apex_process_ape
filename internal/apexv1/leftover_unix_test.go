@@ -39,6 +39,22 @@ func sleeperPid(t *testing.T, pidFile string) int {
 	return pid
 }
 
+// requireNamed requires pid among the leftovers, named "<pid> <cmd…>".
+// Among, not alone: what else the check's group holds at the instant ape
+// lists it — a subshell the script killed that has not exited yet, a
+// loop's short-lived child — is named too, and depends on timing (a CI
+// runner listed two where a workstation always listed one).
+func requireNamed(t *testing.T, leftovers []string, pid int, cmd string) {
+	t.Helper()
+	want := strconv.Itoa(pid) + " " + cmd
+	for _, l := range leftovers {
+		if strings.HasPrefix(l, want) {
+			return
+		}
+	}
+	require.Failf(t, "not named", "%q not among the leftovers %q", want, leftovers)
+}
+
 // requireGone waits (briefly) for pid to be gone: SIGTERMed, reaped.
 func requireGone(t *testing.T, pid int) {
 	t.Helper()
@@ -65,13 +81,13 @@ func TestRunCheck_LeftoverHoldingThePipe_KeepsTheExit(t *testing.T) {
 
 			require.Equal(t, exit, r.Exit, "the script's own exit, not 127: %q", r.Tail)
 			require.Less(t, took, 4*time.Second, "not held for the pipe")
-			require.Len(t, r.Leftovers, 1)
-			require.Equal(t, strconv.Itoa(pid)+" sleep 300", r.Leftovers[0])
+			requireNamed(t, r.Leftovers, pid, "sleep 300")
 			requireGone(t, pid)
 			out := strings.Join(r.Tail, "\n")
 			require.Contains(t, out, "gate: done")
 			require.NotContains(t, out, "WaitDelay")
-			require.Contains(t, out, "still running; ape ended them: "+strconv.Itoa(pid)+" sleep 300")
+			require.Contains(t, out, "still running; ape ended them: ")
+			require.Contains(t, out, strconv.Itoa(pid)+" sleep 300")
 			logged, err := os.ReadFile(filepath.Join(dir, "check.log"))
 			require.NoError(t, err)
 			require.Contains(t, string(logged), "ape ended them")
@@ -90,7 +106,7 @@ func TestRunCheck_QuietLeftoverIsEnded(t *testing.T) {
 	pid := sleeperPid(t, pidFile)
 	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
 	require.Equal(t, 0, r.Exit, r.Tail)
-	require.Equal(t, []string{strconv.Itoa(pid) + " sleep 300"}, r.Leftovers)
+	requireNamed(t, r.Leftovers, pid, "sleep 300")
 	requireGone(t, pid)
 }
 
@@ -119,7 +135,7 @@ func TestRunCheck_LeftoverIgnoringTERMIsKilled(t *testing.T) {
 	pid := sleeperPid(t, pidFile)
 	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
 	require.Equal(t, 0, r.Exit, r.Tail)
-	require.Len(t, r.Leftovers, 1)
+	requireNamed(t, r.Leftovers, pid, "sh -c trap")
 	requireGone(t, pid)
 	require.Less(t, took, 3*time.Second)
 }
