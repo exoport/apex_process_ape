@@ -1,6 +1,8 @@
 package apexv1
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -8,6 +10,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/exoport/apex_process_ape/internal/effort"
 	"gopkg.in/yaml.v3"
@@ -489,8 +492,7 @@ func (p *Project) resolveTool(cfg Config, rows []PluginStatus, checked bool, slo
 		}
 		return st
 	}
-	plugin, skill, namespaced := strings.Cut(tool.Skill, ":")
-	if !namespaced {
+	if !strings.Contains(tool.Skill, ":") {
 		if s, source, ok := p.localSkill(tool.Skill); ok {
 			st.Source = source
 			return judge(s)
@@ -499,25 +501,115 @@ func (p *Project) resolveTool(cfg Config, rows []PluginStatus, checked bool, slo
 		return st
 	}
 	st.Source = "plugin"
-	listed := false
+	s, state, why := PluginSkill(cfg, rows, checked, tool.Skill)
+	if state == ToolOK {
+		return judge(s)
+	}
+	st.State, st.Path = state, why
+	return st
+}
+
+// PluginSkill resolves a plugin skill, <plugin>:<skill>, as Claude Code
+// would load it in an ape session: the plugin is listed in plugins:, it
+// is installed (rows, pluginStatuses' — parallel to cfg.Plugins), and it
+// carries a skill answering to <skill> (its name or an alias). state is
+// ToolOK with the skill, else ToolNotInstalled, or ToolUnchecked when the
+// installs were not read (checked false); why says what is missing.
+//
+// It is the one resolution: a tools: entry (resolveTool) and ape task's
+// preflight (PluginSkillResolver) both use it, so `ape project check`
+// cannot call a tool installed that `ape task` then refuses to start
+// (F-E1-1).
+func PluginSkill(cfg Config, rows []PluginStatus, checked bool, name string) (s SkillInfo, state, why string) {
+	s, miss := pluginSkill(cfg, rows, checked, name)
+	plugin, skill, _ := strings.Cut(name, ":")
+	switch miss {
+	case pluginSkillFound:
+		return s, ToolOK, ""
+	case pluginNotNamespaced:
+		return s, ToolNotInstalled, name + " is not a <plugin>:<skill> name"
+	case pluginUnlisted:
+		return s, ToolNotInstalled, "no plugin " + plugin + " in plugins:"
+	case pluginUnchecked:
+		return s, ToolUnchecked, "claude is not on PATH: the installs were not read"
+	case pluginNotInstalled:
+		return s, ToolNotInstalled, "plugin " + plugin + " is not installed"
+	}
+	return s, ToolNotInstalled, "plugin " + plugin + " has no skill " + skill
+}
+
+// pluginSkillMiss is why pluginSkill found no skill.
+type pluginSkillMiss int
+
+const (
+	pluginSkillFound pluginSkillMiss = iota
+	pluginNotNamespaced
+	pluginUnlisted
+	pluginUnchecked
+	pluginNotInstalled
+	pluginLacksSkill
+)
+
+func pluginSkill(cfg Config, rows []PluginStatus, checked bool, name string) (SkillInfo, pluginSkillMiss) {
+	plugin, skill, namespaced := strings.Cut(name, ":")
+	if !namespaced {
+		return SkillInfo{}, pluginNotNamespaced
+	}
+	listed, installed := false, false
 	for i, pl := range cfg.Plugins {
 		if pl.Name != plugin || i >= len(rows) {
 			continue
 		}
 		listed = true
-		for _, s := range rows[i].contents.Skills {
-			if s.answersTo(skill) {
-				return judge(s)
+		installed = installed || rows[i].Installed
+		for _, sk := range rows[i].contents.Skills {
+			if sk.answersTo(skill) {
+				return sk, pluginSkillFound
 			}
 		}
 	}
 	switch {
 	case !listed:
-		st.Path = "no plugin " + plugin + " in plugins:"
+		return SkillInfo{}, pluginUnlisted
 	case !checked:
-		st.State, st.Path = ToolUnchecked, "claude is not on PATH: the installs were not read"
-	default:
-		st.Path = "plugin " + plugin + " is not installed, or has no skill " + skill
+		return SkillInfo{}, pluginUnchecked
+	case !installed:
+		return SkillInfo{}, pluginNotInstalled
 	}
-	return st
+	return SkillInfo{}, pluginLacksSkill
+}
+
+// PluginSkillResolver is PluginSkill for `ape task` and `ape prompt
+// --agent`: it reads the config and the listed plugins' installs once, on
+// the first name it is asked, and returns nil when the skill resolves,
+// else what is missing and the fix — installHint's for a plugin that is
+// not listed or not installed, the skill name for a plugin that lacks it.
+func (p *Project) PluginSkillResolver(ctx context.Context, cli PluginCLI) func(name string) error {
+	var (
+		once    sync.Once
+		cfg     Config
+		rows    []PluginStatus
+		checked bool
+		loadErr error
+	)
+	return func(name string) error {
+		once.Do(func() {
+			if cfg, loadErr = LoadConfig(p.Root); loadErr != nil || len(cfg.Plugins) == 0 {
+				return // no plugin listed: every plugin skill is unlisted
+			}
+			rows, checked, loadErr = p.pluginStatuses(ctx, cli, cfg)
+		})
+		if loadErr != nil {
+			return fmt.Errorf("cannot read the plugins: %w", loadErr)
+		}
+		_, state, why := PluginSkill(cfg, rows, checked, name)
+		if state == ToolOK {
+			return nil
+		}
+		plugin, _, _ := strings.Cut(name, ":")
+		if _, miss := pluginSkill(cfg, rows, checked, name); miss == pluginLacksSkill {
+			return errors.New(why + " — fix the skill name, or install a version of " + plugin + " that ships it")
+		}
+		return errors.New(why + " — " + installHint(name))
+	}
 }
