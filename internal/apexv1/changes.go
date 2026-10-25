@@ -219,6 +219,10 @@ func (p *Project) checkChange(ctx context.Context, id string, withCaps bool) []F
 			add(1, "paths entry \""+g+"\" is not a valid glob")
 		}
 	}
+	// v1.4 (plantime.go): a task that edits a guarded config key (B6), and
+	// paths: that cover a gate a person approved (F4).
+	out = append(out, guardedConfigTaskFindings(file, c)...)
+	out = append(out, p.gateFrozenFindings(file, c)...)
 
 	if c.Title == "" {
 		add(0, "missing `# <title>`")

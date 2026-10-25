@@ -25,6 +25,8 @@ type MilestoneStatus struct {
 	// B), shown while no gate run of the milestone's own has happened
 	// since (SelfCheckLatest).
 	ApprovalSelfCheck *GateSummary `json:"approval_self_check,omitempty"`
+	// GateFrozen is what its approval froze (v1.4, F4); see MilestoneLine.
+	GateFrozen *GateFrozen `json:"gate_frozen,omitempty"`
 	// BaseSHA is the milestone's start (D130 Q60): HEAD at its first
 	// approval, what $APE_MILESTONE_BASE holds in a gate ape runs; absent
 	// before it is approved.
@@ -294,6 +296,10 @@ type MilestoneLine struct {
 	// approval requires: what a just-approved milestone's gate last did
 	// before any gate run of its own. Absent before approval.
 	ApprovalSelfCheck *GateSummary `json:"approval_self_check,omitempty"`
+	// GateFrozen is what its approval froze (v1.4, F4): the gate files a
+	// change of it may not edit, and the globs whose new matches count
+	// too. Absent before approval and once done.
+	GateFrozen *GateFrozen `json:"gate_frozen,omitempty"`
 }
 
 // GateSummary is a gate run in short (LastGateRun).
@@ -468,6 +474,9 @@ func (p *Project) Status() *StatusReport {
 				line.LastGate = &GateSummary{SHA: run.SHA, Exit: run.Exit, At: run.At, Log: run.Log}
 			}
 			line.ApprovalSelfCheck = approvalSelfCheck(recs[line.ID])
+			if line.Status == MilestoneApproved {
+				line.GateFrozen = gateFrozenOf(recs[line.ID])
+			}
 			r.Milestones = append(r.Milestones, line)
 		}
 		if m := rm.Current(); m != nil {
@@ -476,6 +485,9 @@ func (p *Project) Status() *StatusReport {
 				r.Milestone.BaseSHA = rec.Approval.Base()
 			}
 			r.Milestone.ApprovalSelfCheck = approvalSelfCheck(recs[m.ID])
+			if m.Status == MilestoneApproved {
+				r.Milestone.GateFrozen = gateFrozenOf(recs[m.ID])
+			}
 		}
 	}
 

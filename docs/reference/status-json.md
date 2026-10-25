@@ -91,6 +91,7 @@ A fresh project with one approved milestone gives, in part:
 | `budget` | The budget in USD, when the roadmap gives one. |
 | `gate_last` | The latest gate run: `exit`, `at`, `sha`, `secs`, `output_sha256`, `cmd`, `log`, `tail`, `spec_checks`, `spec_failed`, `stray_files`, `strays_kept`, `regression`, `reason`, `detail`, `shell_note`, `leftovers` (v1.2: what the gate command left running and ape ended), `flaky`, `full_skipped` (v1.3), `live_skipped` (deprecated: the same number under its v1.2 name, removed no earlier than v1.5; a v1.2 record has it alone and ape reads it as both), and `current` (v1.2): `true` when this run still describes the project — no run in progress, HEAD and the working tree (outside `_apex/state/`) unchanged since it ended, and the gate not refused; `false` otherwise, always for a run recorded by ape v1.1. A current run is not what the next gate call returns: that call returns it only when no call has printed its result yet, and otherwise runs the gate again. A red `Gate:` command skips the full scenario checks (`full_skipped`: how many) and the regression command (`regression.skipped: "gate-red"`). Absent before the gate ran. |
 | `approval_self_check` | The latest approval's gate run: `{sha, exit, at, log}`, plus `accept_green: {reason, by, at}` when a person re-approved it green (`milestone approve --accept-green`, v1.2). It is the gate's newest result when its `at` is later than `gate_last.at`, or there is no `gate_last`: the human output and the board then show it, and after an accepted green the next step is `ape milestone close`. A re-approval's `sha` differs from `base_sha`. |
+| `gate_frozen` | v1.4. What the approval froze, `{files, globs}`: the recorded gate files (scripts and own files) and the globs whose new matches count too. A change of the milestone may not edit them (`change.touches-gate`, found at `change check` when its `paths:` cover one). Absent before approval. |
 | `base_sha` | The milestone's start, HEAD at its first approval: what every gate run gets as `APE_MILESTONE_BASE`. |
 | `spent_usd` | The spend of runs started since it was approved. |
 | `budget_enforced` | `limits.budget: enforce` is set. |
@@ -106,6 +107,7 @@ A fresh project with one approved milestone gives, in part:
 | `base_sha` | The milestone's start, once approved. |
 | `last_gate` | Its newest gate run, `{sha, exit, at, log}`. Absent before the gate ran. |
 | `approval_self_check` | The latest approval's gate run, `{sha, exit, at, log}`, with `accept_green` as under `milestone`. |
+| `gate_frozen` | v1.4. An approved milestone's frozen gate set, `{files, globs}`: the gate files its approval recorded (scripts and own files) and the globs whose new matches count too. A change of the milestone may not edit them (`change.touches-gate`). Absent before approval and once done. |
 | `accept_red` | Present when a person closed it with its gate red: `{reason, by, at, gate}`. |
 
 ### `changes[]`

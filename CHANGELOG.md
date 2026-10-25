@@ -10,6 +10,20 @@
 - No config adds it back. A `tools:` entry naming it is `tools.invalid` (the entry is dropped), and
   a `human_review:` delegate naming it joins nothing.
 
+### Found at plan time (B6, F4)
+
+- **`change.guarded-config-task`** (new, exit 1, action replan): `ape change check` and `start`
+  find a task whose own words (before its `— check:`) name `_apex/config.yaml` and a guarded key,
+  `regression:` say. A guarded key is a person's (`config.changed`), so a loop applying the task was
+  certain to stop at it; plans did exactly that twice in the eval. The change drops the task and
+  leaves the value under `## Notes` for the person. Measured on 2,952 task lines of the eval's
+  cells: both field cases found, no false positive.
+- **`change.touches-gate` at plan time:** `change check` and `start` also refuse a change whose
+  frontmatter `paths:` cover a gate file a person approved, or meet a recorded glob. Verify refused
+  the edit one apply later (v1.2 F4's residual).
+- **`ape status --json` `gate_frozen`:** an approved milestone's frozen gate set, `{files, globs}`,
+  under `milestone` and each `milestones[]` row, so a planner sees what it may not edit.
+
 ### Harness
 
 - `make check-agents-md` asks up to three times and passes when any answer quotes the AGENTS.md-only

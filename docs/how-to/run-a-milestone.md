@@ -165,6 +165,9 @@ with its next re-approval). A work product the gate only reads to check stays wh
 From approval on, a change that edits a recorded gate file or own file, or adds a file a recorded
 glob matches, is refused at verify and
 archive with `change.touches-gate` (action `replan`). Only a person or apex-plan changes a gate.
+Since v1.4 a plan that says it will edit one is refused before it is applied: `change check` and
+`start` fail with the same code when the change's frontmatter `paths:` cover a recorded file or meet
+a recorded glob, and `ape status --json` lists the frozen set (`gate_frozen`) for the planner.
 
 ## 4. Deliver the changes
 
