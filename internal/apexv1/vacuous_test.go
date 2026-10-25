@@ -96,8 +96,17 @@ func TestConfig_ChecksAndRequires(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 90*time.Second, cfg.Checks.SlowRegressionAt())
 	require.Equal(t, DefaultVacuousOutput, cfg.Checks.Vacuous(), "vacuous_output absent: the defaults")
+	// v1.4 (T4): vacuous_output_extra appends to the list in force.
+	cfg, err = load(t, "checks: {vacuous_output_extra: [\"harness unavailable\"]}\n")
+	require.NoError(t, err)
+	require.Equal(t, append(append([]string(nil), DefaultVacuousOutput...), "harness unavailable"), cfg.Checks.Vacuous())
+	cfg, err = load(t, "checks: {vacuous_output: [\"0 examples\"], vacuous_output_extra: [\"harness unavailable\"]}\n")
+	require.NoError(t, err)
+	require.Equal(t, []string{"0 examples", "harness unavailable"}, cfg.Checks.Vacuous())
+	require.Equal(t, DefaultVacuousOutput, ChecksConfig{}.Vacuous())
 
 	for yaml, want := range map[string]string{
+		"checks: {vacuous_output_extra: [\" \"]}\n": "checks.vacuous_output_extra: an empty phrase",
 		"checks: {vacuous: [x]}\n":           "checks.vacuous: not a key",
 		"checks: {vacuous_output: [\"\"]}\n": "empty phrase",
 		"checks: {slow_regression: soon}\n":  "checks.slow_regression",

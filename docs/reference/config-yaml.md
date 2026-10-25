@@ -61,7 +61,7 @@ leaves an existing `models:` alone, warning for each default skill it lacks.
 | [`regression`](#regression) | command, or `{change, milestone}` | none: no regression net | yes |
 | [`timeouts`](#timeouts) | mapping per tier | check 15m idle / 2h max, regression 30m / 2h, gate 30m / 4h | yes |
 | [`retries`](#retries) | integer 0–5 | 0 | yes |
-| [`checks`](#checks) | `{vacuous_output: [phrases], slow_regression: <duration>}` | five runner phrases; `5m` | yes |
+| [`checks`](#checks) | `{vacuous_output: [phrases], vacuous_output_extra: [phrases], slow_regression: <duration>}` | five runner phrases; `5m` | yes |
 | [`requires`](#requires) | map: name → `env` or `cmd` | none | yes |
 | [`caps`](#caps) | map: artefact → size | per artefact | yes |
 | [`docs`](#docs) | `{changelog, user_docs, tested}` | none | no |
@@ -253,13 +253,21 @@ retried. Guarded.
 ```yaml
 checks:
   vacuous_output: ["no tests to run", "0 examples"]   # replaces the default list
+  vacuous_output_extra: ["harness unavailable"]       # appended to the list in force (v1.4)
   slow_regression: 10m                                # regression.slow's threshold
 ```
 
 A check that exits 0 but whose output says it ran nothing is red, reason `vacuous`. The default
 phrases are `no tests to run` (go test), `running 0 tests` (cargo), `Ran 0 tests` (unittest before
 3.12), `0 passing` (mocha) and `collected 0 items` (pytest). An empty list turns the rule off; an
-empty phrase is an error. Guarded.
+empty phrase is an error. `vacuous_output_extra` (v1.4) adds the project's own phrases, such as a
+harness's skip reason printed under `-v`, after the list in force, so the defaults need not be
+copied back. Guarded.
+
+Every check ape runs (verify, the gate, approve's self-check, the regression command) has
+`APE_GATE=1` in its environment (v1.4). By convention a test harness that cannot set up what it
+needs (a database, a container runtime) fails when it is set, instead of skipping every test and
+reporting success. ape only exports it; the harness decides.
 
 `slow_regression` (a Go duration, default `5m`): when `regression:` is a single command and its
 last recorded run (a change's baseline or verify, or a milestone's last gate) took longer,

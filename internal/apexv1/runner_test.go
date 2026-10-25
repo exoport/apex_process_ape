@@ -31,6 +31,15 @@ func TestRunCheck(t *testing.T) {
 		"the hash is of the output, not the exit")
 }
 
+// v1.4 (D561 Q4): every check ape runs has APE_GATE=1 in its environment.
+func TestRunCheck_ApeGateSet(t *testing.T) {
+	needSh(t)
+	t.Setenv(EnvApeGate, "")
+	r := RunCheck(ctx(), t.TempDir(), `test "$APE_GATE" = 1 && echo gate=$APE_GATE`, "", 0)
+	require.Equal(t, 0, r.Exit, r.Tail)
+	require.Equal(t, []string{"gate=1"}, r.Tail)
+}
+
 // A timed-out check records 124, and its whole process group is killed:
 // a background child holding the output pipe open must not keep the
 // check alive past its timeout.

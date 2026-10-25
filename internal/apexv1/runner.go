@@ -19,6 +19,13 @@ import (
 	"time"
 )
 
+// EnvApeGate is set to 1 in every check ape runs (v1.4, D561 Q4): verify,
+// the gate, approve's self-check, the regression command. A harness that
+// cannot set up its dependencies fails instead of skipping when it is set,
+// so a broken harness does not read green (OQ-SKIP; a convention, not a
+// rule — ape only exports it).
+const EnvApeGate = "APE_GATE"
+
 // tailLines is how many trailing output lines a red check is reported by.
 const tailLines = 40
 
@@ -125,7 +132,9 @@ func runCheck(ctx context.Context, dir, cmd, logPath, logNote string, lim TierTi
 	c.Dir = dir
 	c.Stdin = nil
 	// A check is a test, not a session: it must not inherit a terminal.
-	c.Env = append(os.Environ(), env...)
+	// APE_GATE=1 tells a harness ape runs it (v1.4, OQ-SKIP): the
+	// convention is that a harness fails rather than skip when it is set.
+	c.Env = append(append(os.Environ(), EnvApeGate+"=1"), env...)
 	g, err := prepareCheck(c, script)
 	if err != nil {
 		return CheckResult{Cmd: cmd, Exit: exitNotFound, Tail: []string{"[ape] " + err.Error()}}

@@ -334,12 +334,16 @@ const DefaultSlowRegression = 5 * time.Minute
 //	checks:
 //	  vacuous_output: ["no tests to run", "0 examples"]   # replaces the default list
 //	  vacuous_output: []                                   # turns the rule off
+//	  vacuous_output_extra: ["harness unavailable"]        # appended to the list in force (v1.4)
 //	  slow_regression: 10m                                 # regression.slow's threshold (W2)
 //
 // Absent, the rule uses DefaultVacuousOutput, and slow_regression is
-// DefaultSlowRegression.
+// DefaultSlowRegression. vacuous_output_extra (v1.4, T4) adds a project's
+// own harness phrases without copying the defaults back.
 type ChecksConfig struct {
 	VacuousOutput []string
+	// VacuousOutputExtra is appended to the phrase list in force (v1.4).
+	VacuousOutputExtra []string
 	// SlowRegression: a single-command regression: whose last run took
 	// longer is project check's regression.slow notice (W2); 0 is unset.
 	SlowRegression time.Duration
@@ -350,15 +354,22 @@ type ChecksConfig struct {
 
 // UnmarshalYAML parses and validates the block.
 func (c *ChecksConfig) UnmarshalYAML(n *yaml.Node) error {
-	if err := checkKeys(n, "checks", "vacuous_output", "slow_regression"); err != nil {
+	if err := checkKeys(n, "checks", "vacuous_output", "vacuous_output_extra", "slow_regression"); err != nil {
 		return err
 	}
 	var raw struct {
-		VacuousOutput  *[]string `yaml:"vacuous_output"`
-		SlowRegression string    `yaml:"slow_regression"`
+		VacuousOutput      *[]string `yaml:"vacuous_output"`
+		VacuousOutputExtra []string  `yaml:"vacuous_output_extra"`
+		SlowRegression     string    `yaml:"slow_regression"`
 	}
 	if err := n.Decode(&raw); err != nil {
-		return fmt.Errorf("checks: %w — vacuous_output is a list of phrases, slow_regression a Go duration", err)
+		return fmt.Errorf("checks: %w — vacuous_output and vacuous_output_extra are lists of phrases, slow_regression a Go duration", err)
+	}
+	for _, ph := range raw.VacuousOutputExtra {
+		if strings.TrimSpace(ph) == "" {
+			return fmt.Errorf("checks.vacuous_output_extra: an empty phrase would match every output")
+		}
+		c.VacuousOutputExtra = append(c.VacuousOutputExtra, ph)
 	}
 	if s := strings.TrimSpace(raw.SlowRegression); s != "" {
 		d, err := time.ParseDuration(s)
@@ -386,12 +397,17 @@ func (c ChecksConfig) SlowRegressionAt() time.Duration {
 	return orDuration(c.SlowRegression, DefaultSlowRegression)
 }
 
-// Vacuous is the phrase list in force.
+// Vacuous is the phrase list in force: vacuous_output (else the
+// defaults), then vacuous_output_extra.
 func (c ChecksConfig) Vacuous() []string {
+	base := DefaultVacuousOutput
 	if c.vacuousSet {
-		return c.VacuousOutput
+		base = c.VacuousOutput
 	}
-	return DefaultVacuousOutput
+	if len(c.VacuousOutputExtra) == 0 {
+		return base
+	}
+	return append(append([]string(nil), base...), c.VacuousOutputExtra...)
 }
 
 // Requirement kinds of requires: (H11).

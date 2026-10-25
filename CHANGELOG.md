@@ -24,6 +24,14 @@
 - **`ape status --json` `gate_frozen`:** an approved milestone's frozen gate set, `{files, globs}`,
   under `milestone` and each `milestones[]` row, so a planner sees what it may not edit.
 
+### Silent skips (OQ-SKIP, part)
+
+- `checks.vacuous_output_extra` (guarded): phrases appended to the vacuous list in force, so a
+  project adds its harness's own words without copying the five defaults back.
+- Every check ape runs has `APE_GATE=1` in its environment. By convention a harness that cannot set
+  up its dependencies fails when it is set rather than skip every test and report success; ape only
+  exports it.
+
 ### Harness
 
 - `make check-agents-md` asks up to three times and passes when any answer quotes the AGENTS.md-only
