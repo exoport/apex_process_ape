@@ -55,6 +55,8 @@ var boardSkipVerbs = map[string]bool{
 	// v1.4 (D526): the (live) rewrite changes check tags, which status
 	// does not report.
 	"project rewrite-live": true,
+	// v1.4 (D543): the gate self-test records nothing.
+	"milestone gate-test": true,
 	// rc.7 (rc7-rename): seq-07 changes the config's models rows, the hooks
 	// and AGENTS.md, none of which status reports.
 	"project operator-interface": true,
