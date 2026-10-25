@@ -34,5 +34,5 @@ func TestLiftDispositionCheck(t *testing.T) {
 
 	q := &Project{Root: t.TempDir(), DevRel: "development"}
 	require.NoError(t, os.MkdirAll(q.Root, 0o755))
-	require.Equal(t, "lift.check-failed", failCode(t, q.LiftDispositionCheck(ctx())), "not a repository: cannot tell")
+	require.Equal(t, CodeLiftCheckFailed, failCode(t, q.LiftDispositionCheck(ctx())), "not a repository: cannot tell")
 }
