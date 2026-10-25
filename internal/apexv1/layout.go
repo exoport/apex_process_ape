@@ -63,6 +63,12 @@ type Config struct {
 	// that no flag, models.<skill> entry or parent session decides
 	// (DecideLaunch). Empty: Claude Code's own setting.
 	Effort string `yaml:"effort"`
+	// Vet is whether apex-orchestrator has a fresh session vet a plan
+	// before it is proposed (v1.4, C1, D529): "plan", or "off" (absent:
+	// off). ape runs nothing for it — the orchestrator starts apex-vet at
+	// depth 0 — so it only reads and validates the value. Not guarded: it
+	// adds a review, it loosens none of ape's.
+	Vet string `yaml:"vet"`
 	// Limits are the loop limits ape enforces (backlog 30): the
 	// milestone budget (off unless enforce) and the attempts cap per
 	// change start.

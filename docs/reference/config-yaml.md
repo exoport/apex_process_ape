@@ -57,6 +57,7 @@ leaves an existing `models:` alone, warning for each default skill it lacks.
 | [`development_folder`](#development_folder) | path | `development` | no |
 | [`models`](#models) | map: skill → model or `{model, effort}` | the seven rows above | no |
 | [`effort`](#effort) | effort level | none (Claude Code's own) | no |
+| [`vet`](#vet) | `plan` or `off` | `off` | no |
 | [`limits`](#limits) | mapping | budget off, attempts 5, attempts_total 15, replans 3, consecutive_blocks 2, context_relay 0.6, relays 5, usage (below) | yes |
 | [`regression`](#regression) | command, or `{change, milestone}` | none: no regression net | yes |
 | [`timeouts`](#timeouts) | mapping per tier | check 15m idle / 2h max, regression 30m / 2h, gate 30m / 4h | yes |
@@ -241,6 +242,14 @@ timeouts:
 Any positive duration is accepted. A scalar's idle is the tier default, clamped to the max. An idle
 above its max, or a max above the ceiling, is a config error. A command's `--timeout` flag sets
 every tier's max, still capped at the ceiling. A timed-out command is not retried.
+
+## `vet`
+
+`plan` has apex-orchestrator vet each plan from a fresh session before it proposes it: it starts
+`apex-vet` at depth 0, which writes numbered notes under `development/vet/`, and apex-plan answers
+them before the proposal (v1.4, measured as the C1 stage). `off`, or no key, skips the vet. ape runs
+nothing for it; it reads the value, and any other value is `config.invalid`. Not guarded: it adds a
+review and loosens nothing.
 
 ## `retries`
 
