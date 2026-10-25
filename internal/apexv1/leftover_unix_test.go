@@ -163,8 +163,14 @@ func TestRunCheck_EscapedPipeHolderBoundsTheDrain(t *testing.T) {
 	pid := sleeperPid(t, pidFile)
 	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
 	require.Equal(t, 0, r.Exit, r.Tail)
-	require.Empty(t, r.Leftovers, "outside the group: not seen")
 	require.Less(t, took, 3*time.Second)
+	if r.Reaping == ReapingScope {
+		// v1.4 (B1): the scope holds what left the group — named and ended.
+		requireNamed(t, r.Leftovers, pid, "sleep 300")
+		requireGone(t, pid)
+		return
+	}
+	require.Empty(t, r.Leftovers, "outside the group: not seen")
 	require.Contains(t, strings.Join(r.Tail, "\n"), "still held open 500ms after the check exited")
 }
 

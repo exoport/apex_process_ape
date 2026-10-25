@@ -130,3 +130,11 @@ func (g *checkGroup) endLeftovers() []string {
 	}
 	return names
 }
+
+// A Windows check has no scope (v1.4): its job object is its group.
+func (g *checkGroup) reaping() string   { return ReapingGroup }
+func (g *checkGroup) scopeUnit() string { return "" }
+func (g *checkGroup) memoryPeak() int64 { return 0 }
+
+// busy reports whether the job used CPU time since the last sample.
+func (g *checkGroup) busy(last, now time.Duration) bool { return now != last }

@@ -2,6 +2,7 @@ package apexv1
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -63,4 +64,41 @@ func TestRunCheck_TailKeepsTheEnd(t *testing.T) {
 	require.Equal(t, "100", r.Tail[len(r.Tail)-1])
 	require.Equal(t, "61", r.Tail[0])
 	require.False(t, strings.HasPrefix(r.Tail[0], "1\n"))
+}
+
+// v1.4 (B1): in a scope, what left the process group — a setsid daemon —
+// is named and ended too; the result says the scope reaped it. Without a
+// user manager (CI) the group is the reaping, and a setsid child escapes
+// it, as before.
+func TestRunCheck_ScopeEndsASetsidLeftover(t *testing.T) {
+	needSh(t)
+	if _, dir, _ := newScope(); dir == "" {
+		t.Skip("no systemd user manager here: checks are reaped by their process group")
+	}
+	r := RunCheck(ctx(), t.TempDir(), "setsid sleep 301 & sleep 0.2; exit 0", "", 0)
+	require.Equal(t, 0, r.Exit)
+	require.Equal(t, ReapingScope, r.Reaping)
+	require.NotEmpty(t, r.ScopeUnit)
+	require.Positive(t, r.MemoryPeak)
+	require.Len(t, r.Leftovers, 1, r.Leftovers)
+	require.Contains(t, r.Leftovers[0], "sleep 301")
+	require.Eventually(t, func() bool { return !pgrepExact(t, "sleep 301") }, 5*time.Second, 50*time.Millisecond)
+}
+
+func TestRunCheck_GroupModeKeepsTheOldReaping(t *testing.T) {
+	needSh(t)
+	old := checkScopes
+	checkScopes = "group"
+	t.Cleanup(func() { checkScopes = old })
+	r := RunCheck(ctx(), t.TempDir(), "sleep 302 & exit 0", "", 0)
+	require.Equal(t, ReapingGroup, r.Reaping)
+	require.Empty(t, r.ScopeUnit)
+	require.Len(t, r.Leftovers, 1)
+}
+
+// pgrepExact reports whether a process with exactly this command line runs.
+func pgrepExact(t *testing.T, cmdline string) bool {
+	t.Helper()
+	out, _ := exec.Command("pgrep", "-fx", cmdline).Output()
+	return strings.TrimSpace(string(out)) != ""
 }

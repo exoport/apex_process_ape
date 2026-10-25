@@ -26,6 +26,13 @@ import (
 // rule — ape only exports it).
 const EnvApeGate = "APE_GATE"
 
+// Reaping says what reaped a check (CheckResult.Reaping, v1.4): its
+// systemd scope, or its process group (on Windows its job object).
+const (
+	ReapingScope = "scope"
+	ReapingGroup = "group"
+)
+
 // tailLines is how many trailing output lines a red check is reported by.
 const tailLines = 40
 
@@ -191,12 +198,23 @@ func runCheck(ctx context.Context, dir, cmd, logPath, logNote string, lim TierTi
 	runtime.UnlockOSThread()
 	secs := checkElapsed(start).Seconds()
 	finished := runCtx.Err() == nil
-	g.done(finished)
 	// What a check that exited on its own left running is ended and named
 	// (F15); a check killed at a timeout or an interrupt was killed whole.
+	// In a scope (v1.4) the watchdog holds the scope open: its leftovers
+	// are ended and its memory.peak read before the watchdog is let go.
 	var leftovers []string
-	if finished {
-		leftovers = g.endLeftovers()
+	var peak int64
+	if g.reaping() == ReapingScope {
+		if finished {
+			leftovers = g.endLeftovers()
+		}
+		peak = g.memoryPeak()
+		g.done(finished)
+	} else {
+		g.done(finished)
+		if finished {
+			leftovers = g.endLeftovers()
+		}
 	}
 	// The output is read until every holder of the pipe is gone. One that
 	// left the check's group is not ended above: it is given outputDrain,
@@ -287,6 +305,9 @@ func runCheck(ctx context.Context, dir, cmd, logPath, logNote string, lim TierTi
 		Leftovers:    leftovers,
 		Tests:        tests,
 		Skip:         skip,
+		Reaping:      g.reaping(),
+		ScopeUnit:    g.scopeUnit(),
+		MemoryPeak:   peak,
 	}
 }
 
@@ -326,7 +347,7 @@ func watchProgress(g *checkGroup, lastOut *atomic.Int64, idle time.Duration, sto
 		case now = <-tick.C:
 		case now = <-deadline.C:
 		}
-		if cpu, ok := g.cpu(); ok && cpu != lastCPU {
+		if cpu, ok := g.cpu(); ok && g.busy(lastCPU, cpu) {
 			lastCPU, lastBusy = cpu, now
 		}
 		last := time.Unix(0, lastOut.Load())

@@ -86,6 +86,13 @@ type CheckResult struct {
 	// GoFlags is the GOFLAGS ape gave a single `go test` check so it
 	// prints its tests (v1.4, D563 Q8): the project's own with -v appended.
 	GoFlags string `json:"goflags,omitempty"`
+	// Reaping is what reaped the check (v1.4, B1): "scope", its systemd
+	// scope ScopeUnit, or "group", its process group alone (no user
+	// manager, or not Linux). MemoryPeak is the scope's memory.peak in
+	// bytes (its containers are not in it: Containers).
+	Reaping    string `json:"reaping,omitempty"`
+	ScopeUnit  string `json:"scope_unit,omitempty"`
+	MemoryPeak int64  `json:"memory_peak,omitempty"`
 }
 
 // Red reports a result that fails its run: a non-zero exit that was not

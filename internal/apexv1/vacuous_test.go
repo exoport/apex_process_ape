@@ -107,13 +107,13 @@ func TestConfig_ChecksAndRequires(t *testing.T) {
 
 	for yaml, want := range map[string]string{
 		"checks: {vacuous_output_extra: [\" \"]}\n": "checks.vacuous_output_extra: an empty phrase",
-		"checks: {vacuous: [x]}\n":           "checks.vacuous: not a key",
-		"checks: {vacuous_output: [\"\"]}\n": "empty phrase",
-		"checks: {slow_regression: soon}\n":  "checks.slow_regression",
-		"checks: {slow_regression: -1m}\n":   "checks.slow_regression",
-		"requires: {RADIX_DSN: envvar}\n":    "is not env or cmd",
-		"requires: {RADIX-DSN: env}\n":       "not an environment variable name",
-		"requires: {/usr/bin/docker: cmd}\n": "without a path",
+		"checks: {vacuous: [x]}\n":                  "checks.vacuous: not a key",
+		"checks: {vacuous_output: [\"\"]}\n":        "empty phrase",
+		"checks: {slow_regression: soon}\n":         "checks.slow_regression",
+		"checks: {slow_regression: -1m}\n":          "checks.slow_regression",
+		"requires: {RADIX_DSN: envvar}\n":           "is not env or cmd",
+		"requires: {RADIX-DSN: env}\n":              "not an environment variable name",
+		"requires: {/usr/bin/docker: cmd}\n":        "without a path",
 	} {
 		_, err := load(t, yaml)
 		require.ErrorContains(t, err, want, yaml)
