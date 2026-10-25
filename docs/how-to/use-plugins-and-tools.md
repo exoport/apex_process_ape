@@ -257,9 +257,9 @@ session's, then the config's `effort:`, then Claude Code's own.
 ### The allow-list
 
 Every skill `tools:` names joins the loop's allow-list, beside `apex-plan`, `apex-change`,
-`apex-apply`, `apex-review`, `apex-release`, `apex-accept` and the `human_review:` delegate. The
+`apex-apply`, `apex-review`, `apex-accept` and the `human_review:` delegate. The
 loop cannot start a skill that is not on it (`session.not-allowed`), and only a valid entry adds
-one. [Nesting](../explanation/orchestrator-and-loop.md#nesting-as-it-applies-to-the-loop) has the rule.
+one, and never `apex-release`: an entry naming it is `tools.invalid` (D524). [Nesting](../explanation/orchestrator-and-loop.md#nesting-as-it-applies-to-the-loop) has the rule.
 
 ### The findings
 

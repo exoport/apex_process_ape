@@ -137,9 +137,9 @@ command wins over a project one). Each must
 be installed (tools.not-installed); a design or review skill must be slash-invocable
 — not user-invocable: false (tools.not-invocable) — because ape task types it as a
 slash command; a malformed block is tools.invalid. The loop may start the design and
-review skills as children, beside apex-plan, apex-change, apex-apply, apex-review,
-apex-release and apex-accept (D62, D76); apex-handoff, apex-loop and the operator's
-apex-orchestrator never.
+review skills as children, beside apex-plan, apex-change, apex-apply, apex-review and
+apex-accept (D62, D76); apex-handoff, apex-loop, the operator's apex-orchestrator and
+apex-release never (D524: an entry naming apex-release is tools.invalid).
 
 An advise entry (W6, Q-E1) starts no session and gives no verdict: load: names files
 under its skill's folder (the folder holding its SKILL.md: in the plugin's install for

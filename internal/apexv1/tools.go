@@ -292,6 +292,9 @@ func parseTool(n *yaml.Node, slot, at string) (tool Tool, probs []string) {
 	if tool.Skill != "" && !toolSkillRe.MatchString(tool.Skill) {
 		probs = append(probs, fmt.Sprintf("%s: skill %q is not a skill name (<skill>, or <plugin>:<skill> for a plugin's; no leading /)", at, tool.Skill))
 	}
+	if NeverChildSkill(tool.Skill) {
+		probs = append(probs, fmt.Sprintf("%s: skill %q is never started by the loop — a release is prepared only on a person's instruction (D524), so it cannot be a tool", at, tool.Skill))
+	}
 	if err := ValidateArgsTemplate(tool.Args); err != nil {
 		probs = append(probs, fmt.Sprintf("%s: %v", at, err))
 	}

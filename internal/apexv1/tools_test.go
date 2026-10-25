@@ -136,7 +136,7 @@ func TestTools_InstalledAndInvocable(t *testing.T) {
 
 func TestChildSkillAllowList(t *testing.T) {
 	p := settingsProject(t, "")
-	require.Equal(t, []string{"apex-plan", "apex-change", "apex-apply", "apex-review", "apex-release", "apex-accept"}, p.ChildSkillAllowList(Config{}))
+	require.Equal(t, []string{"apex-plan", "apex-change", "apex-apply", "apex-review", "apex-accept"}, p.ChildSkillAllowList(Config{}))
 	writeConfigForTest(t, p.Root, `tools:
   review:
     - {name: sec, skill: "kit:security", when: a}
@@ -149,9 +149,31 @@ func TestChildSkillAllowList(t *testing.T) {
 	cfg, err := LoadConfig(p.Root)
 	require.NoError(t, err)
 	got := p.ChildSkillAllowList(cfg)
-	require.Equal(t, []string{"apex-plan", "apex-change", "apex-apply", "apex-review", "apex-release", "apex-accept", "mockups", "kit:security"}, got)
+	require.Equal(t, []string{"apex-plan", "apex-change", "apex-apply", "apex-review", "apex-accept", "mockups", "kit:security"}, got)
 	require.NotContains(t, got, "apex-handoff")
 	require.NotContains(t, got, "apex-orchestrator")
+}
+
+// D524 (v1.4): a loop run can never start apex-release — not as a core
+// skill, not as human_review's delegate, not as a tool, which is a
+// tools.invalid problem.
+func TestChildSkillAllowList_NeverRelease(t *testing.T) {
+	p := settingsProject(t, "")
+	writeConfigForTest(t, p.Root, `human_review:
+  delegate: apex-release
+tools:
+  design:
+    - {name: rel, skill: apex-release, when: a}
+    - {name: mock, skill: mockups, when: a}
+`)
+	cfg, err := LoadConfig(p.Root)
+	require.NoError(t, err)
+	got := p.ChildSkillAllowList(cfg)
+	require.NotContains(t, got, "apex-release")
+	require.Equal(t, []string{"apex-plan", "apex-change", "apex-apply", "apex-review", "apex-accept", "mockups"}, got)
+	require.Len(t, cfg.Tools.Design, 1, "the apex-release entry is refused, the other kept")
+	require.Len(t, cfg.Tools.problems, 1)
+	require.Contains(t, cfg.Tools.problems[0], `tools.design[0]: skill "apex-release" is never started by the loop`)
 }
 
 // F7: a tools: skill may be a local Claude Code command,

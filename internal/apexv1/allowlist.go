@@ -9,7 +9,20 @@ package apexv1
 // session, never a step of the loop; a loop starting another loop is the
 // nesting D62 exists to prevent; and the operator's apex-orchestrator
 // opens only in a person's own session (Q95).
-var CoreChildSkills = []string{"apex-plan", "apex-change", "apex-apply", "apex-review", "apex-release", "apex-accept"}
+//
+// apex-release is absent since v1.4 (D524): a release is prepared only on
+// a person's instruction, so a loop run can never start it — the v1.3
+// skill rule, made a mechanism. Nothing in the config adds it back
+// (NeverChildSkill).
+var CoreChildSkills = []string{"apex-plan", "apex-change", "apex-apply", "apex-review", "apex-accept"}
+
+// NeverChildSkill reports whether skill may never join the allow-list,
+// whatever the config names: apex-release (D524), as human_review's
+// delegate or a tools: entry alike.
+func NeverChildSkill(skill string) bool { return skill == ReleaseSkill }
+
+// ReleaseSkill is the skill that prepares a release (D524).
+const ReleaseSkill = "apex-release"
 
 // ChildSkillAllowList is the depth-1 allow-list (D62, D59 Q4, D76): the
 // core skills, then human_review's delegate, then every skill the config's
@@ -26,14 +39,14 @@ func (p *Project) ChildSkillAllowList(cfg Config) []string {
 	}
 	// The configured human-review delegate (D75, D76), when it is not
 	// apex-accept.
-	if d := cfg.HumanReview.Skill(); d != "" && !seen[d] {
+	if d := cfg.HumanReview.Skill(); d != "" && !seen[d] && !NeverChildSkill(d) {
 		seen[d] = true
 		out = append(out, d)
 	}
 	for _, slot := range ToolSlots {
 		ts := cfg.Tools.Slot(slot)
 		for i := range ts {
-			if s := ts[i].Skill; !seen[s] {
+			if s := ts[i].Skill; !seen[s] && !NeverChildSkill(s) {
 				seen[s] = true
 				out = append(out, s)
 			}

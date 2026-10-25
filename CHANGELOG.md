@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## Unreleased (v1.4)
+
+### The loop can never start apex-release (D524)
+
+- `apex-release` is no longer on the loop's allow-list (`CoreChildSkills`). A loop run that starts
+  it is refused (`session.not-allowed`), so a release is prepared only on a person's instruction:
+  v1.3's skill rule, now a mechanism.
+- No config adds it back. A `tools:` entry naming it is `tools.invalid` (the entry is dropped), and
+  a `human_review:` delegate naming it joins nothing.
+
 ## v1.3.0 (2026-10-25)
 
 APEX v1.3, on v1.2.0: fixes. A plugin's skill in `tools:` now runs (F-E1-1); two diagnostic codes

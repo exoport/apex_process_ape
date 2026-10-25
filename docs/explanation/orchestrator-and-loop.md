@@ -70,8 +70,11 @@ that applies, and starts each skill in its own ape session:
 - `apex-change` to plan;
 - `apex-apply` to build;
 - `ape change review <id> --run` for the review;
-- `ape change tool` for the project's tool skills;
-- `apex-release` when the last milestone is done.
+- `ape change tool` for the project's tool skills.
+
+It never starts `apex-release`: when the last milestone is done it reports "delivery complete" and
+stops. A release is prepared only on a person's instruction (D524), and since v1.4 ape refuses it
+as a loop child (`session.not-allowed`) whatever the config names.
 
 It runs `ape change archive`, `ape milestone gate` and `ape milestone close` itself, each with
 `--wait 9m --json`. An exit 75 means still running: it runs the same command again to attach.
@@ -122,12 +125,13 @@ ape launched:
 
 The allow-list is:
 
-- the core skills `apex-plan`, `apex-change`, `apex-apply`, `apex-review`, `apex-release` and
-  `apex-accept`;
+- the core skills `apex-plan`, `apex-change`, `apex-apply`, `apex-review` and `apex-accept`;
 - the `human_review:` delegate skill, when it is not `apex-accept`;
 - every skill the `tools:` slots name.
 
-`apex-handoff`, `apex-loop` and `apex-orchestrator` are never on it. `ape change review --run`
+`apex-handoff`, `apex-loop`, `apex-orchestrator` and `apex-release` are never on it; a `tools:`
+entry or `human_review:` delegate naming `apex-release` adds nothing (a `tools:` entry is
+`tools.invalid`). `ape change review --run`
 counts as starting `apex-review`.
 
 The refusals:
