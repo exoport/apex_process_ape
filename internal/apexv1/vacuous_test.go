@@ -90,7 +90,7 @@ func TestConfig_ChecksAndRequires(t *testing.T) {
 	cfg, err = load(t, "checks:\n  vacuous_output: [\"0 examples\"]\nrequires: {RADIX_DSN: env, docker: cmd}\n")
 	require.NoError(t, err)
 	require.Equal(t, []string{"0 examples"}, cfg.Checks.Vacuous())
-	require.Equal(t, Requires{"RADIX_DSN": RequireEnv, "docker": RequireCmd}, cfg.Requires)
+	require.Equal(t, Requires{"RADIX_DSN": {Kind: RequireEnv}, "docker": {Kind: RequireCmd}}, cfg.Requires)
 	require.Equal(t, DefaultSlowRegression, cfg.Checks.SlowRegressionAt(), "W2 Q-W2a: 5m")
 	cfg, err = load(t, "checks: {slow_regression: 90s}\n")
 	require.NoError(t, err)

@@ -219,7 +219,7 @@ func (p *Project) RunChecks(ctx context.Context, logDir, prefix string, checks [
 		}
 		if !ok {
 			logPath := filepath.Join(logDir, pc.logName(prefix))
-			if missing := unmetRequirement(pc.Cmd, cfg.Requires); missing != "" {
+			if missing := p.unmetRequirement(ctx, pc.Cmd, cfg.Requires); missing != "" {
 				r = unrunResult(pc.Cmd, logPath, missing)
 				r.Log = p.Rel(logPath)
 			} else {

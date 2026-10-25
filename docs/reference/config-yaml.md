@@ -62,7 +62,7 @@ leaves an existing `models:` alone, warning for each default skill it lacks.
 | [`timeouts`](#timeouts) | mapping per tier | check 15m idle / 2h max, regression 30m / 2h, gate 30m / 4h | yes |
 | [`retries`](#retries) | integer 0–5 | 0 | yes |
 | [`checks`](#checks) | `{vacuous_output: [phrases], vacuous_output_extra: [phrases], slow_regression: <duration>}` | five runner phrases; `5m` | yes |
-| [`requires`](#requires) | map: name → `env` or `cmd` | none | yes |
+| [`requires`](#requires) | map: name → `env`, `cmd` or `{probe, when}` | none | yes |
 | [`caps`](#caps) | map: artefact → size | per artefact | yes |
 | [`docs`](#docs) | `{changelog, user_docs, tested}` | none | no |
 | [`evidence`](#evidence) | `off` or `archive` | `off` | yes |
@@ -276,13 +276,25 @@ as the milestone tier.
 
 ## `requires`
 
-What a check needs from the machine, as `NAME: env` or `NAME: cmd`:
+What a check needs from the machine, as `NAME: env` or `NAME: cmd`, or, since v1.4, a readiness
+probe as `NAME: {probe, when}`:
 
 ```yaml
 requires:
   RADIX_DSN: env    # a check that mentions $RADIX_DSN needs it set
   docker: cmd       # a check that runs docker needs it on PATH
+  dockerd: {probe: "docker info", when: "-tags=[^ ]*integration"}
+  chrome: {probe: 'test -x "$CHROME_EXECUTABLE"', when: "--platform chrome"}
 ```
+
+A probe is for what the command line does not name: a daemon a test suite needs, a browser, a
+sibling checkout. `when` is a regular expression over a check's text (a scenario's, a task's, the
+`Gate:` command or the regression command); without it the probe binds the checks that name it as
+a word. ape runs each bound probe once per command, as a check (its own process group,
+`APE_GATE=1`, idle 1 minute, at most 5), with its output in `_apex/state/logs/probe-<NAME>.log`;
+when it does not exit 0, every check it binds is `unrun: <NAME> is not ready`. Not ready is never
+green, and never a red the product caused. An ape before v1.4 cannot read the mapping form, so a
+project using it needs ape 1.4.0.
 
 A check whose requirement is missing is not run. It is red with reason `unrun`, never green.
 Guarded.

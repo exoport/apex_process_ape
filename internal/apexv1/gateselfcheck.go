@@ -155,7 +155,7 @@ func (p *Project) gateUnrunnable(ctx context.Context, gate string) string {
 		}
 	}
 	cfg, _ := LoadConfig(p.Root)
-	if missing := unmetRequirement(gate, cfg.Requires); missing != "" {
+	if missing := p.unmetRequirement(ctx, gate, cfg.Requires); missing != "" {
 		return missing + " (requires:)"
 	}
 	return ""

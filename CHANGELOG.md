@@ -55,6 +55,15 @@ than v1.5, announced here one release ahead.
   --json` marks each former name's row `deprecated: true`. JSON `live_skipped` and a task's `live`
   stay as they were beside `full_skipped` and `full`; read the new names.
 
+### Readiness probes (D498 (b))
+
+- **`requires: NAME: {probe: <cmd>, when: <regexp>}`** (guarded, like the rest of `requires:`): a
+  probe binds the checks whose text `when` matches (or that name it, without `when`), runs once per
+  ape command, and when it fails every bound check is `unrun: NAME is not ready`: never green, and
+  never red for the product. It is the readiness half of the test-infra work: a Docker-less host, a
+  missing browser or sibling checkout no longer reads as a pass or as a defect. A project using the
+  mapping form needs ape 1.4.0 (an older ape cannot read it).
+
 ### Silent skips (OQ-SKIP, part)
 
 - `checks.vacuous_output_extra` (guarded): phrases appended to the vacuous list in force, so a

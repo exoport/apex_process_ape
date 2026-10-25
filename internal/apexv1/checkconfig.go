@@ -410,41 +410,85 @@ func (c ChecksConfig) Vacuous() []string {
 	return append(append([]string(nil), base...), c.VacuousOutputExtra...)
 }
 
-// Requirement kinds of requires: (H11).
+// Requirement kinds of requires: (H11; probe since v1.4).
 const (
-	RequireEnv = "env"
-	RequireCmd = "cmd"
+	RequireEnv   = "env"
+	RequireCmd   = "cmd"
+	RequireProbe = "probe"
 )
 
 // Requires is requires: — what a check needs from the machine it runs on
-// (H11), name → env|cmd:
+// (H11), name → env|cmd, or (v1.4, D498 (b)) a readiness probe:
 //
 //	requires:
 //	  RADIX_DSN: env    # a check that mentions $RADIX_DSN needs it set
 //	  docker: cmd       # a check that runs docker needs it on PATH
+//	  dockerd: {probe: "docker info", when: "-tags=[^ ]*integration"}
 //
-// A check whose requirement is missing is not run: it records unrun,
-// which counts as red and is never green.
-type Requires map[string]string
+// A probe binds the checks whose text when (a regular expression) matches,
+// or, without when, the checks that name it as a word; it runs once per
+// ape command, and a failing probe makes every bound check unrun ("not
+// ready"). A check whose requirement is missing is not run: it records
+// unrun, which counts as red and is never green.
+type Requires map[string]MachineRequirement
+
+// MachineRequirement is one requires: entry.
+type MachineRequirement struct {
+	Kind string
+	// Probe and When are a probe's: the shell command that must exit 0,
+	// and the regexp over a check's text that binds it ("" binds by name).
+	Probe string
+	When  string
+	when  *regexp.Regexp
+}
 
 // UnmarshalYAML parses and validates the block.
 func (r *Requires) UnmarshalYAML(n *yaml.Node) error {
-	var raw map[string]string
-	if err := n.Decode(&raw); err != nil {
-		return fmt.Errorf("requires: %w — a mapping NAME: env|cmd", err)
+	if n.Kind != yaml.MappingNode {
+		return fmt.Errorf("requires: not a mapping — NAME: env|cmd, or NAME: {probe: <cmd>, when: <regexp>}")
 	}
 	out := Requires{}
-	for name, kind := range raw {
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		name, v := n.Content[i].Value, n.Content[i+1]
+		if v.Kind == yaml.MappingNode {
+			if err := checkKeys(v, "requires."+name, "probe", "when"); err != nil {
+				return err
+			}
+			var raw struct {
+				Probe string `yaml:"probe"`
+				When  string `yaml:"when"`
+			}
+			if err := v.Decode(&raw); err != nil {
+				return fmt.Errorf("requires.%s: %w — {probe: <cmd>, when: <regexp>}", name, err)
+			}
+			req := MachineRequirement{Kind: RequireProbe, Probe: strings.TrimSpace(raw.Probe), When: raw.When}
+			if req.Probe == "" {
+				return fmt.Errorf("requires.%s: probe is empty — a probe is the shell command that exits 0 when %s is ready", name, name)
+			}
+			if req.When != "" {
+				re, err := regexp.Compile(req.When)
+				if err != nil {
+					return fmt.Errorf("requires.%s: when %q is not a regular expression: %v", name, req.When, err)
+				}
+				req.when = re
+			}
+			out[name] = req
+			continue
+		}
+		var kind string
+		if err := v.Decode(&kind); err != nil {
+			return fmt.Errorf("requires.%s: %w — NAME: env|cmd, or NAME: {probe: <cmd>, when: <regexp>}", name, err)
+		}
 		kind = strings.TrimSpace(kind)
 		switch {
 		case kind != RequireEnv && kind != RequireCmd:
-			return fmt.Errorf("requires.%s: %q is not env or cmd", name, kind)
+			return fmt.Errorf("requires.%s: %q is not env or cmd (or a {probe, when} mapping)", name, kind)
 		case kind == RequireEnv && !envNameRe.MatchString(name):
 			return fmt.Errorf("requires.%s: not an environment variable name", name)
 		case kind == RequireCmd && (name == "" || strings.ContainsAny(name, "/ \t")):
 			return fmt.Errorf("requires.%s: a command is named by its program name, without a path", name)
 		}
-		out[name] = kind
+		out[name] = MachineRequirement{Kind: kind}
 	}
 	*r = out
 	return nil

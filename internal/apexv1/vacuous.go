@@ -1,12 +1,16 @@
 package apexv1
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 	"unicode"
 	"unicode/utf8"
 )
@@ -119,14 +123,30 @@ func containsWord(s, phrase string) bool {
 //     guards: chains, subshells, wrappers, sh -c, an absolute path), and
 //     NAME is not on PATH. A check that needs a program only a script it
 //     runs calls names it itself: `docker info >/dev/null && make smoke`.
-func unmetRequirement(cmd string, requires Requires) string {
+//   - NAME: {probe, when} (v1.4) — when matches the check's text (or,
+//     without when, the text names NAME as a word), and the probe does not
+//     exit 0: "NAME is not ready". The probe runs once per ape command
+//     (probeOnce), as a check: its own process group, APE_GATE=1, idle 1m
+//     and max 5m, its output in logs/probe-<NAME>.log.
+func (p *Project) unmetRequirement(ctx context.Context, cmd string, requires Requires) string {
 	names := make([]string, 0, len(requires))
 	for name := range requires {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		switch requires[name] {
+		req := requires[name]
+		switch req.Kind {
+		case RequireProbe:
+			bound := containsWord(cmd, name)
+			if req.when != nil {
+				bound = req.when.MatchString(cmd)
+			}
+			if bound {
+				if why := p.probeOnce(ctx, name, req); why != "" {
+					return why
+				}
+			}
 		case RequireEnv:
 			if mentionsVar(cmd, name) && os.Getenv(name) == "" {
 				return "$" + name + " is unset (requires: " + name + ": env)"
@@ -140,6 +160,45 @@ func unmetRequirement(cmd string, requires Requires) string {
 		}
 	}
 	return ""
+}
+
+// probeResults holds each probe's outcome for the life of this ape command,
+// so a probe runs once however many checks it binds: keyed by project
+// root, name and probe command.
+var probeResults sync.Map
+
+// probeLimits bound a probe: it answers whether something is ready, so it
+// is short.
+var probeLimits = TierTimeout{Idle: time.Minute, Max: 5 * time.Minute}
+
+// probeOnce is "" when name's probe exits 0, else why the bound checks
+// are unrun.
+func (p *Project) probeOnce(ctx context.Context, name string, req MachineRequirement) string {
+	key := p.Root + "\x00" + name + "\x00" + req.Probe
+	if v, ok := probeResults.Load(key); ok {
+		return v.(string)
+	}
+	p.ensureState()
+	logPath := filepath.Join(p.LogsDir(), "probe-"+safeLogName(name)+".log")
+	r := runCheck(ctx, p.Root, req.Probe, logPath, "", probeLimits, nil)
+	why := ""
+	if r.Exit != 0 {
+		why = fmt.Sprintf("%s is not ready: its probe `%s` exited %d (requires: %s: probe; output: %s)", name, req.Probe, r.Exit, name, p.Rel(logPath))
+	}
+	if ctx.Err() == nil {
+		probeResults.Store(key, why)
+	}
+	return why
+}
+
+// safeLogName is name with what a file name should not hold replaced.
+func safeLogName(name string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '/' || r == '\\' || r == ' ' || r < ' ' {
+			return '_'
+		}
+		return r
+	}, name)
 }
 
 // mentionsVar reports whether s holds $name or ${name not followed by
