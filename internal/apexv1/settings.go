@@ -204,26 +204,7 @@ func MergeHooks(path string) ([]string, error) {
 		found := findHook(groups, w.Command)
 		intact := slices.IndexFunc(found, func(e hookEntry) bool { return alteration(w, e) == "" })
 		if intact >= 0 {
-			// F-2: a registration from before rc.7q gains onFailure in place.
-			e := found[intact]
-			if failOpen(w, e) {
-				e.entry["onFailure"] = w.OnFailure
-				added = append(added, w.Event+": "+w.Command+" (onFailure: "+w.OnFailure+")")
-			}
-			// v1.3: one from before v1.3 gains Monitor — in place when the
-			// group holds ape's hook alone, else in a group of its own, so
-			// another hook sharing the group is not widened to Monitor.
-			if monitorUnguarded(w, e) {
-				if gm, _ := groups[e.group].(map[string]any); gm != nil {
-					if hs, _ := gm["hooks"].([]any); len(hs) == 1 {
-						gm["matcher"] = w.Matcher
-					} else {
-						groups = removeHookEntries(groups, []hookEntry{e})
-						hooks[w.Event] = append(groups, map[string]any{"matcher": w.Matcher, "hooks": []any{e.entry}})
-					}
-				}
-				added = append(added, w.Event+": "+w.Command+" (matcher: +Monitor)")
-			}
+			added = append(added, upgradeInPlace(hooks, w, found[intact])...)
 			continue
 		}
 		note := ""
@@ -250,6 +231,31 @@ func MergeHooks(path string) ([]string, error) {
 	}
 	root["hooks"] = hooks
 	return added, writeSettings(path, root)
+}
+
+// upgradeInPlace brings an intact entry e of w up to what init writes,
+// returning one line per upgrade. F-2: a registration from before rc.7q
+// gains onFailure. v1.3: one from before v1.3 gains Monitor — in place
+// when its group holds ape's hook alone, else in a group of its own, so
+// another hook sharing the group is not widened to Monitor.
+func upgradeInPlace(hooks map[string]any, w HookSpec, e hookEntry) []string {
+	var out []string
+	if failOpen(w, e) {
+		e.entry["onFailure"] = w.OnFailure
+		out = append(out, w.Event+": "+w.Command+" (onFailure: "+w.OnFailure+")")
+	}
+	if !monitorUnguarded(w, e) {
+		return out
+	}
+	groups, _ := hooks[w.Event].([]any)
+	gm, _ := groups[e.group].(map[string]any)
+	if hs, _ := gm["hooks"].([]any); len(hs) == 1 {
+		gm["matcher"] = w.Matcher
+	} else {
+		groups = removeHookEntries(groups, []hookEntry{e})
+		hooks[w.Event] = append(groups, map[string]any{"matcher": w.Matcher, "hooks": []any{e.entry}})
+	}
+	return append(out, w.Event+": "+w.Command+" (matcher: +Monitor)")
 }
 
 // removeHookEntries drops the found entries, and any group they leave
