@@ -85,6 +85,14 @@ const (
 	CodeHooksFailOpen = "hooks.fail-open"
 )
 
+// v1.3: Claude Code 2.1.310's Monitor tool.
+const (
+	// CodeHooksMonitorUnguarded: project check's notice for ape's pre-tool
+	// hook registered with the matcher before v1.3, without Monitor
+	// (settings.go monitorUnguardedNotices).
+	CodeHooksMonitorUnguarded = "hooks.monitor-unguarded"
+)
+
 // v1.1 follow-ups (Q154, Q155).
 const (
 	// CodeConfigUnknownKey, CodeConfigInvalid: project check's findings
@@ -494,6 +502,7 @@ var DiagnosticCodes = []CodeDoc{
 	{CodeSpecCheckNamesRemoved, 0, "replan", "a notice, never a finding (project check's notices; the exit is unchanged): a scenario of a lasting spec (development/specs/<capability>/spec.md) has a check: that names what `ape decision standard` removed (D232 Q131) — the apex-v0 ADR-0001 file it replaced or a proposed ADR that superseded it (its path, file name or id; `Supersedes: ADR-0001` once a supersede was removed), by decisions.json's ADR-0001 standard.removed record (Q130); for a project whose seq-08 ran before that record (rc.7b), a check naming a decisions/ file that does not exist or an ADR-0001 file name that is not the standard's (Q133). A check asserting the name's absence (`! test -e …`, `[ ! -f … ]`) is not stale. The scenario can never pass again: plan a change whose REMOVED delta of the requirement cites the migration v1.0.0_seq-08 (re-ADD what still holds under a new name); never recreate the records or supersede ADR-0001 again — an accepted supersede opts the project out of APEX's standard (D205). ape never edits the spec itself (Q132); the gate's and verify's red line for that scenario carries the same pointer (stale_names)"},
 	// rc.7q (D340): F-2.
 	{CodeHooksFailOpen, 0, "person", "a notice, never a finding (project check's notices; the exit is unchanged): .claude/settings.json registers ape's pre-tool hook without \"onFailure\": \"block\" (Claude Code 2.1.295+), as every init before rc.7q wrote it — so if the hook cannot run (ape not on PATH, a crash, a timeout) Claude Code passes the tool call unguarded (measured on 2.1.304 and 2.1.305); `ape project init` adds the key in place (F-2, D340)"},
+	{CodeHooksMonitorUnguarded, 0, "person", "a notice, never a finding (project check's notices; the exit is unchanged; ape doctor's hooks row warns): .claude/settings.json registers ape's pre-tool hook with the matcher every init before v1.3 wrote, Edit|Write|MultiEdit|NotebookEdit|Bash — so in a person's session on Claude Code 2.1.310+ a Monitor tool call runs its command past the guards (RecordGuard, TagGuard, PushGuard, KillGuard, SubjectGuard, RebaseGuard); ape task sessions carry the hooks inline and are guarded either way; `ape project init` adds Monitor in place"},
 	// v1.1 follow-ups (Q154).
 	{CodeConfigUnknownKey, 1, "person", "_apex/config.yaml limits: has a key ape does not know (Q154: budget, attempts, attempts_total, replans, consecutive_blocks, context_relay, relays, usage — or a key of limits.usage: seven_day, five_hour, ceiling, share, max_age, off), so it limits nothing; a person fixes the name or drops it (limits: is guarded: `ape project accept-config`)"},
 	{CodeConfigInvalid, 1, "person", "_apex/config.yaml's top-level effort: or a models.<skill>.effort is not a level (low, medium, high, xhigh, max; Q154): every session it applies to would refuse to launch, so project check reports it first; a person fixes it, or drops it for Claude Code's own default"},

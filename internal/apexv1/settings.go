@@ -110,7 +110,7 @@ func findHook(groups []any, command string) []hookEntry {
 // counts: a different matcher, a type other than command, async (an async
 // hook cannot block), or a stop-hook timeout below the checks' budget.
 func alteration(w HookSpec, e hookEntry) string {
-	if e.matcher != w.Matcher {
+	if e.matcher != w.Matcher && !monitorUnguarded(w, e) {
 		if w.Matcher == "" {
 			return fmt.Sprintf("matcher %q, want none", e.matcher)
 		}
@@ -141,6 +141,16 @@ func alteration(w HookSpec, e hookEntry) string {
 func failOpen(w HookSpec, e hookEntry) bool {
 	_, ok := e.entry["onFailure"]
 	return w.OnFailure != "" && !ok
+}
+
+// monitorUnguarded reports an entry of w with the matcher every init
+// before v1.3 wrote, without Monitor: intact — never a finding, so a
+// project check that was green stays green — but a
+// hooks.monitor-unguarded notice, since a person's session on Claude Code
+// 2.1.310+ runs a Monitor command past the guards. Init adds Monitor in
+// place.
+func monitorUnguarded(w HookSpec, e hookEntry) bool {
+	return w.Matcher == PreToolMatcher && e.matcher == preMonitorMatcher
 }
 
 // readSettings reads a settings.json into a map; an absent file is empty.
@@ -195,9 +205,24 @@ func MergeHooks(path string) ([]string, error) {
 		intact := slices.IndexFunc(found, func(e hookEntry) bool { return alteration(w, e) == "" })
 		if intact >= 0 {
 			// F-2: a registration from before rc.7q gains onFailure in place.
-			if e := found[intact]; failOpen(w, e) {
+			e := found[intact]
+			if failOpen(w, e) {
 				e.entry["onFailure"] = w.OnFailure
 				added = append(added, w.Event+": "+w.Command+" (onFailure: "+w.OnFailure+")")
+			}
+			// v1.3: one from before v1.3 gains Monitor — in place when the
+			// group holds ape's hook alone, else in a group of its own, so
+			// another hook sharing the group is not widened to Monitor.
+			if monitorUnguarded(w, e) {
+				if gm, _ := groups[e.group].(map[string]any); gm != nil {
+					if hs, _ := gm["hooks"].([]any); len(hs) == 1 {
+						gm["matcher"] = w.Matcher
+					} else {
+						groups = removeHookEntries(groups, []hookEntry{e})
+						hooks[w.Event] = append(groups, map[string]any{"matcher": w.Matcher, "hooks": []any{e.entry}})
+					}
+				}
+				added = append(added, w.Event+": "+w.Command+" (matcher: +Monitor)")
 			}
 			continue
 		}
@@ -309,6 +334,43 @@ func (p *Project) failOpenNotices() []Diagnostic {
 				" — `ape project init` adds it in place", w.Command, w.Event, w.OnFailure)}))
 	}
 	return out
+}
+
+// monitorUnguardedNotices are project check's hooks.monitor-unguarded
+// notices (v1.3): ape's pre-tool hook registered with the matcher every
+// init before v1.3 wrote, so a Monitor tool call (Claude Code 2.1.310+)
+// runs its command past RecordGuard, TagGuard, PushGuard, KillGuard,
+// SubjectGuard and RebaseGuard. `ape task` sessions are guarded either
+// way: they carry the hooks inline. `ape project init` adds it in place.
+func (p *Project) monitorUnguardedNotices() []Diagnostic {
+	root, err := readSettings(p.SettingsJSON())
+	if err != nil {
+		return nil
+	}
+	hooks, _ := root["hooks"].(map[string]any)
+	var out []Diagnostic
+	for _, w := range requiredHooks() {
+		groups, _ := hooks[w.Event].([]any)
+		found := findHook(groups, w.Command)
+		// The entry MergeHooks keeps: none is CheckHooks' finding.
+		i := slices.IndexFunc(found, func(e hookEntry) bool { return alteration(w, e) == "" })
+		if i < 0 || !monitorUnguarded(w, found[i]) {
+			continue
+		}
+		out = append(out, notice(Diagnostic{Code: CodeHooksMonitorUnguarded, File: settingsJSONRel, Message: fmt.Sprintf(
+			"hook %#q for %s has matcher %q, without Monitor, so a Monitor tool call (Claude Code 2.1.310+) in a person's session runs its command unguarded"+
+				" — `ape project init` adds it in place", w.Command, w.Event, preMonitorMatcher)}))
+	}
+	return out
+}
+
+// MonitorUnguarded is the hooks.monitor-unguarded notice's message, or
+// "" when the pre-tool matcher covers Monitor (ape doctor's hooks row).
+func (p *Project) MonitorUnguarded() string {
+	if ns := p.monitorUnguardedNotices(); len(ns) > 0 {
+		return ns[0].Message
+	}
+	return ""
 }
 
 // RequiredHookCount is how many hooks CheckHooks requires.

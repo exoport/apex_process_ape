@@ -127,9 +127,10 @@ for setup while no .claude/skills/apex-* exists; JSON "next" carries the same li
 Hooks merged into .claude/settings.json (existing keys and hooks are kept):
   SessionStart          ape hook session-start
   Stop, SubagentStop    ape hook stop          (timeout 1800 s: it runs the change's checks)
-  PreToolUse            ape hook pre-tool      (matcher Edit|Write|MultiEdit|NotebookEdit|Bash:
-                                                the edit guard, and the Bash guards:
-                                                git tag writes, git push, pkill/killall,
+  PreToolUse            ape hook pre-tool      (matcher Edit|Write|MultiEdit|NotebookEdit|Bash|Monitor:
+                                                the edit guard, and the Bash guards, on a
+                                                Bash or a Monitor command (Claude Code
+                                                2.1.310+): git tag writes, git push, pkill/killall,
                                                 rebase/merge/cherry-pick on a change
                                                 branch; "onFailure": "block", so a
                                                 guard that cannot run blocks the call)
@@ -137,8 +138,9 @@ Hooks merged into .claude/settings.json (existing keys and hooks are kept):
                                                 person acts typed in Claude Code (E2))
 A hook that was altered (another matcher, async, a shorter stop timeout, another
 onFailure) is replaced by the one above; a pre-tool hook with no onFailure, as v1.0
-wrote it, gains the key in place (project check: notice hooks.fail-open). Running
-init again changes nothing. ape task passes the same
+wrote it, gains the key in place (project check: notice hooks.fail-open), and one with
+the matcher before v1.3, without Monitor, gains Monitor in place (project check: notice
+hooks.monitor-unguarded). Running init again changes nothing. ape task passes the same
 hooks inline as well, except UserPromptSubmit, so its sessions have them even when
 settings.json does not.
 

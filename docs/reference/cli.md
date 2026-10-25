@@ -3595,9 +3595,9 @@ the hook payload (JSON) on stdin.
                   session's stop while background work runs, and a stop while the
                   in-progress change has a red command check (at most 3 times in a row);
                   in a person's own session, only shows what was red or still running
-  pre-tool        PreToolUse (Edit|Write|MultiEdit|NotebookEdit|Bash): denies edits to
-                  development/specs/**, changes/*/state.json, archive/**, _apex/state/**,
-                  an existing development/briefs/** file, and Bash commands that create,
+  pre-tool        PreToolUse (Edit|Write|MultiEdit|NotebookEdit|Bash|Monitor): denies edits
+                  to development/specs/**, changes/*/state.json, archive/**, _apex/state/**,
+                  an existing development/briefs/** file, and Bash or Monitor commands that create,
                   delete or push a git tag, push at all, stop processes by name (pkill,
                   killall), commit with an apex: subject, or rebase, merge or cherry-pick
                   on a change branch; while ape runs a
@@ -3677,7 +3677,7 @@ PreToolUse hook: deny edits to specs, state.json, the archive, _apex/state and b
 ape hook pre-tool [flags]
 ```
 
-PreToolUse hook for Edit|Write|MultiEdit|NotebookEdit|Bash. Denies, with
+PreToolUse hook for Edit|Write|MultiEdit|NotebookEdit|Bash|Monitor. Denies, with
 {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny",
 "permissionDecisionReason":"… specs change only through ape change archive"}}, an edit
 whose target is under development/specs/, is development/changes/*/state.json, is under
@@ -3700,6 +3700,11 @@ development/briefs/YYYY-MM-DD-<slug>/ — its brief.md, assets, source.txt) is a
 file too. Writing a new file there is allowed. Symlinked folders and links to a brief
 are resolved. A Bash write is not seen here; `ape project check` reports it
 (brief.edited).
+
+Monitor (Claude Code 2.1.310+): its command runs in a shell as a Bash command does, so
+every Bash rule below applies to it as well; a Monitor call with no command (a ws watch)
+runs nothing and is allowed. A Monitor command that runs a person act is denied whatever
+the person typed: a grant is for a Bash call, in the turn the person typed the words.
 
 Bash: denies a command that writes a git tag — only a person tags or releases:
   git tag <name> (-a, -s, -f, -m …), git tag -d|--delete
@@ -5440,9 +5445,10 @@ for setup while no .claude/skills/apex-* exists; JSON "next" carries the same li
 Hooks merged into .claude/settings.json (existing keys and hooks are kept):
   SessionStart          ape hook session-start
   Stop, SubagentStop    ape hook stop          (timeout 1800 s: it runs the change's checks)
-  PreToolUse            ape hook pre-tool      (matcher Edit|Write|MultiEdit|NotebookEdit|Bash:
-                                                the edit guard, and the Bash guards:
-                                                git tag writes, git push, pkill/killall,
+  PreToolUse            ape hook pre-tool      (matcher Edit|Write|MultiEdit|NotebookEdit|Bash|Monitor:
+                                                the edit guard, and the Bash guards, on a
+                                                Bash or a Monitor command (Claude Code
+                                                2.1.310+): git tag writes, git push, pkill/killall,
                                                 rebase/merge/cherry-pick on a change
                                                 branch; "onFailure": "block", so a
                                                 guard that cannot run blocks the call)
@@ -5450,8 +5456,9 @@ Hooks merged into .claude/settings.json (existing keys and hooks are kept):
                                                 person acts typed in Claude Code (E2))
 A hook that was altered (another matcher, async, a shorter stop timeout, another
 onFailure) is replaced by the one above; a pre-tool hook with no onFailure, as v1.0
-wrote it, gains the key in place (project check: notice hooks.fail-open). Running
-init again changes nothing. ape task passes the same
+wrote it, gains the key in place (project check: notice hooks.fail-open), and one with
+the matcher before v1.3, without Monitor, gains Monitor in place (project check: notice
+hooks.monitor-unguarded). Running init again changes nothing. ape task passes the same
 hooks inline as well, except UserPromptSubmit, so its sessions have them even when
 settings.json does not.
 

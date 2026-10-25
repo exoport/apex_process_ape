@@ -91,6 +91,12 @@ func SessionStartOutput(text string) ([]byte, error) {
 // editTools are the tools the pre-tool hook guards.
 var editTools = map[string]bool{"Edit": true, "Write": true, "MultiEdit": true, "NotebookEdit": true}
 
+// ShellTools are the tools whose command the pre-tool hook's Bash guards
+// read: Bash, and Monitor (Claude Code 2.1.310+), whose command runs in a
+// shell under the same permission check as Bash's. A Monitor call with no
+// command (a ws watch) runs nothing, so every guard passes it.
+var ShellTools = map[string]bool{"Bash": true, "Monitor": true}
+
 // PreToolDecision is the pre-tool hook's verdict; Deny false allows.
 type PreToolDecision struct {
 	Deny   bool
@@ -116,10 +122,11 @@ func (d PreToolDecision) Output() ([]byte, error) {
 // whether a Bash call may touch the E2 records (RecordGuard, T6), write a
 // git tag (TagGuard), push (PushGuard, D45), stop processes by name
 // (KillGuard, D46), commit with an `apex:` subject (SubjectGuard, Q156)
-// or rebase or merge on a change branch (RebaseGuard, D40). A Bash call's
-// person acts are PersonActGate's, after these.
+// or rebase or merge on a change branch (RebaseGuard, D40) — and so may a
+// Monitor call's command (v1.3). A Bash call's person acts are
+// PersonActGate's, after these.
 func PreTool(payload HookPayload) PreToolDecision {
-	if payload.ToolName == "Bash" {
+	if ShellTools[payload.ToolName] {
 		cwd := payload.Cwd
 		if cwd == "" {
 			cwd, _ = os.Getwd()

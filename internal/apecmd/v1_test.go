@@ -362,6 +362,30 @@ func TestHookCommands(t *testing.T) {
 	t.Setenv("APE_ALLOW_PUSH", "")
 	t.Setenv("APE_ALLOW_KILL", "")
 
+	// v1.3: a Monitor call's command (Claude Code 2.1.310+) is judged as a
+	// Bash command is; a ws-only Monitor runs nothing and is allowed.
+	t.Setenv("APE_ALLOW_TAG", "")
+	monitor := func(input map[string]any) string {
+		t.Helper()
+		out, _, err := v1ExecIn(t, newHookCmd, payload(map[string]any{
+			"session_id": "s", "hook_event_name": "PreToolUse", "tool_name": "Monitor", "tool_input": input,
+		}), "pre-tool")
+		require.NoError(t, err)
+		return out
+	}
+	for cmd, reason := range map[string]string{
+		"git push origin main":                  "only a person pushes",
+		"git tag v1":                            "only a person tags or releases",
+		"pkill -f server":                       "stop the process you started by its PID",
+		`git commit --allow-empty -m "apex: x"`: "Only ape writes one",
+	} {
+		stdout = monitor(map[string]any{"command": cmd, "timeout_ms": 60000, "persistent": true})
+		require.Contains(t, stdout, `"permissionDecision":"deny"`, cmd)
+		require.Contains(t, stdout, reason, cmd)
+	}
+	require.Empty(t, monitor(map[string]any{"command": "until test -f done.txt; do sleep 2; done", "timeout_ms": 60000}))
+	require.Empty(t, monitor(map[string]any{"ws": map[string]any{"url": "ws://127.0.0.1:9/events"}, "timeout_ms": 60000}))
+
 	// Backlog 31: in a session ape task injected the hooks into, the
 	// settings.json copy (no --inline) stands down; the inline one acts.
 	t.Setenv("APE_ALLOW_TAG", "")

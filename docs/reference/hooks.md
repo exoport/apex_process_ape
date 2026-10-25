@@ -16,7 +16,7 @@ hook:
 | `SessionStart` | none | `ape hook session-start` | Claude Code's default | Claude Code's default |
 | `Stop` | none | `ape hook stop` | 1800 s | Claude Code's default |
 | `SubagentStop` | none | `ape hook stop` | 1800 s | Claude Code's default |
-| `PreToolUse` | `Edit\|Write\|MultiEdit\|NotebookEdit\|Bash` | `ape hook pre-tool` | Claude Code's default | `block` |
+| `PreToolUse` | `Edit\|Write\|MultiEdit\|NotebookEdit\|Bash\|Monitor` | `ape hook pre-tool` | Claude Code's default | `block` |
 | `UserPromptSubmit` | none | `ape hook user-prompt` | Claude Code's default | Claude Code's default |
 
 Each is a `type: command` hook. An entry that was altered is removed and written again as init
@@ -30,7 +30,12 @@ writes it. Altered means one of:
 
 An intact entry is left alone, so running init again changes nothing. A `pre-tool` entry with no
 `onFailure`, as an init before v1.0.0-rc.7q wrote it, is intact; `ape project check` lists the notice `hooks.fail-open`,
-and init adds the key in place.
+and init adds the key in place. Likewise a `pre-tool` entry with the matcher every init before
+v1.3.0 wrote, `Edit|Write|MultiEdit|NotebookEdit|Bash`, is intact: `ape project check` lists the
+notice `hooks.monitor-unguarded`, `ape doctor`'s hooks row warns, and init adds `Monitor` in place
+(in a group of its own when another hook shares the entry's group, so that hook is not widened).
+Until then, a `Monitor` call in a person's session on Claude Code 2.1.310 or later runs its command
+unguarded; `ape task` sessions carry the hooks inline, so they are guarded either way.
 
 **Why `onFailure: block`.** Claude Code (2.1.295 and later) runs a PreToolUse hook that cannot
 start, crashes or times out as a pass: the tool call goes through unguarded. Measured on 2.1.304,
@@ -84,8 +89,13 @@ names from `find`, never `ls`.
 
 ## `ape hook pre-tool`
 
-Runs before every `Edit`, `Write`, `MultiEdit`, `NotebookEdit` and `Bash` call, and denies with a
-`permissionDecision: deny` and a reason. Anything it does not deny gets no output.
+Runs before every `Edit`, `Write`, `MultiEdit`, `NotebookEdit`, `Bash` and `Monitor` call, and
+denies with a `permissionDecision: deny` and a reason. Anything it does not deny gets no output.
+
+`Monitor` (Claude Code 2.1.310 and later) runs its `command` in a shell under the same permission
+check as `Bash`, and can keep it running until the session ends. So the guards read a `Monitor`
+command exactly as they read a `Bash` one: everything below that says "Bash command" covers it too.
+A `Monitor` call with no `command` (a `ws` watch) runs nothing and is allowed.
 
 ### Edits it denies
 
@@ -140,7 +150,7 @@ undid anything or not:
 whether a check's cleanup ran then and what it undid. Past 1 MiB the log moves to
 `strays.jsonl.1`.
 
-### Bash commands it denies
+### Bash and Monitor commands it denies
 
 | Command | Override |
 | ------- | -------- |
@@ -183,7 +193,9 @@ own words: the phrase typed in the prompt that opened the turn, as `ape hook use
 it. A grant is a single-use file under `_apex/state/grants/`, valid for 120 s. Without one the hook
 denies the command and says why. The phrase grammar and the matching rules are in
 [What only a person does](../explanation/person-acts.md#in-your-own-claude-code-session). In a
-session ape launched (`APE_SESSION`), nothing is granted.
+session ape launched (`APE_SESSION`), nothing is granted. A `Monitor` command that runs a person
+act is denied whatever the person typed: a grant is for a `Bash` call in the turn the person typed
+the words, and a `Monitor` command runs on unattended.
 
 ## `ape hook stop`
 

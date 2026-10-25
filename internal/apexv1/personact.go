@@ -641,7 +641,8 @@ func (p *Project) pruneGrants() {
 // output) outside a v1 project, in a session ape launched (the command
 // refuses there, as before, T7) and for a command with no person act; it
 // allows and writes a grant when the person's own words in this turn ask
-// for the act; it denies otherwise, naming the phrase to type.
+// for the act; it denies otherwise, naming the phrase to type. A Monitor
+// command's person act (v1.3) is denied whatever the person typed.
 func PersonActGate(ctx context.Context, payload HookPayload, calls []PersonCall) PreToolDecision {
 	if len(calls) == 0 || os.Getenv(envApeSession) != "" {
 		return PreToolDecision{}
@@ -653,6 +654,11 @@ func PersonActGate(ctx context.Context, payload HookPayload, calls []PersonCall)
 	p, err := Open(FindRoot(cwd))
 	if err != nil || !p.IsV1() {
 		return PreToolDecision{}
+	}
+	// v1.3: a grant is for a Bash call, in the turn the person typed the
+	// words; a Monitor command runs on, unattended, so it carries none.
+	if payload.ToolName == "Monitor" {
+		return PreToolDecision{Deny: true, Reason: "a person act does not run in a Monitor command — run it as a Bash command, in the turn the person typed its words (E2)"}
 	}
 	if len(calls) > 1 {
 		return PreToolDecision{Deny: true, Reason: "this command runs " + strconv.Itoa(len(calls)) +

@@ -30,9 +30,9 @@ the hook payload (JSON) on stdin.
                   session's stop while background work runs, and a stop while the
                   in-progress change has a red command check (at most 3 times in a row);
                   in a person's own session, only shows what was red or still running
-  pre-tool        PreToolUse (Edit|Write|MultiEdit|NotebookEdit|Bash): denies edits to
-                  development/specs/**, changes/*/state.json, archive/**, _apex/state/**,
-                  an existing development/briefs/** file, and Bash commands that create,
+  pre-tool        PreToolUse (Edit|Write|MultiEdit|NotebookEdit|Bash|Monitor): denies edits
+                  to development/specs/**, changes/*/state.json, archive/**, _apex/state/**,
+                  an existing development/briefs/** file, and Bash or Monitor commands that create,
                   delete or push a git tag, push at all, stop processes by name (pkill,
                   killall), commit with an apex: subject, or rebase, merge or cherry-pick
                   on a change branch; while ape runs a
@@ -228,7 +228,7 @@ func newHookPreToolCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "pre-tool",
 		Short: "PreToolUse hook: deny edits to specs, state.json, the archive, _apex/state and briefs, git tag writes, git push, pkill/killall, apex: commit subjects, and rebase/merge/cherry-pick on a change branch",
-		Long: `PreToolUse hook for Edit|Write|MultiEdit|NotebookEdit|Bash. Denies, with
+		Long: `PreToolUse hook for Edit|Write|MultiEdit|NotebookEdit|Bash|Monitor. Denies, with
 {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny",
 "permissionDecisionReason":"… specs change only through ape change archive"}}, an edit
 whose target is under development/specs/, is development/changes/*/state.json, is under
@@ -251,6 +251,11 @@ development/briefs/YYYY-MM-DD-<slug>/ — its brief.md, assets, source.txt) is a
 file too. Writing a new file there is allowed. Symlinked folders and links to a brief
 are resolved. A Bash write is not seen here; ` + "`ape project check`" + ` reports it
 (brief.edited).
+
+Monitor (Claude Code 2.1.310+): its command runs in a shell as a Bash command does, so
+every Bash rule below applies to it as well; a Monitor call with no command (a ws watch)
+runs nothing and is allowed. A Monitor command that runs a person act is denied whatever
+the person typed: a grant is for a Bash call, in the turn the person typed the words.
 
 Bash: denies a command that writes a git tag — only a person tags or releases:
   git tag <name> (-a, -s, -f, -m …), git tag -d|--delete
@@ -360,7 +365,7 @@ runs this ape regardless.`,
 				payload.Cwd = cwd
 			}
 			d := apexv1.PreTool(payload)
-			if !d.Deny && payload.ToolName == "Bash" {
+			if !d.Deny && apexv1.ShellTools[payload.ToolName] {
 				d = apexv1.PersonActGate(cmd.Context(), payload, personCallsIn(apexv1.BashCommand(payload.ToolInput)))
 			}
 			emitHook(cmd)(d.Output())

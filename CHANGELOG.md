@@ -4,8 +4,8 @@
 
 APEX v1.3, on v1.2.0: fixes. A plugin's skill in `tools:` now runs (F-E1-1); two diagnostic codes
 and the check kind `(live)` get names that read right, the old names kept as aliases until v1.5 at
-the earliest. A framework payload that uses these declares `min_ape_version: "1.3.0"`. Not yet
-evaluated.
+the earliest. A framework payload that uses these declares `min_ape_version: "1.3.0"`. The guards also
+cover Claude Code's Monitor tool (2.1.310+). Not yet evaluated.
 
 ### F-E1-1: a plugin tool runs (D488, D512)
 
@@ -38,6 +38,24 @@ evaluated.
   with both. `live_skipped` and `live` are deprecated and go no earlier than v1.5.
 - Human lines say "Full checks not run" and "N full scenario check(s)". No migration rewrites a
   project's specs: a spec changes only through a change.
+
+### Claude Code's Monitor tool is guarded (D530, D532)
+
+- ape now also guards the commands Claude Code's Monitor tool runs, the same way it guards Bash.
+  Claude Code 2.1.310 turns on Monitor, which runs a shell command (and can keep it running until
+  the session ends). Before, a Monitor command got past every guard: tag writes, `git push`,
+  `pkill`/`killall`, `apex:` commit subjects, rebase or merge on a change branch, and ape's own
+  records. A Monitor call with no command (a `ws` watch) runs nothing and is allowed.
+- A person act (`ape milestone approve`, `ape decision accept` …) is refused in a Monitor command,
+  whatever the person typed: run it as a Bash command, in the turn you typed the words.
+- `ape project init` registers the pre-tool hook for `Edit|Write|MultiEdit|NotebookEdit|Bash|Monitor`.
+  A project set up before v1.3 keeps working: `ape project check` stays green and lists the notice
+  `hooks.monitor-unguarded`, `ape doctor`'s hooks row warns, and `ape project init` adds `Monitor`
+  in place. Until then, a Monitor command in your own Claude Code session runs unguarded;
+  `ape task` sessions are guarded either way.
+- **rc.2** (bin-v13rc2): this guard, plus a live test whose seed Claude Code 2.1.310 refused (a
+  standalone `sleep`), so `make check-harness` is green on 2.1.310 again. Measured on Claude Code
+  2.1.310.
 
 ## v1.2.0 (2026-10-24)
 

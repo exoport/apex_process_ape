@@ -126,6 +126,15 @@ func checkV1Hooks(_ context.Context, env doctorEnv) CheckResult {
 	}
 	fs := p.CheckHooks()
 	if len(fs) == 0 {
+		// v1.3: project check's hooks.monitor-unguarded notice.
+		if msg := p.MonitorUnguarded(); msg != "" {
+			return CheckResult{
+				Status:      StatusWarn,
+				Message:     apexv1.CodeHooksMonitorUnguarded + ": " + msg,
+				Remediation: "`ape project init` adds Monitor to the pre-tool matcher in place; `ape task` sessions get the hooks inline either way.",
+				FixCommand:  "ape project init --cwd " + p.Root,
+			}
+		}
 		return CheckResult{Status: StatusOK, Message: fmt.Sprintf("ape's %d hooks registered in .claude/settings.json", apexv1.RequiredHookCount())}
 	}
 	return CheckResult{

@@ -35,6 +35,8 @@ var noticeCodes = []string{
 	CodePackageUnchecked, CodeGateRootModuleChange,
 	// v1.1 W8.
 	CodeDocsUnaccepted, CodeContextRelayLow, CodeGateDataOutside,
+	// v1.3: Claude Code 2.1.310's Monitor tool.
+	CodeHooksMonitorUnguarded,
 }
 
 // The published list and the code agree: every code the source sets or a
@@ -104,7 +106,8 @@ func TestDiagnosticCodes_PublishedListMatchesTheCode(t *testing.T) {
 		// rc.7d (rc7d-std).
 		"CodeSpecCheckNamesRemoved": CodeSpecCheckNamesRemoved,
 		// rc.7q (D340): F-2.
-		"CodeHooksFailOpen": CodeHooksFailOpen,
+		"CodeHooksFailOpen":         CodeHooksFailOpen,
+		"CodeHooksMonitorUnguarded": CodeHooksMonitorUnguarded,
 		// v1.1 follow-ups (Q154, Q155).
 		"CodeConfigUnknownTopKey": CodeConfigUnknownTopKey, "CodeDecisionPlaceholder": CodeDecisionPlaceholder,
 		"CodeDecisionPlaceholderAccepted": CodeDecisionPlaceholderAccepted,

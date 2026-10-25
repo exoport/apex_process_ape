@@ -22,7 +22,13 @@ const (
 	HookCmdPreTool      = "ape hook pre-tool"
 	// HookCmdUserPrompt records the prompts a person types (E2, D178).
 	HookCmdUserPrompt = "ape hook user-prompt"
-	PreToolMatcher    = "Edit|Write|MultiEdit|NotebookEdit|Bash"
+	// PreToolMatcher includes Monitor (v1.3): Claude Code 2.1.310 enables
+	// it, and its command runs in a shell as Bash's does.
+	PreToolMatcher = "Edit|Write|MultiEdit|NotebookEdit|Bash|Monitor"
+	// preMonitorMatcher is PreToolMatcher as every init before v1.3 wrote
+	// it: intact, but a hooks.monitor-unguarded notice, and init adds
+	// Monitor in place (settings.go monitorUnguarded).
+	preMonitorMatcher = "Edit|Write|MultiEdit|NotebookEdit|Bash"
 	// StopHookTimeout is the stop hook's timeout in seconds: it re-runs
 	// the change's short command checks, within StopRunBudget (600s), and
 	// never a long one (D58 2.5) — so it is not derived from
