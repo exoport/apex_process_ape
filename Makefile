@@ -431,7 +431,7 @@ check-agents-md:  ## Verify the installed Claude Code loads this repo's AGENTS.m
 	@# control. Verified to fail with a stray CLAUDE.md in the root. The free
 	@# half (no CLAUDE.md in the root) runs in `make test`.
 	@#
-	@# LOCAL ONLY: needs claude, auth and network. Two one-line Haiku turns.
+	@# LOCAL ONLY: needs claude, auth and network. Up to six one-line Haiku turns (any of three asks in the root; three in the negative control).
 	APE_CLAUDE_LIVE=1 go test ./internal/e2e/ \
 	  -run TestLive_AgentsMD -v -count=1 -timeout 10m
 

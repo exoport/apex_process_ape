@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 
@@ -41,19 +42,35 @@ func TestLive_AgentsMD(t *testing.T) {
 	claudeBin, err := exec.LookPath("claude")
 	require.NoError(t, err, "claude not on PATH")
 
-	got := askNoTools(t, claudeBin, repoRoot(t))
-	t.Logf("repo root answered: %s", got)
-	require.Contains(t, got, agentsMDMarker,
-		"Claude Code, started in the repo root, could not quote a rule that only AGENTS.md contains: it did not "+
+	// Haiku sometimes declines to quote the rule though AGENTS.md loaded
+	// (≈ 8 in 34 runs on 2.1.310, D533). A session that never loaded the
+	// file cannot know the phrase, so any one of agentsMDAsks answers that
+	// quote it proves the load; the negative control must quote it in none.
+	var answers []string
+	loaded := false
+	for i := 0; i < agentsMDAsks && !loaded; i++ {
+		got := askNoTools(t, claudeBin, repoRoot(t))
+		t.Logf("repo root answered (ask %d of %d): %s", i+1, agentsMDAsks, got)
+		answers = append(answers, got)
+		loaded = strings.Contains(got, agentsMDMarker)
+	}
+	require.True(t, loaded,
+		"Claude Code, started in the repo root, could not quote a rule that only AGENTS.md contains in %d asks: it did not "+
 			"load AGENTS.md. Check that no CLAUDE.md exists here or in any parent directory, then whether this "+
-			"Claude Code version changed how AGENTS.md is loaded")
+			"Claude Code version changed how AGENTS.md is loaded. Answers: %q", agentsMDAsks, answers)
 
-	control := askNoTools(t, claudeBin, t.TempDir())
-	t.Logf("empty directory answered: %s", control)
-	require.NotContains(t, control, agentsMDMarker,
-		"the negative control quoted the rule with no AGENTS.md present, so the question does not prove "+
-			"anything was loaded — pick a rule the model cannot produce unprompted")
+	for i := 0; i < agentsMDAsks; i++ {
+		control := askNoTools(t, claudeBin, t.TempDir())
+		t.Logf("empty directory answered (ask %d of %d): %s", i+1, agentsMDAsks, control)
+		require.NotContains(t, control, agentsMDMarker,
+			"the negative control quoted the rule with no AGENTS.md present, so the question does not prove "+
+				"anything was loaded — pick a rule the model cannot produce unprompted")
+	}
 }
+
+// agentsMDAsks is how many times the gate asks: any one quoting answer
+// passes the repo root, and the negative control must quote in none.
+const agentsMDAsks = 3
 
 // askNoTools runs one `claude -p` turn in dir with every tool disabled.
 func askNoTools(t *testing.T, claudeBin, dir string) string {

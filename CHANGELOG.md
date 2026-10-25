@@ -10,6 +10,13 @@
 - No config adds it back. A `tools:` entry naming it is `tools.invalid` (the entry is dropped), and
   a `human_review:` delegate naming it joins nothing.
 
+### Harness
+
+- `make check-agents-md` asks up to three times and passes when any answer quotes the AGENTS.md-only
+  rule; the negative control must quote it in none of three. Haiku sometimes declines to quote
+  though the file loaded (about 8 in 34 runs on Claude Code 2.1.310, D533), and a session that
+  never loaded the file cannot know the phrase.
+
 ## v1.3.0 (2026-10-25)
 
 APEX v1.3, on v1.2.0: fixes. A plugin's skill in `tools:` now runs (F-E1-1); two diagnostic codes
