@@ -95,7 +95,9 @@ func (p *Project) provenanceFindings(ctx context.Context) []Finding {
 				continue
 			}
 			switch {
-			case strings.HasPrefix(rel, "specs/") && !c.squash:
+			case strings.HasPrefix(rel, "specs/") && !c.squash && !(c.subject == RewriteLiveSubject && p.pureLiveRewrite(ctx, c.sha)):
+				// v1.4 (D526): ape's (live) rewrite edits specs, and only
+				// when its diff is that rewrite and nothing else.
 				reported[f] = true
 				fs = append(fs, Finding{File: f, Message: "edited outside an archive squash by " + by +
 					", which carries no `Change:` trailer of an archived change — specs change only through `ape change archive`: " +

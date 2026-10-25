@@ -4815,6 +4815,7 @@ Subcommands:
 - `lift` — Lift an APEX v0 project to v1 in one commit (the mechanical half of the migration)
 - `operator-interface` — Bring a project made before rc.7 to the operator interface (the v1.0.0_seq-07 migration)
 - `package-check` — Check a library's packed files for APEX folders (the release gate apex-release runs)
+- `rewrite-live` — Rewrite the check kind (live) as (full), in one commit (the v1.4 migration)
 
 ## ape project accept-config
 
@@ -6067,6 +6068,68 @@ Flags:
 
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+
+## ape project rewrite-live
+
+Rewrite the check kind (live) as (full), in one commit (the v1.4 migration)
+
+```
+ape project rewrite-live [--check] [flags]
+```
+
+Rewrite every `(live)` check tag as `(full)`. (live) is (full)'s v1.2 name (D508):
+v1.3 accepted it silently, v1.4 warns (project check's notice check.live-deprecated), and
+it is removed no earlier than v1.5 (D526). A framework migration runs this (command: ape
+project rewrite-live; check: ape project rewrite-live --check); a person may run it too.
+
+What it rewrites, and nothing else in those files:
+  specs        every `check (live):` line of development/specs/**/spec.md
+  drafts       a draft change's change.md: its delta's `check (live):` lines and its
+               tasks' `— check (live):`
+  open gates   a `# scenario (live):` comment line in development/gates/**; when the
+               file is one an approval recorded and is as approved, the approval's SHA-256
+               is recorded again in the same commit, so the rewrite is no gate drift
+Lines inside fenced code blocks of a markdown file are examples and stay as written.
+
+What it leaves: the archive (history), and a started change — its plan is frozen at start
+(change.plan-drift), and `ape change archive` writes its delta's (live) as (full) into
+the specs. They are listed as "left".
+
+One commit, "apex: rewrite (live) as (full)": provenance exempts it from spec.edited because
+its diff is that rewrite and nothing else (a commit with the subject and any other edit is
+judged like any other). Idempotent: with nothing to rewrite it writes nothing (exit 0).
+
+Refused on a change branch (branch.change-branch), with uncommitted changes in a file it
+would write (tree.dirty), and outside a git repository (git.not-a-repo). A command any
+session may run (not person-only).
+
+--check writes nothing: exit 0 when nothing is left to rewrite, 1 (project.live-left,
+naming the files) when something is — the migration's check: 0 applied, 1 not applied,
+2 (project.read-failed) the check itself failed. A started change's tags never count.
+
+JSON: {"rewritten": [{"path", "kind", "count"}], "left": [{"path", "kind", "count", "why"}],
+"approvals": [<milestone>], "commit"}; "rewritten" and "left" are always there. Under
+--check "rewritten" lists what would be written, at the top level beside the failure's
+ok/exit/diagnostics when it is not empty (exit 1).
+
+Exit codes: 0 rewritten, or nothing to rewrite (--check: nothing left) · 1 refused, or
+(--check) some left · 2 a file could not be read.
+
+Examples:
+
+```
+  ape project rewrite-live --check
+  ape project rewrite-live
+  ape project rewrite-live --json
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--check` | bool | `false` | write nothing: exit 0 when nothing is left to rewrite, 1 when something is |
 | `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
 | `--json` | bool | `false` | machine output (JSON on stdout) |
 

@@ -544,8 +544,8 @@ func TestV1Commands_DiagnosticEnvelope(t *testing.T) {
 	stdout, _, err = v1Exec(t, newProjectCmd, "codes")
 	require.NoError(t, err)
 	require.Regexp(t, `(?m)^session\.loop-running +3  retry `, stdout)
-	require.Regexp(t, "(?m)^session\\.orchestrator-running +3  retry +renamed to `session\\.loop-running`; kept as an alias until v1\\.5", stdout)
-	require.Regexp(t, "(?m)^models\\.operator-row +0  person +renamed to `models\\.orchestrator-row`; kept as an alias until v1\\.5", stdout)
+	require.Regexp(t, "(?m)^session\\.orchestrator-running +3  retry +renamed to `session\\.loop-running`; deprecated since v1\\.4 and kept as an alias until v1\\.5", stdout)
+	require.Regexp(t, "(?m)^models\\.operator-row +0  person +renamed to `models\\.orchestrator-row`; deprecated since v1\\.4 and kept as an alias until v1\\.5", stdout)
 }
 
 // Backlog 32, 37 through the CLI: a regression command red at baseline is

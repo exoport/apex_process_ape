@@ -38,7 +38,7 @@ func TestCodeAliases_Table(t *testing.T) {
 	require.Empty(t, AliasOf(CodeChildRunning))
 	require.Equal(t, CodeChildRunning, CanonicalCode(CodeChildRunning))
 	require.Empty(t, FormerlyNote(CodeChildRunning))
-	require.Equal(t, "; formerly session.orchestrator-running", FormerlyNote(CodeLoopRunning))
+	require.Equal(t, "; formerly session.orchestrator-running (deprecated)", FormerlyNote(CodeLoopRunning))
 }
 
 // `ape project codes`' rows: the new code's row lists its aliases and is
@@ -63,7 +63,7 @@ func TestPublishedCodes_AliasRows(t *testing.T) {
 		require.Equal(t, c.code, rows[j].RenamedTo)
 		require.Equal(t, rows[i].Exit, rows[j].Exit)
 		require.Equal(t, rows[i].Action, rows[j].Action)
-		require.Contains(t, rows[j].Meaning, "renamed to `"+c.code+"`; kept as an alias until v1.5")
+		require.Contains(t, rows[j].Meaning, "renamed to `"+c.code+"`; deprecated since v1.4 and kept as an alias until v1.5")
 	}
 	require.Equal(t, 3, rows[idx("session.loop-running")].Exit)
 	require.Equal(t, ActionRetry, rows[idx("session.loop-running")].Action)

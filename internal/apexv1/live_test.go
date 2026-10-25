@@ -230,6 +230,6 @@ func TestLiveCheck_Notices(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(nj), `"code":"check.full-suggested"`)
 	require.Contains(t, string(nj), `"alias":"check.live-suggested"`)
-	require.Equal(t, "; formerly check.live-suggested", FormerlyNote(ls[0].Code))
+	require.Equal(t, "; formerly check.live-suggested (deprecated)", FormerlyNote(ls[0].Code))
 	require.Equal(t, CodeCheckFullSuggested, CanonicalCode("check.live-suggested"))
 }

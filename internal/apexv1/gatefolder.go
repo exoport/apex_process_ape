@@ -199,6 +199,8 @@ func (p *Project) Notices() []Diagnostic {
 	out = append(out, p.failOpenNotices()...)
 	// v1.3: Claude Code 2.1.310's Monitor tool.
 	out = append(out, p.monitorUnguardedNotices()...)
+	// v1.4 (D526): (live) warns.
+	out = append(out, p.liveNotices()...)
 	// v1.1 follow-ups (Q154, Q155).
 	out = append(out, p.configKeyNotices()...)
 	out = append(out, p.decisionPlaceholderNotices()...)

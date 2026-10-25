@@ -65,10 +65,12 @@ func CanonicalCode(code string) string {
 }
 
 // FormerlyNote is what a human line appends after code: "; formerly
-// <alias>" for a renamed code, so the old string still appears, else "".
+// <alias> (deprecated)" for a renamed code, so the old string still
+// appears and says it is going (v1.4, D526: renamed in v1.3, warned in
+// v1.4, removed no earlier than v1.5), else "".
 func FormerlyNote(code string) string {
 	if a := AliasOf(code); a != "" {
-		return "; formerly " + a
+		return "; formerly " + a + " (deprecated)"
 	}
 	return ""
 }
@@ -95,6 +97,9 @@ type PublishedCode struct {
 	CodeDoc
 	Aliases   []string `json:"aliases,omitempty"`
 	RenamedTo string   `json:"renamed_to,omitempty"`
+	// Deprecated marks a former name's row (v1.4, D526): readers that
+	// count the old string move to the new one before it goes.
+	Deprecated bool `json:"deprecated,omitempty"`
 }
 
 // PublishedCodes is DiagnosticCodes as `ape project codes` lists it: each
@@ -109,8 +114,9 @@ func PublishedCodes() []PublishedCode {
 			}
 			out = append(out, PublishedCode{
 				Code: a.Alias, Exit: c.Exit, Action: c.Action,
-				Meaning:   "renamed to `" + a.Code + "`; kept as an alias until " + a.Until + ": a diagnostic carries `" + a.Code + "` in code and this name in alias",
-				RenamedTo: a.Code,
+				Meaning:    "renamed to `" + a.Code + "`; deprecated since v1.4 and kept as an alias until " + a.Until + ": a diagnostic carries `" + a.Code + "` in code and this name in alias",
+				RenamedTo:  a.Code,
+				Deprecated: true,
 			})
 		}
 	}

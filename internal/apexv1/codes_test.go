@@ -37,6 +37,8 @@ var noticeCodes = []string{
 	CodeDocsUnaccepted, CodeContextRelayLow, CodeGateDataOutside,
 	// v1.3: Claude Code 2.1.310's Monitor tool.
 	CodeHooksMonitorUnguarded,
+	// v1.4 (D526): (live) warns.
+	CodeLiveDeprecated,
 }
 
 // The published list and the code agree: every code the source sets or a
@@ -122,6 +124,8 @@ func TestDiagnosticCodes_PublishedListMatchesTheCode(t *testing.T) {
 		// v1.1 W8.
 		"CodeDocsUnaccepted": CodeDocsUnaccepted, "CodeContextRelayLow": CodeContextRelayLow,
 		"CodeGateDataOutside": CodeGateDataOutside,
+		// v1.4.
+		"CodeGuardedConfigTask": CodeGuardedConfigTask, "CodeLiveDeprecated": CodeLiveDeprecated, "CodeLiveLeft": CodeLiveLeft,
 	}
 	for _, glob := range []string{"*.go", filepath.Join("..", "apecmd", "v1_*.go")} {
 		files, err := filepath.Glob(glob)

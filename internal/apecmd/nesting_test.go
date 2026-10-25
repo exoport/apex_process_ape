@@ -411,7 +411,7 @@ func TestNesting_ARefusalCarriesItsCode(t *testing.T) {
 	// A renamed code names its former name too, which readers count (D512).
 	err = sessionRefusal(apexv1.SessionBusy(false, "apex-loop, pid 1"))
 	require.Equal(t, exitV1Conflict, exitCodeOf(t, err))
-	require.Contains(t, err.Error(), "(code session.loop-running, action retry; formerly session.orchestrator-running)")
+	require.Contains(t, err.Error(), "(code session.loop-running, action retry; formerly session.orchestrator-running (deprecated))")
 }
 
 // requireSessionDepth requires err to be the session.depth refusal.

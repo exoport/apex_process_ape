@@ -52,6 +52,9 @@ var boardSkipVerbs = map[string]bool{
 	// The archive layout move changes where archived changes live, not
 	// what status counts or lists.
 	"project archive-layout": true,
+	// v1.4 (D526): the (live) rewrite changes check tags, which status
+	// does not report.
+	"project rewrite-live": true,
 	// rc.7 (rc7-rename): seq-07 changes the config's models rows, the hooks
 	// and AGENTS.md, none of which status reports.
 	"project operator-interface": true,

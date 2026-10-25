@@ -329,7 +329,7 @@ statuses: 1 a check failed, 2 usage, 3 conflict (nothing written).
 `ape project codes` prints every code a v1 command can report, with its exit status, its action
 and what it means. `--json` gives the same as an array of `{code, exit, action, meaning}`;
 a renamed code's row adds `aliases`, and each former name has a row of its own, with the new
-code's exit and action and `renamed_to` naming the new code:
+code's exit and action, `renamed_to` naming the new code and, since v1.4, `deprecated: true`:
 
 ```bash
 ape project codes
@@ -340,8 +340,9 @@ Read it from the installed ape rather than from a copy: a new rule gets a new co
 
 ### Renamed codes
 
-A code whose name came to read wrong is renamed, and its old name stays an alias for a while
-(v1.3, kept until v1.5):
+A code whose name came to read wrong is renamed, and its old name stays an alias for a while:
+renamed in v1.3, deprecated in v1.4, removed no earlier than v1.5, announced in the CHANGELOG one
+release ahead (D526):
 
 | Code | Formerly |
 | --- | --- |
@@ -351,5 +352,5 @@ A code whose name came to read wrong is renamed, and its old name stays an alias
 
 A diagnostic of a renamed code carries the new code in `code` and the old one in `alias`, and the
 human line names both (`code session.loop-running, action retry; formerly
-session.orchestrator-running`). Branch on `code`, and accept the old name there too while you
+session.orchestrator-running (deprecated)`). Branch on `code`, and accept the old name there too while you
 read output from an ape before v1.3, which puts it in `code`.

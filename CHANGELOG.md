@@ -24,6 +24,23 @@
 - **`ape status --json` `gate_frozen`:** an approved milestone's frozen gate set, `{files, globs}`,
   under `milestone` and each `milestones[]` row, so a planner sees what it may not edit.
 
+### Deprecations warn (D526)
+
+The names v1.3 renamed still work in v1.4, and now say they are going: they are removed no earlier
+than v1.5, announced here one release ahead.
+
+- **`(live)`**: a check line using it is the notice `check.live-deprecated` (`ape project check`,
+  `ape change check`). **`ape project rewrite-live`** (new) rewrites the specs, the draft changes
+  and the open gates' `# scenario (live):` comments as `(full)` in one commit,
+  `apex: rewrite (live) as (full)`, which provenance accepts only when its diff is that rewrite and
+  nothing else; an approved gate file it rewrites has its SHA-256 recorded again in the same
+  commit, so it is no gate drift. `--check` is a migration's check: 0 nothing left, 1 some left
+  (`project.live-left`), 2 the check itself failed (`project.read-failed`). A started change keeps
+  its frozen plan; `ape change archive` now writes a delta's `(live)` into the specs as `(full)`.
+- **Renamed codes**: the human line reads `; formerly <old> (deprecated)`, and `ape project codes
+  --json` marks each former name's row `deprecated: true`. JSON `live_skipped` and a task's `live`
+  stay as they were beside `full_skipped` and `full`; read the new names.
+
 ### Silent skips (OQ-SKIP, part)
 
 - `checks.vacuous_output_extra` (guarded): phrases appended to the vacuous list in force, so a

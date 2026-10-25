@@ -48,7 +48,7 @@ func TestCodeAlias_ProjectCheckNotice(t *testing.T) {
 	}
 
 	_, stderr, _ := v1Exec(t, newProjectCmd, "check", "--cwd", root)
-	require.Contains(t, stderr, "(code models.orchestrator-row; formerly models.operator-row)")
+	require.Contains(t, stderr, "(code models.orchestrator-row; formerly models.operator-row (deprecated))")
 	for line := range strings.SplitSeq(stderr, "\n") {
 		if strings.HasPrefix(line, "notice: ") && !strings.Contains(line, "models.apex-orchestrator") {
 			require.NotContains(t, line, "(code ", "a notice of a code never renamed is printed as before")
@@ -60,7 +60,7 @@ func TestCodeAlias_ProjectCheckNotice(t *testing.T) {
 // name an older daemon sends onto the new code's exit.
 func TestCodeAlias_ServiceRefusal(t *testing.T) {
 	r := &service.RefusalError{Code: apexv1.CodeLoopRunning, Action: apexv1.ActionRetry, Msg: "busy"}
-	require.Equal(t, "busy (code session.loop-running, action retry; formerly session.orchestrator-running)", r.Error())
+	require.Equal(t, "busy (code session.loop-running, action retry; formerly session.orchestrator-running (deprecated))", r.Error())
 	require.Equal(t, exitV1Conflict, submitExitCode("session.loop-running"))
 	require.Equal(t, exitV1Conflict, submitExitCode("session.orchestrator-running"), "an older daemon's code")
 	require.Equal(t, ExitUsage, submitExitCode(apexv1.CodeSessionDepth))

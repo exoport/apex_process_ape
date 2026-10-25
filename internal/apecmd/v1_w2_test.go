@@ -82,6 +82,6 @@ func TestPrintNotices_FullSuggestedNamesItsFormerCode(t *testing.T) {
 		Message: "scenario greeting/Hello/hello's check took 1m15s at M1's last gate",
 		Fix:     "write it `- check (full): test -f hello.txt`",
 	}})
-	require.Contains(t, b.String(), "(code check.full-suggested; formerly check.live-suggested)")
+	require.Contains(t, b.String(), "(code check.full-suggested; formerly check.live-suggested (deprecated))")
 	require.Contains(t, b.String(), "`- check (full): test -f hello.txt`")
 }

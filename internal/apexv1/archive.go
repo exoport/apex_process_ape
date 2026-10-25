@@ -84,6 +84,8 @@ func applyDeltas(spec *Spec, capName string, deltas []Delta, u *SpecUpdate) (mer
 				break
 			}
 		}
+		// v1.4 (D526): a (live) tag reaches the spec as (full).
+		d.Req.Text, _ = rewriteLiveMarkdown(d.Req.Text)
 		switch d.Op {
 		case OpAdded:
 			if idx >= 0 {

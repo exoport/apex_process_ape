@@ -191,9 +191,13 @@ Checks run from the project root with `sh -c`, output under `_apex/state/logs/<i
 A full check is a check that does not run on every change: it needs a service, a network or a
 browser, or it is long. It is written `- check (full): <command>` on a scenario, or
 `— check (full): <command>` on a task. `full` is the only kind. `(live)`, its name in ape v1.2,
-is still accepted and means the same, with no warning. Any other kind, full on `human-review`,
-or a kind on `regression:` is the finding `check.bad-kind` (action replan). ape rewrites no spec:
-a `(live)` line changes only when a change rewrites it.
+is still accepted and means the same, but since v1.4 it warns: `ape project check` and
+`ape change check` give the notice `check.live-deprecated`, and it is removed no earlier than
+v1.5 (D526). `ape project rewrite-live` rewrites the specs, the draft changes and the open gates'
+`# scenario (live):` comments as `(full)` in one commit, which a framework migration runs; a
+started change keeps its plan, and `ape change archive` writes its delta's `(live)` into the specs
+as `(full)`. Any other kind, full on `human-review`, or a kind on `regression:` is the finding
+`check.bad-kind` (action replan).
 
 | Run | Full checks it runs |
 | --- | --- |
