@@ -327,12 +327,40 @@ A check's result is its shell's exit, recorded when the shell exits (v1.2). What
 and left running in its process group (a server it did not stop, a `sleep` orphaned when the
 script killed the subshell around it) is then sent SIGTERM, and SIGKILL a second later. Each
 is recorded as `leftovers` (`"<pid> <command>"`; the pid alone on Windows, where the check's job
-holds them), and the log ends with a line naming them. To keep something running after the check,
-such as a service later steps use, start it with `setsid` so it leaves the group: a process outside
-the group is not ended. If it holds the check's output open, ape stops reading 5 s after the check
-exited and says so in the log; the exit stands. Before v1.2 such a process made a green check
-exit 127 (`WaitDelay expired before I/O complete`), and a quiet leftover kept running after the
-check.
+holds them), and the log ends with a line naming them. If something holds the check's output open,
+ape stops reading 5 s after the check exited and says so in the log; the exit stands. Before v1.2
+such a process made a green check exit 127 (`WaitDelay expired before I/O complete`), and a quiet
+leftover kept running after the check.
+
+Since v1.4, on Linux, each check also runs in a systemd scope of its own
+(`systemd-run --user --scope`, unit `ape-<pid>-<n>`, beside ape in its slice), so its cgroup holds
+everything it starts. **A process that left the group (`setsid`, a double fork, a daemon) is ended
+too:** nothing a check starts outlives it. A service later steps need is not started by a check.
+A timeout kills the whole scope, and so does ape's end. The result records `reaping: "scope"` (or
+`"group"` where there is no systemd user manager, as in a container or CI, and on macOS and
+Windows), `scope_unit` and the scope's `memory_peak` in bytes. Starting a scope costs about 15 ms.
+
+What else a check gets in v1.4:
+
+- **Its own `TMPDIR`**, `<TMPDIR>/ape-<uid>/<pid>-<id>` (mode 0700; under `/tmp` when ape's own TMPDIR would make it longer than 60 bytes), removed when it ends (`tmp_bytes`
+  records what it held). It is short so a unix socket a test binds under it fits.
+- **A process outside the check that holds that `TMPDIR`** (in its command line, working directory
+  or environment) is the check's too: ended and named in `leftovers` ("it held the check's
+  TMPDIR"). Snap's Chromium, which moves itself out of the check's scope and keeps using the
+  check's `TMPDIR` as its profile, is the case that needs it. Set `CHROME_EXECUTABLE` to a
+  Chrome that is not a snap where you can.
+- **Its own compose project**, `COMPOSE_PROJECT_NAME=apex-<project>-<id>` (`compose_project`). It
+  overrides the project's `name:`, its `.env` and the person's environment; only `-p` on the
+  command line opts out. A gate that started the dev stack's services gets its own, and a fixed
+  host port the dev stack holds then shows as `port-held` (below).
+- **Containers**, where `docker` is on `PATH` and its daemon answers: each container the check
+  created is recorded in `containers` (`secs` alive, its own `memory_peak`, `owner`). Those of the
+  check's compose project are removed with their networks and volumes (`removed: true`);
+  testcontainers' are left to Ryuk; any other is reported and never removed.
+- **A red check whose output says its port is taken** (`address already in use`, `port is already
+  allocated`, `EADDRINUSE`) is unrun, `port-held`, when the port's holder is outside the check (a
+  process, or a container publishing it): not ready, never red for the product. Held by the check
+  itself, it stays red.
 
 ### Advise files and unmatched tools
 

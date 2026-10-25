@@ -244,19 +244,19 @@ func scopeMemberArgv(pid int) []string {
 // scope's, where the check has one, so what left the group is among them.
 func (g *checkGroup) leftovers() []groupMember {
 	var left []groupMember
+	seen := map[int]bool{}
 	if g.unit != "" {
-		if pids := scopePIDs(g.dir); pids != nil {
-			for _, pid := range pids {
-				m := groupMember{pid: pid, argv: scopeMemberArgv(pid)}
-				if !m.isWatchdog() {
-					left = append(left, m)
-				}
+		for _, pid := range scopePIDs(g.dir) {
+			m := groupMember{pid: pid, argv: scopeMemberArgv(pid)}
+			if seen[pid] = true; !m.isWatchdog() {
+				left = append(left, m)
 			}
-			return left
 		}
 	}
+	// The group's too, in a scope: a process can leave the scope and keep
+	// the group (a systemd-run --scope the check runs).
 	for _, m := range groupMembers(g.pid) {
-		if !m.isWatchdog() {
+		if !seen[m.pid] && !m.isWatchdog() {
 			left = append(left, m)
 		}
 	}
@@ -282,4 +282,21 @@ func parseGroupMembers(out string, pgid int) []groupMember {
 		members = append(members, groupMember{pid: pid, argv: []string{strings.Join(f[3:], " ")}})
 	}
 	return members
+}
+
+// contains reports whether pid is the check's: in its scope, or its
+// process group.
+func (g *checkGroup) contains(pid int) bool {
+	if g.unit != "" {
+		for _, p := range scopePIDs(g.dir) {
+			if p == pid {
+				return true
+			}
+		}
+	}
+	if g.pid <= 0 {
+		return false
+	}
+	pgid, err := syscall.Getpgid(pid)
+	return err == nil && pgid == g.pid
 }

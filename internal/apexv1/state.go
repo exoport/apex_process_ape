@@ -93,6 +93,12 @@ type CheckResult struct {
 	Reaping    string `json:"reaping,omitempty"`
 	ScopeUnit  string `json:"scope_unit,omitempty"`
 	MemoryPeak int64  `json:"memory_peak,omitempty"`
+	// TmpBytes is what its own TMPDIR held when it ended (v1.4); Compose
+	// the COMPOSE_PROJECT_NAME it ran under; Containers what it created
+	// (checkinfra.go).
+	TmpBytes   int64          `json:"tmp_bytes,omitempty"`
+	Compose    string         `json:"compose_project,omitempty"`
+	Containers []ContainerUse `json:"containers,omitempty"`
 }
 
 // Red reports a result that fails its run: a non-zero exit that was not

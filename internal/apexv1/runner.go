@@ -141,9 +141,13 @@ func runCheck(ctx context.Context, dir, cmd, logPath, logNote string, lim TierTi
 	// A check is a test, not a session: it must not inherit a terminal.
 	// APE_GATE=1 tells a harness ape runs it (v1.4, OQ-SKIP): the
 	// convention is that a harness fails rather than skip when it is set.
-	c.Env = append(append(os.Environ(), EnvApeGate+"=1"), env...)
+	// v1.4 (B1): its own TMPDIR and compose project (checkinfra.go),
+	// over ape's environment and under the check's own.
+	infra := newCheckInfra(ctx, dir)
+	c.Env = append(append(append(os.Environ(), EnvApeGate+"=1"), infra.env()...), env...)
 	g, err := prepareCheck(c, script)
 	if err != nil {
+		infra.discard()
 		return CheckResult{Cmd: cmd, Exit: exitNotFound, Tail: []string{"[ape] " + err.Error()}}
 	}
 	c.Cancel = func() error { return g.kill(c) }
@@ -155,6 +159,7 @@ func runCheck(ctx context.Context, dir, cmd, logPath, logNote string, lim TierTi
 	// check's exit (eval bf :3 M2: a green gate recorded as 127).
 	pr, pw, err := os.Pipe()
 	if err != nil {
+		infra.discard()
 		return CheckResult{Cmd: cmd, Exit: exitNotFound, Tail: []string{"[ape] " + err.Error()}}
 	}
 	defer func() { _ = pr.Close() }()
@@ -198,6 +203,17 @@ func runCheck(ctx context.Context, dir, cmd, logPath, logNote string, lim TierTi
 	runtime.UnlockOSThread()
 	secs := checkElapsed(start).Seconds()
 	finished := runCtx.Err() == nil
+	// v1.4 (B1): a red check whose port was taken by what is not the
+	// check's — judged before its leftovers are ended, while the check's
+	// own holder is still in its group.
+	portHeld := ""
+	if finished && err != nil {
+		if port := takenPort(buf.String()); port > 0 {
+			if h := portHolder(ctx, port, infra.docker, g.contains); h != "" {
+				portHeld = "port " + strconv.Itoa(port) + " is held by " + h + ", outside the check"
+			}
+		}
+	}
 	// What a check that exited on its own left running is ended and named
 	// (F15); a check killed at a timeout or an interrupt was killed whole.
 	// In a scope (v1.4) the watchdog holds the scope open: its leftovers
@@ -216,6 +232,11 @@ func runCheck(ctx context.Context, dir, cmd, logPath, logNote string, lim TierTi
 			leftovers = g.endLeftovers()
 		}
 	}
+	// v1.4 (B1): what held its TMPDIR from outside, its containers, the
+	// TMPDIR itself.
+	var fin CheckResult
+	infra.finish(ctx, &fin, g.contains)
+	leftovers = append(leftovers, fin.Leftovers...)
 	// The output is read until every holder of the pipe is gone. One that
 	// left the check's group is not ended above: it is given outputDrain,
 	// then ape stops reading — the check's exit stands.
@@ -253,6 +274,10 @@ func runCheck(ctx context.Context, dir, cmd, logPath, logNote string, lim TierTi
 			exit = exitNotFound
 			_, _ = io.WriteString(w, "\n[ape] "+err.Error()+"\n")
 		}
+	}
+	if portHeld != "" && exit != 0 && exit != ExitTimeout {
+		exit, reason, detail = ExitUnrun, ReasonUnrun, portHeld+" (port-held): not ready, never red for the product"
+		_, _ = io.WriteString(w, "\n[ape] unrun (port-held): "+portHeld+"\n")
 	}
 	sum := hex.EncodeToString(hash.Sum(nil)) // of the command's own output
 	if exit == 0 {
@@ -308,6 +333,9 @@ func runCheck(ctx context.Context, dir, cmd, logPath, logNote string, lim TierTi
 		Reaping:      g.reaping(),
 		ScopeUnit:    g.scopeUnit(),
 		MemoryPeak:   peak,
+		TmpBytes:     fin.TmpBytes,
+		Compose:      fin.Compose,
+		Containers:   fin.Containers,
 	}
 }
 

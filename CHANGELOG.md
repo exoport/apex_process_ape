@@ -10,6 +10,26 @@
 - No config adds it back. A `tools:` entry naming it is `tools.invalid` (the entry is dropped), and
   a `human_review:` delegate naming it joins nothing.
 
+### Test infrastructure: nothing a check starts outlives it (D498 (a), D561, D563)
+
+- **A systemd scope per check on Linux.** Each check runs in `systemd-run --user --scope` of its
+  own, so a process that left its process group (`setsid`, a double fork, a daemon) is ended with
+  its leftovers, a timeout kills the whole scope, and ape's end does too. **Behaviour change:**
+  starting something with `setsid` to keep it running after a check no longer works. The result
+  records `reaping` (`scope`, or `group` where there is no systemd user manager: containers, CI,
+  macOS, Windows), `scope_unit` and `memory_peak`. About 15 ms a check.
+- **A `TMPDIR` of its own** per check, `/tmp/ape-<uid>/<pid>-<id>`, removed when it ends
+  (`tmp_bytes`), and short enough for a unix socket under it. A process outside the check that holds
+  it is ended and named: snap's Chromium escapes the scope and keeps using the check's `TMPDIR`.
+- **`COMPOSE_PROJECT_NAME=apex-<project>-<id>`** in every check, over the project's `name:`, `.env`
+  and the person's environment; only `-p` opts out. **Behaviour change for compose-using projects:**
+  a gate that ran against the person's dev stack now gets a stack of its own.
+- **Containers** (with a docker daemon): those of the check's compose project are removed with
+  their networks and volumes; any other it created is reported in `containers`, never removed; each
+  one's lifetime and memory peak are recorded.
+- **`port-held`**: a red check whose port was taken by a process or container outside it is unrun,
+  not red.
+
 ### The full run (D508, D563)
 
 - **The gate records its full run.** Once the `Gate:` command is green, the full checks and the

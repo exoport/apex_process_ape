@@ -138,3 +138,6 @@ func (g *checkGroup) memoryPeak() int64 { return 0 }
 
 // busy reports whether the job used CPU time since the last sample.
 func (g *checkGroup) busy(last, now time.Duration) bool { return now != last }
+
+// contains reports whether pid is the check's (Windows: never asked).
+func (g *checkGroup) contains(int) bool { return false }
