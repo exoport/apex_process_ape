@@ -1,0 +1,20 @@
+
+running 2 tests
+i 1/2
+t::a --- FAILED
+
+failures:
+
+---- t::a stdout ----
+
+thread 't::a' (1837255) panicked at src/lib.rs:3:36:
+boom
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    t::a
+
+test result: FAILED. 0 passed; 1 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `--lib`

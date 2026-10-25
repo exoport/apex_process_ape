@@ -1,0 +1,10 @@
+
+ RUN  v3.2.7 /work/vt
+
+ ↓ a.test.js (3 tests | 3 skipped)
+
+ Test Files  1 skipped (1)
+      Tests  3 skipped (3)
+   Start at  14:22:36
+   Duration  453ms (transform 22ms, setup 0ms, collect 12ms, tests 0ms, environment 0ms, prepare 116ms)
+

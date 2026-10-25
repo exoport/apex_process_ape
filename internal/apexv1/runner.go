@@ -244,6 +244,20 @@ func runCheck(ctx context.Context, dir, cmd, logPath, logNote string, lim TierTi
 			_, _ = io.WriteString(w, "\n[ape] vacuous: "+detail+" (checks.vacuous_output)\n")
 		}
 	}
+	// OQ-SKIP (v1.4): the runner's counts, and, for a check whose output
+	// ape judges (vacuous non-nil: never a gate's own command), a run that
+	// tested nothing is unrun.
+	var tests *TestCounts
+	skip := ""
+	if c, ok := testCounts(buf.String()); ok {
+		tests = &c
+		if exit == 0 && vacuous != nil {
+			if why, d := skipVerdict(cmd, c); why != "" {
+				exit, reason, detail, skip = ExitUnrun, ReasonUnrun, d, why
+				_, _ = io.WriteString(w, "\n[ape] unrun ("+why+"): "+d+"\n")
+			}
+		}
+	}
 	shellNote := shellBuiltinNote(exit, buf.String())
 	if shellNote != "" {
 		_, _ = io.WriteString(w, "\n[ape] note: "+shellNote+"\n")
@@ -271,6 +285,8 @@ func runCheck(ctx context.Context, dir, cmd, logPath, logNote string, lim TierTi
 		Detail:       detail,
 		ShellNote:    shellNote,
 		Leftovers:    leftovers,
+		Tests:        tests,
+		Skip:         skip,
 	}
 }
 

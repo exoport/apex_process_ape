@@ -64,8 +64,20 @@ than v1.5, announced here one release ahead.
   missing browser or sibling checkout no longer reads as a pass or as a defect. A project using the
   mapping form needs ape 1.4.0 (an older ape cannot read it).
 
-### Silent skips (OQ-SKIP, part)
+### Silent skips (OQ-SKIP)
 
+- **A check that tested nothing is unrun.** ape reads the passed, skipped and failed counts from the
+  runner's own summary (`go test -v`/`-json`, gotestsum, pytest, cargo, `node --test`, jest,
+  vitest, mocha, flutter and dart; measured on each stack) and records them on the result
+  (`tests`). On a zero exit, 0 passed with skips is `unrun` (`skip: all-skipped`), and a check that
+  names its tests and skipped one is `unrun` (`skip: named-skip`). The `Gate:` command itself is not
+  judged.
+- **`-v` for a single `go test` check:** plain `go test` prints only `ok pkg`, which hides a skip,
+  so a task or scenario check that is one `go test` invocation gets `-v` appended to its `GOFLAGS`
+  (the project's own kept; recorded as `goflags`). Its log gets longer. Not for any other go command,
+  a compound command or one that sets `GOFLAGS` itself.
+- **`check.pass-drop`** (verify's notice): a green check that passed fewer than half the tests it
+  passed at the change's last verify.
 - `checks.vacuous_output_extra` (guarded): phrases appended to the vacuous list in force, so a
   project adds its harness's own words without copying the five defaults back.
 - Every check ape runs has `APE_GATE=1` in its environment. By convention a harness that cannot set

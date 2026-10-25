@@ -1,0 +1,8 @@
+=== RUN   TestA
+    a_test.go:3: harness unavailable
+--- SKIP: TestA (0.00s)
+=== RUN   TestB
+    a_test.go:4: harness unavailable
+--- SKIP: TestB (0.00s)
+PASS
+ok  	p1	0.003s

@@ -1,0 +1,23 @@
+FAIL ./b.test.cjs
+  ✕ a (3 ms)
+  ✓ b
+
+  ● a
+
+    expect(received).not.toBe(expected) // Object.is equality
+
+    Expected: not "fail"
+
+      1 | const m=process.env.MODE
+    > 2 | ;(m==='skip'?test.skip:test)('a',()=>{ expect(m).not.toBe('fail') })
+        |                                                      ^
+      3 | ;(m==='skip'?test.skip:test)('b',()=>{})
+      4 |
+
+      at Object.<anonymous> (b.test.cjs:2:54)
+
+Test Suites: 1 failed, 1 total
+Tests:       1 failed, 1 passed, 2 total
+Snapshots:   0 total
+Time:        0.211 s, estimated 1 s
+Ran all test suites.

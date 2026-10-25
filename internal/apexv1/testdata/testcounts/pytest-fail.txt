@@ -1,0 +1,13 @@
+F.                                                                       [100%]
+=================================== FAILURES ===================================
+____________________________________ test_a ____________________________________
+
+    def test_a():
+        if M=="skip": pytest.skip("harness unavailable")
+>       assert M!="fail"
+E       AssertionError: assert 'fail' != 'fail'
+
+test_a.py:5: AssertionError
+=========================== short test summary info ============================
+FAILED test_a.py::test_a - AssertionError: assert 'fail' != 'fail'
+1 failed, 1 passed in 0.02s

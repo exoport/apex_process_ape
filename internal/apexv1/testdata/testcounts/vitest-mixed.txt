@@ -1,0 +1,36 @@
+
+ RUN  v3.2.7 /work/vt
+
+ ❯ a.test.js (3 tests | 1 failed | 2 skipped) 9ms
+   ↓ a
+   × b 8ms
+     → expected 1 to be 2 // Object.is equality
+   ↓ c
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  a.test.js > b
+AssertionError: expected 1 to be 2 // Object.is equality
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 2[39m
+[31m+ 1[39m
+
+ ❯ a.test.js:3:26
+      1| import {test,expect} from 'vitest'
+      2| test.skip('a',()=>{})
+      3| test('b',()=>{ expect(1).toBe(2) })
+       |                          ^
+      4| test.skip('c',()=>{})
+      5| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 2 skipped (3)
+   Start at  14:22:34
+   Duration  468ms (transform 22ms, setup 0ms, collect 12ms, tests 9ms, environment 0ms, prepare 83ms)
+

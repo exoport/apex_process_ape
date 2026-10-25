@@ -1,0 +1,14 @@
+{"Time":"2026-10-25T14:21:05.868799845-03:00","Action":"start","Package":"p1"}
+{"Time":"2026-10-25T14:21:05.87151002-03:00","Action":"run","Package":"p1","Test":"TestA"}
+{"Time":"2026-10-25T14:21:05.871573158-03:00","Action":"output","Package":"p1","Test":"TestA","Output":"=== RUN   TestA\n","OutputType":"frame"}
+{"Time":"2026-10-25T14:21:05.871609146-03:00","Action":"output","Package":"p1","Test":"TestA","Output":"    a_test.go:3: harness unavailable\n"}
+{"Time":"2026-10-25T14:21:05.871638436-03:00","Action":"output","Package":"p1","Test":"TestA","Output":"--- SKIP: TestA (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-25T14:21:05.871646555-03:00","Action":"skip","Package":"p1","Test":"TestA","Elapsed":0}
+{"Time":"2026-10-25T14:21:05.871656648-03:00","Action":"run","Package":"p1","Test":"TestB"}
+{"Time":"2026-10-25T14:21:05.871661183-03:00","Action":"output","Package":"p1","Test":"TestB","Output":"=== RUN   TestB\n","OutputType":"frame"}
+{"Time":"2026-10-25T14:21:05.871670156-03:00","Action":"output","Package":"p1","Test":"TestB","Output":"    a_test.go:4: harness unavailable\n"}
+{"Time":"2026-10-25T14:21:05.871679851-03:00","Action":"output","Package":"p1","Test":"TestB","Output":"--- SKIP: TestB (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-10-25T14:21:05.871688517-03:00","Action":"skip","Package":"p1","Test":"TestB","Elapsed":0}
+{"Time":"2026-10-25T14:21:05.871697259-03:00","Action":"output","Package":"p1","Output":"PASS\n","OutputType":"frame"}
+{"Time":"2026-10-25T14:21:05.872096542-03:00","Action":"output","Package":"p1","Output":"ok  \tp1\t0.003s\n"}
+{"Time":"2026-10-25T14:21:05.872125812-03:00","Action":"pass","Package":"p1","Elapsed":0.003}

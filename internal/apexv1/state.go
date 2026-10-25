@@ -77,6 +77,15 @@ type CheckResult struct {
 	// what `ape decision standard` removed (D232 Q131) — the names;
 	// StalePointer says how to retire it.
 	StaleNames []string `json:"stale_names,omitempty"`
+	// Tests are the passed/skipped/failed counts its runner's summary gave
+	// (v1.4, OQ-SKIP; testcounts.go), when ape could read them. Skip marks
+	// an unrun for what it skipped: "all-skipped" (0 passed, some skipped)
+	// or "named-skip" (a test the check names was skipped).
+	Tests *TestCounts `json:"tests,omitempty"`
+	Skip  string      `json:"skip,omitempty"`
+	// GoFlags is the GOFLAGS ape gave a single `go test` check so it
+	// prints its tests (v1.4, D563 Q8): the project's own with -v appended.
+	GoFlags string `json:"goflags,omitempty"`
 }
 
 // Red reports a result that fails its run: a non-zero exit that was not

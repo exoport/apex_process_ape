@@ -254,6 +254,15 @@ func progressf(w io.Writer, format string, args ...any) {
 // stay beside the last as <name>.try<k>.log.
 func (p *Project) runWithRetries(ctx context.Context, pc *PlannedCheck, logPath string, lim TierTimeout, vacuous []string, retries int, inGit bool) CheckResult {
 	var r CheckResult
+	// D563 Q8: a task's or scenario's single `go test` prints its tests.
+	env := pc.Env
+	goflags := ""
+	if pc.Kind == KindTask || pc.Kind == KindScenario {
+		if gf := goFlagsV(pc.Cmd); gf != nil {
+			env = append(append([]string(nil), pc.Env...), gf...)
+			goflags = strings.TrimPrefix(gf[0], "GOFLAGS=")
+		}
+	}
 	var strays, keptDirs []string
 	for try := 0; ; try++ {
 		path := logPath
@@ -270,7 +279,7 @@ func (p *Project) runWithRetries(ctx context.Context, pc *PlannedCheck, logPath 
 			done := p.markChecking(pc.Cmd, path)
 			start := Stamp()
 			before = p.snapshot(ctx)
-			r = runCheck(ctx, p.Root, pc.Cmd, path, pc.LogNote, lim, vacuous, pc.Env...)
+			r = runCheck(ctx, p.Root, pc.Cmd, path, pc.LogNote, lim, vacuous, env...)
 			var undone []string
 			undone, kept = p.undoStrays(ctx, before)
 			strays = append(strays, undone...)
@@ -281,7 +290,7 @@ func (p *Project) runWithRetries(ctx context.Context, pc *PlannedCheck, logPath 
 			})
 			done()
 		} else {
-			r = runCheck(ctx, p.Root, pc.Cmd, path, pc.LogNote, lim, vacuous, pc.Env...)
+			r = runCheck(ctx, p.Root, pc.Cmd, path, pc.LogNote, lim, vacuous, env...)
 		}
 		if kept != "" {
 			keptDirs = append(keptDirs, kept)
@@ -292,6 +301,7 @@ func (p *Project) runWithRetries(ctx context.Context, pc *PlannedCheck, logPath 
 				_ = os.Rename(path, logPath)
 			}
 			r.Log = p.Rel(logPath)
+			r.GoFlags = goflags
 			if try > 0 {
 				r.Tries = try + 1
 				r.Flaky = r.Exit == 0

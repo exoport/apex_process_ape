@@ -600,6 +600,9 @@ func (p *Project) verify(ctx context.Context, ci ChangeInfo, opt RunOptions, kee
 	if advise == nil {
 		advise = []AdviseFile{}
 	}
+	// v1.4 (OQ-SKIP): a green check whose runner passed far fewer tests
+	// than at the last verify.
+	notices = append(notices, passDropNotices(st.Verify, results)...)
 	if notices == nil {
 		notices = []Diagnostic{}
 	}

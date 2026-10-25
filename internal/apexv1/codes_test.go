@@ -39,6 +39,8 @@ var noticeCodes = []string{
 	CodeHooksMonitorUnguarded,
 	// v1.4 (D526): (live) warns.
 	CodeLiveDeprecated,
+	// v1.4 (OQ-SKIP).
+	CodePassDrop,
 }
 
 // The published list and the code agree: every code the source sets or a
@@ -126,7 +128,7 @@ func TestDiagnosticCodes_PublishedListMatchesTheCode(t *testing.T) {
 		"CodeGateDataOutside": CodeGateDataOutside,
 		// v1.4.
 		"CodeGuardedConfigTask": CodeGuardedConfigTask, "CodeLiveDeprecated": CodeLiveDeprecated, "CodeLiveLeft": CodeLiveLeft,
-		"CodeGateStubRed": CodeGateStubRed,
+		"CodeGateStubRed": CodeGateStubRed, "CodePassDrop": CodePassDrop,
 	}
 	for _, glob := range []string{"*.go", filepath.Join("..", "apecmd", "v1_*.go")} {
 		files, err := filepath.Glob(glob)

@@ -1,0 +1,15 @@
+00:00 +0: loading /work/fl/test/a_test.dart
+00:00 +0: a
+00:00 +0 -1: a [E]
+  Expected: false
+    Actual: <true>
+  
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/a_test.dart 5:18                               main.<fn>
+  
+00:00 +0 -1: b
+00:00 +1 -1: Some tests failed.
+
+Failing tests:
+  /work/fl/test/a_test.dart: a

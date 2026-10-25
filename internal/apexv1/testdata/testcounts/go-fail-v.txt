@@ -1,0 +1,8 @@
+=== RUN   TestA
+    a_test.go:3: boom
+--- FAIL: TestA (0.00s)
+=== RUN   TestB
+--- PASS: TestB (0.00s)
+FAIL
+FAIL	p1	0.002s
+FAIL

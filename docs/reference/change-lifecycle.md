@@ -227,7 +227,18 @@ mark it `— regression:`. Checks of the change that passed at baseline are list
 | Result | When | Recorded as |
 | --- | --- | --- |
 | vacuous | Exit 0, but the output says nothing ran (`checks.vacuous_output`; default "no tests to run", "running 0 tests", "Ran 0 tests", "0 passing", "collected 0 items"; `[]` turns it off) | red, reason `vacuous`, exit -2 |
-| unrun | A `requires:` entry is missing: the check mentions `$NAME` and `NAME` is unset (`NAME: env`), or runs `NAME` and it is not on `PATH` (`NAME: cmd`) | not run; red, reason `unrun`, exit -3 |
+| unrun | A `requires:` entry is missing: the check mentions `$NAME` and `NAME` is unset (`NAME: env`), or runs `NAME` and it is not on `PATH` (`NAME: cmd`), or (v1.4) a probe it binds does not exit 0 (`NAME: {probe, when}`: "NAME is not ready") | not run; red, reason `unrun`, exit -3 |
+| unrun, `skip: all-skipped` | v1.4. Exit 0, but the runner's summary says every test it ran was skipped: 0 passed, at least one skipped | red, reason `unrun`, exit -3 |
+| unrun, `skip: named-skip` | v1.4. Exit 0, the check names its tests (`go test -run`, a pytest `path::test`, flutter `--plain-name`/`--name`), and the summary says one was skipped | red, reason `unrun`, exit -3 |
+
+The skip verdicts read the counts the runner's own summary gives (`tests: {passed, skipped,
+failed, parser}` on the result): `go test -v` and `-json`, gotestsum, pytest, cargo, `node --test`,
+jest, vitest, mocha, and flutter and dart's progress line. Plain `go test` prints no per-test
+lines, so for a task or scenario check that is one `go test` invocation (no pipe, no chain, no
+`GOFLAGS=` of its own, no `-v` or `-json`) ape appends `-v` to `GOFLAGS` (`goflags` on the result;
+the log gets longer). The gate's own `Gate:` command is never judged this way. A green check that
+passed fewer than half the tests it passed green at the change's last verify (at least 4 then) is
+the verify notice `check.pass-drop`.
 
 Vacuous and unrun checks are not retried.
 
