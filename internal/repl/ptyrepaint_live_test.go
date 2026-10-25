@@ -48,6 +48,7 @@ func livePTYRepaintsDuringTool(t *testing.T, claudeBin string) {
 	// Well under claude's 120 s Bash default timeout, so the command is
 	// still running for the whole sampled window.
 	const sleepFor = 25 * time.Second
+	const silentCommand = "timeout 25 tail -f /dev/null || true"
 
 	dir, token := uniqueWorkdir(t)
 	name := sessionName(t, "ptyrepaint")
@@ -64,8 +65,14 @@ func livePTYRepaintsDuringTool(t *testing.T, claudeBin string) {
 	// "run it with the Bash tool", and claude launched a background
 	// sub-agent instead, ended its turn, and left an idle pane with no
 	// foreground tool row to measure at all.
+	//
+	// Not a standalone sleep: Claude Code 2.1.310 blocks `sleep 25` as a
+	// Bash call ("Blocked: standalone sleep 25 … use Monitor …"), so the
+	// seed had nothing to measure. This command is as silent and as long,
+	// and exits 0. Measured: `sleep 25` passed on 2.1.309 and was blocked
+	// on 2.1.310, back to back on the same account.
 	require.NoError(t, SendCommand(ctx, name,
-		"Run this command YOURSELF, directly, with the Bash tool: sleep 25. "+
+		"Run this command YOURSELF, directly, with the Bash tool: "+silentCommand+" . "+
 			"Do NOT use the Agent tool, do NOT delegate to a sub-agent, and do NOT run it in the "+
 			"background — call the Bash tool in this turn and wait for it. Run no other tool, write no "+
 			"files, and print nothing while it runs. When it returns, reply with the single word DONE."))
@@ -134,8 +141,8 @@ func livePTYRepaintsDuringTool(t *testing.T, claudeBin string) {
 			"signal here and the reasoning recorded at pipeline_interactive.go's OnStepStart should be "+
 			"re-measured rather than trusted.", samples)
 
-	t.Logf("PTY stayed within %v of live across %d samples while `sleep 25` ran; transcript static at %d bytes",
-		worstPTY.Round(100*time.Millisecond), samples, sizeAtStart)
+	t.Logf("PTY stayed within %v of live across %d samples while `%s` ran; transcript static at %d bytes",
+		worstPTY.Round(100*time.Millisecond), samples, silentCommand, sizeAtStart)
 }
 
 // toolRowRunning reports whether the pane shows a FOREGROUND tool call in
