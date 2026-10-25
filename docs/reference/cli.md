@@ -4061,6 +4061,7 @@ Subcommands:
 
 - `approve` — Write Status: approved (by <who> <ts>)
 - `close` — Run the gate; on exit 0 write Status: done (<ts> <sha>)
+- `full` — Run the milestone's full checks and regression command, and record them for the gate
 - `gate` — Run the milestone's gate and record the result
 - `gate-test` — Self-test a gate folder before its milestone exists: the stub run passes, the plain gate is red
 - `new` — Append a milestone (Status: proposed) to roadmap.md
@@ -4318,6 +4319,78 @@ Flags:
 | `--timeout` | duration | `0s` | ceiling for each command run, overriding _apex/config.yaml timeouts.<tier>.max (default: check 2h, regression 2h, gate 4h; capped at ape's hard ceilings 4h/8h/12h); the tier's idle window still applies; exit 124 when exceeded |
 | `--wait` | duration | `9m0s` | how long this call waits for the detached run (at most 9m30s; 0 returns at once); exit 75 while it still runs — run the same command again to attach |
 
+## ape milestone full
+
+Run the milestone's full checks and regression command, and record them for the gate
+
+```
+ape milestone full <M> [flags]
+```
+
+Run the milestone's full run on demand: every `check (full):` scenario of the spec and the
+milestone's regression command (its milestone tier), judged as `ape milestone gate` judges them,
+and record it in _apex/state/logs/full-<M>.json. It records no gate result and commits
+nothing.
+
+The gate runs the same full run itself once its Gate: command is green (a red Gate:
+command is red already, and the full checks are skipped), and records it the same way. A
+full run is current while HEAD, the working tree (ape's state aside), the milestone's
+approval, its full checks and the regression command are what they were when it ended; a
+gate run again, and `ape milestone close`, take a current one instead of running them again
+(JSON run.full_run_reused: when it ran). `ape milestone gate <M> --rerun` runs them anyway.
+
+Same refusals as the gate (a change branch, a done milestone, an approval ape holds no
+record of, or a gate changed since it). Timeouts: each scenario under timeouts.check, the
+regression command under timeouts.regression. A long run (the milestone's lock: run.busy
+beside its gate or close): --wait, exit 75, attach by running it again.
+
+JSON: {"milestone", "at", "sha", "tree", "results": [<check result>], "regression",
+"verdict", "secs", "by": "full"}.
+
+Exit codes: 0 green · 1 a full check red or the regression command newly red
+(milestone.full-red), or refused · 75 still running.
+
+Detached runs (D58 2.3): the command takes the run lock of its change (or milestone),
+_apex/state/runs/<id|M>.json, and runs in a detached worker (`ape __run`, its own
+session, output in _apex/state/runs/<id|M>.log), so the call that started it can be cut,
+backgrounded or killed without stopping it. The call waits up to --wait (default 9m, at
+most 9m30s; 0 returns at once); a run that ends in time is printed as always, with the same
+exit code and --json shape. Otherwise the call exits 75, still running: "… still running
+since <time> — run the same command again to attach" (--json: {"running": true, "verb",
+"scope", "since", "log", "pid", "log_tail"}, the shape `ape change review --run` has;
+milestone gate and close add "verdict": "no verdict yet: …" last).
+Running the same command again attaches: it waits again and prints the run's result once it
+ends — never a second run — or exits 75 again with the log lines the run wrote since the
+last call (stderr; --json: "log_tail"). A result no call
+printed yet is printed by the next call of the same verb while HEAD has not moved (for
+`ape milestone gate`, only while the working tree is unchanged too, marked "recorded";
+see its help); once printed, the next call runs again. While a
+run holds the lock, another of these verbs on the same change or milestone is refused:
+run.busy (exit 3, action retry; the message names the running verb and since when). A lock
+whose process is gone (killed, the machine restarted) is removed and reported as
+run.interrupted (exit 1, action retry) — never an attempt. A run stopped by SIGTERM/SIGINT
+kills its checks and records nothing — no attempt, no state commit, no gate run — and
+reports run.interrupted. No check outlives the worker. Never run these with
+run_in_background, and never end a turn on an exit 75: run the same command again.
+Beside the exit codes above: 75 still running · 3 run.busy · 1 run.interrupted · 2 a
+--wait outside 0–9m30s (usage.wait).
+
+Examples:
+
+```
+  ape milestone full M2
+  ape milestone full M2 --json --wait 9m
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+| `--timeout` | duration | `0s` | ceiling for each command run, overriding _apex/config.yaml timeouts.<tier>.max (default: check 2h, regression 2h, gate 4h; capped at ape's hard ceilings 4h/8h/12h); the tier's idle window still applies; exit 124 when exceeded |
+| `--wait` | duration | `9m0s` | how long this call waits for the detached run (at most 9m30s; 0 returns at once); exit 75 while it still runs — run the same command again to attach |
+
 ## ape milestone gate
 
 Run the milestone's gate and record the result
@@ -4381,6 +4454,13 @@ edit or new file outside _apex/state/, a change of the gate since its approval (
 milestone.gate-changed), or a run that was refused before the gate ran also starts a new
 run. --rerun runs the gate even when an unprinted result would be returned (it never
 attaches a different run: a run in progress is still attached to).
+
+The full run (v1.4, D563): once the Gate: command is green, the full checks and the
+regression command run as the milestone's full run and are recorded in
+_apex/state/logs/full-<M>.json; a gate run again and `ape milestone close` take a current one
+(the same HEAD, working tree, approval, full checks and regression command) instead of
+running them again, JSON run.full_run_reused saying when it ran. --rerun runs them anyway.
+`ape milestone full <M>` runs and records one on demand.
 
 --spec-only (W2): runs the spec's scenario checks alone, as the gate runs them — no Gate:
 command, no regression command, no full check (JSON full_skipped, and live_skipped) — and records nothing: no milestones.json, no gate-<M>.json,

@@ -196,7 +196,10 @@ The gate is green only when all of these pass:
   `- check (full): <command>`, see [Full checks](../reference/change-lifecycle.md#full-checks))
   and the regression command: JSON `run.full_skipped: N` (and `run.live_skipped`, its deprecated
   v1.2 name, with the same number) and `run.regression.skipped: "gate-red"`. `ape milestone
-  close` runs everything;
+  close` runs everything. Since v1.4 the full checks and the regression command are the
+  milestone's full run: a green one at an unchanged tree is taken by the next gate and by close
+  instead of running them again (`run.full_run_reused`; `--rerun` runs them), and
+  `ape milestone full <M>` runs one on demand;
 - the project's regression command, when `_apex/config.yaml` sets `regression:` (its `milestone`
   tier, else the one command). It only needs to be not newly red: it is judged against the
   earliest baseline any change of the milestone recorded for the same command. A milestone tier

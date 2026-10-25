@@ -57,7 +57,9 @@ func addV1TimeoutFlag(cmd *cobra.Command, f *v1Flags) {
 		"still applies; exit 124 when exceeded")
 }
 
-func (f *v1Flags) runOptions() apexv1.RunOptions { return apexv1.RunOptions{Timeout: f.timeout} }
+func (f *v1Flags) runOptions() apexv1.RunOptions {
+	return apexv1.RunOptions{Timeout: f.timeout, Rerun: f.rerun}
+}
 
 // v1Project resolves the project a v1 command acts on.
 func v1Project(f *v1Flags) (*apexv1.Project, error) {

@@ -55,6 +55,10 @@ type GateRun struct {
 	// FullSkipped from it (UnmarshalJSON). Deprecated: read full_skipped;
 	// live_skipped is removed no earlier than v1.5.
 	LiveSkipped int `json:"live_skipped,omitempty"`
+	// FullRunReused is when the full run this gate took instead of running
+	// the full checks and the regression command ran (v1.4, D563); absent
+	// when it ran them, or skipped them.
+	FullRunReused string `json:"full_run_reused,omitempty"`
 	// ScenarioSecs is each scenario check's run time, by ref (W2): what
 	// project check's test-cost notices read. Kept only in the gitignored
 	// logs/gate-<M>.json (gateTimings); never in milestones.json, the
@@ -575,21 +579,44 @@ func (p *Project) runGate(ctx context.Context, id string, opt RunOptions, full b
 		run.LiveSkipped = run.FullSkipped
 	}
 	run.SpecChecks = len(spec)
-	checks := spec
 	regressionCmd := p.milestoneRegressionCmd()
 	if regressionCmd != "" && skip {
 		run.Regression = &RegressionVerdict{Cmd: regressionCmd, Skipped: RegressionSkippedGateRed}
 		regressionCmd = ""
 	}
-	if regressionCmd != "" {
-		checks = append(append([]PlannedCheck(nil), spec...), PlannedCheck{Ref: regressionRef, Kind: KindRegression, Cmd: regressionCmd})
+	// v1.4 (D563): the full checks and the regression command are the
+	// full run (fullrun.go): taken from the record while it is current,
+	// else run and recorded for the next gate or the close to take.
+	plain, fullChecks := splitFull(spec)
+	var fr *FullRun
+	if !skip && !opt.Rerun {
+		fr = p.currentFullRun(ctx, id, fullChecks, regressionCmd)
 	}
-	results := p.RunChecks(ctx, filepath.Join(p.LogsDir(), "gate-"+id), "", checks, opt)
+	results := p.RunChecks(ctx, filepath.Join(p.LogsDir(), "gate-"+id), "", plain, opt)
 	if err := interrupted(ctx, "the gate run of "+id); err != nil {
 		return nil, err
 	}
+	if !skip {
+		if fr != nil {
+			run.FullRunReused = fr.At
+		} else {
+			by := "gate"
+			if full {
+				by = "close"
+			}
+			var err error
+			if fr, err = p.runFull(ctx, id, fullChecks, regressionCmd, by, opt); err != nil {
+				return nil, err
+			}
+		}
+		results = append(results, fr.Results...)
+	}
 	ctx = context.WithoutCancel(ctx)
 	ran := append([]CheckResult{gate}, results...)
+	if fr != nil && fr.Regression != nil {
+		ran = append(ran, *fr.Regression)
+		run.Regression = fr.Verdict
+	}
 	run.StrayFiles = StrayFiles(ran)
 	run.StraysKept = StraysKept(ran)
 	for i := range ran {
@@ -597,15 +624,8 @@ func (p *Project) runGate(ctx context.Context, id string, opt RunOptions, full b
 			run.Flaky = append(run.Flaky, ran[i].Task)
 		}
 	}
-	if regressionCmd != "" {
-		change, base := p.milestoneRegressionBaseline(ctx, id, regressionCmd)
-		r := &results[len(results)-1]
-		run.Regression = judgeRegression(r, base, p.checkOutput(r))
-		run.Regression.BaselineChange = change
-		results = results[:len(results)-1]
-	}
 	// rc.7d (rc7d-std): a red scenario that checks what `ape decision
-	// standard` removed says so (Q131).
+	// standard` removed says so (Q131); a full run marked its own.
 	p.markStale(results)
 	for i := range results {
 		if results[i].Exit != 0 {

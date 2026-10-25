@@ -169,11 +169,20 @@ func TestLiveCheck_GateSkipsOnARedGateCommand(t *testing.T) {
 	require.Empty(t, g.Run.StrayFiles, "evidence under development/ is not a stray (Q-W2c)")
 	require.FileExists(t, p.Root+"/development/evidence/live.txt")
 
-	// Close runs everything even with the Gate: command red.
+	// Close runs everything even with the Gate: command red — taking the
+	// green full run the gate recorded at this tree (v1.4, D561 Q6), and
+	// running it again once the tree changed.
 	t.Setenv("GATE_RED", "1")
 	_, err = p.CloseMilestone(ctx(), "M1", RunOptions{})
 	require.Error(t, err, "red: not closed")
-	require.Equal(t, 2, liveRuns(t, p), "close ran the live check")
+	require.Equal(t, 1, liveRuns(t, p), "close took the gate's full run")
+	require.NotEmpty(t, p.LastGateRun("M1").FullRunReused)
+	require.Zero(t, p.LastGateRun("M1").FullSkipped)
+	write(t, p, "README.md", "# greeter\n")
+	commitAll(t, p, "docs: readme")
+	_, err = p.CloseMilestone(ctx(), "M1", RunOptions{})
+	require.Error(t, err, "red: not closed")
+	require.Equal(t, 2, liveRuns(t, p), "a changed tree: close ran the live check")
 	require.FileExists(t, p.Root+"/development/evidence/suite.txt", "and the regression")
 	require.Zero(t, p.LastGateRun("M1").FullSkipped)
 

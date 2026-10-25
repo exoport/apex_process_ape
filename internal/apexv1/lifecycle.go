@@ -20,6 +20,9 @@ type RunOptions struct {
 	// Progress, when set, gets one line as each check starts and ends: a
 	// detached run's log, which a call that attaches to it shows (D58 2.3).
 	Progress io.Writer
+	// Rerun (`ape milestone gate --rerun`) runs the full checks and the
+	// regression command even when a current full run is recorded (v1.4).
+	Rerun bool
 }
 
 // requirementConflicts reports the requirements two changes' deltas both

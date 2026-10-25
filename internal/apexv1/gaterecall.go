@@ -23,6 +23,18 @@ const VerbMilestoneGate = "milestone gate"
 // whatever was committed in between: a commit of the same files keeps it,
 // an untracked file, an edit or a deletion changes it.
 func (p *Project) WorkTreeDigest(ctx context.Context) (string, error) {
+	return p.workTreeDigest(ctx, false)
+}
+
+// ContentDigest is WorkTreeDigest with ape's state left out altogether,
+// its tracked records too (milestones.json, decisions.json): what a full
+// run is current against (v1.4), so the gate's own record commit, which
+// writes only milestones.json, does not change it.
+func (p *Project) ContentDigest(ctx context.Context) (string, error) {
+	return p.workTreeDigest(ctx, true)
+}
+
+func (p *Project) workTreeDigest(ctx context.Context, dropState bool) (string, error) {
 	idx, err := git(ctx, p.Root, "rev-parse", "--git-path", "index")
 	if err != nil {
 		return "", err
@@ -47,6 +59,11 @@ func (p *Project) WorkTreeDigest(ctx context.Context) (string, error) {
 	env := []string{"GIT_INDEX_FILE=" + tmp}
 	if _, err := gitWithEnv(ctx, p.Root, env, "add", "-A", "--", ".", ":(exclude)"+p.StateRel()); err != nil {
 		return "", err
+	}
+	if dropState {
+		if _, err := gitWithEnv(ctx, p.Root, env, "rm", "-r", "-q", "--cached", "--ignore-unmatch", "--", p.StateRel()); err != nil {
+			return "", err
+		}
 	}
 	return gitWithEnv(ctx, p.Root, env, "write-tree")
 }

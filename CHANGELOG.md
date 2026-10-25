@@ -10,6 +10,16 @@
 - No config adds it back. A `tools:` entry naming it is `tools.invalid` (the entry is dropped), and
   a `human_review:` delegate naming it joins nothing.
 
+### The full run (D508, D563)
+
+- **The gate records its full run.** Once the `Gate:` command is green, the full checks and the
+  regression command run as the milestone's full run, recorded in `_apex/state/logs/full-<M>.json`.
+  A gate run again, and `ape milestone close`, take a green full run that is still current (the
+  same working tree, approval, full checks and regression command) instead of running them again:
+  JSON `run.full_run_reused`. `--rerun` runs them anyway. A red full run is never taken. A red
+  `Gate:` command still skips them, so a red attempt never pays for the suite.
+- **`ape milestone full <M>`** (new) runs and records one on demand (`milestone.full-red` when red).
+
 ### The gate self-test runs through ape (D541, D543)
 
 - **`ape milestone gate-test <folder> [--stub <file>]`** (new): apex-plan's gate self-test, before

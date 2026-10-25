@@ -202,10 +202,18 @@ as `(full)`. Any other kind, full on `human-review`, or a kind on `regression:` 
 | Run | Full checks it runs |
 | --- | --- |
 | `verify` (and the baseline at `start`) | The change's own: its full tasks and the full scenarios of its delta. Also a full scenario red at the last gate of any milestone. The rest are counted as `full_skipped`. |
-| `milestone gate`, `Gate:` command green | All of them. |
+| `milestone gate`, `Gate:` command green | All of them, with the regression command: the milestone's **full run** (v1.4), recorded in `_apex/state/logs/full-<M>.json`. A gate run again takes a green one that is current instead of running them again (JSON `run.full_run_reused`); `--rerun` runs them anyway. |
 | `milestone gate`, `Gate:` command red | None, and no regression command: the gate is red already. JSON `run.full_skipped: N` and `run.regression.skipped: "gate-red"`. |
-| `milestone close` | All of them, whatever the `Gate:` command did. |
+| `milestone close` | All of them, whatever the `Gate:` command did, or a green, current full run in their place. |
+| `milestone full` | All of them, with the regression command, on demand (v1.4): recorded as the full run, no gate result. |
 | `milestone gate --spec-only` | None (`full_skipped`). |
+
+A full run is current while the working tree is what it was when the run ended (the content
+of every file git does not ignore, `_apex/state/` aside, so the gate's own record commit
+changes nothing) and the milestone's approval, its full checks and its regression command are
+unchanged. Only a green one is taken: a red one may be red for something outside the tree, a
+service that was down, so the next gate runs them again. An ignored input or a change in the
+machine's environment is not seen; `--rerun` runs them.
 
 Every JSON object that carries `full_skipped` also carries `live_skipped` with the same number,
 and a task's `full` comes with `live`: the v1.2 names, deprecated, removed no earlier than v1.5.

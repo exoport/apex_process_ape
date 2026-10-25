@@ -40,7 +40,7 @@ every change in flight wherever it is worked.`,
 	}
 	cmd.AddCommand(newMilestoneNewCmd(), newMilestoneApproveCmd(), newMilestoneGateCmd(), newMilestoneCloseCmd())
 	// v1.4 (D543 B2).
-	cmd.AddCommand(newMilestoneGateTestCmd())
+	cmd.AddCommand(newMilestoneGateTestCmd(), newMilestoneFullCmd())
 	return cmd
 }
 
@@ -429,6 +429,13 @@ edit or new file outside _apex/state/, a change of the gate since its approval (
 milestone.gate-changed), or a run that was refused before the gate ran also starts a new
 run. --rerun runs the gate even when an unprinted result would be returned (it never
 attaches a different run: a run in progress is still attached to).
+
+The full run (v1.4, D563): once the Gate: command is green, the full checks and the
+regression command run as the milestone's full run and are recorded in
+_apex/state/logs/full-<M>.json; a gate run again and ` + "`ape milestone close`" + ` take a current one
+(the same HEAD, working tree, approval, full checks and regression command) instead of
+running them again, JSON run.full_run_reused saying when it ran. --rerun runs them anyway.
+` + "`ape milestone full <M>`" + ` runs and records one on demand.
 
 --spec-only (W2): runs the spec's scenario checks alone, as the gate runs them — no Gate:
 command, no regression command, no full check (JSON full_skipped, and live_skipped) — and records nothing: no milestones.json, no gate-<M>.json,
