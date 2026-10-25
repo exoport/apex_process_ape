@@ -1,11 +1,28 @@
 # CHANGELOG
 
-## v1.3.0 (draft)
+## v1.3.0 (2026-10-25)
 
 APEX v1.3, on v1.2.0: fixes. A plugin's skill in `tools:` now runs (F-E1-1); two diagnostic codes
 and the check kind `(live)` get names that read right, the old names kept as aliases until v1.5 at
 the earliest. A framework payload that uses these declares `min_ape_version: "1.3.0"`. The guards also
-cover Claude Code's Monitor tool (2.1.310+). Not yet evaluated.
+cover Claude Code's Monitor tool (2.1.310+), and ape is measured on Claude Code 2.1.310.
+
+Evaluated end to end on Claude Code 2.1.310 with the release build, rc.2 (c87b145), and the
+framework's v1.3.0-rc.4 payload: four projects (greenfield, brownfield, ledger and taskforge) were
+built to completion, each with the acceptance v1.2 reached: greenfield 8/9 end to end, brownfield
+18/18, ledger 70/70 and 24/24, taskforge 49/49 and 41/41. Ledger and taskforge count their second
+runs; the first run of each stopped at its first milestone, on its plan or on a gate the model
+wrote, not on a v1.3 change. The loop never prepared a release on its own, and no renamed code
+was reported under its old name alone. ape's harness gates and `make check-framework` against the
+framework's v1.3.0-rc.3 payload (the payload rc.4 records) pass on Claude Code 2.1.310. GitHub CI
+green twice on rc.2's tree on ci/v1.3.0-check: ubuntu-latest (`make test`), windows-latest
+(`make test-portable`), lint and govulncheck.
+
+Promoted from the release build at c87b145. Nothing compiled into the binary changed after that
+build: a docs commit (README's status and bingo pin, the install examples, the scope page) and the
+release commit, which touches only this file. rc.1 (f2c1829) carried the plugin tools, the renamed
+codes and the `(full)` checks; rc.2 added the Monitor guard after Claude Code 2.1.310 turned the
+tool on, and replaced rc.1 before its evaluation finished.
 
 ### F-E1-1: a plugin tool runs (D488, D512)
 
@@ -53,9 +70,8 @@ cover Claude Code's Monitor tool (2.1.310+). Not yet evaluated.
   `hooks.monitor-unguarded`, `ape doctor`'s hooks row warns, and `ape project init` adds `Monitor`
   in place. Until then, a Monitor command in your own Claude Code session runs unguarded;
   `ape task` sessions are guarded either way.
-- **rc.2** (bin-v13rc2): this guard, plus a live test whose seed Claude Code 2.1.310 refused (a
-  standalone `sleep`), so `make check-harness` is green on 2.1.310 again. Measured on Claude Code
-  2.1.310.
+- A live harness test whose prompt Claude Code 2.1.310 refused (a standalone `sleep`) runs a
+  silent command instead, so `make check-harness` measures 2.1.310.
 
 ## v1.2.0 (2026-10-24)
 
