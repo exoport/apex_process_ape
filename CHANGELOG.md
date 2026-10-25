@@ -114,6 +114,15 @@ than v1.5, announced here one release ahead.
   up its dependencies fails when it is set rather than skip every test and report success; ape only
   exports it.
 
+### The lift-disposition migration's check (D467, D567)
+
+- **`ape project lift-disposition --check`** (new): the check of the framework migration
+  `v1.4.0_seq-01`, which supersedes `v1.0.0_seq-02..05`. Their check matched any
+  `**/lift-disposition.md` in the repository, so a tracked fixture elsewhere read as half-applied;
+  this one reads only the project's own `<development_folder>/lift-disposition.md` once the project
+  is lifted, and defers to the lift's dry run when it is not. Exits 0 applied, 1 not applied
+  (`lift.disposition-left`), 2 the check failed (`lift.check-failed`).
+
 ### Harness
 
 - `make check-agents-md` asks up to three times and passes when any answer quotes the AGENTS.md-only

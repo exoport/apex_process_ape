@@ -4975,6 +4975,7 @@ Subcommands:
 - `fence` — Keep APEX's folders out of a Go library's module zip: one go.mod fence per APEX folder
 - `init` — Create the development/ skeleton and merge ape's hooks (never overwrites)
 - `lift` — Lift an APEX v0 project to v1 in one commit (the mechanical half of the migration)
+- `lift-disposition` — Check whether the lift's disposition list is disposed of (the v1.4.0_seq-01 migration's check)
 - `operator-interface` — Bring a project made before rc.7 to the operator interface (the v1.0.0_seq-07 migration)
 - `package-check` — Check a library's packed files for APEX folders (the release gate apex-release runs)
 - `rewrite-live` — Rewrite the check kind (live) as (full), in one commit (the v1.4 migration)
@@ -6097,6 +6098,45 @@ Flags:
 | `--json` | bool | `false` | machine output (JSON on stdout) |
 | `--no-verify-run` | bool | `false` | do not run the regression command (at the tag, and after the commit) |
 | `--timeout` | duration | `0s` | ceiling for each command run, overriding _apex/config.yaml timeouts.<tier>.max (default: check 2h, regression 2h, gate 4h; capped at ape's hard ceilings 4h/8h/12h); the tier's idle window still applies; exit 124 when exceeded |
+
+## ape project lift-disposition
+
+Check whether the lift's disposition list is disposed of (the v1.4.0_seq-01 migration's check)
+
+```
+ape project lift-disposition --check [flags]
+```
+
+Check, writing nothing, whether the framework migration v1.4.0_seq-01 is applied: the lift's
+disposition list is disposed of. It supersedes v1.0.0_seq-02..05, whose check matched any
+**/lift-disposition.md in the repository, so a tracked fixture elsewhere read as half-applied.
+The disposing itself is the migration's judged body (apex-plan); this verb only checks.
+
+  not lifted   no commit whose message starts "apex: lift" is reachable from HEAD: the lift's
+               dry run decides — lift.not-v0 (no APEX v0 install, or v1 already) is applied, any
+               other answer (a v0 project not lifted yet) is not
+  lifted       any such commit: applied when <development_folder>/lift-disposition.md (the folder
+               from _apex/config.yaml, never a match elsewhere) is not in git's index — a staged
+               git rm counts as removed, an untracked copy does not
+
+_apex/state/lift-disposition.json plays no part.
+
+Exit codes (a migration's check): 0 applied · 1 not applied (lift.disposition-left) · 2 the check
+failed (lift.check-failed: git or the dry run could not run), never read as "not applied".
+
+Examples:
+
+```
+  ape project lift-disposition --check
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--check` | bool | `false` | write nothing: 0 applied, 1 not applied, 2 the check failed |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
 
 ## ape project operator-interface
 

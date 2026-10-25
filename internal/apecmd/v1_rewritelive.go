@@ -105,3 +105,50 @@ func printLiveLeft(w io.Writer, left []apexv1.RewriteLiveFile) {
 		fmt.Fprintf(w, "left %d (live) tag(s) in %s: %s\n", l.Count, l.Path, l.Why)
 	}
 }
+
+// newProjectLiftDispositionCmd is `ape project lift-disposition --check`
+// (v1.4, B10): the check of the framework migration v1.4.0_seq-01.
+func newProjectLiftDispositionCmd() *cobra.Command {
+	var f v1Flags
+	var check bool
+	cmd := &cobra.Command{
+		Use:   "lift-disposition --check",
+		Short: "Check whether the lift's disposition list is disposed of (the v1.4.0_seq-01 migration's check)",
+		Long: `Check, writing nothing, whether the framework migration v1.4.0_seq-01 is applied: the lift's
+disposition list is disposed of. It supersedes v1.0.0_seq-02..05, whose check matched any
+**/lift-disposition.md in the repository, so a tracked fixture elsewhere read as half-applied.
+The disposing itself is the migration's judged body (apex-plan); this verb only checks.
+
+  not lifted   no commit whose message starts "apex: lift" is reachable from HEAD: the lift's
+               dry run decides — lift.not-v0 (no APEX v0 install, or v1 already) is applied, any
+               other answer (a v0 project not lifted yet) is not
+  lifted       any such commit: applied when <development_folder>/lift-disposition.md (the folder
+               from _apex/config.yaml, never a match elsewhere) is not in git's index — a staged
+               git rm counts as removed, an untracked copy does not
+
+_apex/state/lift-disposition.json plays no part.
+
+Exit codes (a migration's check): 0 applied · 1 not applied (lift.disposition-left) · 2 the check
+failed (lift.check-failed: git or the dry run could not run), never read as "not applied".`,
+		Example: "  ape project lift-disposition --check",
+		Args:    cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if !check {
+				return &apexv1.UsageError{Code: "usage.check-only", Action: apexv1.ActionStop, Msg: "`ape project lift-disposition` only checks: run it with --check"}
+			}
+			p, err := v1Project(&f)
+			if err != nil {
+				return err
+			}
+			if err := p.LiftDispositionCheck(cmd.Context()); err != nil {
+				return v1Fail(cmd, &f, err, nil)
+			}
+			return v1Emit(cmd.OutOrStdout(), &f, map[string]bool{"applied": true}, func(w io.Writer) {
+				fmt.Fprintln(w, "lift disposition: applied")
+			})
+		},
+	}
+	addV1Flags(cmd, &f)
+	cmd.Flags().BoolVar(&check, "check", false, "write nothing: 0 applied, 1 not applied, 2 the check failed")
+	return cmd
+}

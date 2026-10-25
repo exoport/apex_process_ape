@@ -20,7 +20,7 @@ func newProjectCmd() *cobra.Command {
 		Short: "Create and check an APEX v1 project layout",
 	}
 	cmd.AddCommand(newProjectInitCmd(), newProjectCheckCmd(), newProjectCodesCmd(), newProjectLiftCmd(), newProjectAcceptConfigCmd(),
-		newProjectArchiveLayoutCmd(), newProjectRewriteLiveCmd())
+		newProjectArchiveLayoutCmd(), newProjectRewriteLiveCmd(), newProjectLiftDispositionCmd())
 	// rc.7 (rc7-rename).
 	cmd.AddCommand(newProjectOperatorInterfaceCmd())
 	// v1.1 W7.

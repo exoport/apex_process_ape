@@ -57,6 +57,8 @@ var boardSkipVerbs = map[string]bool{
 	"project rewrite-live": true,
 	// v1.4 (D543): the gate self-test records nothing.
 	"milestone gate-test": true,
+	// v1.4 (B10): a check that writes nothing.
+	"project lift-disposition": true,
 	// v1.4 (D563): a full run records no gate result.
 	"milestone full": true,
 	// rc.7 (rc7-rename): seq-07 changes the config's models rows, the hooks
