@@ -8,19 +8,18 @@ framework's v1 skills do the work, each in a Claude Code session that ape
 drives through a PTY; ape keeps the records (`development/`, `_apex/state/`)
 and refuses what a session may not do.
 
-> **Status:** v1.2. It is built for one operator per checkout, working on a
+> **Status:** v1.3. It is built for one operator per checkout, working on a
 > local trunk; what v1 promises, and what it leaves out, is in
 > [What APEX v1.0 promises](docs/explanation/apex-v1-scope.md). An APEX v0 project keeps
 > the v0 ape its `.bingo` pins until it is lifted to v1
 > ([How to lift a v0 project](docs/how-to/lift-a-v0-project.md)). See
 > [CHANGELOG.md](CHANGELOG.md).
 >
-> **New in v1.2:** a check's result is the script's own exit, and what it leaves running is
-> ended and named; a finished gate run is returned once and its output ends with its verdict;
-> approval freezes the files a gate's scripts reach; a session's leftover servers are stopped;
-> a pre-1.0 install updates; measured on Claude Code 2.1.309. A framework release that uses
-> these declares `min_ape_version: "1.2.0"`. Known issue: a plugin's skill in a `tools:` slot
-> does not run yet (see [CHANGELOG.md](CHANGELOG.md)).
+> **New in v1.3:** a plugin's skill in a `tools:` slot runs; ape's guards also cover the
+> commands Claude Code's Monitor tool runs, the same way they cover Bash; three diagnostic codes
+> and the check kind `(live)` have clearer names (`session.loop-running`, `models.orchestrator-row`,
+> `check.full-suggested`, `(full)`), the old names kept as aliases; measured on Claude Code
+> 2.1.310. A framework release that uses these declares `min_ape_version: "1.3.0"`.
 
 ## Install
 
@@ -41,7 +40,7 @@ A project can pin its ape with [bingo](https://github.com/bwplotka/bingo):
 
 ```bash
 # In your project repo:
-bingo get -l github.com/exoport/apex_process_ape/cmd/ape@v1.2.0
+bingo get -l github.com/exoport/apex_process_ape/cmd/ape@v1.3.0
 ```
 
 A bare `ape` run inside that project then runs the pinned version. See
