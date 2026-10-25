@@ -89,5 +89,11 @@ func TestAboardServeDetachReRunsApe(t *testing.T) {
 		return errors.Is(err, os.ErrNotExist)
 	}, 10*time.Second, 50*time.Millisecond,
 		"a TERM must shut the detached board down cleanly and remove %s", root.InstanceFile(""))
-	require.Nil(t, aboard.ProbeBoard(context.Background(), inst.Port, inst.Base))
+	// aboard removes the record first and closes its server after (v0.4.1,
+	// server.go), so the board may answer for a moment once the record is
+	// gone: wait for it to stop. A single probe right after the record
+	// went failed once on a loaded CI runner (run 40152446466).
+	require.Eventually(t, func() bool {
+		return aboard.ProbeBoard(context.Background(), inst.Port, inst.Base) == nil
+	}, 10*time.Second, 50*time.Millisecond, "the board still answers on port %d after its TERM", inst.Port)
 }
