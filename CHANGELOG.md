@@ -10,6 +10,20 @@
 - No config adds it back. A `tools:` entry naming it is `tools.invalid` (the entry is dropped), and
   a `human_review:` delegate naming it joins nothing.
 
+### The gate self-test runs through ape (D541, D543)
+
+- **`ape milestone gate-test <folder> [--stub <file>]`** (new): apex-plan's gate self-test, before
+  the milestone exists. The stub run (the folder's own `stub`, or `--stub`) must exit 0, and the
+  plain gate must be red. Both run as checks, under `timeouts.gate`, in their own process group,
+  with what they leave running ended and named. The verdicts are approve's self-check's:
+  `milestone.gate-green`, `milestone.gate-broken`, and the new `milestone.gate-stub-red`. It
+  records nothing. A long run: `--wait`, exit 75, attach by running it again.
+- **The pre-tool hook denies a gate's plain `gate.sh`** run from a session's Bash or Monitor, in
+  the forms the guards parse (`timeout 300 ./…/gate.sh`, `bash …/gate.sh`, `sh -c`). The deny
+  names `ape milestone gate-test`. `gate.sh --stub <file>`, `bash -n` and the shared
+  `<dev>/gates/lib/` stay allowed, and `APE_ALLOW_GATE=1` in the launching environment lifts it.
+  The v1.3 eval's one gate survivor (taskforge M4) came from such a run, outside ape's reaping.
+
 ### Found at plan time (B6, F4)
 
 - **`change.guarded-config-task`** (new, exit 1, action replan): `ape change check` and `start`

@@ -70,19 +70,10 @@ func (p *Project) gateSelfCheck(ctx context.Context, m *Milestone, base string, 
 		return &FailError{Code: CodeGateBroken, Msg: m.ID + "'s gate cannot run: " + what +
 			" — a gate must run and be red until the milestone's work is done: re-plan the gate (apex-plan) so every script it names exists and runs, then approve again"}
 	}
-	for _, rel := range gateScripts(m.Gate) {
-		path := filepath.Join(p.Root, filepath.FromSlash(rel))
-		if st, err := os.Stat(path); err != nil || !st.Mode().IsRegular() {
-			return nil, broken("it runs " + rel + ", which does not exist (a gate's scripts exist at approval: the milestone's work makes them pass, it does not write them)")
-		}
-		if out, failed := shellSyntax(ctx, path); failed {
-			return nil, broken(rel + " is not valid shell (`bash -n`: " + out + ")")
-		}
+	if why := p.gateUnrunnable(ctx, m.Gate); why != "" {
+		return nil, broken(why)
 	}
 	cfg, _ := LoadConfig(p.Root) // Open refused an unparseable one
-	if missing := unmetRequirement(m.Gate, cfg.Requires); missing != "" {
-		return nil, broken(missing + " (requires:)")
-	}
 	lim := cfg.Timeouts.Limits(KindGate, 0)
 	timeout := lim.Max
 	sha := HeadSHA(ctx, p.Root)
@@ -148,6 +139,26 @@ func (p *Project) gateSelfCheck(ctx context.Context, m *Milestone, base string, 
 	}
 	fmt.Fprintf(progress, "%s: the gate is red (exit %d in %.1fs), as a new gate must be — approving\n", m.ID, r.Exit, r.Secs)
 	return sc, nil
+}
+
+// gateUnrunnable is why the gate command cannot run before it is run: a
+// script it names is missing or is not valid shell, or a requires: entry
+// it needs is missing; "" when none of that holds.
+func (p *Project) gateUnrunnable(ctx context.Context, gate string) string {
+	for _, rel := range gateScripts(gate) {
+		path := filepath.Join(p.Root, filepath.FromSlash(rel))
+		if st, err := os.Stat(path); err != nil || !st.Mode().IsRegular() {
+			return "it runs " + rel + ", which does not exist (a gate's scripts exist at approval: the milestone's work makes them pass, it does not write them)"
+		}
+		if out, failed := shellSyntax(ctx, path); failed {
+			return rel + " is not valid shell (`bash -n`: " + out + ")"
+		}
+	}
+	cfg, _ := LoadConfig(p.Root)
+	if missing := unmetRequirement(gate, cfg.Requires); missing != "" {
+		return missing + " (requires:)"
+	}
+	return ""
 }
 
 // shellSyntax parses a gate script that is a POSIX or bash script — its

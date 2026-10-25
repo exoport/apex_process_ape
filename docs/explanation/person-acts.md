@@ -150,11 +150,13 @@ words; it is not a sandbox, and the pre-tool hook sees direct calls only.
 ## The guard overrides
 
 The pre-tool hook denies `git tag` writes, every `git push`, and `pkill`/`killall` in the
-sessions it guards. Three variables lift those denies:
+sessions it guards, and since v1.4 a gate's plain `gate.sh` run outside ape. Four variables lift
+those denies:
 
 - `APE_ALLOW_TAG=1` allows tag writes;
 - `APE_ALLOW_PUSH=1` allows `git push` (a tag push needs both);
-- `APE_ALLOW_KILL=1` allows `pkill`, `killall`, `killall5` and `skill`.
+- `APE_ALLOW_KILL=1` allows `pkill`, `killall`, `killall5` and `skill`;
+- `APE_ALLOW_GATE=1` allows a gate folder's plain `gate.sh`.
 
 Each counts only in the environment the person launches the session with, which the hook
 inherits:

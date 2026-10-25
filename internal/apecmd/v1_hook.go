@@ -279,8 +279,13 @@ timeout, xargs, sh -c, a chain, an absolute path): they stop processes the sessi
 not start. The deny says: stop the process you started by its PID (kill <pid>), which
 stays allowed.
 
+Bash, too (v1.4, D543): denies a gate folder's plain <dev>/gates/<M>-<slug>/gate.sh —
+run directly, through timeout, env, sh -c or bash <script> — because outside ape nothing
+ends what it starts; the deny names ` + "`ape milestone gate-test <folder>`" + ` (` + "`ape milestone gate <M>`" + `
+once the milestone exists). gate.sh --stub <file>, bash -n and <dev>/gates/lib/ stay allowed.
+
 Overrides: APE_ALLOW_TAG=1 allows tag writes, APE_ALLOW_PUSH=1 git push,
-APE_ALLOW_KILL=1 pkill/killall. Each counts ONLY in the environment the person launches
+APE_ALLOW_KILL=1 pkill/killall, APE_ALLOW_GATE=1 a plain gate.sh. Each counts ONLY in the environment the person launches
 the session with (` + "`APE_ALLOW_PUSH=1 claude`" + `, or ` + "`APE_ALLOW_PUSH=1 ape task …`" + `),
 which the hook inherits. Set inside a command the model runs — APE_ALLOW_PUSH=1 git
 push, env APE_ALLOW_PUSH=1 …, export APE_ALLOW_PUSH=1; … — it does not count: the

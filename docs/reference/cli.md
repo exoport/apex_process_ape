@@ -3728,8 +3728,13 @@ timeout, xargs, sh -c, a chain, an absolute path): they stop processes the sessi
 not start. The deny says: stop the process you started by its PID (kill <pid>), which
 stays allowed.
 
+Bash, too (v1.4, D543): denies a gate folder's plain <dev>/gates/<M>-<slug>/gate.sh —
+run directly, through timeout, env, sh -c or bash <script> — because outside ape nothing
+ends what it starts; the deny names `ape milestone gate-test <folder>` (`ape milestone gate <M>`
+once the milestone exists). gate.sh --stub <file>, bash -n and <dev>/gates/lib/ stay allowed.
+
 Overrides: APE_ALLOW_TAG=1 allows tag writes, APE_ALLOW_PUSH=1 git push,
-APE_ALLOW_KILL=1 pkill/killall. Each counts ONLY in the environment the person launches
+APE_ALLOW_KILL=1 pkill/killall, APE_ALLOW_GATE=1 a plain gate.sh. Each counts ONLY in the environment the person launches
 the session with (`APE_ALLOW_PUSH=1 claude`, or `APE_ALLOW_PUSH=1 ape task …`),
 which the hook inherits. Set inside a command the model runs — APE_ALLOW_PUSH=1 git
 push, env APE_ALLOW_PUSH=1 …, export APE_ALLOW_PUSH=1; … — it does not count: the
@@ -4057,6 +4062,7 @@ Subcommands:
 - `approve` — Write Status: approved (by <who> <ts>)
 - `close` — Run the gate; on exit 0 write Status: done (<ts> <sha>)
 - `gate` — Run the milestone's gate and record the result
+- `gate-test` — Self-test a gate folder before its milestone exists: the stub run passes, the plain gate is red
 - `new` — Append a milestone (Status: proposed) to roadmap.md
 
 ## ape milestone approve
@@ -4438,6 +4444,82 @@ Flags:
 | `--rerun` | bool | `false` | run the gate even when a finished run no call has printed would be returned (by default that result is returned once, while HEAD and the working tree are unchanged since it ended) |
 | `--spec-only` | bool | `false` | run only the spec's scenario checks (no Gate: command, no regression) and record nothing; allowed on a proposed milestone |
 | `--timeout` | duration | `0s` | ceiling for each command run, overriding _apex/config.yaml timeouts.<tier>.max (default: check 2h, regression 2h, gate 4h; capped at ape's hard ceilings 4h/8h/12h); the tier's idle window still applies; exit 124 when exceeded |
+| `--wait` | duration | `9m0s` | how long this call waits for the detached run (at most 9m30s; 0 returns at once); exit 75 while it still runs — run the same command again to attach |
+
+## ape milestone gate-test
+
+Self-test a gate folder before its milestone exists: the stub run passes, the plain gate is red
+
+```
+ape milestone gate-test <folder> [--stub <file>] [flags]
+```
+
+Run a gate folder's gate.sh the two ways apex-plan's gate self-test asks for, through ape:
+first with --stub <file> (the folder's own stub when it has one, or the file --stub names),
+which must exit 0 — a gate must be able to pass; then plain, which must be red — a gate
+is red until the milestone's work is done. The folder is <dev>/gates/<M>-<slug>/; the
+milestone need not exist yet (apex-plan writes the gate before `ape milestone new`).
+
+Each run is a check: from the project root, with APE_MILESTONE=<M> (from the folder's name)
+and APE_MILESTONE_BASE=HEAD, under timeouts.gate, in its own process group, and what it
+leaves running is ended and named (F15) — which a gate run from a session's Bash tool
+does not get, so the pre-tool hook refuses a plain gate.sh there and names this command.
+The verdicts are approve's self-check's (D70 B): a green plain run is milestone.gate-green,
+one that cannot run (a missing or unparseable script, a requires: entry missing, exit 126
+or 127, a timeout) milestone.gate-broken, a red stub run milestone.gate-stub-red; all three
+action replan. It records nothing: no milestone, no gate result, no commit. The logs go to
+_apex/state/logs/gate-test-<M>-stub.log and -plain.log.
+
+<folder> may be given as its name alone (M4-time-entries), under <dev>/gates/.
+
+A long run (lock <folder's name>): --wait bounds how long the call waits; exit 75 means
+still running, and the same command attaches.
+
+JSON: {"folder", "milestone", "runs": [{"mode": "stub"|"plain", "cmd", "exit", "secs", "log",
+"reason", "leftovers", "verdict": "pass"|"fail", "tail"}], "ok"}.
+
+Exit codes: 0 both runs as they must be · 1 a verdict above · 2 not a gate folder
+(usage.gate-folder) · 75 still running.
+
+Detached runs (D58 2.3): the command takes the run lock of its change (or milestone),
+_apex/state/runs/<id|M>.json, and runs in a detached worker (`ape __run`, its own
+session, output in _apex/state/runs/<id|M>.log), so the call that started it can be cut,
+backgrounded or killed without stopping it. The call waits up to --wait (default 9m, at
+most 9m30s; 0 returns at once); a run that ends in time is printed as always, with the same
+exit code and --json shape. Otherwise the call exits 75, still running: "… still running
+since <time> — run the same command again to attach" (--json: {"running": true, "verb",
+"scope", "since", "log", "pid", "log_tail"}, the shape `ape change review --run` has;
+milestone gate and close add "verdict": "no verdict yet: …" last).
+Running the same command again attaches: it waits again and prints the run's result once it
+ends — never a second run — or exits 75 again with the log lines the run wrote since the
+last call (stderr; --json: "log_tail"). A result no call
+printed yet is printed by the next call of the same verb while HEAD has not moved (for
+`ape milestone gate`, only while the working tree is unchanged too, marked "recorded";
+see its help); once printed, the next call runs again. While a
+run holds the lock, another of these verbs on the same change or milestone is refused:
+run.busy (exit 3, action retry; the message names the running verb and since when). A lock
+whose process is gone (killed, the machine restarted) is removed and reported as
+run.interrupted (exit 1, action retry) — never an attempt. A run stopped by SIGTERM/SIGINT
+kills its checks and records nothing — no attempt, no state commit, no gate run — and
+reports run.interrupted. No check outlives the worker. Never run these with
+run_in_background, and never end a turn on an exit 75: run the same command again.
+Beside the exit codes above: 75 still running · 3 run.busy · 1 run.interrupted · 2 a
+--wait outside 0–9m30s (usage.wait).
+
+Examples:
+
+```
+  ape milestone gate-test development/gates/M4-time-entries
+  ape milestone gate-test development/gates/M4-time-entries --stub development/gates/M4-time-entries/stub --json
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+| `--stub` | string | `—` | the stand-in for the work (default: the folder's own stub, when it has one) |
 | `--wait` | duration | `9m0s` | how long this call waits for the detached run (at most 9m30s; 0 returns at once); exit 75 while it still runs — run the same command again to attach |
 
 ## ape milestone new

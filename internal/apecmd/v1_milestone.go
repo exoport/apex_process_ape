@@ -39,6 +39,8 @@ new, approve, gate and close are refused (exit 1, code branch.change-branch): ru
 every change in flight wherever it is worked.`,
 	}
 	cmd.AddCommand(newMilestoneNewCmd(), newMilestoneApproveCmd(), newMilestoneGateCmd(), newMilestoneCloseCmd())
+	// v1.4 (D543 B2).
+	cmd.AddCommand(newMilestoneGateTestCmd())
 	return cmd
 }
 

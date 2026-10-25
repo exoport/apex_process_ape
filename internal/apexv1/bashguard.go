@@ -1,7 +1,9 @@
 package apexv1
 
 import (
+	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -145,4 +147,77 @@ func RecordGuard(command, cwd string) PreToolDecision {
 		return PreToolDecision{}
 	}
 	return PreToolDecision{Deny: true, Reason: strings.Replace(recordGuardReason, "%s", what, 1)}
+}
+
+// The gate guard (v1.4, D541, D543 B2): a session runs a gate's plain
+// <dev>/gates/<M>-<slug>/gate.sh only through ape — `ape milestone
+// gate-test <folder>` before the milestone is registered, `ape milestone
+// gate <M>` after — which run it in its own process group and end what it
+// leaves running. Run from a session's Bash tool it is outside that, and a
+// gate whose lifecycle code lost its server's PID left the server running
+// (taskforge M4, v1.3 row 3). The stub run, `gate.sh --stub <file>`, starts
+// no server (apex-plan: "the gate skips building, starting a server and
+// calling earlier gates") and stays allowed. Parsed like the other guards
+// (wrappers such as timeout and env, `sh -c`, `bash <script>`), with the
+// same limits: a script run through a variable, a make target or `source`
+// is not seen. EnvAllowGate=1 lets a session run it.
+
+// EnvAllowGate lets a session run a gate's plain gate.sh.
+const EnvAllowGate = "APE_ALLOW_GATE"
+
+const gateGuardReason = "%s runs a gate outside ape, so nothing ends what it starts (a server whose PID the gate lost outlives it) — " +
+	"run it through ape, which reaps it: `ape milestone gate-test %s` (stub and plain runs, before the milestone exists) or " +
+	"`ape milestone gate <M>` once it does; `gate.sh --stub <file>` alone may run directly. A session the person started with " + EnvAllowGate + "=1 may run it."
+
+// GateGuard decides a Bash command; Deny is set for a plain run of a gate
+// folder's gate.sh.
+func GateGuard(command, cwd string) PreToolDecision {
+	if overrideSet(EnvAllowGate) || !strings.Contains(command, "gate.sh") {
+		return PreToolDecision{}
+	}
+	folder := ""
+	what := scanCmds(command, cwd, 0, func(words []string, dir string) string {
+		script, args := words[0], words[1:]
+		switch filepath.Base(script) {
+		case "sh", "bash", "zsh", "dash", "ksh":
+			i := 0
+			for i < len(args) && strings.HasPrefix(args[i], "-") {
+				if o := args[i]; !strings.HasPrefix(o, "--") && strings.Contains(o, "n") {
+					return "" // `bash -n`: parsed, not run
+				}
+				i++
+			}
+			if i >= len(args) {
+				return ""
+			}
+			script, args = args[i], args[i+1:]
+		}
+		if filepath.Base(script) != "gate.sh" {
+			return ""
+		}
+		for _, a := range args {
+			if a == "--stub" || strings.HasPrefix(a, "--stub=") {
+				return ""
+			}
+		}
+		abs := script
+		if !filepath.IsAbs(abs) {
+			abs = filepath.Join(dir, abs)
+		}
+		root := FindRoot(dir)
+		dev := DefaultDevFolder
+		if p, err := Open(root); err == nil {
+			dev = p.DevRel
+		}
+		rel, err := filepath.Rel(filepath.Join(root, filepath.FromSlash(dev), "gates"), filepath.Clean(abs))
+		if err != nil || strings.HasPrefix(rel, "..") || strings.Count(filepath.ToSlash(rel), "/") != 1 || path.Dir(filepath.ToSlash(rel)) == "lib" {
+			return "" // not a gate folder's own gate.sh (<dev>/gates/lib/ is the shared library)
+		}
+		folder = path.Join(dev, "gates", path.Dir(filepath.ToSlash(rel)))
+		return "`" + strings.Join(words, " ") + "`"
+	})
+	if what == "" {
+		return PreToolDecision{}
+	}
+	return PreToolDecision{Deny: true, Reason: fmt.Sprintf(gateGuardReason, what, folder) + inlineOverrideNote(command)}
 }

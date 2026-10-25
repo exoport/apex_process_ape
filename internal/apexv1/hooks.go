@@ -122,7 +122,8 @@ func (d PreToolDecision) Output() ([]byte, error) {
 // whether a Bash call may touch the E2 records (RecordGuard, T6), write a
 // git tag (TagGuard), push (PushGuard, D45), stop processes by name
 // (KillGuard, D46), commit with an `apex:` subject (SubjectGuard, Q156)
-// or rebase or merge on a change branch (RebaseGuard, D40) — and so may a
+// or rebase or merge on a change branch (RebaseGuard, D40), or run a
+// gate's plain gate.sh (GateGuard, v1.4 D543) — and so may a
 // Monitor call's command (v1.3). A Bash call's person acts are
 // PersonActGate's, after these.
 func PreTool(payload HookPayload) PreToolDecision {
@@ -132,7 +133,7 @@ func PreTool(payload HookPayload) PreToolDecision {
 			cwd, _ = os.Getwd()
 		}
 		command := bashCommand(payload.ToolInput)
-		for _, guard := range []func(command, cwd string) PreToolDecision{RecordGuard, TagGuard, PushGuard, KillGuard, SubjectGuard} {
+		for _, guard := range []func(command, cwd string) PreToolDecision{RecordGuard, TagGuard, PushGuard, KillGuard, SubjectGuard, GateGuard} {
 			if d := guard(command, cwd); d.Deny {
 				return d
 			}

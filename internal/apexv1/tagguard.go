@@ -186,7 +186,10 @@ func scanCmd(words []string, cwd string, depth int, judge cmdJudge) string {
 				return scanCmds(words[i+1], cwd, depth+1, judge)
 			}
 		}
-		return ""
+		// `bash <script> …` runs a script: the judge sees the shell and
+		// its words (v1.4: GateGuard; the other judges match git, ape and
+		// the kill programs, never a shell).
+		return judge(words, cwd)
 	case "eval":
 		return scanCmds(strings.Join(words[1:], " "), cwd, depth+1, judge)
 	}
