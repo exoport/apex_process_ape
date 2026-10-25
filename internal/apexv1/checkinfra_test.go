@@ -79,7 +79,9 @@ func TestRunCheck_PortHeldOutsideIsUnrun(t *testing.T) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	defer l.Close()
-	port := l.Addr().(*net.TCPAddr).Port
+	addr, ok := l.Addr().(*net.TCPAddr)
+	require.True(t, ok)
+	port := addr.Port
 	cmd := "echo 'listen tcp 127.0.0.1:" + strconv.Itoa(port) + ": bind: address already in use'; exit 1"
 	r := RunCheck(ctx(), t.TempDir(), cmd, "", 0)
 	if listenerPID(port) == 0 {

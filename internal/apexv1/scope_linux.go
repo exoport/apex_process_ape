@@ -35,6 +35,9 @@ var (
 	scopeSeq    atomic.Int64
 )
 
+// cgroupRoot is where cgroup v2 is mounted.
+const cgroupRoot = "/sys/fs/cgroup"
+
 // checkScopes is how checks are reaped: "auto" (a scope where one works,
 // else the process group) or "group" (the process group alone). A var so
 // tests can choose.
@@ -44,7 +47,7 @@ var checkScopes = "auto"
 // created in (ape's own cgroup's parent: the slice --slice-inherit names),
 // or "" when scopes cannot be used: no systemd-run, no cgroup v2, no user
 // manager answering. Probed once per ape command (about 15 ms).
-func scopeSupport() (string, string) {
+func scopeSupport() (runner, parent string) {
 	if checkScopes != "auto" {
 		return "", ""
 	}
@@ -66,7 +69,7 @@ func scopeSupport() (string, string) {
 		if probe.Run() != nil {
 			return
 		}
-		systemdRun, scopeParent = path, filepath.Join("/sys/fs/cgroup", filepath.Dir(own))
+		systemdRun, scopeParent = path, cgroupRoot+filepath.Dir(own)
 	})
 	return systemdRun, scopeParent
 }

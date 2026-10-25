@@ -131,7 +131,7 @@ func (p *Project) gateFrozenFindings(file string, c *Change) []Finding {
 			continue
 		}
 		sort.Strings(hit)
-		out = append(out, Finding{File: file, Line: 1, Message: "paths: \"" + g + "\" covers " + strings.Join(limit(hit, 4), ", ") + ", a gate " + kind + " a person approved" +
+		out = append(out, Finding{File: file, Line: 1, Message: "paths: \"" + g + "\" covers " + strings.Join(limit(hit, namedFiles), ", ") + ", a gate " + kind + " a person approved" +
 			" — verify would refuse the edit (change.touches-gate): only a person or apex-plan changes a gate, and a person approves it again;" +
 			" drop it from paths: and the tasks, or, if the gate itself is wrong, say so (`gate defect: <evidence>`)"})
 	}
@@ -164,4 +164,13 @@ func gateFrozenOf(rec *MilestoneRecord) *GateFrozen {
 	sort.Strings(g.Files)
 	g.Globs = append(g.Globs, a.GateGlobs...)
 	return g
+}
+
+// approvedGateFrozen is m's frozen gate set while it is approved, nil
+// before and after.
+func approvedGateFrozen(m *Milestone, rec *MilestoneRecord) *GateFrozen {
+	if m.Status != MilestoneApproved {
+		return nil
+	}
+	return gateFrozenOf(rec)
 }

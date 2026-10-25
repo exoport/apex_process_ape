@@ -127,7 +127,7 @@ func TestDiagnosticCodes_PublishedListMatchesTheCode(t *testing.T) {
 		"CodeDocsUnaccepted": CodeDocsUnaccepted, "CodeContextRelayLow": CodeContextRelayLow,
 		"CodeGateDataOutside": CodeGateDataOutside,
 		// v1.4.
-		"CodeGuardedConfigTask": CodeGuardedConfigTask, "CodeLiveDeprecated": CodeLiveDeprecated, "CodeLiveLeft": CodeLiveLeft,
+		"CodeGuardedConfigTask": CodeGuardedConfigTask, "CodeLiveDeprecated": CodeLiveDeprecated, "CodeLiveLeft": CodeLiveLeft, "CodeReadFailed": CodeReadFailed,
 		"CodeGateStubRed": CodeGateStubRed, "CodePassDrop": CodePassDrop, "CodeFullRed": CodeFullRed,
 	}
 	for _, glob := range []string{"*.go", filepath.Join("..", "apecmd", "v1_*.go")} {

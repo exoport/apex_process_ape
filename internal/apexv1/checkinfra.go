@@ -61,6 +61,13 @@ type ContainerUse struct {
 	Removed bool   `json:"removed,omitempty"`
 }
 
+// shortContainerID is how much of a container id a result keeps (docker
+// ps's own short form); holderWidth how much of a holder's command line.
+const (
+	shortContainerID = 12
+	holderWidth      = 80
+)
+
 // checkInfra is one check's TMPDIR, compose project and container list.
 type checkInfra struct {
 	id      string
@@ -240,7 +247,7 @@ func (ci *checkInfra) containers(ctx context.Context) []ContainerUse {
 		if ci.before[c.id] {
 			continue
 		}
-		u := ContainerUse{ID: c.id[:min(12, len(c.id))], Name: c.name, Image: c.image}
+		u := ContainerUse{ID: c.id[:min(shortContainerID, len(c.id))], Name: c.name, Image: c.image}
 		if t, err := time.Parse("2006-01-02 15:04:05 -0700 MST", c.created); err == nil {
 			u.Secs = float64(time.Since(t).Round(100*time.Millisecond)) / float64(time.Second)
 		}
@@ -257,7 +264,8 @@ func (ci *checkInfra) containers(ctx context.Context) []ContainerUse {
 	c, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 	if len(remove) > 0 {
-		if exec.CommandContext(c, "docker", append([]string{"rm", "-f", "-v"}, remove...)...).Run() != nil {
+		rm := exec.CommandContext(c, "docker", append([]string{"rm", "-f", "-v"}, remove...)...) //nolint:gosec // container ids docker itself listed
+		if rm.Run() != nil {
 			for i := range out {
 				out[i].Removed = false
 			}
@@ -265,9 +273,9 @@ func (ci *checkInfra) containers(ctx context.Context) []ContainerUse {
 	}
 	label := "label=com.docker.compose.project=" + ci.compose
 	for _, kind := range []string{"network", "volume"} {
-		ids, err := exec.CommandContext(c, "docker", kind, "ls", "-q", "--filter", label).Output()
+		ids, err := exec.CommandContext(c, "docker", kind, "ls", "-q", "--filter", label).Output() //nolint:gosec // kind is network or volume, label ape's own name
 		if err == nil && len(strings.Fields(string(ids))) > 0 {
-			_ = exec.CommandContext(c, "docker", append([]string{kind, "rm"}, strings.Fields(string(ids))...)...).Run()
+			_ = exec.CommandContext(c, "docker", append([]string{kind, "rm"}, strings.Fields(string(ids))...)...).Run() //nolint:gosec // ids docker itself listed
 		}
 	}
 	return out
@@ -319,12 +327,12 @@ func portHolder(ctx context.Context, port int, docker bool, inCheck func(pid int
 		if inCheck(pid) {
 			return ""
 		}
-		return strconv.Itoa(pid) + " " + clip(strings.Join(pidArgv(pid), " "), 80)
+		return strconv.Itoa(pid) + " " + clip(strings.Join(pidArgv(pid), " "), holderWidth)
 	}
 	if docker {
 		c, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
-		out, err := exec.CommandContext(c, "docker", "ps", "--filter", "publish="+strconv.Itoa(port), "--format", "{{.Names}}").Output()
+		out, err := exec.CommandContext(c, "docker", "ps", "--filter", "publish="+strconv.Itoa(port), "--format", "{{.Names}}").Output() //nolint:gosec // a port number
 		if err == nil {
 			if names := strings.Fields(string(out)); len(names) > 0 {
 				return "container " + strings.Join(names, ", ")

@@ -20,7 +20,7 @@ import (
 //	go test -json         "Action":"pass"|"skip"|"fail" with a "Test"
 //	gotestsum             DONE N tests, S skipped, F failures
 //	pytest                N passed, S skipped, F failed … in 0.1s
-//	cargo test            test result: … N passed; F failed; S ignored (per binary, summed)
+//	cargo                 test result: … N passed; F failed; S ignored (per binary, summed)
 //	node --test           ℹ pass N / ℹ skipped S / ℹ fail F
 //	jest                  Tests: F failed, S skipped, N passed, T total
 //	vitest                Tests  F failed | S skipped | N passed (T)
@@ -228,13 +228,14 @@ func passDropNotices(prev *Verify, now []CheckResult) []Diagnostic {
 		return nil
 	}
 	before := map[string]int{}
-	for _, r := range prev.Results {
-		if r.Exit == 0 && r.Tests != nil && r.Tests.Passed >= passDropMin {
+	for i := range prev.Results {
+		if r := &prev.Results[i]; r.Exit == 0 && r.Tests != nil && r.Tests.Passed >= passDropMin {
 			before[r.Task] = r.Tests.Passed
 		}
 	}
 	var out []Diagnostic
-	for _, r := range now {
+	for i := range now {
+		r := &now[i]
 		was, ok := before[r.Task]
 		if !ok || r.Exit != 0 || r.Tests == nil || r.Tests.Passed*2 >= was {
 			continue

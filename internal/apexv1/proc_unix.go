@@ -125,18 +125,18 @@ func (g *checkGroup) cpu() (time.Duration, bool) {
 	return groupCPU(g.pid)
 }
 
-// scopeBusyMin is the CPU a scope must have used since the last sample to
+// scopeBusyThreshold is the CPU a scope must have used since the last sample to
 // count as progress: its cpu.stat counts microseconds, so the few a
 // sleeping check's processes use (a shell's start-up, the kernel's
 // accounting) would otherwise read as work. A busy check uses hundreds of
 // milliseconds a sample.
-const scopeBusyMin = 20 * time.Millisecond
+const scopeBusyThreshold = 20 * time.Millisecond
 
 // busy reports whether CPU time went from last to now: any change for a
-// process group (counted in clock ticks), at least scopeBusyMin for a scope.
+// process group (counted in clock ticks), at least scopeBusyThreshold for a scope.
 func (g *checkGroup) busy(last, now time.Duration) bool {
 	if g.unit != "" {
-		return now-last >= scopeBusyMin
+		return now-last >= scopeBusyThreshold
 	}
 	return now != last
 }
@@ -287,12 +287,8 @@ func parseGroupMembers(out string, pgid int) []groupMember {
 // contains reports whether pid is the check's: in its scope, or its
 // process group.
 func (g *checkGroup) contains(pid int) bool {
-	if g.unit != "" {
-		for _, p := range scopePIDs(g.dir) {
-			if p == pid {
-				return true
-			}
-		}
+	if g.unit != "" && slices.Contains(scopePIDs(g.dir), pid) {
+		return true
 	}
 	if g.pid <= 0 {
 		return false

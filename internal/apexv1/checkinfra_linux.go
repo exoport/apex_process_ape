@@ -2,6 +2,7 @@ package apexv1
 
 import (
 	"bufio"
+	"bytes"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -44,7 +45,7 @@ func endTmpHolders(tmp string, inCheck func(pid int) bool) []string {
 			}
 		}
 		if !holds {
-			if env, err := os.ReadFile(dir + "/environ"); err == nil && strings.Contains(string(env), string(envNeedle)) {
+			if env, err := os.ReadFile(dir + "/environ"); err == nil && bytes.Contains(env, envNeedle) {
 				holds = true
 			}
 		}
@@ -132,7 +133,7 @@ func procCgroupMemoryPeak(pid int) int64 {
 	}
 	for line := range strings.SplitSeq(strings.TrimSpace(string(data)), "\n") {
 		if rest, ok := strings.CutPrefix(line, "0::"); ok {
-			return scopeMemoryPeak(filepath.Join("/sys/fs/cgroup", rest))
+			return scopeMemoryPeak(cgroupRoot + rest)
 		}
 	}
 	return 0

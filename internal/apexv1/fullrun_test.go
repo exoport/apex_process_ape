@@ -11,7 +11,7 @@ import (
 
 // fullRunProject is an approved M1 whose spec has one full scenario and a
 // regression command, each counting its runs in a file outside the tree.
-func fullRunProject(t *testing.T) (*Project, func() (full, suite int)) {
+func fullRunProject(t *testing.T) (p *Project, runs func() (full, suite int)) {
 	t.Helper()
 	counts := t.TempDir()
 	t.Setenv("FULL_COUNT", filepath.Join(counts, "full"))
@@ -22,7 +22,7 @@ func fullRunProject(t *testing.T) (*Project, func() (full, suite int)) {
 	files["svc.sh"] = "#!/bin/sh\necho run >> \"$FULL_COUNT\"\n"
 	files["gate.sh"] = "#!/bin/sh\n[ ! -f gate.red ]\n"
 	files["development/specs/greeting/spec.md"] = liveSpec
-	p := fixture(t, files)
+	p = fixture(t, files)
 	n := func(name string) int {
 		data, _ := os.ReadFile(filepath.Join(counts, name))
 		return strings.Count(string(data), "run")

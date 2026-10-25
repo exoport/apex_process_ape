@@ -597,21 +597,12 @@ func (p *Project) runGate(ctx context.Context, id string, opt RunOptions, full b
 		return nil, err
 	}
 	if !skip {
-		if fr != nil {
-			run.FullRunReused = fr.At
-		} else {
-			by := "gate"
-			if full {
-				by = "close"
-			}
-			var err error
-			if fr, err = p.runFull(ctx, id, fullChecks, regressionCmd, by, opt); err != nil {
-				return nil, err
-			}
+		var err error
+		if fr, err = p.gateFullRun(ctx, id, fr, fullChecks, regressionCmd, full, opt, &run); err != nil {
+			return nil, err
 		}
 		results = append(results, fr.Results...)
 	}
-	ctx = context.WithoutCancel(ctx)
 	ran := append([]CheckResult{gate}, results...)
 	if fr != nil && fr.Regression != nil {
 		ran = append(ran, *fr.Regression)
@@ -661,6 +652,21 @@ func (p *Project) runGate(ctx context.Context, id string, opt RunOptions, full b
 	}
 	g.ResultChanged = true
 	return g, nil
+}
+
+// gateFullRun is the gate's full run: fr when it took a current one
+// (recorded on run), else one it runs now and records — by close when
+// full.
+func (p *Project) gateFullRun(ctx context.Context, id string, fr *FullRun, checks []PlannedCheck, regressionCmd string, full bool, opt RunOptions, run *GateRun) (*FullRun, error) {
+	if fr != nil {
+		run.FullRunReused = fr.At
+		return fr, nil
+	}
+	by := "gate"
+	if full {
+		by = "close"
+	}
+	return p.runFull(ctx, id, checks, regressionCmd, by, opt)
 }
 
 // withoutFull is checks without the full ones, and how many there were.

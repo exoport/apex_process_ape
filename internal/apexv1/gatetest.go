@@ -153,13 +153,13 @@ func (p *Project) GateTest(ctx context.Context, folder, stub string, progress io
 	}
 	r.Verdict = "pass"
 	var plainFail error
-	switch {
-	case r.Exit == 0:
+	switch r.Exit {
+	case 0:
 		plainFail = &FailError{Code: CodeGateGreen, Msg: fmt.Sprintf("%s's plain gate is already green (exit 0 in %.1fs)", dir, r.Secs) +
 			" — a green gate proves nothing the milestone adds: re-plan the gate so it is red until the milestone's work is done" + last(r)}
-	case r.Exit == ExitTimeout:
+	case ExitTimeout:
 		plainFail = &FailError{Code: CodeGateBroken, Msg: dir + "'s plain gate timed out (" + r.Reason + ", timeouts.gate) — re-plan the gate so it ends" + last(r)}
-	case r.Exit == exitNotExecutable || r.Exit == exitNotFound:
+	case exitNotExecutable, exitNotFound:
 		plainFail = &FailError{Code: CodeGateBroken, Msg: fmt.Sprintf("%s's plain gate exited %d (a command it runs was not found or is not executable)", dir, r.Exit) +
 			" — re-plan the gate so every command it runs exists" + last(r)}
 	}

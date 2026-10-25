@@ -474,9 +474,6 @@ func (p *Project) Status() *StatusReport {
 				line.LastGate = &GateSummary{SHA: run.SHA, Exit: run.Exit, At: run.At, Log: run.Log}
 			}
 			line.ApprovalSelfCheck = approvalSelfCheck(recs[line.ID])
-			if line.Status == MilestoneApproved {
-				line.GateFrozen = gateFrozenOf(recs[line.ID])
-			}
 			r.Milestones = append(r.Milestones, line)
 		}
 		if m := rm.Current(); m != nil {
@@ -485,9 +482,7 @@ func (p *Project) Status() *StatusReport {
 				r.Milestone.BaseSHA = rec.Approval.Base()
 			}
 			r.Milestone.ApprovalSelfCheck = approvalSelfCheck(recs[m.ID])
-			if m.Status == MilestoneApproved {
-				r.Milestone.GateFrozen = gateFrozenOf(recs[m.ID])
-			}
+			r.Milestone.GateFrozen = approvedGateFrozen(m, recs[m.ID])
 		}
 	}
 
@@ -698,7 +693,7 @@ func (p *Project) milestoneStatus(m *Milestone, runs []cost.RunCost, tweaks map[
 // milestoneLine is m's line in the report: its start once approved
 // (D130), and an accept-red close.
 func milestoneLine(m *Milestone, rec *MilestoneRecord) MilestoneLine {
-	line := MilestoneLine{ID: m.ID, Title: m.Title, Status: m.Status}
+	line := MilestoneLine{ID: m.ID, Title: m.Title, Status: m.Status, GateFrozen: approvedGateFrozen(m, rec)}
 	if rec != nil {
 		line.BaseSHA = rec.Approval.Base()
 		if m.Status == MilestoneDone {

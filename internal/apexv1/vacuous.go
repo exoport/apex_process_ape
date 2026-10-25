@@ -176,14 +176,15 @@ var probeLimits = TierTimeout{Idle: time.Minute, Max: 5 * time.Minute}
 func (p *Project) probeOnce(ctx context.Context, name string, req MachineRequirement) string {
 	key := p.Root + "\x00" + name + "\x00" + req.Probe
 	if v, ok := probeResults.Load(key); ok {
-		return v.(string)
+		s, _ := v.(string)
+		return s
 	}
 	p.ensureState()
 	logPath := filepath.Join(p.LogsDir(), "probe-"+safeLogName(name)+".log")
 	r := runCheck(ctx, p.Root, req.Probe, logPath, "", probeLimits, nil)
 	why := ""
 	if r.Exit != 0 {
-		why = fmt.Sprintf("%s is not ready: its probe `%s` exited %d (requires: %s: probe; output: %s)", name, req.Probe, r.Exit, name, p.Rel(logPath))
+		why = fmt.Sprintf("%s is not ready: its probe %#q exited %d (requires: %s: probe; output: %s)", name, req.Probe, r.Exit, name, p.Rel(logPath))
 	}
 	if ctx.Err() == nil {
 		probeResults.Store(key, why)

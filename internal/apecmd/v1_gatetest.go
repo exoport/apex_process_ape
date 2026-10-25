@@ -72,7 +72,8 @@ Exit codes: 0 both runs as they must be · 1 a verdict above · 2 not a gate fol
 						return v1Fail(cmd, f, err, res)
 					}
 					return v1Emit(cmd.OutOrStdout(), f, res, func(w io.Writer) {
-						for _, r := range res.Runs {
+						for i := range res.Runs {
+							r := &res.Runs[i]
 							fmt.Fprintf(w, "%s run: exit %d in %.1fs — %s (%s)\n", r.Mode, r.Exit, r.Secs, r.Verdict, r.Log)
 						}
 						fmt.Fprintf(w, "%s: the gate self-test passes\n", res.Folder)

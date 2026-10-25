@@ -48,7 +48,10 @@ func TestLive_AgentsMD(t *testing.T) {
 	// quote it proves the load; the negative control must quote it in none.
 	var answers []string
 	loaded := false
-	for i := 0; i < agentsMDAsks && !loaded; i++ {
+	for i := range agentsMDAsks {
+		if loaded {
+			break
+		}
 		got := askNoTools(t, claudeBin, repoRoot(t))
 		t.Logf("repo root answered (ask %d of %d): %s", i+1, agentsMDAsks, got)
 		answers = append(answers, got)
@@ -59,7 +62,7 @@ func TestLive_AgentsMD(t *testing.T) {
 			"load AGENTS.md. Check that no CLAUDE.md exists here or in any parent directory, then whether this "+
 			"Claude Code version changed how AGENTS.md is loaded. Answers: %q", agentsMDAsks, answers)
 
-	for i := 0; i < agentsMDAsks; i++ {
+	for i := range agentsMDAsks {
 		control := askNoTools(t, claudeBin, t.TempDir())
 		t.Logf("empty directory answered (ask %d of %d): %s", i+1, agentsMDAsks, control)
 		require.NotContains(t, control, agentsMDMarker,

@@ -37,7 +37,11 @@ import (
 const (
 	CodeLiveDeprecated = "check.live-deprecated"
 	CodeLiveLeft       = "project.live-left"
+	CodeReadFailed     = "project.read-failed"
 )
+
+// namedFiles is how many files a notice names.
+const namedFiles = 4
 
 // RewriteLiveSubject is the rewrite's commit subject. Provenance exempts a
 // commit with it from spec.edited only when its diff is the rewrite alone.
@@ -46,7 +50,7 @@ const RewriteLiveSubject = "apex: rewrite (live) as (full)"
 func init() {
 	DiagnosticCodes = append(DiagnosticCodes,
 		CodeDoc{CodeLiveDeprecated, 0, "person", "a notice, never a finding (project check's and change check's notices; the exit is unchanged): a check line still uses `(live)`, `(full)`'s v1.2 name, deprecated since v1.4 and removed no earlier than v1.5 (D526) — in a spec, a draft change, an open gate's `# scenario (live):` comment, or a started change; `ape project rewrite-live` rewrites all but the started changes in one commit, and those reach the specs as `(full)` when they are archived"},
-		CodeDoc{"project.read-failed", 2, "stop", "`ape project rewrite-live` (and its --check): a spec, change or gate file could not be read — the check itself failed (exit 2, never read as \"not applied\"); fix the file's permissions and run it again"},
+		CodeDoc{CodeReadFailed, 2, "stop", "`ape project rewrite-live` (and its --check): a spec, change or gate file could not be read — the check itself failed (exit 2, never read as \"not applied\"); fix the file's permissions and run it again"},
 		CodeDoc{CodeLiveLeft, 1, "person", "`ape project rewrite-live --check` (the framework migration's check: 0 applied, 1 not applied): a spec, a draft change or an open gate still uses `(live)`; `ape project rewrite-live` rewrites them (a started change's are not counted: its archive writes `(full)`)"},
 	)
 }
@@ -64,9 +68,9 @@ var (
 
 // rewriteLiveMarkdown is doc, a spec or a change.md, with each `(live)`
 // check tag written `(full)` outside fenced code, and how many it wrote.
-func rewriteLiveMarkdown(doc string) (string, int) {
+func rewriteLiveMarkdown(doc string) (out string, n int) {
 	lines := strings.SplitAfter(doc, "\n")
-	n, fenced := 0, false
+	fenced := false
 	for i, l := range lines {
 		if fenceRe.MatchString(l) {
 			fenced = !fenced
@@ -89,9 +93,8 @@ func rewriteLiveMarkdown(doc string) (string, int) {
 
 // rewriteLiveGate is doc, a gate folder's file, with each `# scenario
 // (live):` comment written `(full)`, and how many it wrote.
-func rewriteLiveGate(doc string) (string, int) {
+func rewriteLiveGate(doc string) (out string, n int) {
 	lines := strings.SplitAfter(doc, "\n")
-	n := 0
 	for i, l := range lines {
 		if liveGateRe.MatchString(l) {
 			lines[i] = liveGateRe.ReplaceAllString(l, "${1}full${2}")
@@ -188,7 +191,11 @@ func (p *Project) liveTargets() (rewrite, left []RewriteLiveFile, err error) {
 	}
 	seen := map[string]bool{}
 	gate := func(path string) error {
-		if st, err := os.Stat(path); err != nil || !st.Mode().IsRegular() || st.Size() > 1<<20 || seen[path] {
+		st, err := os.Stat(path)
+		if err != nil {
+			return nil //nolint:nilerr // a file gone since the walk is no gate file to rewrite
+		}
+		if !st.Mode().IsRegular() || st.Size() > 1<<20 || seen[path] {
 			return nil
 		}
 		seen[path] = true
@@ -224,7 +231,7 @@ func (p *Project) liveNotices() []Diagnostic {
 	if len(left) > 0 {
 		fix += " (a started change's stay: its archive writes `(full)`)"
 	}
-	return []Diagnostic{notice(Diagnostic{Code: CodeLiveDeprecated, Message: strconv.Itoa(n) + " check line(s) use `(live)` (" + strings.Join(limit(where, 4), ", ") +
+	return []Diagnostic{notice(Diagnostic{Code: CodeLiveDeprecated, Message: strconv.Itoa(n) + " check line(s) use `(live)` (" + strings.Join(limit(where, namedFiles), ", ") +
 		"): `(live)` is `(full)`'s v1.2 name, deprecated since v1.4 and removed no earlier than v1.5 — " + fix})}
 }
 
@@ -248,7 +255,7 @@ func (p *Project) RewriteLiveCheck() (*RewriteLiveResult, error) {
 	rewrite, left, err := p.liveTargets()
 	res := &RewriteLiveResult{Rewritten: orEmpty(rewrite), Left: orEmpty(left)}
 	if err != nil {
-		return res, &FailError{Code: "project.read-failed", Msg: "cannot read the project's specs, changes or gates: " + err.Error()}
+		return res, &FailError{Code: CodeReadFailed, Msg: "cannot read the project's specs, changes or gates: " + err.Error()}
 	}
 	if len(rewrite) == 0 {
 		return res, nil
@@ -263,11 +270,11 @@ func (p *Project) RewriteLiveCheck() (*RewriteLiveResult, error) {
 		" — `ape project rewrite-live` rewrites them as `(full)` in one commit"}
 }
 
-func orEmpty(fs []RewriteLiveFile) []RewriteLiveFile {
-	if fs == nil {
+func orEmpty(files []RewriteLiveFile) []RewriteLiveFile {
+	if files == nil {
 		return []RewriteLiveFile{}
 	}
-	return fs
+	return files
 }
 
 // RewriteLive is `ape project rewrite-live`: every `(live)` tag of the
@@ -286,7 +293,7 @@ func (p *Project) RewriteLive(ctx context.Context) (*RewriteLiveResult, error) {
 	rewrite, left, err := p.liveTargets()
 	res.Left = orEmpty(left)
 	if err != nil {
-		return res, &FailError{Code: "project.read-failed", Msg: "cannot read the project's specs, changes or gates: " + err.Error()}
+		return res, &FailError{Code: CodeReadFailed, Msg: "cannot read the project's specs, changes or gates: " + err.Error()}
 	}
 	if len(rewrite) == 0 {
 		return res, nil
@@ -377,6 +384,12 @@ func (p *Project) rerecordRewrittenGates(before map[string]string) ([]string, er
 	}
 	sort.Strings(changed)
 	return changed, p.saveMilestoneRecords(recs)
+}
+
+// liveRewriteCommit reports ape's (live) rewrite commit: its subject, and
+// a diff that is the rewrite alone.
+func (p *Project) liveRewriteCommit(ctx context.Context, subject, sha string) bool {
+	return subject == RewriteLiveSubject && p.pureLiveRewrite(ctx, sha)
 }
 
 // pureLiveRewrite reports whether commit sha's diff to its parent is the

@@ -95,7 +95,7 @@ func (p *Project) provenanceFindings(ctx context.Context) []Finding {
 				continue
 			}
 			switch {
-			case strings.HasPrefix(rel, "specs/") && !c.squash && !(c.subject == RewriteLiveSubject && p.pureLiveRewrite(ctx, c.sha)):
+			case strings.HasPrefix(rel, "specs/") && !c.squash && !p.liveRewriteCommit(ctx, c.subject, c.sha):
 				// v1.4 (D526): ape's (live) rewrite edits specs, and only
 				// when its diff is that rewrite and nothing else.
 				reported[f] = true

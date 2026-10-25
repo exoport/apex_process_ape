@@ -208,30 +208,13 @@ func runCheck(ctx context.Context, dir, cmd, logPath, logNote string, lim TierTi
 	// own holder is still in its group.
 	portHeld := ""
 	if finished && err != nil {
-		if port := takenPort(buf.String()); port > 0 {
-			if h := portHolder(ctx, port, infra.docker, g.contains); h != "" {
-				portHeld = "port " + strconv.Itoa(port) + " is held by " + h + ", outside the check"
-			}
-		}
+		portHeld = heldPort(ctx, w, &buf, infra.docker, g.contains)
 	}
 	// What a check that exited on its own left running is ended and named
 	// (F15); a check killed at a timeout or an interrupt was killed whole.
 	// In a scope (v1.4) the watchdog holds the scope open: its leftovers
 	// are ended and its memory.peak read before the watchdog is let go.
-	var leftovers []string
-	var peak int64
-	if g.reaping() == ReapingScope {
-		if finished {
-			leftovers = g.endLeftovers()
-		}
-		peak = g.memoryPeak()
-		g.done(finished)
-	} else {
-		g.done(finished)
-		if finished {
-			leftovers = g.endLeftovers()
-		}
-	}
+	leftovers, peak := endCheck(g, finished)
 	// v1.4 (B1): what held its TMPDIR from outside, its containers, the
 	// TMPDIR itself.
 	var fin CheckResult
@@ -249,32 +232,7 @@ func runCheck(ctx context.Context, dir, cmd, logPath, logNote string, lim TierTi
 		<-copied
 	}
 
-	exit := 0
-	var reason, detail string
-	if err != nil {
-		var ee *exec.ExitError
-		switch {
-		case errors.Is(context.Cause(runCtx), errIdle):
-			exit, reason = ExitTimeout, ReasonIdle
-			detail = "no output and no CPU time for " + lim.Idle.String() + " (" + lim.key("idle") + ")"
-			_, _ = io.WriteString(w, "\n[ape] check timed out: "+detail+"\n")
-		case errors.Is(ctx.Err(), context.DeadlineExceeded):
-			exit, reason = ExitTimeout, ReasonCeiling
-			detail = "still running at " + lim.Max.String() + " (" + lim.key("max") + ")"
-			_, _ = io.WriteString(w, "\n[ape] check timed out: "+detail+"\n")
-		case errors.As(err, &ee):
-			exit = ee.ExitCode()
-			if exit < 0 {
-				exit = 128
-			}
-			if ctx.Err() != nil {
-				_, _ = io.WriteString(w, "\n[ape] interrupted\n")
-			}
-		default:
-			exit = exitNotFound
-			_, _ = io.WriteString(w, "\n[ape] "+err.Error()+"\n")
-		}
-	}
+	exit, reason, detail := checkExit(ctx, runCtx, err, lim, w)
 	if portHeld != "" && exit != 0 && exit != ExitTimeout {
 		exit, reason, detail = ExitUnrun, ReasonUnrun, portHeld+" (port-held): not ready, never red for the product"
 		_, _ = io.WriteString(w, "\n[ape] unrun (port-held): "+portHeld+"\n")
@@ -290,16 +248,10 @@ func runCheck(ctx context.Context, dir, cmd, logPath, logNote string, lim TierTi
 	// OQ-SKIP (v1.4): the runner's counts, and, for a check whose output
 	// ape judges (vacuous non-nil: never a gate's own command), a run that
 	// tested nothing is unrun.
-	var tests *TestCounts
-	skip := ""
-	if c, ok := testCounts(buf.String()); ok {
-		tests = &c
-		if exit == 0 && vacuous != nil {
-			if why, d := skipVerdict(cmd, c); why != "" {
-				exit, reason, detail, skip = ExitUnrun, ReasonUnrun, d, why
-				_, _ = io.WriteString(w, "\n[ape] unrun ("+why+"): "+d+"\n")
-			}
-		}
+	tests, skip, skipDetail := judgeSkips(cmd, buf.String(), exit == 0 && vacuous != nil)
+	if skip != "" {
+		exit, reason, detail = ExitUnrun, ReasonUnrun, skipDetail
+		_, _ = io.WriteString(w, "\n[ape] unrun ("+skip+"): "+skipDetail+"\n")
 	}
 	shellNote := shellBuiltinNote(exit, buf.String())
 	if shellNote != "" {
@@ -337,6 +289,88 @@ func runCheck(ctx context.Context, dir, cmd, logPath, logNote string, lim TierTi
 		Compose:      fin.Compose,
 		Containers:   fin.Containers,
 	}
+}
+
+// checkExit is the exit a check records for the error its Wait returned:
+// 0, its own exit, ExitTimeout at its idle window or ceiling (noted in the
+// log through w), or 127 when it could not run.
+func checkExit(ctx, runCtx context.Context, err error, lim TierTimeout, w io.Writer) (exit int, reason, detail string) {
+	if err == nil {
+		return 0, "", ""
+	}
+	var ee *exec.ExitError
+	switch {
+	case errors.Is(context.Cause(runCtx), errIdle):
+		exit, reason = ExitTimeout, ReasonIdle
+		detail = "no output and no CPU time for " + lim.Idle.String() + " (" + lim.key("idle") + ")"
+		_, _ = io.WriteString(w, "\n[ape] check timed out: "+detail+"\n")
+	case errors.Is(ctx.Err(), context.DeadlineExceeded):
+		exit, reason = ExitTimeout, ReasonCeiling
+		detail = "still running at " + lim.Max.String() + " (" + lim.key("max") + ")"
+		_, _ = io.WriteString(w, "\n[ape] check timed out: "+detail+"\n")
+	case errors.As(err, &ee):
+		exit = ee.ExitCode()
+		if exit < 0 {
+			exit = 128
+		}
+		if ctx.Err() != nil {
+			_, _ = io.WriteString(w, "\n[ape] interrupted\n")
+		}
+	default:
+		exit = exitNotFound
+		_, _ = io.WriteString(w, "\n[ape] "+err.Error()+"\n")
+	}
+	return exit, reason, detail
+}
+
+// endCheck lets the check's watchdog go and ends what a check that
+// exited on its own left running — in a scope, first, with its
+// memory.peak read while the watchdog still holds the scope open.
+func endCheck(g *checkGroup, finished bool) (leftovers []string, peak int64) {
+	if g.reaping() == ReapingScope {
+		if finished {
+			leftovers = g.endLeftovers()
+		}
+		peak = g.memoryPeak()
+		g.done(finished)
+		return leftovers, peak
+	}
+	g.done(finished)
+	if finished {
+		leftovers = g.endLeftovers()
+	}
+	return leftovers, 0
+}
+
+// heldPort is why a red check is port-held (v1.4, B1), "" when its
+// output names no taken port or the holder is the check's own. The output
+// may still be streaming (a leftover holds the pipe): it is read under the
+// writer's lock.
+func heldPort(ctx context.Context, w *lockedWriter, buf *bytes.Buffer, docker bool, inCheck func(int) bool) string {
+	w.mu.Lock()
+	sofar := buf.String()
+	w.mu.Unlock()
+	port := takenPort(sofar)
+	if port == 0 {
+		return ""
+	}
+	if h := portHolder(ctx, port, docker, inCheck); h != "" {
+		return "port " + strconv.Itoa(port) + " is held by " + h + ", outside the check"
+	}
+	return ""
+}
+
+// judgeSkips is the runner's counts of out (OQ-SKIP), and, when judge, the
+// skip verdict that makes the check unrun.
+func judgeSkips(cmd, out string, judge bool) (tests *TestCounts, skip, detail string) {
+	c, ok := testCounts(out)
+	if !ok {
+		return nil, "", ""
+	}
+	if judge {
+		skip, detail = skipVerdict(cmd, c)
+	}
+	return &c, skip, detail
 }
 
 // outputDrain bounds how long a check's output is read after the check

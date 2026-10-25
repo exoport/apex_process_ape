@@ -36,8 +36,9 @@ func TestCheckChange_GuardedConfigTask(t *testing.T) {
 
 	_, err := p.Start(ctx(), "add-wave", RunOptions{})
 	require.Error(t, err, "start runs change check and refuses its findings")
-	var codes []string
-	for _, d := range Diagnostics(err) {
+	ds := Diagnostics(err)
+	codes := make([]string, 0, len(ds))
+	for _, d := range ds {
 		codes = append(codes, d.Code)
 	}
 	require.Contains(t, codes, CodeGuardedConfigTask)

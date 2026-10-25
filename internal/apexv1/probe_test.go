@@ -48,7 +48,7 @@ func TestRunChecks_Probe(t *testing.T) {
 		{Ref: "T2", Kind: KindTask, Cmd: "./it.sh -tags=integration ./queue"},
 		{Ref: "T3", Kind: KindTask, Cmd: "./it.sh ./unit"},
 	}
-	rs := p.RunChecks(ctx(), filepath.Join(p.Root, "_apex/state/logs/t"), "", checks, RunOptions{})
+	rs := p.RunChecks(ctx(), filepath.Join(p.Root, "_apex", "state", "logs", "t"), "", checks, RunOptions{})
 	require.Equal(t, ReasonUnrun, rs[0].Reason)
 	require.Equal(t, ExitUnrun, rs[0].Exit)
 	require.Contains(t, rs[0].Detail, "dockerd is not ready: its probe `echo probed >> probe.count; test -f ready.flag` exited 1")
@@ -59,7 +59,7 @@ func TestRunChecks_Probe(t *testing.T) {
 	// Ready: the bound checks run.
 	probeResults.Range(func(k, _ any) bool { probeResults.Delete(k); return true })
 	write(t, p, "ready.flag", "")
-	rs = p.RunChecks(ctx(), filepath.Join(p.Root, "_apex/state/logs/t"), "", checks, RunOptions{})
+	rs = p.RunChecks(ctx(), filepath.Join(p.Root, "_apex", "state", "logs", "t"), "", checks, RunOptions{})
 	require.Equal(t, 0, rs[0].Exit)
 	require.Equal(t, 0, rs[1].Exit)
 }

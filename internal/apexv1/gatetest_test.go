@@ -3,7 +3,6 @@ package apexv1
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -56,9 +55,9 @@ func TestGateGuard(t *testing.T) {
 
 // gateTestProject is a v1 project with a gate folder M1-skel whose gate
 // runs ./app.sh (or the stub), and a stub that answers.
-func gateTestProject(t *testing.T, gate string) (*Project, string) {
+func gateTestProject(t *testing.T, gate string) (p *Project, folder string) {
 	t.Helper()
-	p := fixture(t, baseFiles())
+	p = fixture(t, baseFiles())
 	dir := "development/gates/M1-skel"
 	write(t, p, dir+"/gate.sh", gate)
 	write(t, p, dir+"/stub", "#!/bin/sh\necho \"hi $1\"\n")
@@ -118,5 +117,5 @@ func TestGateTest_EndsLeftovers(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, res.Runs, 1, "no stub: the plain run only")
 	require.Len(t, res.Runs[0].Leftovers, 1)
-	require.True(t, strings.Contains(res.Runs[0].Leftovers[0], "sleep 300"), res.Runs[0].Leftovers)
+	require.Contains(t, res.Runs[0].Leftovers[0], "sleep 300")
 }
