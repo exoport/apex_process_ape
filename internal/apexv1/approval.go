@@ -53,6 +53,11 @@ type MilestoneApproval struct {
 	// gateOwnScan), sorted: a file one matches that GateOwnFiles does not
 	// hold is drift. Absent on approvals before v1.2.
 	GateGlobs []string `json:"gate_globs,omitempty"`
+	// ScratchExcluded: GateOwnFiles left out the gate's scratch, the files
+	// git ignores that it neither sources, declares nor could run (v1.4
+	// D581, gateScratch), so drift compares every file it holds. False on
+	// approvals before v1.4, whose scratch drift skips.
+	ScratchExcluded bool `json:"gate_scratch_excluded,omitempty"`
 	// SelfCheck is the gate's run at approval (D70 B): red, its exit,
 	// duration and log. Absent on approvals before rc.3.
 	SelfCheck *GateSelfCheck `json:"self_check,omitempty"`
@@ -142,7 +147,7 @@ func gateFilesDigest(files map[string]string) string {
 // newApproval records a person approving m's gate now.
 func (p *Project) newApproval(m *Milestone, by string) *MilestoneApproval {
 	files := p.gateFiles(m.Gate)
-	a := &MilestoneApproval{By: by, At: Stamp(), GateCmd: m.Gate, GateFilesSHA256: gateFilesDigest(files)}
+	a := &MilestoneApproval{By: by, At: Stamp(), GateCmd: m.Gate, GateFilesSHA256: gateFilesDigest(files), ScratchExcluded: true}
 	if len(files) > 0 {
 		a.GateFiles = files
 	}
@@ -180,7 +185,7 @@ func (p *Project) gateDrift(m *Milestone, a *MilestoneApproval) []string {
 			out = append(out, n+" changed")
 		}
 	}
-	return append(out, p.gateOwnDrift(a)...)
+	return append(out, p.gateOwnDrift(m, a)...)
 }
 
 // gateScriptUnrecorded reports a script of m's gate that exists now and

@@ -3,6 +3,7 @@ package apexv1
 import (
 	"context"
 	"io/fs"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
@@ -55,6 +56,16 @@ import (
 //     "# ape: gate-files <path|glob>…" — each repo-relative path or glob is
 //     the gate's own, wherever it lives (the author asked: no folder rule;
 //     a declared glob is recorded even with no match yet).
+//
+// v1.4 D581 (FINDING-C1-1): a gate that keeps scratch output under its own
+// folder — ledger's lib wrote <gate>/.work/io/err, its .gitignore holding
+// development/gates/*/.work/ — had that output frozen, and the green run
+// that rewrote it refused the close as milestone.gate-changed. A file git
+// ignores is the gate's scratch, not its own (gateScratch), unless it can
+// change what the gate does: a file a gate script sources, one a
+// declaration names, or a script — an executable bit, a #! line, or a
+// script's extension (scriptExts). A tracked file, or an untracked one git
+// does not ignore, is frozen as before, wherever the scan found it.
 
 var (
 	// sourceRe is a script line that sources a file.
@@ -104,10 +115,12 @@ var (
 const maxSourceDepth = 3
 
 // gateOwn is what gateOwnScan finds: the gate's own files, each with its
-// content's SHA-256, and the globs that name some of them.
+// content's SHA-256, and the globs that name some of them; keep are the
+// files sourced or declared, frozen even when git ignores them (D581).
 type gateOwn struct {
 	files map[string]string
 	globs map[string]bool
+	keep  map[string]bool
 }
 
 // gateOwnFiles are m's gate's own files (above), each with its content's
@@ -118,7 +131,7 @@ func (p *Project) gateOwnFiles(m *Milestone) map[string]string {
 
 // gateOwnScan is gateOwnFiles with the globs recorded beside them.
 func (p *Project) gateOwnScan(m *Milestone) gateOwn {
-	own := gateOwn{files: map[string]string{}, globs: map[string]bool{}}
+	own := gateOwn{files: map[string]string{}, globs: map[string]bool{}, keep: map[string]bool{}}
 	folders := p.milestoneGateFolders(m.ID)
 	if lib := filepath.Join(p.GatesDir(), "lib"); dirExists(lib) {
 		folders = append(folders, lib)
@@ -139,7 +152,58 @@ func (p *Project) gateOwnScan(m *Milestone) gateOwn {
 	for _, s := range scripts {
 		delete(own.files, s)
 	}
+	for f := range p.gateScratch(slices.Collect(maps.Keys(own.files)), own.keep) {
+		delete(own.files, f)
+	}
 	return own
+}
+
+// scriptExts are the extensions that make an ignored file a script a gate
+// may run (gateScratch): `bash x.sh` needs neither an executable bit nor a
+// #! line.
+var scriptExts = map[string]bool{
+	".sh": true, ".bash": true, ".zsh": true, ".ksh": true, ".py": true, ".pl": true, ".rb": true,
+	".js": true, ".mjs": true, ".cjs": true, ".ts": true, ".awk": true, ".sed": true, ".php": true, ".lua": true, ".tcl": true,
+}
+
+// gateScratch are the files among names that are a gate's scratch (D581):
+// git ignores them (a tracked file never is), keep does not hold them, and
+// none is a script — an executable bit, a #! line or a script's extension.
+// Empty outside a git repository. It takes no context: approval and drift,
+// which read it, take none either, and check-ignore is local and quick.
+//
+//nolint:contextcheck,nolintlint // contextcheck reads a declaration's directive to stop the chain; nolintlint cannot see that
+func (p *Project) gateScratch(names []string, keep map[string]bool) map[string]bool {
+	out := map[string]bool{}
+	if len(names) == 0 {
+		return out
+	}
+	for _, f := range gitIgnored(context.Background(), p.Root, false, names...) {
+		if !keep[f] && !p.isScript(f) {
+			out[f] = true
+		}
+	}
+	return out
+}
+
+// isScript reports a file a gate could run: an executable bit, a #! line
+// or a script's extension (scriptExts).
+func (p *Project) isScript(rel string) bool {
+	if scriptExts[strings.ToLower(path.Ext(rel))] {
+		return true
+	}
+	abs := filepath.Join(p.Root, filepath.FromSlash(rel))
+	if st, err := os.Stat(abs); err == nil && st.Mode().Perm()&0o111 != 0 {
+		return true
+	}
+	f, err := os.Open(abs)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	head := make([]byte, 2)
+	n, _ := f.Read(head)
+	return n == 2 && string(head) == "#!"
 }
 
 func (o gateOwn) add(p *Project, rel string) bool {
@@ -210,8 +274,11 @@ func (s *ownScan) read(file string, depth int) {
 		}
 		red := s.assign(strings.NewReplacer(`"`, "", `'`, "").Replace(line), file)
 		if w, ok := s.sourced(red); ok {
-			if rel, ok := repoPath(w); ok && s.own.add(s.p, rel) && depth < maxSourceDepth {
-				s.read(rel, depth+1)
+			if rel, ok := repoPath(w); ok && s.own.add(s.p, rel) {
+				s.own.keep[rel] = true
+				if depth < maxSourceDepth {
+					s.read(rel, depth+1)
+				}
 			}
 		}
 		s.folderWords(red)
@@ -323,8 +390,8 @@ func (s *ownScan) word(w string, declared bool) {
 		}
 		return
 	}
-	if rel, ok := repoPath(w); ok {
-		s.own.add(s.p, rel)
+	if rel, ok := repoPath(w); ok && s.own.add(s.p, rel) && declared {
+		s.own.keep[rel] = true
 	}
 }
 
@@ -345,7 +412,9 @@ func (s *ownScan) glob(pat string, declared bool) {
 	}
 	s.own.globs[pat] = true
 	for _, rel := range matches {
-		s.own.add(s.p, rel)
+		if s.own.add(s.p, rel) && declared {
+			s.own.keep[rel] = true
+		}
 	}
 }
 
@@ -462,15 +531,28 @@ func atoi(s string) int {
 // not hold (F4: a check list added under scripts/checks/*.checks is new
 // gate input). Any other file the record does not hold is not drift
 // (created since, or recorded before rc.7o): the next re-approval freezes
-// it.
-func (p *Project) gateOwnDrift(a *MilestoneApproval) []string {
+// it. An approval since v1.4 (ScratchExcluded) left the gate's scratch
+// out when it was recorded, so every file it holds is compared: judging a
+// file now would let one edit drop a helper's #! line and its executable
+// bit and change it unseen. An older one may hold scratch (D581), judged
+// now (gateScratch, m's gate scanned for what it sources and declares) and
+// skipped. A new file a recorded glob matches is new gate input, ignored
+// or not.
+func (p *Project) gateOwnDrift(m *Milestone, a *MilestoneApproval) []string {
 	names := make([]string, 0, len(a.GateOwnFiles))
 	for n := range a.GateOwnFiles {
 		names = append(names, n)
 	}
 	sort.Strings(names)
+	scratch := map[string]bool{}
+	if !a.ScratchExcluded && len(names) > 0 && m != nil {
+		scratch = p.gateScratch(names, p.gateOwnScan(m).keep)
+	}
 	var out []string
 	for _, n := range names {
+		if scratch[n] {
+			continue
+		}
 		switch is, exists := p.fileSHA256(n); {
 		case !exists:
 			out = append(out, n+" is gone")

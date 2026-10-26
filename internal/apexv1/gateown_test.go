@@ -157,3 +157,110 @@ func TestGateDataOutsideNotice(t *testing.T) {
 	})
 	require.Empty(t, notices(r))
 }
+
+// D581 (FINDING-C1-1): a gate's scratch — a file git ignores under its own
+// folder, ledger's <gate>/.work/io/err — is not one of its own files: the
+// green run that rewrites it is no drift. What can change what the gate
+// does stays frozen though ignored: a file it sources or declares, and a
+// script (an executable bit, a #! line, a script's extension); a tracked
+// file is frozen as before.
+func TestGateOwnFiles_IgnoredScratchIsNotDrift(t *testing.T) {
+	plain := func(t *testing.T, p *Project, rel, content string) {
+		t.Helper()
+		write(t, p, rel, content)
+		require.NoError(t, os.Chmod(filepath.Join(p.Root, filepath.FromSlash(rel)), 0o644))
+	}
+	const dir = "development/gates/M1-skel/"
+	setup := func(t *testing.T) (*Project, *Milestone) {
+		t.Helper()
+		p := selfCheckProject(t, "./"+dir+"gate.sh", map[string]string{
+			".gitignore": "development/gates/*/.work/\n",
+			dir + "gate.sh": "#!/bin/bash\nhere=$(cd \"$(dirname \"$0\")\" && pwd)\n. \"$here/../lib/check.sh\"\n" +
+				". \"$here/.work/env\"\nbash \"$here/.work/helper\"\n\"$here/.work/run\" >\"$here/.work/io/out\" 2>\"$here/.work/io/err\"\nexit 1\n",
+			"development/gates/lib/check.sh": "W=$1/.work\n",
+			dir + "checks":                   "a\n",
+		})
+		plain(t, p, "development/gates/lib/check.sh", "W=$1/.work\n")
+		plain(t, p, dir+"checks", "a\n")
+		plain(t, p, dir+".work/io/err", "red\n")
+		plain(t, p, dir+".work/io/out", "")
+		plain(t, p, dir+".work/j/example.journal", "j\n")
+		plain(t, p, dir+".work/env", "X=1\n")                // sourced: frozen
+		plain(t, p, dir+".work/helper", "#!/bin/sh\ntrue\n") // a #! line: frozen
+		write(t, p, dir+".work/run", "true\n")               // executable: frozen
+		plain(t, p, dir+".work/lib.sh", "true\n")            // a script's extension: frozen
+		commitAll(t, p, "gate")
+		return p, p.roadmap().Find("M1")
+	}
+	t.Run("the field case: the gate's own output under an ignored .work/", func(t *testing.T) {
+		p, m := setup(t)
+		a := p.newApproval(m, "ann")
+		require.Equal(t, []string{
+			dir + ".work/env", dir + ".work/helper", dir + ".work/lib.sh", dir + ".work/run", dir + "checks", "development/gates/lib/check.sh",
+		}, sortedKeys(keysOf(a.GateOwnFiles)), "the scratch is not recorded; what can run, and what is tracked, is")
+		plain(t, p, dir+".work/io/err", "")
+		plain(t, p, dir+".work/io/out", "ok\t1\n")
+		require.NoError(t, os.Remove(filepath.Join(p.Root, filepath.FromSlash(dir+".work/j/example.journal"))))
+		plain(t, p, dir+".work/io/new", "x\n")
+		require.Empty(t, p.gateDrift(m, a), "a green run rewrote its scratch")
+		require.False(t, p.gateScriptUnrecorded(m, a), "new scratch is not an unrecorded own file")
+	})
+	t.Run("an approval recorded before v1.4 that froze the scratch", func(t *testing.T) {
+		p, m := setup(t)
+		a := p.newApproval(m, "ann")
+		a.ScratchExcluded = false
+		a.GateOwnFiles[dir+".work/io/err"] = "66bb1ab403006ec3c01ed55317731f8a3f7d2a22eae18c0187a48f2a2e67bef0"
+		a.GateOwnFiles[dir+".work/j/example.journal"] = "0"
+		require.Empty(t, p.gateDrift(m, a), "judged now: ignored, not a script, not sourced")
+		plain(t, p, dir+"checks", "weakened\n")
+		plain(t, p, dir+".work/env", "X=2\n")
+		require.Equal(t, []string{dir + ".work/env changed", dir + "checks changed"}, p.gateDrift(m, a), "what it tracks and sources is still compared")
+	})
+	t.Run("a tracked file under the gate folder stays frozen", func(t *testing.T) {
+		p, m := setup(t)
+		a := p.newApproval(m, "ann")
+		plain(t, p, dir+"checks", "weakened\n")
+		plain(t, p, "development/gates/lib/check.sh", "W=/tmp\n")
+		require.Equal(t, []string{dir + "checks changed", "development/gates/lib/check.sh changed"}, p.gateDrift(m, a))
+	})
+	t.Run("a tracked file git's rules would ignore stays frozen", func(t *testing.T) {
+		p, m := setup(t)
+		run(t, p.Root, "add", "-f", dir+".work/io/err")
+		run(t, p.Root, "commit", "-q", "-m", "track it")
+		a := p.newApproval(m, "ann")
+		require.Contains(t, a.GateOwnFiles, dir+".work/io/err")
+		plain(t, p, dir+".work/io/err", "")
+		require.Equal(t, []string{dir + ".work/io/err changed"}, p.gateDrift(m, a))
+	})
+	t.Run("an ignored file the gate runs or sources stays frozen", func(t *testing.T) {
+		for _, f := range []string{".work/env", ".work/helper", ".work/run", ".work/lib.sh"} {
+			p, m := setup(t)
+			a := p.newApproval(m, "ann")
+			plain(t, p, dir+f, "exit 0\n")
+			require.Equal(t, []string{dir + f + " changed"}, p.gateDrift(m, a), f+": its x bit or #! line removed in the same edit")
+		}
+	})
+	t.Run("a declared ignored file stays frozen", func(t *testing.T) {
+		p, m := setup(t)
+		write(t, p, dir+"gate.sh", "#!/bin/bash\n# ape: gate-files "+dir+".work/expected\nexit 1\n")
+		plain(t, p, dir+".work/expected", "ok\n")
+		a := p.newApproval(m, "ann")
+		require.Contains(t, a.GateOwnFiles, dir+".work/expected")
+		plain(t, p, dir+".work/expected", "anything\n")
+		require.Equal(t, []string{dir + ".work/expected changed"}, p.gateDrift(m, a))
+	})
+	t.Run("an ignored file a recorded glob matches later is new gate input all the same", func(t *testing.T) {
+		p, m := setup(t)
+		write(t, p, dir+"gate.sh", "#!/bin/bash\nfor c in "+dir+"*.checks; do :; done\nexit 1\n")
+		plain(t, p, dir+"a.checks", "a\n")
+		commitAll(t, p, "checks")
+		a := p.newApproval(m, "ann")
+		require.Equal(t, []string{dir + "*.checks"}, a.GateGlobs)
+		require.NoError(t, os.WriteFile(filepath.Join(p.Root, ".gitignore"), []byte("development/gates/*/.work/\n*.local.checks\n"), 0o644))
+		commitAll(t, p, "ignore local checks")
+		a = p.newApproval(m, "ann")
+		plain(t, p, dir+"mine.local.checks", "x\n")
+		plain(t, p, dir+"b.checks", "b\n")
+		require.Equal(t, []string{dir + "b.checks is new (it matches " + dir + "*.checks)", dir + "mine.local.checks is new (it matches " + dir + "*.checks)"}, p.gateDrift(m, a))
+	})
+}

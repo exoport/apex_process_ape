@@ -2,6 +2,18 @@
 
 ## Unreleased (v1.4)
 
+### A gate's scratch output is not a gate change (D581, FINDING-C1-1)
+
+- Approval froze every file under the milestone's gate folder, so a gate that wrote its output
+  there (`development/gates/M1-…/.work/io/err`, ignored by the project) changed on its own green
+  run, and `ape milestone close` refused it as `milestone.gate-changed`.
+- A file git ignores is now the gate's scratch, not one of its own files, unless it can change what
+  the gate does: a recorded script sources it, a `# ape: gate-files` line declares it, or it is a
+  script (an executable bit, a `#!` line, or a script's extension). Tracked files stay frozen.
+- The approval records `gate_scratch_excluded: true`, and drift compares every file such a record
+  holds, so an edit cannot unfreeze a helper by dropping its `#!` line and executable bit. An
+  approval made before v1.4 may hold scratch files; drift skips those, judged as above.
+
 ### The loop can never start apex-release (D524)
 
 - `apex-release` is no longer on the loop's allow-list (`CoreChildSkills`). A loop run that starts

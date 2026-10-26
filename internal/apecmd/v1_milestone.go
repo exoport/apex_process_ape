@@ -128,7 +128,11 @@ sourced file, and its own folder counts too. A path with a glob under such a fol
 (for f in scripts/checks/*.checks) that matches a file freezes every match and records the
 pattern in gate_globs. A line "# ape: gate-files <path|glob>…" in a gate script or a file it
 sources adds those repo-relative paths and globs wherever they are (a declared glob is
-recorded even with no match yet). The gate differs from the
+recorded even with no match yet). A file git ignores is the gate's scratch, not its own
+(v1.4, D581: a gate's output under its own .work/), unless a recorded script sources it, a
+declaration names it, or it is a script — an executable bit, a #! line, or a script's
+extension (.sh .py .js …); a tracked file is frozen wherever it is (gate_scratch_excluded:
+true; an approval before v1.4 holds its scratch, which drift skips). The gate differs from the
 approved one when its command changed, or a recorded gate file it still runs, or a recorded
 own file, is gone or changed (compared file by file), or a file a recorded glob matches is
 not recorded (a new check list); any other gate file or own file created since

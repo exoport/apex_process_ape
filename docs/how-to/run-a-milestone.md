@@ -100,6 +100,7 @@ never the `Status:` line alone. The record holds:
 | `gate_files_sha256` | A digest of the gate files. |
 | `gate_own_files` | The gate's own files beside its scripts, each with its SHA-256 (below). |
 | `gate_globs` | The globs that named some of the own files (below): a file one matches later is a change to the gate. |
+| `gate_scratch_excluded` | v1.4: `true` when the approval left the gate's scratch (ignored files it cannot run) out of `gate_own_files` (below). |
 | `base_sha` | HEAD at the first approval, the milestone's start. A re-approval keeps it. It is `APE_MILESTONE_BASE` for every gate run. |
 | `self_check` | The approval's red run: `at`, `sha`, `exit`, `secs`, `log`, `output_sha256`. |
 
@@ -150,6 +151,16 @@ recorded even before anything matches it):
 ```bash
 # ape: gate-files data/expected.json scripts/checks/*.checks
 ```
+
+A file git ignores is the gate's scratch, not one of its own files (v1.4): a gate that writes its
+output under its own folder (`development/gates/M1-skel/.work/io/err`, with
+`development/gates/*/.work/` in `.gitignore`) rewrites it on every run, and that is no change to
+the gate. An ignored file stays frozen when it can change what the gate does: a recorded script
+sources it, a `# ape: gate-files` line declares it, or it is a script (an executable bit, a `#!`
+line, or a script's extension such as `.sh`, `.py` or `.js`). A tracked file is frozen wherever it
+is, ignore rules or not. The approval says so with `gate_scratch_excluded: true`, and drift then
+compares every file it recorded; an approval made before v1.4 may hold scratch files, and drift
+skips those. A file a recorded glob matches later is new gate input even when git ignores it.
 
 Never the files a gate checks elsewhere (`README.md`, `docs/`): those are the milestone's work.
 They stay out even when a script reaches them through its folder (`"$here/../README.md"`).
