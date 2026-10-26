@@ -661,11 +661,6 @@ func (p *Project) configKeyFindings() []Finding {
 					}
 				}
 			}
-		case "vet":
-			if s := strings.TrimSpace(v.Value); v.Kind != yaml.ScalarNode || s != VetPlan && s != VetOff {
-				out = append(out, Finding{File: configYAML, Line: v.Line, Message: "vet: " + strconv.Quote(v.Value) +
-					" is not plan or off, so apex-orchestrator cannot tell whether to vet a plan — use plan (a fresh session vets each plan before it is proposed) or off, or drop it"})
-			}
 		case "effort":
 			if v.Kind == yaml.ScalarNode && checkEffortLevel(v.Value) != nil {
 				out = append(out, Finding{File: configYAML, Line: v.Line, Message: "effort: " + strconv.Quote(v.Value) +
@@ -753,11 +748,5 @@ func yamlKeys(v any) []string {
 	}
 	return out
 }
-
-// The vet: values (v1.4).
-const (
-	VetPlan = "plan"
-	VetOff  = "off"
-)
 
 func checkEffortLevel(v string) error { return effort.CheckLevel(strings.TrimSpace(v)) }

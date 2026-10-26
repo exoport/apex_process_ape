@@ -236,7 +236,6 @@ var findingRules = []findingRule{
 	// v1.1 follow-ups (Q154).
 	rule("", `^limits\.\S+ is not a key of limits:`, CodeConfigUnknownKey),
 	rule("", `^(models\.\S+\.)?effort: .* is not a level`, CodeConfigInvalid),
-	rule("", `^vet: .* is not plan or off`, CodeConfigInvalid),
 	// v1.1 W2.
 	// v1.3 (D508): the kind is named full; live is its v1.2 name.
 	rule("", "(kind `\\(.*\\)` is not `check \\(full\\):`|is `check \\((full|live)\\):` on )", CodeCheckBadKind),

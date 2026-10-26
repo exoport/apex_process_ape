@@ -135,13 +135,6 @@ than v1.5, announced here one release ahead.
   is lifted, and defers to the lift's dry run when it is not. Exits 0 applied, 1 not applied
   (`lift.disposition-left`), 2 the check failed (`lift.check-failed`).
 
-### `vet:` is a key ape knows (C1)
-
-- `vet: plan|off` in `_apex/config.yaml` no longer gives the notice `config.unknown-top-key`, which
-  told a session to drop it; any other value is `config.invalid`. ape runs nothing for it:
-  apex-orchestrator starts `apex-vet` at depth 0, which every ape since v1.1 runs as a plain
-  `ape task`.
-
 ### Harness
 
 - `make check-agents-md` asks up to three times and passes when any answer quotes the AGENTS.md-only

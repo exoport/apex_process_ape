@@ -209,19 +209,3 @@ func TestGate_UnrunCommand(t *testing.T) {
 	require.True(t, v.Failed)
 	require.False(t, v.PreExistingRed)
 }
-
-// v1.4 (C1, Q-V14-VET): vet: is a key ape knows — plan or off, no
-// unknown-key notice; any other value is config.invalid.
-func TestConfig_Vet(t *testing.T) {
-	p := fixture(t, baseFiles())
-	writeConfigForTest(t, p.Root, "project_name: greeter\nvet: plan\n")
-	cfg, err := LoadConfig(p.Root)
-	require.NoError(t, err)
-	require.Equal(t, VetPlan, cfg.Vet)
-	for _, n := range p.configKeyNotices() {
-		require.NotEqual(t, CodeConfigUnknownTopKey, n.Code, n.Message)
-	}
-	writeConfigForTest(t, p.Root, "project_name: greeter\nvet: maybe\n")
-	codes := codesOf(p.configKeyFindings())
-	require.Contains(t, codes, CodeConfigInvalid)
-}
