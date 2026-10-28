@@ -14,6 +14,21 @@
   holds, so an edit cannot unfreeze a helper by dropping its `#!` line and executable bit. An
   approval made before v1.4 may hold scratch files; drift skips those, judged as above.
 
+### What a check was seen doing, and `check.tag-mismatch` (D623, D624)
+
+- **`observed` on every check result** (Linux): while a check runs, ape samples its processes
+  (every 250 ms for 30 s, then every 2 s, and once as it ends) for listening ports, connections
+  and browsers, and counts the containers created meanwhile (docker's events, so one created and
+  removed inside the check counts). A port the test runner itself holds (httptest,
+  `127.0.0.1:0`) is in-process; any other listening process is a service. Recorded as
+  `{samples, runner, services, in_process_listeners, containers, browser, outside, remote}`.
+- **`check.tag-mismatch`**, an informational verify notice (exit unchanged, no remedy): a check
+  of the change's own tagged `(full)` that ran in-process in under `checks.full_min_secs`
+  (guarded, default 60 s), with a known runner and no service, container, browser, outside or
+  remote connection, and no `requires:` entry for it. Every C3 tag defect was such a check. An
+  untagged check that started a service is recorded only; that direction is the project's
+  choice.
+
 ### A reused pid is no session (D620, FINDING-C3-6)
 
 - The nesting rule matched a caller's ancestor pids against `~/.ape/registry.json`, and `Alive`

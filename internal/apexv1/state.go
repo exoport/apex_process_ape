@@ -99,6 +99,10 @@ type CheckResult struct {
 	TmpBytes   int64          `json:"tmp_bytes,omitempty"`
 	Compose    string         `json:"compose_project,omitempty"`
 	Containers []ContainerUse `json:"containers,omitempty"`
+	// Observed is what the check was seen doing while it ran (v1.4, D623:
+	// observe.go): listeners, services, containers, a browser, outside
+	// connections. Absent off Linux.
+	Observed *Observed `json:"observed,omitempty"`
 }
 
 // Red reports a result that fails its run: a non-zero exit that was not

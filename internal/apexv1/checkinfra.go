@@ -281,6 +281,32 @@ func (ci *checkInfra) containers(ctx context.Context) []ContainerUse {
 	return out
 }
 
+// createdCount counts the containers created while the check ran (v1.4,
+// D623): those it left (listed) and, with events, those docker's events
+// show created since it started — one it created and removed itself
+// included.
+// Another process's container created meanwhile counts too: that only
+// keeps a check.tag-mismatch notice from being given.
+func (ci *checkInfra) createdCount(ctx context.Context, listed []ContainerUse, events bool) int {
+	ids := map[string]bool{}
+	for _, c := range listed {
+		ids[c.ID] = true
+	}
+	if ci.docker && events {
+		c, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		out, err := exec.CommandContext(c, "docker", "events", "--since", strconv.FormatInt(ci.start.Unix(), 10), //nolint:gosec // a time
+			"--until", strconv.FormatInt(time.Now().Unix()+1, 10), "--filter", "type=container", "--filter", "event=create",
+			"--format", "{{.Actor.ID}}").Output()
+		if err == nil {
+			for id := range strings.FieldsSeq(string(out)) {
+				ids[id[:min(shortContainerID, len(id))]] = true
+			}
+		}
+	}
+	return len(ids)
+}
+
 // containerMemoryPeak is a running container's cgroup memory.peak.
 func containerMemoryPeak(ctx context.Context, id string) int64 {
 	c, cancel := context.WithTimeout(ctx, 5*time.Second)

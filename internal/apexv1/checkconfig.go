@@ -336,6 +336,7 @@ const DefaultSlowRegression = 5 * time.Minute
 //	  vacuous_output: []                                   # turns the rule off
 //	  vacuous_output_extra: ["harness unavailable"]        # appended to the list in force (v1.4)
 //	  slow_regression: 10m                                 # regression.slow's threshold (W2)
+//	  full_min_secs: 60                                    # check.tag-mismatch's bound (v1.4)
 //
 // Absent, the rule uses DefaultVacuousOutput, and slow_regression is
 // DefaultSlowRegression. vacuous_output_extra (v1.4, T4) adds a project's
@@ -347,6 +348,10 @@ type ChecksConfig struct {
 	// SlowRegression: a single-command regression: whose last run took
 	// longer is project check's regression.slow notice (W2); 0 is unset.
 	SlowRegression time.Duration
+	// FullMinSecs: a (full) check that ran in-process for this long or
+	// longer is no check.tag-mismatch — "long" is a reason for (full)
+	// (v1.4, D623); 0 is unset.
+	FullMinSecs int
 	// vacuousSet: vacuous_output: was given (an empty list turns the rule
 	// off), as opposed to absent (the default list).
 	vacuousSet bool
@@ -354,16 +359,17 @@ type ChecksConfig struct {
 
 // UnmarshalYAML parses and validates the block.
 func (c *ChecksConfig) UnmarshalYAML(n *yaml.Node) error {
-	if err := checkKeys(n, "checks", "vacuous_output", "vacuous_output_extra", "slow_regression"); err != nil {
+	if err := checkKeys(n, "checks", "vacuous_output", "vacuous_output_extra", "slow_regression", "full_min_secs"); err != nil {
 		return err
 	}
 	var raw struct {
 		VacuousOutput      *[]string `yaml:"vacuous_output"`
 		VacuousOutputExtra []string  `yaml:"vacuous_output_extra"`
 		SlowRegression     string    `yaml:"slow_regression"`
+		FullMinSecs        *int      `yaml:"full_min_secs"`
 	}
 	if err := n.Decode(&raw); err != nil {
-		return fmt.Errorf("checks: %w — vacuous_output and vacuous_output_extra are lists of phrases, slow_regression a Go duration", err)
+		return fmt.Errorf("checks: %w — vacuous_output and vacuous_output_extra are lists of phrases, slow_regression a Go duration, full_min_secs a number of seconds", err)
 	}
 	for _, ph := range raw.VacuousOutputExtra {
 		if strings.TrimSpace(ph) == "" {
@@ -378,6 +384,12 @@ func (c *ChecksConfig) UnmarshalYAML(n *yaml.Node) error {
 		}
 		c.SlowRegression = d
 	}
+	if raw.FullMinSecs != nil {
+		if *raw.FullMinSecs <= 0 {
+			return fmt.Errorf("checks.full_min_secs: %d is not a positive number of seconds", *raw.FullMinSecs)
+		}
+		c.FullMinSecs = *raw.FullMinSecs
+	}
 	if raw.VacuousOutput == nil {
 		return nil
 	}
@@ -390,6 +402,17 @@ func (c *ChecksConfig) UnmarshalYAML(n *yaml.Node) error {
 		c.VacuousOutput = append(c.VacuousOutput, ph)
 	}
 	return nil
+}
+
+// DefaultFullMinSecs is checks.full_min_secs's default (v1.4, D623).
+const DefaultFullMinSecs = 60
+
+// FullMinSecsAt is check.tag-mismatch's bound in force, in seconds.
+func (c ChecksConfig) FullMinSecsAt() float64 {
+	if c.FullMinSecs > 0 {
+		return float64(c.FullMinSecs)
+	}
+	return DefaultFullMinSecs
 }
 
 // SlowRegressionAt is the regression.slow threshold in force.

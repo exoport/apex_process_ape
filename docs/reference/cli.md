@@ -2295,7 +2295,12 @@ state.json's verify (without path and for), so an expert updated in the middle o
 change shows in the record. JSON "notices" ([] when none): tools.unmatched for a tools:
 entry the change does not list whose paths: a file the change's commits touched since
 base_sha matches (the development folder and _apex/state left out), or whose touches:
-the change's names (`ape change check --help`); a notice never changes the outcome.
+the change's names (`ape change check --help`); check.pass-drop for a green check that
+passed far fewer tests than at the last verify; and (v1.4, Linux) check.tag-mismatch, which
+is informational: a check of the change's own tagged (full) that ran in-process, under
+checks.full_min_secs (default 60 s), with no service apart from its test runner, container,
+browser or connection outside the check seen (each check result's "observed" says what was
+seen); ape ran it as tagged and nothing has to change. A notice never changes the outcome.
 
 All checks exit 0 → status verified (a reviewed change whose work has not moved
 since its review stays reviewed), state.json committed. Any red → the failing checks' last

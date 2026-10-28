@@ -61,7 +61,7 @@ leaves an existing `models:` alone, warning for each default skill it lacks.
 | [`regression`](#regression) | command, or `{change, milestone}` | none: no regression net | yes |
 | [`timeouts`](#timeouts) | mapping per tier | check 15m idle / 2h max, regression 30m / 2h, gate 30m / 4h | yes |
 | [`retries`](#retries) | integer 0–5 | 0 | yes |
-| [`checks`](#checks) | `{vacuous_output: [phrases], vacuous_output_extra: [phrases], slow_regression: <duration>}` | five runner phrases; `5m` | yes |
+| [`checks`](#checks) | `{vacuous_output: [phrases], vacuous_output_extra: [phrases], slow_regression: <duration>, full_min_secs: <n>}` | five runner phrases; `5m`; `60` | yes |
 | [`requires`](#requires) | map: name → `env`, `cmd` or `{probe, when}` | none | yes |
 | [`caps`](#caps) | map: artefact → size | per artefact | yes |
 | [`docs`](#docs) | `{changelog, user_docs, tested}` | none | no |
@@ -255,6 +255,7 @@ checks:
   vacuous_output: ["no tests to run", "0 examples"]   # replaces the default list
   vacuous_output_extra: ["harness unavailable"]       # appended to the list in force (v1.4)
   slow_regression: 10m                                # regression.slow's threshold
+  full_min_secs: 120                                  # check.tag-mismatch's bound (v1.4)
 ```
 
 A check that exits 0 but whose output says it ran nothing is red, reason `vacuous`. The default
@@ -273,6 +274,10 @@ reporting success. ape only exports it; the harness decides.
 last recorded run (a change's baseline or verify, or a milestone's last gate) took longer,
 `ape project check` notices `regression.slow`: split it into a fast change tier and the whole suite
 as the milestone tier.
+
+`full_min_secs` (seconds, default `60`, v1.4): a `(full)` check that ran this long or longer is
+never the verify notice `check.tag-mismatch`, because "long" is a reason for `(full)`
+([Full checks](change-lifecycle.md#full-checks)).
 
 ## `requires`
 

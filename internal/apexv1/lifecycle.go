@@ -606,6 +606,11 @@ func (p *Project) verify(ctx context.Context, ci ChangeInfo, opt RunOptions, kee
 	// v1.4 (OQ-SKIP): a green check whose runner passed far fewer tests
 	// than at the last verify.
 	notices = append(notices, passDropNotices(st.Verify, results)...)
+	// v1.4 (D623): a (full) check of the change's own seen running
+	// in-process. Informational.
+	if cfg, err := LoadConfig(p.Root); err == nil {
+		notices = append(notices, tagMismatchNotices(checks, results, cfg.Requires, cfg.Checks.FullMinSecsAt())...)
+	}
 	if notices == nil {
 		notices = []Diagnostic{}
 	}

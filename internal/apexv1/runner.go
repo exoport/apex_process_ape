@@ -188,8 +188,10 @@ func runCheck(ctx context.Context, dir, cmd, logPath, logNote string, lim TierTi
 		defer close(copied)
 		_, _ = io.Copy(w, pr)
 	}()
+	var obs *observer
 	if err == nil {
 		g.started(c)
+		obs = startObserver(g)
 		stop := make(chan struct{})
 		watched := make(chan struct{})
 		go func() {
@@ -214,12 +216,19 @@ func runCheck(ctx context.Context, dir, cmd, logPath, logNote string, lim TierTi
 	// (F15); a check killed at a timeout or an interrupt was killed whole.
 	// In a scope (v1.4) the watchdog holds the scope open: its leftovers
 	// are ended and its memory.peak read before the watchdog is let go.
+	// v1.4 (D623): what it did while it ran, read before its leftovers end.
+	observed := obs.finish()
 	leftovers, peak := endCheck(g, finished)
 	// v1.4 (B1): what held its TMPDIR from outside, its containers, the
 	// TMPDIR itself.
 	var fin CheckResult
 	infra.finish(ctx, &fin, g.contains)
 	leftovers = append(leftovers, fin.Leftovers...)
+	if observed != nil {
+		// docker's events only where they could decide a notice: a known
+		// runner, nothing else seen yet.
+		observed.Containers = infra.createdCount(ctx, fin.Containers, observed.Runner != "" && !observed.Needs())
+	}
 	// The output is read until every holder of the pipe is gone. One that
 	// left the check's group is not ended above: it is given outputDrain,
 	// then ape stops reading — the check's exit stands.
@@ -288,6 +297,7 @@ func runCheck(ctx context.Context, dir, cmd, logPath, logNote string, lim TierTi
 		TmpBytes:     fin.TmpBytes,
 		Compose:      fin.Compose,
 		Containers:   fin.Containers,
+		Observed:     observed,
 	}
 }
 

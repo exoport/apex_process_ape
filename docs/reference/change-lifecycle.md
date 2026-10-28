@@ -222,6 +222,26 @@ A record ape v1.2 wrote has `live_skipped` alone, and ape reads it as both.
 `ape status` lists what was skipped and why. A full check's evidence written under `development/`
 is never undone as a stray file.
 
+**What a check was seen doing (v1.4, Linux).** While a check runs, ape samples its processes
+(every 250 ms for its first 30 s, then every 2 s, and once as it ends): their listening ports,
+their connections, and browser processes. Afterwards it counts the containers created while it ran.
+A port the test runner itself holds (a Go test binary, pytest, jest, vitest, mocha, `node --test`,
+a cargo test binary, dart or flutter test) is in-process: httptest, a server on `127.0.0.1:0`. Any
+other listening process is a service: a built binary the test starts, `go run`'s, uvicorn. The
+result records it as `observed: {samples, runner, services, in_process_listeners, containers,
+browser, outside, remote}`, where `outside` holds loopback ports whose listener was not the
+check's (a running dev stack) and `remote` holds addresses off the machine.
+
+A check of the change's own tagged `(full)` that verify saw run in-process is the verify notice
+`check.tag-mismatch`. It must have run for less than `checks.full_min_secs` (default 60 s), with
+a test runner ape knows, at least two samples, and no service, container, browser, outside or
+remote connection, and no `requires:` entry naming what it needs. The notice is informational:
+ape ran the check as tagged, nothing has to change, and no session acts on it. It tells a
+person that the tag may be wider than the check needs. An untagged check that started a service
+is only recorded in `observed`, never a notice: whether such a check runs on every change is the
+project's choice. Sampling can miss a process that lives less than 250 ms, so a check that started
+a service that briefly can read as in-process. Off Linux nothing is observed and nothing is said.
+
 ### Green before the work: vacuous checks
 
 At `start` ape runs every check once as the baseline. When the change has an ADDED or MODIFIED

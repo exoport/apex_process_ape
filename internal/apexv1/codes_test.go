@@ -41,6 +41,8 @@ var noticeCodes = []string{
 	CodeLiveDeprecated,
 	// v1.4 (OQ-SKIP).
 	CodePassDrop,
+	// v1.4 (D623): informational.
+	CodeTagMismatch,
 }
 
 // The published list and the code agree: every code the source sets or a
@@ -129,6 +131,7 @@ func TestDiagnosticCodes_PublishedListMatchesTheCode(t *testing.T) {
 		// v1.4.
 		"CodeGuardedConfigTask": CodeGuardedConfigTask, "CodeLiveDeprecated": CodeLiveDeprecated, "CodeLiveLeft": CodeLiveLeft, "CodeReadFailed": CodeReadFailed,
 		"CodeGateStubRed": CodeGateStubRed, "CodePassDrop": CodePassDrop, "CodeFullRed": CodeFullRed, "CodeLiftDispositionLeft": CodeLiftDispositionLeft, "CodeLiftCheckFailed": CodeLiftCheckFailed,
+		"CodeTagMismatch": CodeTagMismatch,
 	}
 	for _, glob := range []string{"*.go", filepath.Join("..", "apecmd", "v1_*.go")} {
 		files, err := filepath.Glob(glob)
