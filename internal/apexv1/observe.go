@@ -19,7 +19,8 @@ import (
 // this one need any of that? A (full) check that ran in-process (httptest,
 // a server on 127.0.0.1:0 in the test binary, a signal test) is verify's
 // notice check.tag-mismatch. It is informational: ape runs the check as
-// tagged and nothing has to change. An untagged check that started a
+// tagged and nothing has to change, and its action is empty (ActionNone,
+// D626): a loop that branches on actions has nothing to do with it. An untagged check that started a
 // service is recorded only, never a notice: projects decide that direction
 // differently (a throwaway-database harness kept untagged by a project's
 // own ruling).
@@ -104,7 +105,7 @@ const CodeTagMismatch = "check.tag-mismatch"
 
 func init() {
 	DiagnosticCodes = append(DiagnosticCodes,
-		CodeDoc{CodeTagMismatch, 0, ActionPerson, "a notice, never a finding, and informational (verify's notices; the exit is unchanged; v1.4, D623): a check tagged (full) ran in-process — under checks.full_min_secs (default 60 s), its runner recognised, and no service apart from the test runner, no container, no browser and no connection to a listener outside the check or off the machine seen, nor a requires: entry naming what it needs. ape runs the check as tagged and nothing has to change: no session acts on it. It tells a person the tag may be wider than the check; an untagged check that started a service is recorded in the result's observed, never a notice"},
+		CodeDoc{CodeTagMismatch, 0, ActionNone, "a notice, never a finding, and informational: its action is empty (verify's notices, never its diagnostics; the exit is unchanged; v1.4, D623, D626): a check tagged (full) ran in-process — under checks.full_min_secs (default 60 s), its runner recognised, and no service apart from the test runner, no container, no browser and no connection to a listener outside the check or off the machine seen, nor a requires: entry naming what it needs. ape runs the check as tagged and nothing has to change: no session acts on it. It tells a person the tag may be wider than the check; an untagged check that started a service is recorded in the result's observed, never a notice"},
 	)
 }
 
@@ -129,7 +130,7 @@ func tagMismatchNotices(checks []PlannedCheck, results []CheckResult, requires R
 		}
 		out = append(out, notice(Diagnostic{Code: CodeTagMismatch, Message: pc.Ref + "'s check is tagged (full) but ran in " +
 			strconv.FormatFloat(r.Secs, 'f', 1, 64) + "s in-process (" + seen + "; no service, container, browser or outside connection seen)" +
-			" — informational: ape ran it as tagged and nothing has to change; the tag may be wider than the check needs"}))
+			" — informational: no action needed; ape ran it as tagged, and the tag is the planner's choice"}))
 	}
 	return out
 }

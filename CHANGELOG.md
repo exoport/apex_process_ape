@@ -22,7 +22,8 @@
   removed inside the check counts). A port the test runner itself holds (httptest,
   `127.0.0.1:0`) is in-process; any other listening process is a service. Recorded as
   `{samples, runner, services, in_process_listeners, containers, browser, outside, remote}`.
-- **`check.tag-mismatch`**, an informational verify notice (exit unchanged, no remedy): a check
+- **`check.tag-mismatch`**, an informational verify notice (exit unchanged, no remedy, an empty
+  `action`: nothing for a loop to branch on, and only in `notices`, never `diagnostics`): a check
   of the change's own tagged `(full)` that ran in-process in under `checks.full_min_secs`
   (guarded, default 60 s), with a known runner and no service, container, browser, outside or
   remote connection, and no `requires:` entry for it. Every C3 tag defect was such a check. An

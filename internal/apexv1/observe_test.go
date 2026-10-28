@@ -30,8 +30,8 @@ func TestTestRunner(t *testing.T) {
 
 func splitArgv(s string) []string { return strings.Fields(s) }
 
-// D623/D624: a (full) check seen in-process is check.tag-mismatch, an
-// informational notice (action person, no remedy); anything that needed a
+// D623/D624/D626: a (full) check seen in-process is check.tag-mismatch, an
+// informational notice (no action, no remedy); anything that needed a
 // service, a long run, an unknown runner, too few samples, a requires:
 // entry, an unrun or an untagged check is not.
 func TestTagMismatchNotices(t *testing.T) {
@@ -42,10 +42,10 @@ func TestTagMismatchNotices(t *testing.T) {
 	got := tagMismatchNotices([]PlannedCheck{full}, []CheckResult{res}, nil, 60)
 	require.Len(t, got, 1)
 	require.Equal(t, CodeTagMismatch, got[0].Code)
-	require.Equal(t, ActionPerson, got[0].Action)
+	require.Equal(t, ActionNone, got[0].Action, "informational: no action a loop could branch on (D626)")
 	require.Equal(t, SeverityNotice, got[0].Severity)
 	require.Contains(t, got[0].Message, "T3's check is tagged (full) but ran in 0.8s in-process (2 port(s), all the go test runner's own")
-	require.Contains(t, got[0].Fix, "informational: ape ran it as tagged and nothing has to change")
+	require.Equal(t, "informational: no action needed; ape ran it as tagged, and the tag is the planner's choice", got[0].Fix)
 
 	none := func(name string, pc PlannedCheck, r CheckResult, req Requires) {
 		t.Helper()

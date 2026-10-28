@@ -666,7 +666,9 @@ passed far fewer tests than at the last verify; and (v1.4, Linux) check.tag-mism
 is informational: a check of the change's own tagged (full) that ran in-process, under
 checks.full_min_secs (default 60 s), with no service apart from its test runner, container,
 browser or connection outside the check seen (each check result's "observed" says what was
-seen); ape ran it as tagged and nothing has to change. A notice never changes the outcome.
+seen); ape ran it as tagged and nothing has to change, so its action is empty. Notices are
+never diagnostics: "diagnostics" holds the command's own error alone. A notice never changes
+the outcome.
 
 All checks exit 0 → status verified (a reviewed change whose work has not moved
 since its review stays reviewed), state.json committed. Any red → the failing checks' last

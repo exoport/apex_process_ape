@@ -59,7 +59,13 @@ func TestDiagnosticCodes_PublishedListMatchesTheCode(t *testing.T) {
 			require.Contains(t, []int{1, 2, 3}, c.Exit, c.Code)
 		}
 		require.NotEmpty(t, c.Meaning, c.Code)
-		require.Contains(t, Actions, c.Action, c.Code)
+		if c.Action == ActionNone {
+			// D626: only an informational notice names no action.
+			require.Equal(t, CodeTagMismatch, c.Code, "only check.tag-mismatch is informational")
+			require.Zero(t, c.Exit, c.Code)
+		} else {
+			require.Contains(t, Actions, c.Action, c.Code)
+		}
 		published[c.Code] = c.Exit
 	}
 	used := map[string]bool{}

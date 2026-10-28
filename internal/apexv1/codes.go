@@ -194,6 +194,12 @@ const (
 // Actions is the closed set of CodeDoc.Action values.
 var Actions = []string{ActionRetry, ActionApply, ActionReview, ActionReplan, ActionStop, ActionPerson}
 
+// ActionNone is an informational notice's action (v1.4, D626): none. Such a
+// notice asks nothing of a session, so it names no action a loop could
+// branch on — each of Actions sends it somewhere (person and stop end it).
+// Only an exit-0 notice code has it; it is never a diagnostic's.
+const ActionNone = ""
+
 // ActionFor is the published action of a code (a former name's is its new
 // code's, CodeAliases); stop for an unknown code.
 func ActionFor(code string) string {

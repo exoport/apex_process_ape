@@ -236,7 +236,10 @@ A check of the change's own tagged `(full)` that verify saw run in-process is th
 `check.tag-mismatch`. It must have run for less than `checks.full_min_secs` (default 60 s), with
 a test runner ape knows, at least two samples, and no service, container, browser, outside or
 remote connection, and no `requires:` entry naming what it needs. The notice is informational:
-ape ran the check as tagged, nothing has to change, and no session acts on it. It tells a
+ape ran the check as tagged, nothing has to change, and no session acts on it. Its `action` is
+empty, so a loop that branches on an action finds nothing to do. Like every notice it sits in
+verify's `notices`, never in `diagnostics`, which holds the command's own error alone (on a red
+verify, `verify.red`). It tells a
 person that the tag may be wider than the check needs. An untagged check that started a service
 is only recorded in `observed`, never a notice: whether such a check runs on every change is the
 project's choice. Sampling can miss a process that lives less than 250 ms, so a check that started
