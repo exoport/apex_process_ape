@@ -148,7 +148,9 @@ func ancestorSession(rows []sessions.Session) *sessions.Session {
 			if rows[i].RunID == "" {
 				continue // a web-mode row: no model session ape tracks
 			}
-			if rows[i].PID == pid || (rows[i].ClaudePID != 0 && rows[i].ClaudePID == pid) {
+			// Alive kept only rows whose process is still theirs, a reused
+			// pid excluded (D620); the claude pid is checked the same way.
+			if rows[i].PID == pid || rows[i].IsClaude(pid) {
 				return &rows[i]
 			}
 		}
@@ -319,6 +321,7 @@ func (l *sessionLaunch) acquire(projectRoot, token string) error {
 	l.token = token
 	root := runlog.SessionLocksRoot(projectRoot)
 	rec := sessionLock{PID: os.Getpid(), Token: token, Skill: l.skill, ParentRun: l.parentRun, StartedAt: time.Now().UTC()}
+	rec.PIDStart, _ = proctree.StartTime(rec.PID)
 	if l.skill == apexv1.OrchestratorSkill {
 		path := filepath.Join(root, "orchestrator.json")
 		if err := acquireSessionLock(path, rec, false); err != nil {
@@ -368,6 +371,17 @@ type sessionLock struct {
 	Skill     string    `json:"skill,omitempty"`
 	ParentRun string    `json:"parent_run,omitempty"`
 	StartedAt time.Time `json:"started_at"`
+	// PIDStart is PID's start time (proctree.StartTime), so a reused pid
+	// does not hold the lock (D620). Absent on locks before v1.4: the pid
+	// existing is then all there is (a retargeted holder started after
+	// StartedAt, so StartedAt cannot stand in for it).
+	PIDStart time.Time `json:"pid_start,omitzero"`
+}
+
+// held reports whether the lock's holder still runs: its pid exists and,
+// with PIDStart recorded, is no reused pid.
+func (s sessionLock) held() bool {
+	return proctree.SameProcess(s.PID, s.PIDStart, time.Time{})
 }
 
 func (s sessionLock) describe() string {
@@ -425,7 +439,7 @@ func acquireSessionLock(path string, rec sessionLock, child bool) error {
 			_ = os.Remove(path)
 		case cur.Token == rec.Token:
 			return atomicfile.Write(path, data)
-		case !proctree.Alive(cur.PID):
+		case !cur.held():
 			_ = os.Remove(path)
 		default:
 			return apexv1.SessionBusy(child, cur.describe())
@@ -444,6 +458,7 @@ func retargetSessionLocks(paths []string, token string, pid int) {
 			continue
 		}
 		cur.PID = pid
+		cur.PIDStart, _ = proctree.StartTime(pid)
 		if data, err := json.MarshalIndent(cur, "", "  "); err == nil {
 			_ = atomicfile.Write(path, append(data, '\n'))
 		}
@@ -488,7 +503,10 @@ func (s *liveSession) spawned(claudePID int) {
 	if s == nil || claudePID <= 0 {
 		return
 	}
-	_ = sessions.UpdateRun(sessions.Path(), s.pid, s.run, func(row *sessions.Session) { row.ClaudePID = claudePID })
+	_ = sessions.UpdateRun(sessions.Path(), s.pid, s.run, func(row *sessions.Session) {
+		row.ClaudePID = claudePID
+		row.ClaudeStart, _ = proctree.StartTime(claudePID)
+	})
 }
 
 // held records, on the row, that the usage guard holds the session's

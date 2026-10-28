@@ -113,3 +113,57 @@ func TestRegister_CorruptFileStartsFresh(t *testing.T) {
 		t.Fatalf("len=%d, want 1 (corrupt file should have been replaced)", len(rows))
 	}
 }
+
+// D620 (FINDING-C3-6): a row whose pid now belongs to a process that
+// started after the row was written is a reused pid: Alive and Prune drop
+// it. A row recorded with its process's start keeps only that process.
+func TestAliveAndPrune_DropAReusedPid(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("start times are read from /proc")
+	}
+	path := tmpRegistry(t)
+	self := os.Getpid()
+	old := time.Date(2026, 10, 20, 19, 25, 27, 0, time.UTC)
+	rows := []Session{
+		{PID: self, RunID: "now", StartedAt: time.Now().UTC()},                 // this process wrote it: kept
+		{PID: self, RunID: "stale-v13", StartedAt: old, PIDStart: time.Time{}}, // an older ape's row, its pid reused since
+		{PID: self, RunID: "stale-v14", StartedAt: old, PIDStart: old},         // a v1.4 row of the process that had this pid
+	}
+	for _, r := range rows {
+		if err := Register(path, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Register filled PIDStart for the rows that left it zero; undo it for
+	// the older ape's row, which recorded none.
+	all, _ := List(path)
+	all[1].PIDStart = time.Time{}
+	if err := withLockedFile(path, func(f *os.File) error { return writeBack(f, registryShape{Sessions: all}) }); err != nil {
+		t.Fatal(err)
+	}
+
+	runs := func(ss []Session) []string {
+		out := make([]string, 0, len(ss))
+		for _, s := range ss {
+			out = append(out, s.RunID)
+		}
+		return out
+	}
+	alive, err := Alive(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := runs(alive); len(got) != 1 || got[0] != "now" {
+		t.Fatalf("Alive = %v, want [now]", got)
+	}
+	pruned, err := Prune(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := runs(pruned); len(got) != 1 || got[0] != "now" {
+		t.Fatalf("Prune kept %v, want [now]", got)
+	}
+	if !pruned[0].PIDStart.IsZero() && !pruned[0].Running() {
+		t.Fatal("the kept row is this process's")
+	}
+}

@@ -7754,13 +7754,16 @@ and ape script sessions that run through them — with its run id, the skill
 ape typed, its depth and parent run (the nesting rule, D62), the ape
 process running it (PID) and the claude it spawned (claude_pid in JSON).
 ape reads those rows to tell which session a command runs under, so a
-pruned row only ever belongs to a process that is gone. Rows show the skill
+pruned row only ever belongs to a process that is gone. A row is its
+process's while that pid runs AND is the same process: its start time
+matches the row's pid_start (or, on a row without one, it started before
+the row was written), so a reused pid is no session (v1.4, D620; on Linux). Rows show the skill
 as recorded: a loop run an ape before rc.7 started reads apex-orchestrator,
 and counts as apex-loop's for the nesting rule (its lock and children, Q95). Rows an older ape
 wrote for `ape pipeline`'s web mode, retired with APEX v0, carry a port and URL.
 
   ape sessions               Show one row per live session.
-  ape sessions prune         Drop rows whose PID is no longer running.
+  ape sessions prune         Drop rows whose process is gone (a reused PID included).
   ape sessions open [<pfx>]  xdg-open the URL of the live session whose
                              cwd starts with <pfx>. Errors if zero or
                              multiple sessions match.
@@ -7768,7 +7771,7 @@ wrote for `ape pipeline`'s web mode, retired with APEX v0, carry a port and URL.
 Subcommands:
 
 - `open` — xdg-open the URL of the live session whose cwd matches <project-prefix>
-- `prune` — Drop registry rows whose PID is no longer running
+- `prune` — Drop registry rows whose process is gone, a reused PID included
 
 Examples:
 
@@ -7799,7 +7802,7 @@ Examples:
 
 ## ape sessions prune
 
-Drop registry rows whose PID is no longer running
+Drop registry rows whose process is gone, a reused PID included
 
 ```
 ape sessions prune [flags]

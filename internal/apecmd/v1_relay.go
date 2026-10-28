@@ -13,7 +13,6 @@ import (
 
 	"github.com/exoport/apex_process_ape/internal/apexv1"
 	"github.com/exoport/apex_process_ape/internal/pipeline"
-	"github.com/exoport/apex_process_ape/internal/proctree"
 	"github.com/exoport/apex_process_ape/internal/runlog"
 )
 
@@ -77,7 +76,7 @@ func relayGate(verb, projectRoot, run string, warn io.Writer) error {
 // its one child slot (another holder than this process).
 func childSlotBusy(projectRoot, run string) bool {
 	cur, err := readSessionLock(filepath.Join(runlog.SessionLocksRoot(projectRoot), "child-"+safeLockName(run)+".json"))
-	return err == nil && cur.Token != lockToken() && proctree.Alive(cur.PID)
+	return err == nil && cur.Token != lockToken() && cur.held()
 }
 
 // loopRelay is the process running the loop's side of one loop session's

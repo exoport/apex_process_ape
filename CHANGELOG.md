@@ -14,6 +14,20 @@
   holds, so an edit cannot unfreeze a helper by dropping its `#!` line and executable bit. An
   approval made before v1.4 may hold scratch files; drift skips those, judged as above.
 
+### A reused pid is no session (D620, FINDING-C3-6)
+
+- The nesting rule matched a caller's ancestor pids against `~/.ape/registry.json`, and `Alive`
+  and `ape sessions prune` kept any row whose pid existed. A row from a session long gone whose
+  pid the kernel had since given to one of the caller's ancestors made the caller look nested in
+  it: the eval saw a loop's `ape change review --run` refused with `session.depth`, naming an
+  apex-plan run eight days dead, which cost the cell.
+- A row now records its process's start (`pid_start`, and `claude_start` for its claude), and
+  counts only while that pid's process started then. A row written before v1.4, without one,
+  counts only when its pid's process started before the row was written. `ape sessions prune` drops
+  the rest. The session locks (`session.loop-running`, `session.child-running`) record and compare
+  the holder's start the same way; a lock written before v1.4 is judged as before, by its pid.
+- Linux only: elsewhere ape reads no start time, and a pid that exists still counts.
+
 ### The loop can never start apex-release (D524)
 
 - `apex-release` is no longer on the loop's allow-list (`CoreChildSkills`). A loop run that starts

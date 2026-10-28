@@ -70,10 +70,21 @@ never by process name, so a stand-in `claude` (a test or eval stub) gets the
 same answer a real session does. Whether a session is the loop is decided from
 ape's record of the skill it typed, never from the model.
 
+A pid is only a process while that process runs: once it ends, the kernel
+gives the number to another. So a row counts only while its pid is the process
+that wrote it (v1.4). ape records each process's start time beside its pid
+(`pid_start`, `claude_start`) and compares it, and a row written before v1.4,
+without one, counts only when its pid's process started before the row was
+written. The session locks (`session.loop-running`, `session.child-running`)
+record and compare the holder's start the same way. Without that, a row from a
+long-gone session whose pid now belonged to one of the caller's ancestors made
+the caller look nested in it: the v1.4 eval saw a loop's review refused with
+`session.depth`, naming an apex-plan run eight days dead.
+
 What remains open, and is documented rather than chased: a model that scrubs
 its environment and also double-forks into a daemon leaves no ancestor ape
-knows. On Windows an ancestor that exited may have had its pid reused, so the
-walk there is best effort.
+knows. Off Linux ape reads no start time, so a reused pid there still counts as
+the process: the walk is best effort on macOS and Windows.
 
 An `ape service` daemon is depth 0 and cannot see where a request comes from,
 so every job carries the caller's stamp, which `ape service submit` takes

@@ -19,6 +19,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/exoport/apex_process_ape/internal/proctree"
 )
 
 // Session is one row in the registry.
@@ -47,6 +49,26 @@ type Session struct {
 	// HeldUntil is set while ape's usage guard holds the session's launch
 	// on the plan's 5-hour window (W4): when it decides again.
 	HeldUntil *time.Time `json:"held_until,omitempty"`
+
+	// PIDStart and ClaudeStart are PID's and ClaudePID's start times
+	// (proctree.StartTime), so a reused pid is not taken for the session
+	// (D620). Absent on rows before v1.4 and off Linux.
+	PIDStart    time.Time `json:"pid_start,omitzero"`
+	ClaudeStart time.Time `json:"claude_start,omitzero"`
+}
+
+// Running reports whether s's process is still the one that wrote it: its
+// PID exists and is no reused pid (proctree.SameProcess, against PIDStart,
+// else StartedAt: the row is written by that process, after it started).
+func (s *Session) Running() bool {
+	return pidAlive(s.PID) && proctree.SameProcess(s.PID, s.PIDStart, s.StartedAt)
+}
+
+// IsClaude reports whether pid, a running process (an ancestor the caller
+// walked to), is s's claude: it matches ClaudePID and, with ClaudeStart
+// recorded, started then, so a reused pid is not it.
+func (s *Session) IsClaude(pid int) bool {
+	return s.ClaudePID != 0 && s.ClaudePID == pid && (s.ClaudeStart.IsZero() || proctree.SameProcess(pid, s.ClaudeStart, time.Time{}))
 }
 
 // registryShape is the on-disk container; we keep the wrapper so a
@@ -73,8 +95,12 @@ var Path = DefaultPath
 
 // Register appends s to the registry at path. Acquires an exclusive
 // flock for the write so concurrent ape invocations cannot interleave.
-// Creates the parent directory if missing.
+// Creates the parent directory if missing. A PIDStart left zero is read
+// from the process (D620).
 func Register(path string, s Session) error {
+	if s.PIDStart.IsZero() {
+		s.PIDStart, _ = proctree.StartTime(s.PID)
+	}
 	return withLockedFile(path, func(f *os.File) error {
 		reg, err := decode(f)
 		if err != nil {
@@ -140,7 +166,7 @@ func UpdateRun(path string, pid int, runID string, change func(*Session)) error 
 	})
 }
 
-// Alive lists the rows whose PID is running, without taking the write lock
+// Alive lists the rows whose process is running (Session.Running), without taking the write lock
 // or rewriting the file: what a reader that must not block on, or modify,
 // another process's registry needs.
 func Alive(path string) ([]Session, error) {
@@ -150,14 +176,15 @@ func Alive(path string) ([]Session, error) {
 	}
 	out := rows[:0]
 	for i := range rows {
-		if pidAlive(rows[i].PID) {
+		if rows[i].Running() {
 			out = append(out, rows[i])
 		}
 	}
 	return out, nil
 }
 
-// Prune drops rows whose PID is no longer running. Returns the rows
+// Prune drops rows whose process is no longer running, a reused pid
+// included (Session.Running). Returns the rows
 // that survived. Called by every startup and by `ape sessions prune`.
 func Prune(path string) ([]Session, error) {
 	var alive []Session
@@ -167,7 +194,7 @@ func Prune(path string) ([]Session, error) {
 			return err
 		}
 		for i := range reg.Sessions {
-			if pidAlive(reg.Sessions[i].PID) {
+			if reg.Sessions[i].Running() {
 				alive = append(alive, reg.Sessions[i])
 			}
 		}
