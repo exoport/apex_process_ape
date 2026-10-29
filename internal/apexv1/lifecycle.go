@@ -69,6 +69,9 @@ type StartResult struct {
 	// CatchUp: start found the base branch moved ahead of the change and
 	// caught it up — rebased, re-baselined at the base tip (D40).
 	CatchUp *CatchUp `json:"catch_up,omitempty"`
+	// Notices are the change's check.grep-test-output notices (D620):
+	// informational, the exit unchanged. Always present.
+	Notices []Diagnostic `json:"notices"`
 }
 
 // Start moves a draft (or blocked) change to in-progress: check green,
@@ -159,7 +162,7 @@ func (p *Project) reenter(ctx context.Context, id string, opt RunOptions, switch
 		}
 		return &StartResult{
 			ID: id, Status: st.Status, BaseSHA: st.BaseSHA, BaseBranch: st.BaseBranch, Branch: ChangeBranch(id),
-			Resumed: true, Baseline: []CheckResult{}, CatchUp: cu,
+			Resumed: true, Baseline: []CheckResult{}, CatchUp: cu, Notices: []Diagnostic{},
 		}, nil
 	}
 	if res != nil {
@@ -291,6 +294,7 @@ func (p *Project) start(ctx context.Context, id string, opt RunOptions, enter fu
 	return &StartResult{
 		ID: id, Status: st.Status, BaseSHA: st.BaseSHA, BaseBranch: st.BaseBranch, Branch: CurrentBranch(ctx, p.Root),
 		Baseline: results, Regression: regression, MilestoneRegression: milestoneRegression,
+		Notices: p.testGrepNotices(ci.Doc, p.Rel(p.ChangeMD(id))),
 	}, nil
 }
 
@@ -606,6 +610,10 @@ func (p *Project) verify(ctx context.Context, ci ChangeInfo, opt RunOptions, kee
 	// v1.4 (OQ-SKIP): a green check whose runner passed far fewer tests
 	// than at the last verify.
 	notices = append(notices, passDropNotices(st.Verify, results)...)
+	// v1.4.1 (D620): a check that greps test output in a known-broken way.
+	if ci.Doc != nil {
+		notices = append(notices, p.testGrepNotices(ci.Doc, p.Rel(p.ChangeMD(ci.ID)))...)
+	}
 	// v1.4 (D623): a (full) check of the change's own seen running
 	// in-process. Informational.
 	if cfg, err := LoadConfig(p.Root); err == nil {

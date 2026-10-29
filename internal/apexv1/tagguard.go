@@ -342,12 +342,30 @@ func isLocalTagOnly(dir, name string) bool {
 // shellCommands splits a command line into simple commands, each a list of
 // words with quotes and escapes resolved.
 func shellCommands(line string) [][]string {
+	return lexShell(line).cmds
+}
+
+// shellPipelines is shellCommands grouped into pipelines: the commands one
+// `|` joins are one group, in order.
+func shellPipelines(line string) [][][]string {
+	lx := lexShell(line)
+	var out [][][]string
+	for k, words := range lx.cmds {
+		if k == 0 || !lx.piped[k-1] {
+			out = append(out, nil)
+		}
+		out[len(out)-1] = append(out[len(out)-1], words)
+	}
+	return out
+}
+
+func lexShell(line string) *shellLexer {
 	lx := &shellLexer{rs: []rune(line)}
 	for lx.i = 0; lx.i < len(lx.rs); lx.i++ {
 		lx.step()
 	}
 	lx.endCmd()
-	return lx.cmds
+	return lx
 }
 
 // shellLexer is shellCommands' state: the input, its position, the words
@@ -359,6 +377,9 @@ type shellLexer struct {
 	words []string
 	cur   strings.Builder
 	inTok bool
+	// piped[k] reports that cmds[k] writes into cmds[k+1] through a single
+	// `|` (or `|&`): a pipeline, whose exit is its last command's.
+	piped []bool
 }
 
 func (lx *shellLexer) endWord() {
@@ -373,6 +394,7 @@ func (lx *shellLexer) endCmd() {
 	lx.endWord()
 	if len(lx.words) > 0 {
 		lx.cmds = append(lx.cmds, lx.words)
+		lx.piped = append(lx.piped, false)
 		lx.words = nil
 	}
 }
@@ -407,7 +429,18 @@ func (lx *shellLexer) step() {
 		lx.endWord()
 	case c == '>' || c == '<':
 		lx.redirect()
-	case strings.ContainsRune("\n;&|()`", c), (c == '{' || c == '}') && !lx.inTok:
+	case c == '|':
+		lx.endCmd()
+		if n, ok := lx.next(); ok && n == '|' {
+			lx.i++ // `||`: a list, not a pipe
+			return
+		} else if ok && n == '&' {
+			lx.i++
+		}
+		if k := len(lx.piped) - 1; k >= 0 {
+			lx.piped[k] = true
+		}
+	case strings.ContainsRune("\n;&()`", c), (c == '{' || c == '}') && !lx.inTok:
 		lx.endCmd()
 	case c == '$':
 		if n, ok := lx.next(); ok && n == '(' {

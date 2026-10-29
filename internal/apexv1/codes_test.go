@@ -43,6 +43,8 @@ var noticeCodes = []string{
 	CodePassDrop,
 	// v1.4 (D623): informational.
 	CodeTagMismatch,
+	// v1.4.1 (D620): informational.
+	CodeCheckGrepTestOutput,
 }
 
 // The published list and the code agree: every code the source sets or a
@@ -61,7 +63,7 @@ func TestDiagnosticCodes_PublishedListMatchesTheCode(t *testing.T) {
 		require.NotEmpty(t, c.Meaning, c.Code)
 		if c.Action == ActionNone {
 			// D626: only an informational notice names no action.
-			require.Equal(t, CodeTagMismatch, c.Code, "only check.tag-mismatch is informational")
+			require.Contains(t, []string{CodeTagMismatch, CodeCheckGrepTestOutput}, c.Code, "only check.tag-mismatch and check.grep-test-output are informational")
 			require.Zero(t, c.Exit, c.Code)
 		} else {
 			require.Contains(t, Actions, c.Action, c.Code)
@@ -138,6 +140,8 @@ func TestDiagnosticCodes_PublishedListMatchesTheCode(t *testing.T) {
 		"CodeGuardedConfigTask": CodeGuardedConfigTask, "CodeLiveDeprecated": CodeLiveDeprecated, "CodeLiveLeft": CodeLiveLeft, "CodeReadFailed": CodeReadFailed,
 		"CodeGateStubRed": CodeGateStubRed, "CodePassDrop": CodePassDrop, "CodeFullRed": CodeFullRed, "CodeLiftDispositionLeft": CodeLiftDispositionLeft, "CodeLiftCheckFailed": CodeLiftCheckFailed,
 		"CodeTagMismatch": CodeTagMismatch,
+		// v1.4.1.
+		"CodeCheckGrepTestOutput": CodeCheckGrepTestOutput,
 	}
 	for _, glob := range []string{"*.go", filepath.Join("..", "apecmd", "v1_*.go")} {
 		files, err := filepath.Glob(glob)

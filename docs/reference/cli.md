@@ -1773,7 +1773,13 @@ matches and does not list — one of its touches: slugs names the entry's, or on
 planned paths: globs meets the entry's (either glob matches the other read as a path)
 — where "lists" is a task's `— tool: <name>` (design), review_tools: (review) or
 advise: (advise). If the entry's when: applies, apex-change lists it; if not, it leaves
-it. Printed as "notice: <file>:1: …" lines on stderr; JSON "notices": [{severity:
+it. check.grep-test-output (v1.4.1, informational: no action) is one of the change's own
+checks — a task's, or a scenario of its delta — that pipes a test runner's output on in a
+shape that misjudges the tests: the pipeline's exit is its last command's, so a failing
+test can pass (no `set -o pipefail`, no PIPESTATUS); a grep for go test's PASS line ending
+in $, which never matches the "(0.00s)" go test prints after the name; or a PASS-line grep
+whose test name is unanchored, which also matches a longer name and every subtest. Start
+and verify give it too. Printed as "notice: <file>:1: …" lines on stderr; JSON "notices": [{severity:
 "notice", code, message, fix, action, file, line}] ([] when none), beside the findings
 on a failure too.
 
@@ -2026,7 +2032,9 @@ Start a draft (or resume a blocked or answered) change:
      about it — start refuses (exit 1, change.vacuous-check, nothing written, no branch
      left): rewrite the check to fail until the change is done, or write a check meant to
      stay green as "- T<n> <what> — regression: <command>". Not judged for Delta: none,
-     a REMOVED-only delta, or a task a re-plan adds after the change has work
+     a REMOVED-only delta, or a task a re-plan adds after the change has work.
+     JSON "notices" ([] when none): check.grep-test-output (`ape change check --help`),
+     informational, never a refusal; printed as "notice: …" lines on stderr
   5. sets in-progress, freezes the plan (SHA-256 of change.md outside ## Why and ## Notes), fingerprints
      the spec block of every requirement it MODIFIES or REMOVES, commits state.json
      ("apex: <id> in-progress") on change/<id>, and resets the attempts count since start
@@ -2300,7 +2308,8 @@ passed far fewer tests than at the last verify; and (v1.4, Linux) check.tag-mism
 is informational: a check of the change's own tagged (full) that ran in-process, under
 checks.full_min_secs (default 60 s), with no service apart from its test runner, container,
 browser or connection outside the check seen (each check result's "observed" says what was
-seen); ape ran it as tagged and nothing has to change, so its action is empty. Notices are
+seen); ape ran it as tagged and nothing has to change, so its action is empty; and
+(v1.4.1) check.grep-test-output, informational too (`ape change check --help`). Notices are
 never diagnostics: "diagnostics" holds the command's own error alone. A notice never changes
 the outcome.
 

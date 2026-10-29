@@ -339,7 +339,7 @@ func (p *Project) ChangeNotices(ctx context.Context, id string) []Diagnostic {
 	if c.MetaErr != nil {
 		return []Diagnostic{}
 	}
-	return append(unmatchedTools(cfg.Tools, c, file, nil), view.changeLiveNotices(id)...)
+	return append(append(unmatchedTools(cfg.Tools, c, file, nil), view.changeLiveNotices(id)...), view.testGrepNotices(c, file)...)
 }
 
 // verifyAdvise is what a verify reads of the change's advise (W6): its
