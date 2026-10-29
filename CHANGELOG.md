@@ -1,6 +1,50 @@
 # CHANGELOG
 
-## Unreleased (v1.4)
+## v1.4.0 (2026-10-29)
+
+APEX v1.4, on v1.3.0: what a check starts no longer outlives it, a check that tested nothing is
+unrun rather than green, the gate's full run is recorded once and reused, a gate is self-tested
+through ape, plans that were certain to stop are caught at plan time, and a stale session record
+can no longer make a command look nested. Each check also records what it was seen doing, and a
+`(full)` check that ran in-process is noted (informational). A framework payload that uses these
+declares `min_ape_version: "1.4.0"`. Measured on Claude Code 2.1.310.
+
+Evaluated end to end on Claude Code 2.1.310 with the release build, bin-v14rc6 (2f5afe4), and the
+framework's v1.4.0-rc.4 payload (digest 2b9d0939): five projects built from the full brief.
+Greenfield reached e2e 8/9 (as v1.3), brownfield 18/18, ledger 70/70 and 24/24, and notes-svc
+37/37. Taskforge stopped at its sixth milestone of seven, 49/49 and 30/41 (v1.3: 41/41), when
+review blocked three rounds on real defects the model's own change had added. In every project no
+run lost recorded work, no process a gate started outlived it, and the loop never prepared a
+release on its own. `check.tag-mismatch` stopped nothing: the one project where it appeared (four
+in-process startup checks) read it as informational and went on. ape's harness gates and
+`make check-framework` against the payload pass on Claude Code 2.1.310. CI's group-mode (no systemd
+user manager) and Windows tests were first run at promotion; three test expectations from 1.4's
+first candidate were corrected, no code changed. GitHub CI green on 0829712's tree on
+ci/v1.4.0-check-2: ubuntu-latest (`make test`), windows-latest (`make test-portable`), lint and
+govulncheck.
+
+Promoted from the release build at 2f5afe4. Nothing compiled into the binary changed after that
+build: a test commit (0829712, the three expectations above), a docs commit (README's status and
+bingo pin, the install examples, the scope page) and the release commit, which touches only this
+file. Earlier candidates: bin-v14rc1 (282e53b) carried the test infrastructure, the full run, the
+gate self-test, the plan-time refusals, the readiness probes, the skip rules and the deprecation
+warnings; bin-v14rc2 (ebe0690) added the gate-scratch
+fix after the eval found it (FINDING-C1-1); bin-v14rc3 (92f9b3f) is rc2 with nothing else changed
+in what ships; bin-v14rc4 (e98cab8) added the reused-pid fix (FINDING-C3-6); bin-v14rc5 (6081a3f)
+added the check observation and `check.tag-mismatch`; bin-v14rc6 gave that notice no action.
+
+### Known issue: the sandbox's `credentials: oauth` mode (D604, D605)
+
+- `ape sandbox` workspaces under `aped` with `credentials: oauth` hold copies of the host's Claude
+  OAuth credential, and `aped` keeps them in step by polling every 3 s and taking the newest file.
+  OAuth refresh tokens rotate. Every copy expires at the same time, so the host and a workspace
+  refresh in the same window, and the one that refreshes second is logged out. `aped` can then copy
+  that logged-out file to every workspace and into the host's own `~/.claude/.credentials.json`,
+  logging the host out too.
+- Until it is fixed, use `credentials: api-key` for workspace work, or keep `aped` stopped when no
+  workspace is in use. ape's own sessions (`ape task`, the loop, `ape chat`) never copy
+  credentials and are not affected. The fix (rank copies by token expiry, never propagate a
+  logged-out file) follows after 1.4.
 
 ### A gate's scratch output is not a gate change (D581, FINDING-C1-1)
 
@@ -36,7 +80,8 @@
   and `ape sessions prune` kept any row whose pid existed. A row from a session long gone whose
   pid the kernel had since given to one of the caller's ancestors made the caller look nested in
   it: the eval saw a loop's `ape change review --run` refused with `session.depth`, naming an
-  apex-plan run eight days dead, which cost the cell.
+  apex-plan run eight days dead, which cost the cell. Every release since v1.0.0 has it, 1.3.0
+  included.
 - A row now records its process's start (`pid_start`, and `claude_start` for its claude), and
   counts only while that pid's process started then. A row written before v1.4, without one,
   counts only when its pid's process started before the row was written. `ape sessions prune` drops
@@ -60,7 +105,8 @@
   starting something with `setsid` to keep it running after a check no longer works. The result
   records `reaping` (`scope`, or `group` where there is no systemd user manager: containers, CI,
   macOS, Windows), `scope_unit` and `memory_peak`. About 15 ms a check.
-- **A `TMPDIR` of its own** per check, `/tmp/ape-<uid>/<pid>-<id>`, removed when it ends
+- **A `TMPDIR` of its own** per check, `<TMPDIR>/ape-<uid>/<pid>-<id>` (`/tmp/ape-<uid>/…` when that
+  would be longer than 60 bytes), removed when it ends
   (`tmp_bytes`), and short enough for a unix socket under it. A process outside the check that holds
   it is ended and named: snap's Chromium escapes the scope and keeps using the check's `TMPDIR`.
 - **`COMPOSE_PROJECT_NAME=apex-<project>-<id>`** in every check, over the project's `name:`, `.env`
