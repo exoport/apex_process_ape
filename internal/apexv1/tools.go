@@ -106,10 +106,29 @@ const (
 	AdviseChange = "change"
 	AdviseApply  = "apply"
 	AdviseReview = "review"
+	// AdvisePlan (v1.4.1, D611): the planning session reads the entry when
+	// it plans a milestone. Never a default: an entry reads at plan time
+	// only when its for: names plan.
+	AdvisePlan = "plan"
 )
 
-// AdviseSessions are the for: values, in order.
+// AdviseSessions are a change's sessions, in order: the for: an entry
+// without one reads in.
 var AdviseSessions = []string{AdviseChange, AdviseApply, AdviseReview}
+
+// AdviseForValues are every value for: may hold.
+var AdviseForValues = []string{AdvisePlan, AdviseChange, AdviseApply, AdviseReview}
+
+// PlanAdvise are the tools.advise entries whose for: names plan, in order.
+func (t ToolsConfig) PlanAdvise() []string {
+	var out []string
+	for _, a := range t.Advise {
+		if slices.Contains(a.For, AdvisePlan) {
+			out = append(out, a.Name)
+		}
+	}
+	return out
+}
 
 // Slot returns a slot's entries.
 func (t ToolsConfig) Slot(slot string) []Tool {
@@ -331,8 +350,8 @@ func adviseProblems(tool Tool, at string) []string {
 	seen := map[string]bool{}
 	for _, s := range tool.For {
 		switch {
-		case !slices.Contains(AdviseSessions, s):
-			probs = append(probs, fmt.Sprintf("%s: for %q is not one of change, apply, review (no delegate reads advise)", at, s))
+		case !slices.Contains(AdviseForValues, s):
+			probs = append(probs, fmt.Sprintf("%s: for %q is not one of plan, change, apply, review (no delegate reads advise)", at, s))
 		case seen[s]:
 			probs = append(probs, fmt.Sprintf("%s: for lists %q twice", at, s))
 		}
@@ -447,7 +466,32 @@ func (p *Project) toolStatuses(cfg Config, rows []PluginStatus, checked bool) ([
 			out = append(out, st)
 		}
 	}
-	return out, fs
+	return out, append(fs, planAdviseCap(cfg, out)...)
+}
+
+// planAdviseCap is the plan session's caps.advise_session finding (D611):
+// what the entries whose for: names plan load together. A change's
+// sessions are capped by change check, against the entries it names; the
+// plan session reads every plan entry, so it is capped here, on the config.
+func planAdviseCap(cfg Config, sts []ToolStatus) []Finding {
+	total := 0
+	var names []string
+	for i := range sts {
+		st := &sts[i]
+		if st.Slot != "advise" || st.State != ToolOK || !slices.Contains(st.For, AdvisePlan) {
+			continue
+		}
+		for j := range st.Files {
+			total += st.Files[j].Bytes
+		}
+		names = append(names, st.Name)
+	}
+	limit := cfg.Caps.Limits().AdviseSession
+	if total <= limit {
+		return nil
+	}
+	return []Finding{{File: configYAML, Message: "advise: the plan session would read " + sizeKB(total) + " (" + strings.Join(names, ", ") + "), over the " +
+		capSize(limit) + " cap (caps.advise_session) — a person narrows an entry's for: or raises caps.advise_session in _apex/config.yaml"}}
 }
 
 // adviseEntryStatus resolves an advise entry's load: files into st and

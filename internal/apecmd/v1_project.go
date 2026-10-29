@@ -565,7 +565,7 @@ func newProjectCheckCmd() *cobra.Command {
                            well-formed — args: placeholders only {id} {task} {assets}
                            {change}, effort: a level, paths: relative globs, touches:
                            kebab slugs, load: paths inside the skill's folder, for:
-                           change, apply, review — (tools.invalid), each skill
+                           plan, change, apply, review — (tools.invalid), each skill
                            installed — <plugin>:<skill> of a listed plugin, or a project
                            or user skill or command — (tools.not-installed) and, for
                            design and review, not user-invocable: false
@@ -1063,7 +1063,11 @@ func newStatusCmd() *cobra.Command {
     the user's .claude/skills/<skill>/), for the sessions that read it (change, apply,
     review), file the load: entry; a row that cannot be read has error instead (not
     declared, skill not installed, file missing) and no sha256. Always present ([]).
-    Resolved when ape status runs: a plugin skill through the claude plugin CLI
+    Resolved when ape status runs: a plugin skill through the claude plugin CLI.
+    The top-level advise (v1.4.1, D611) has the same rows for every tools.advise entry
+    whose for: names plan: the planning session (apex-plan) reads them before it plans a
+    milestone. No change names them, so it is all of them, within caps.advise_session
+    (project check). Always present ([]); an entry without for: is never a plan one
   - acceptances (JSON changes[].accepted: [{task, by, at, evidence, run}]): by a person,
     or by "delegate:<skill>" with its run when _apex/config.yaml human_review delegates
     them (D75; "Accepted by a delegate" in the long output); and each human-review task's
@@ -1286,6 +1290,10 @@ func statusLong(r *apexv1.StatusReport) string {
 		}
 	}
 	b.WriteString(fullSkippedLines(r))
+	if len(r.Advise) > 0 {
+		b.WriteString("\nAdvise for planning (tools.advise for: plan; ape status --json: advise):\n")
+		printAdvise(&b, r.Advise)
+	}
 	if n := len(r.OutsideFlow); n > 0 {
 		fmt.Fprintf(&b, "\nOutside the change flow: %d commit(s) on the base since the last archive touch code with no Change: trailer (newest %.7s %s; ape status --json: outside_flow)\n",
 			n, r.OutsideFlow[0].SHA, r.OutsideFlow[0].Subject)

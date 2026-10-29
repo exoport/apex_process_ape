@@ -385,12 +385,22 @@ func adviseRecord(files []AdviseFile) []AdviseFile {
 }
 
 // AttachAdvise fills each change's advise in a status report (W6): the
-// files of the entries its advise: names, resolved and hashed now. The
+// files of the entries its advise: names, resolved and hashed now; and
+// the report's own advise, the entries whose for: names plan (D611). The
 // `ape status` command calls it; Status alone does not, as a plugin
 // skill's folder is found through the claude plugin CLI, which a hook or
 // the board should not wait for.
 func (p *Project) AttachAdvise(ctx context.Context, r *StatusReport) {
 	var res *adviseResolver
+	if r.Advise == nil {
+		r.Advise = []AdviseFile{}
+	}
+	if cfg, err := LoadConfig(p.Root); err == nil {
+		if names := cfg.Tools.PlanAdvise(); len(names) > 0 {
+			res = p.newAdviseResolver(cfg)
+			r.Advise = res.files(ctx, names)
+		}
+	}
 	for i := range r.Changes {
 		c := &r.Changes[i]
 		if len(c.adviseNames) == 0 {

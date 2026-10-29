@@ -4853,10 +4853,13 @@ under its skill's folder (the folder holding its SKILL.md: in the plugin's insta
 a plugin skill, else the user's or the project's .claude/skills/<skill>/; for a
 command, the whole commands/ folder its <skill>.md sits in), and for:
 the sessions that read them, change, apply and/or review (default all three; never a
-delegate). A change names the entries whose when: it matches in change.md's advise:
-frontmatter (ape change check --help); ape status --json lists each file of them under
-changes[].advise with its absolute path, bytes and sha256, and every verify records
-the sha256s. ape resolves, sizes and hashes the files; it never reads them for meaning.
+delegate), and plan (v1.4.1, D611; never a default). A change names the entries whose
+when: it matches in change.md's advise: frontmatter (ape change check --help); ape
+status --json lists each file of them under changes[].advise with its absolute path,
+bytes and sha256, and every verify records the sha256s. An entry whose for: names plan
+is read by the planning session before it plans a milestone: no change names it, so ape
+status --json lists every such entry's files under the top-level advise, and project
+check caps them together by caps.advise_session. ape resolves, sizes and hashes the files; it never reads them for meaning.
 caps.advise (default 8 KB, ceiling 16 KB) bounds one entry's files together and
 caps.advise_session (default 16 KB, ceiling 32 KB) what one session of a change reads
 (tools.too-big). The skill need not be slash-invocable; disable-model-invocation: true
@@ -5265,7 +5268,7 @@ Validate the whole project and list every failure, not just the first.
                            well-formed — args: placeholders only {id} {task} {assets}
                            {change}, effort: a level, paths: relative globs, touches:
                            kebab slugs, load: paths inside the skill's folder, for:
-                           change, apply, review — (tools.invalid), each skill
+                           plan, change, apply, review — (tools.invalid), each skill
                            installed — <plugin>:<skill> of a listed plugin, or a project
                            or user skill or command — (tools.not-installed) and, for
                            design and review, not user-invocable: false
@@ -7909,7 +7912,11 @@ Show where the project stands, from the records ape keeps:
     the user's .claude/skills/<skill>/), for the sessions that read it (change, apply,
     review), file the load: entry; a row that cannot be read has error instead (not
     declared, skill not installed, file missing) and no sha256. Always present ([]).
-    Resolved when ape status runs: a plugin skill through the claude plugin CLI
+    Resolved when ape status runs: a plugin skill through the claude plugin CLI.
+    The top-level advise (v1.4.1, D611) has the same rows for every tools.advise entry
+    whose for: names plan: the planning session (apex-plan) reads them before it plans a
+    milestone. No change names them, so it is all of them, within caps.advise_session
+    (project check). Always present ([]); an entry without for: is never a plan one
   - acceptances (JSON changes[].accepted: [{task, by, at, evidence, run}]): by a person,
     or by "delegate:<skill>" with its run when _apex/config.yaml human_review delegates
     them (D75; "Accepted by a delegate" in the long output); and each human-review task's

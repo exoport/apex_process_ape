@@ -374,6 +374,11 @@ type StatusReport struct {
 	// runs ahead of milestone work, at the loop's next change boundary —
 	// or alone, `ape task apex-loop --args <id>`.
 	Tweaks []string `json:"tweaks"`
+	// Advise is the files of the tools.advise entries whose for: names
+	// plan (v1.4.1, D611), one row per file as a change's advise: the
+	// planning session reads them before it plans a milestone. Filled by
+	// AttachAdvise (`ape status`); always present.
+	Advise []AdviseFile `json:"advise"`
 	// PreExistingRed is what was red at a change's baseline that is not
 	// the change's own: the planner's to roadmap (backlog 37).
 	PreExistingRed []PreExistingRed `json:"pre_existing_red"`
@@ -441,7 +446,7 @@ type StatusConfig struct {
 //
 //nolint:gocyclo // one section per part of the report, each guarded by what it reads
 func (p *Project) Status() *StatusReport {
-	r := &StatusReport{Root: p.Root, Initialized: p.IsV1(), Changes: []ChangeStatus{}, Milestones: []MilestoneLine{}, Tweaks: []string{}, OutsideFlow: []OutsideFlow{}, RoadmapNext: []string{}}
+	r := &StatusReport{Root: p.Root, Initialized: p.IsV1(), Changes: []ChangeStatus{}, Milestones: []MilestoneLine{}, Tweaks: []string{}, Advise: []AdviseFile{}, OutsideFlow: []OutsideFlow{}, RoadmapNext: []string{}}
 	cfg, cfgErr := LoadConfig(p.Root)
 	if cfgErr == nil && cfg.ProjectName != "" {
 		r.Project = cfg.ProjectName

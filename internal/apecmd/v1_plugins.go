@@ -146,10 +146,13 @@ under its skill's folder (the folder holding its SKILL.md: in the plugin's insta
 a plugin skill, else the user's or the project's .claude/skills/<skill>/; for a
 command, the whole commands/ folder its <skill>.md sits in), and for:
 the sessions that read them, change, apply and/or review (default all three; never a
-delegate). A change names the entries whose when: it matches in change.md's advise:
-frontmatter (ape change check --help); ape status --json lists each file of them under
-changes[].advise with its absolute path, bytes and sha256, and every verify records
-the sha256s. ape resolves, sizes and hashes the files; it never reads them for meaning.
+delegate), and plan (v1.4.1, D611; never a default). A change names the entries whose
+when: it matches in change.md's advise: frontmatter (ape change check --help); ape
+status --json lists each file of them under changes[].advise with its absolute path,
+bytes and sha256, and every verify records the sha256s. An entry whose for: names plan
+is read by the planning session before it plans a milestone: no change names it, so ape
+status --json lists every such entry's files under the top-level advise, and project
+check caps them together by caps.advise_session. ape resolves, sizes and hashes the files; it never reads them for meaning.
 caps.advise (default 8 KB, ceiling 16 KB) bounds one entry's files together and
 caps.advise_session (default 16 KB, ceiling 32 KB) what one session of a change reads
 (tools.too-big). The skill need not be slash-invocable; disable-model-invocation: true

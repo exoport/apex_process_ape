@@ -537,8 +537,12 @@ An `advise` entry starts no session and gives no verdict. Its fields:
 | Field | Meaning |
 | ----- | ------- |
 | `load` | Required. Files relative to the skill's folder: the folder holding its `SKILL.md`, in the plugin's install for a plugin skill, else in the user's or the project's `.claude/skills/<skill>/` (a user skill wins, as in Claude Code). For a command it is the `commands/` folder holding `<skill>.md`, shared with every other command ([below](#an-advise-entry-on-a-command)). No `..`, no absolute path |
-| `for` | The sessions that read the files: `change`, `apply`, `review`. Default all three. A delegate never reads advise |
+| `for` | The sessions that read the files: `change`, `apply`, `review`, and (v1.4.1) `plan`. Default `change`, `apply` and `review`; `plan` only when named. A delegate never reads advise |
 | `paths`, `touches` | As above |
+
+A `plan` entry is read by the planning session before it plans a milestone. No change names
+it, so `ape status --json` lists the files of every entry whose `for` names `plan` under its
+top-level `advise`, and `ape project check` holds them together to `caps.advise_session`.
 
 `args`, `model` and `effort` are refused on an advise entry. The skill need not be
 slash-invocable; `disable-model-invocation: true` keeps it out of every session's skill listing.

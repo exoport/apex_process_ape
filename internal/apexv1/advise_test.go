@@ -55,7 +55,7 @@ func TestToolsConfig_AdviseSchema(t *testing.T) {
 		`tools.advise[2]: missing load`,
 		`tools.advise[3]: load entry "../secrets.md" is not a file path inside the skill's folder`,
 		`tools.advise[3]: load entry "/etc/passwd" is not a file path inside the skill's folder`,
-		`tools.advise[4]: for "accept" is not one of change, apply, review`,
+		`tools.advise[4]: for "accept" is not one of plan, change, apply, review`,
 		`tools.advise[5]: for lists "apply" twice`,
 		`tools.advise[6]: unknown key "model" — an entry is {name, skill, when, load, for?, paths?, touches?} (an advise entry starts no session)`,
 	} {
@@ -317,4 +317,49 @@ func TestPrepareTool_AdviseEntry(t *testing.T) {
 	require.ErrorAs(t, err, &fe)
 	require.Equal(t, "tool.unknown", fe.Code)
 	require.Contains(t, fe.Msg, "tools.advise entry nats starts no session")
+}
+
+// D611: an entry whose for: names plan is read by the planning session.
+// ape status lists every such entry's files at the top level (no change
+// names them), an entry without for: is never one, and project check caps
+// the plan session's files together.
+func TestAdvise_PlanSession(t *testing.T) {
+	body := "P1 plan the bus first.\n"
+	p := adviseProject(t, adviseConfig, body)
+	r := p.Status()
+	p.AttachAdvise(ctx(), r)
+	require.Equal(t, []AdviseFile{}, r.Advise, "for: unset is never plan")
+
+	write(t, p, "_apex/config.yaml", `tools:
+  advise:
+    - {name: nats, skill: nats, when: "NATS", load: [advise.md], for: [plan, review]}
+    - {name: gone, skill: missing-skill, when: x, load: [a.md], for: [plan]}
+    - {name: apply-only, skill: nats, when: x, load: [advise.md], for: [apply]}
+`)
+	cfg, err := LoadConfig(p.Root)
+	require.NoError(t, err)
+	require.Equal(t, []string{"nats", "gone"}, cfg.Tools.PlanAdvise())
+	r = p.Status()
+	require.Equal(t, []AdviseFile{}, r.Advise, "Status alone resolves nothing")
+	p.AttachAdvise(ctx(), r)
+	require.Len(t, r.Advise, 2)
+	require.Equal(t, AdviseFile{
+		Name: "nats", Skill: "nats", For: []string{"plan", "review"}, File: "advise.md",
+		Path: filepath.Join(p.Root, ".claude", "skills", "nats", "advise.md"), Bytes: len(body), SHA256: sha(body),
+	}, r.Advise[0])
+	require.Equal(t, "gone", r.Advise[1].Name)
+	require.NotEmpty(t, r.Advise[1].Error, "a plan entry that cannot be read is a row with error")
+
+	write(t, p, ".claude/skills/nats/advise.md", strings.Repeat("x", 9<<10))
+	write(t, p, ".claude/skills/kb/SKILL.md", skillMD("kb", ""))
+	write(t, p, ".claude/skills/kb/a.md", strings.Repeat("y", 8<<10))
+	write(t, p, "_apex/config.yaml", `caps: {advise: 16384}
+tools:
+  advise:
+    - {name: nats, skill: nats, when: "NATS", load: [advise.md], for: [plan]}
+    - {name: kb, skill: kb, when: x, load: [a.md], for: [plan]}
+`)
+	fs := p.CheckPluginContents(ctx(), nil)
+	require.Contains(t, findingMessages(fs), "advise: the plan session would read 17.0 KB (nats, kb), over the 16 KB cap (caps.advise_session)")
+	require.Contains(t, codesOf(fs), CodeToolsTooBig)
 }
