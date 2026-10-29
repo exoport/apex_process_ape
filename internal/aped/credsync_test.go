@@ -1,6 +1,8 @@
 package aped
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -19,16 +21,37 @@ func credRig(t *testing.T, workspaces ...string) (sync *CredentialSync, publishe
 	stateDir := filepath.Join(root, "state")
 	published = filepath.Join(root, "published", ".claude", ".credentials.json")
 	require.NoError(t, os.MkdirAll(filepath.Dir(published), 0o750))
-	require.NoError(t, os.WriteFile(published, []byte(`{"accessToken":"v1"}`), 0o660))
+	require.NoError(t, os.WriteFile(published, []byte(cred("v1", time.Now().Add(-2*time.Hour))), 0o660))
 
 	wsPaths = map[string]string{}
 	for _, name := range workspaces {
 		p := WorkspaceCredentialPath(stateDir, name)
 		require.NoError(t, os.MkdirAll(filepath.Dir(p), 0o700))
-		require.NoError(t, os.WriteFile(p, []byte(`{"accessToken":"v1"}`), 0o600))
+		require.NoError(t, os.WriteFile(p, []byte(cred("v1", time.Now().Add(-2*time.Hour))), 0o600))
 		wsPaths[name] = p
 	}
 	return &CredentialSync{Published: published, StateDir: stateDir, Stderr: &testWriter{}}, published, wsPaths
+}
+
+// cred is a logged-in Claude Code credential whose session was issued at issued:
+// its token expires eight hours later, so a later issue is a later expiry.
+func cred(token string, issued time.Time) string {
+	return fmt.Sprintf(`{"claudeAiOauth":{"accessToken":%q,"refreshToken":"r-%s","expiresAt":%d,"scopes":["user:inference"]}}`,
+		token, token, issued.Add(8*time.Hour).UnixMilli())
+}
+
+// loggedOut is what a credential file holds after a logout or a lost session.
+const loggedOut = `{"claudeAiOauth":{"accessToken":"","refreshToken":"","expiresAt":0}}`
+
+// tokenOf reads a credential's access token ("" for a logged-out or other file).
+func tokenOf(t *testing.T, data []byte) string {
+	t.Helper()
+	var f oauthFile
+	require.NoError(t, json.Unmarshal(data, &f), string(data))
+	if f.ClaudeAiOauth == nil {
+		return ""
+	}
+	return f.ClaudeAiOauth.AccessToken
 }
 
 // testWriter swallows the syncer's progress lines.
@@ -50,9 +73,9 @@ func TestCredSyncWorkspaceRefreshReachesHostAndOtherWorkspaces(t *testing.T) {
 	// shared OAuth session dies at the first rotation.
 	sync, published, ws := credRig(t, "alpha", "beta")
 	base := time.Now().Add(-time.Hour)
-	touchWith(t, published, `{"accessToken":"v1"}`, base)
-	touchWith(t, ws["beta"], `{"accessToken":"v1"}`, base)
-	touchWith(t, ws["alpha"], `{"accessToken":"v2-refreshed"}`, base.Add(time.Minute))
+	touchWith(t, published, cred("v1", base), base)
+	touchWith(t, ws["beta"], cred("v1", base), base)
+	touchWith(t, ws["alpha"], cred("v2-refreshed", base.Add(time.Minute)), base.Add(time.Minute))
 
 	n, err := sync.SyncOnce()
 	require.NoError(t, err)
@@ -61,22 +84,22 @@ func TestCredSyncWorkspaceRefreshReachesHostAndOtherWorkspaces(t *testing.T) {
 	for name, path := range map[string]string{"published": published, "beta": ws["beta"], "alpha": ws["alpha"]} {
 		data, rerr := os.ReadFile(path)
 		require.NoError(t, rerr)
-		assert.JSONEq(t, `{"accessToken":"v2-refreshed"}`, string(data), name)
+		assert.Equal(t, "v2-refreshed", tokenOf(t, data), name)
 	}
 }
 
 func TestCredSyncHostLoginReachesWorkspaces(t *testing.T) {
 	sync, published, ws := credRig(t, "alpha")
 	base := time.Now().Add(-time.Hour)
-	touchWith(t, ws["alpha"], `{"accessToken":"old"}`, base)
-	touchWith(t, published, `{"accessToken":"post-login"}`, base.Add(time.Minute))
+	touchWith(t, ws["alpha"], cred("old", base), base)
+	touchWith(t, published, cred("post-login", base.Add(time.Minute)), base.Add(time.Minute))
 
 	n, err := sync.SyncOnce()
 	require.NoError(t, err)
 	assert.Equal(t, 1, n)
 	data, err := os.ReadFile(ws["alpha"])
 	require.NoError(t, err)
-	assert.JSONEq(t, `{"accessToken":"post-login"}`, string(data))
+	assert.Equal(t, "post-login", tokenOf(t, data))
 }
 
 func TestCredSyncPreservesThePublishedInode(t *testing.T) {
@@ -93,8 +116,8 @@ func TestCredSyncPreservesThePublishedInode(t *testing.T) {
 	require.NoError(t, err)
 
 	base := time.Now().Add(-time.Hour)
-	touchWith(t, published, `{"accessToken":"v1"}`, base)
-	touchWith(t, ws["alpha"], `{"accessToken":"v2"}`, base.Add(time.Minute))
+	touchWith(t, published, cred("v1", base), base)
+	touchWith(t, ws["alpha"], cred("v2", base.Add(time.Minute)), base.Add(time.Minute))
 	_, err = sync.SyncOnce()
 	require.NoError(t, err)
 
@@ -105,7 +128,7 @@ func TestCredSyncPreservesThePublishedInode(t *testing.T) {
 	// And therefore the operator's own file now carries the workspace's refresh.
 	data, err := os.ReadFile(operatorFile)
 	require.NoError(t, err)
-	assert.JSONEq(t, `{"accessToken":"v2"}`, string(data),
+	assert.Equal(t, "v2", tokenOf(t, data),
 		"writing in place is what makes a workspace refresh reach the host")
 }
 
@@ -115,8 +138,8 @@ func TestCredSyncNeverCreatesAMissingCredential(t *testing.T) {
 	sync, published, ws := credRig(t, "alpha", "beta")
 	require.NoError(t, os.Remove(ws["beta"]))
 	base := time.Now().Add(-time.Hour)
-	touchWith(t, published, `{"accessToken":"v1"}`, base)
-	touchWith(t, ws["alpha"], `{"accessToken":"v2"}`, base.Add(time.Minute))
+	touchWith(t, published, cred("v1", base), base)
+	touchWith(t, ws["alpha"], cred("v2", base.Add(time.Minute)), base.Add(time.Minute))
 
 	_, err := sync.SyncOnce()
 	require.NoError(t, err)
@@ -134,7 +157,7 @@ func TestCredSyncRefusesToPropagateInvalidJSON(t *testing.T) {
 	// workspace — that is the one failure that would be hardest to recover from.
 	sync, published, ws := credRig(t, "alpha")
 	base := time.Now().Add(-time.Hour)
-	touchWith(t, published, `{"accessToken":"good"}`, base)
+	touchWith(t, published, cred("good", base), base)
 	touchWith(t, ws["alpha"], `{"accessToken":"tru`, base.Add(time.Minute)) // newest, but torn
 
 	n, err := sync.SyncOnce()
@@ -142,7 +165,7 @@ func TestCredSyncRefusesToPropagateInvalidJSON(t *testing.T) {
 	assert.Equal(t, 1, n, "the valid credential is restored over the torn one")
 	data, err := os.ReadFile(ws["alpha"])
 	require.NoError(t, err)
-	assert.JSONEq(t, `{"accessToken":"good"}`, string(data))
+	assert.Equal(t, "good", tokenOf(t, data))
 
 	// With nothing valid anywhere, it reports rather than guessing.
 	touchWith(t, published, `not json`, base)
@@ -154,8 +177,8 @@ func TestCredSyncRefusesToPropagateInvalidJSON(t *testing.T) {
 func TestCredSyncIsANoOpWhenConverged(t *testing.T) {
 	sync, published, ws := credRig(t, "alpha")
 	base := time.Now().Add(-time.Hour)
-	touchWith(t, published, `{"accessToken":"same"}`, base)
-	touchWith(t, ws["alpha"], `{"accessToken":"same"}`, base)
+	touchWith(t, published, cred("same", base), base)
+	touchWith(t, ws["alpha"], cred("same", base), base)
 
 	before, err := os.Stat(ws["alpha"])
 	require.NoError(t, err)
@@ -181,8 +204,8 @@ func TestCredSyncWorkspaceWriteIsAtomicForReaders(t *testing.T) {
 	// via the inode changing, which is what rename does and in-place writing does not.
 	sync, published, ws := credRig(t, "alpha")
 	base := time.Now().Add(-time.Hour)
-	touchWith(t, ws["alpha"], `{"accessToken":"old"}`, base)
-	touchWith(t, published, `{"accessToken":"new"}`, base.Add(time.Minute))
+	touchWith(t, ws["alpha"], cred("old", base), base)
+	touchWith(t, published, cred("new", base.Add(time.Minute)), base.Add(time.Minute))
 
 	before, err := os.Stat(ws["alpha"])
 	require.NoError(t, err)
@@ -206,25 +229,25 @@ func TestCredSyncARepublishedCredentialBeatsANewerWorkspaceToken(t *testing.T) {
 	// A re-publish must therefore win on authority, not timestamp.
 	sync, published, ws := credRig(t, "alpha")
 	base := time.Now().Add(-time.Hour)
-	touchWith(t, published, `{"accessToken":"pre-login"}`, base)
-	touchWith(t, ws["alpha"], `{"accessToken":"pre-login"}`, base)
+	touchWith(t, published, cred("pre-login", base), base)
+	touchWith(t, ws["alpha"], cred("pre-login", base), base)
 
 	// Establish the baseline identity (what a first tick does).
 	_, err := sync.SyncOnce()
 	require.NoError(t, err)
 
 	// The workspace refreshes from the old session — NEWER mtime.
-	touchWith(t, ws["alpha"], `{"accessToken":"refreshed-from-old-session"}`, base.Add(2*time.Minute))
+	touchWith(t, ws["alpha"], cred("refreshed-from-old-session", base.Add(2*time.Minute)), base.Add(2*time.Minute))
 	// And the operator re-publishes after a login: a NEW file at the same path, older mtime.
 	require.NoError(t, os.Remove(published))
-	touchWith(t, published, `{"accessToken":"post-login"}`, base.Add(time.Minute))
+	touchWith(t, published, cred("post-login", base.Add(time.Minute)), base.Add(time.Minute))
 
 	n, err := sync.SyncOnce()
 	require.NoError(t, err)
 	assert.Equal(t, 1, n)
 	data, err := os.ReadFile(ws["alpha"])
 	require.NoError(t, err)
-	assert.JSONEq(t, `{"accessToken":"post-login"}`, string(data),
+	assert.Equal(t, "post-login", tokenOf(t, data),
 		"the re-published credential must win over a newer token from the session it replaced")
 }
 
@@ -240,8 +263,8 @@ func TestCredSyncARepublishThatReusesTheInodeStillWins(t *testing.T) {
 	// inode reuse looks like from here.
 	sync, published, ws := credRig(t, "alpha")
 	base := time.Now().Add(-time.Hour)
-	touchWith(t, published, `{"accessToken":"pre-login"}`, base)
-	touchWith(t, ws["alpha"], `{"accessToken":"pre-login"}`, base)
+	touchWith(t, published, cred("pre-login", base), base)
+	touchWith(t, ws["alpha"], cred("pre-login", base), base)
 
 	_, err := sync.SyncOnce()
 	require.NoError(t, err)
@@ -249,9 +272,9 @@ func TestCredSyncARepublishThatReusesTheInodeStillWins(t *testing.T) {
 	require.NoError(t, err)
 
 	// The workspace refreshes from the old session — NEWER mtime.
-	touchWith(t, ws["alpha"], `{"accessToken":"refreshed-from-old-session"}`, base.Add(2*time.Minute))
+	touchWith(t, ws["alpha"], cred("refreshed-from-old-session", base.Add(2*time.Minute)), base.Add(2*time.Minute))
 	// The operator's post-login credential lands on the same inode, with an older mtime.
-	touchWith(t, published, `{"accessToken":"post-login"}`, base.Add(time.Minute))
+	touchWith(t, published, cred("post-login", base.Add(time.Minute)), base.Add(time.Minute))
 
 	afterID, err := os.Stat(published)
 	require.NoError(t, err)
@@ -263,7 +286,7 @@ func TestCredSyncARepublishThatReusesTheInodeStillWins(t *testing.T) {
 	assert.Equal(t, 1, n)
 	data, err := os.ReadFile(ws["alpha"])
 	require.NoError(t, err)
-	assert.JSONEq(t, `{"accessToken":"post-login"}`, string(data),
+	assert.Equal(t, "post-login", tokenOf(t, data),
 		"a re-publish must win even when the new credential reuses the old inode number")
 }
 
@@ -273,12 +296,12 @@ func TestCredSyncInPlaceUpdatesAreNotMistakenForARepublish(t *testing.T) {
 	// authoritative and immediately undo itself.
 	sync, published, ws := credRig(t, "alpha")
 	base := time.Now().Add(-time.Hour)
-	touchWith(t, published, `{"accessToken":"v1"}`, base)
-	touchWith(t, ws["alpha"], `{"accessToken":"v1"}`, base)
+	touchWith(t, published, cred("v1", base), base)
+	touchWith(t, ws["alpha"], cred("v1", base), base)
 	_, err := sync.SyncOnce()
 	require.NoError(t, err)
 
-	touchWith(t, ws["alpha"], `{"accessToken":"v2-from-workspace"}`, base.Add(time.Minute))
+	touchWith(t, ws["alpha"], cred("v2-from-workspace", base.Add(time.Minute)), base.Add(time.Minute))
 	_, err = sync.SyncOnce() // writes the published file in place
 	require.NoError(t, err)
 
@@ -287,6 +310,114 @@ func TestCredSyncInPlaceUpdatesAreNotMistakenForARepublish(t *testing.T) {
 	assert.Zero(t, n)
 	data, err := os.ReadFile(published)
 	require.NoError(t, err)
-	assert.JSONEq(t, `{"accessToken":"v2-from-workspace"}`, string(data),
+	assert.Equal(t, "v2-from-workspace", tokenOf(t, data),
 		"the workspace's refresh must stick, not be undone by a false republish detection")
+}
+
+// D605.1: a logged-out file is never a source, whatever its modification time —
+// the incident: a workspace's logged-out copy, written last, spread into the
+// operator's ~/.claude through the published hard link and logged the host out.
+func TestCredSyncNeverSpreadsALoggedOutCredential(t *testing.T) {
+	sync, published, ws := credRig(t, "alpha", "beta")
+	base := time.Now().Add(-time.Hour)
+	touchWith(t, published, cred("good", base), base)
+	touchWith(t, ws["beta"], cred("good", base), base)
+	touchWith(t, ws["alpha"], loggedOut, base.Add(time.Minute)) // newest mtime, logged out
+
+	n, err := sync.SyncOnce()
+	require.NoError(t, err)
+	assert.Equal(t, 1, n, "only the logged-out workspace is written: it gets the session back")
+	for name, path := range map[string]string{"published": published, "alpha": ws["alpha"], "beta": ws["beta"]} {
+		data, rerr := os.ReadFile(path)
+		require.NoError(t, rerr)
+		assert.Equal(t, "good", tokenOf(t, data), name)
+	}
+}
+
+// An earlier expiry never overwrites a later one, however recently it was written.
+func TestCredSyncRanksByExpiryNotModificationTime(t *testing.T) {
+	sync, published, ws := credRig(t, "alpha")
+	base := time.Now().Add(-time.Hour)
+	touchWith(t, published, cred("later-expiry", base.Add(time.Minute)), base)
+	touchWith(t, ws["alpha"], cred("earlier-expiry", base), base.Add(5*time.Minute))
+
+	n, err := sync.SyncOnce()
+	require.NoError(t, err)
+	assert.Equal(t, 1, n)
+	for name, path := range map[string]string{"published": published, "alpha": ws["alpha"]} {
+		data, rerr := os.ReadFile(path)
+		require.NoError(t, rerr)
+		assert.Equal(t, "later-expiry", tokenOf(t, data), name)
+	}
+}
+
+// A publication with no logged-in session — the operator logged out — is left
+// alone and nothing is taken from it: no workspace is logged out by it, and no
+// workspace token is written back into the operator's file.
+func TestCredSyncLeavesALoggedOutPublicationAlone(t *testing.T) {
+	sync, published, ws := credRig(t, "alpha")
+	base := time.Now().Add(-time.Hour)
+	touchWith(t, ws["alpha"], cred("ws", base), base)
+	touchWith(t, published, cred("ws", base), base)
+	_, err := sync.SyncOnce() // baseline
+	require.NoError(t, err)
+
+	// The operator logs out: a new file at the published path.
+	require.NoError(t, os.Remove(published))
+	touchWith(t, published, loggedOut, base.Add(time.Minute))
+	for range 2 {
+		n, err := sync.SyncOnce()
+		require.NoError(t, err)
+		assert.Zero(t, n)
+	}
+	data, err := os.ReadFile(published)
+	require.NoError(t, err)
+	assert.JSONEq(t, loggedOut, string(data), "the operator's logout stands")
+	data, err = os.ReadFile(ws["alpha"])
+	require.NoError(t, err)
+	assert.Equal(t, "ws", tokenOf(t, data), "the workspace is not logged out by it")
+
+	// A login afterwards is a re-publish, and wins as before.
+	require.NoError(t, os.Remove(published))
+	touchWith(t, published, cred("post-login", base.Add(-time.Minute)), base.Add(2*time.Minute))
+	n, err := sync.SyncOnce()
+	require.NoError(t, err)
+	assert.Equal(t, 1, n)
+	data, err = os.ReadFile(ws["alpha"])
+	require.NoError(t, err)
+	assert.Equal(t, "post-login", tokenOf(t, data))
+}
+
+// With no logged-in session anywhere, nothing is written; a publication of a
+// shape this does not know counts as holding none, and is left alone.
+func TestCredSyncWithNoLoggedInPeerWritesNothing(t *testing.T) {
+	sync, published, ws := credRig(t, "alpha")
+	base := time.Now().Add(-time.Hour)
+	touchWith(t, published, `{"pub`, base) // torn
+	touchWith(t, ws["alpha"], loggedOut, base.Add(time.Minute))
+	n, err := sync.SyncOnce()
+	require.Error(t, err)
+	assert.Zero(t, n)
+
+	touchWith(t, published, `{"accessToken":"an-unknown-shape"}`, base)
+	touchWith(t, ws["alpha"], cred("ws", base), base.Add(time.Minute))
+	n, err = sync.SyncOnce()
+	require.NoError(t, err)
+	assert.Zero(t, n)
+	data, err := os.ReadFile(published)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"accessToken":"an-unknown-shape"}`, string(data))
+}
+
+// Equal expiries: the later write wins, then the publication.
+func TestCredSyncBreaksAnExpiryTieByModificationTime(t *testing.T) {
+	base := time.Now().Add(-time.Hour)
+	same := base.Add(time.Minute)
+	peers := []credPeer{
+		{path: "ws", mod: base.Add(2 * time.Minute), data: []byte(cred("ws", same)), expires: sessionExpiry([]byte(cred("ws", same)))},
+		{path: "pub", published: true, mod: base, data: []byte(cred("pub", same)), expires: sessionExpiry([]byte(cred("pub", same)))},
+	}
+	assert.Equal(t, "ws", newestPeer(peers).path)
+	peers[0].mod = base
+	assert.Equal(t, "pub", newestPeer(peers).path)
 }

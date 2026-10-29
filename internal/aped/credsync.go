@@ -52,7 +52,9 @@ to nothing and rename is what makes a reader see the change atomically.
 Bounds it respects: it never CREATES a credential where none exists (an absent file
 means no grant, and a revoked one must stay revoked), and it never propagates
 content that is not parseable JSON (a torn read must not be spread to every
-workspace and the host).
+workspace and the host). Since D605 it ranks by the token's expiry, never by
+modification time, and a logged-out file is never a source: an mtime-newest
+logged-out copy once spread from a workspace into the operator's ~/.claude.
 */
 
 // DefaultCredSyncInterval is how often the sync loop runs. Token refreshes happen
@@ -131,13 +133,41 @@ func (c *CredentialSync) stderr() io.Writer {
 type credPeer struct {
 	path string
 	// published marks the operator's file, which must be written in place to keep its
-	// hard link intact, and which wins a modification-time tie.
+	// hard link intact, and which wins a tie.
 	published bool
 	mod       time.Time
 	data      []byte
+	// expires is claudeAiOauth.expiresAt (Unix ms) when the file holds a logged-in
+	// session — both tokens present and an expiry set — and 0 otherwise: a logged-out
+	// file, a torn read, or a shape this does not know. Only a peer with expires > 0
+	// is ever a source (D605.1).
+	expires int64
 }
 
-// SyncOnce converges every peer on the newest valid credential and returns how many
+// oauthFile is the part of Claude Code's .credentials.json the ranking reads.
+type oauthFile struct {
+	ClaudeAiOauth *struct {
+		AccessToken  string `json:"accessToken"`
+		RefreshToken string `json:"refreshToken"`
+		ExpiresAt    int64  `json:"expiresAt"`
+	} `json:"claudeAiOauth"`
+}
+
+// sessionExpiry is a credential's token expiry (Unix ms), or 0 when it holds no
+// logged-in session.
+func sessionExpiry(data []byte) int64 {
+	var f oauthFile
+	if json.Unmarshal(data, &f) != nil || f.ClaudeAiOauth == nil {
+		return 0
+	}
+	o := f.ClaudeAiOauth
+	if o.AccessToken == "" || o.RefreshToken == "" || o.ExpiresAt <= 0 {
+		return 0
+	}
+	return o.ExpiresAt
+}
+
+// SyncOnce converges every peer on the credential that expires last and returns how many
 // peers it wrote. Exported so the behaviour is testable without a running daemon.
 func (c *CredentialSync) SyncOnce() (int, error) {
 	peers, err := c.peers()
@@ -148,14 +178,25 @@ func (c *CredentialSync) SyncOnce() (int, error) {
 		return 0, nil // nothing to converge (no publication, or no workspace with one)
 	}
 
+	// A logged-out publication is the operator's own state (a logout, or a session
+	// that ended): nothing is written into it, and nothing is taken from it — a
+	// logged-out file spread to every workspace, and a workspace token written back
+	// into a file the operator logged out of, are both what D605 forbids.
+	if pub := publishedPeer(peers); pub != nil && pub.expires == 0 && json.Valid(pub.data) {
+		c.republishedPeer(peers) // keep the baseline current for the next tick
+		fmt.Fprintf(c.stderr(), "  credential sync: the publication holds no logged-in session — nothing propagated (log in and re-publish)\n")
+		return 0, nil
+	}
+
 	newest := newestPeer(peers)
 	if newest == nil {
-		return 0, errors.New("no peer holds parseable credential JSON — refusing to propagate")
+		c.republishedPeer(peers)
+		return 0, errors.New("no peer holds a logged-in credential — refusing to propagate")
 	}
-	// A freshly re-published credential wins on authority, not on timestamp: a login
-	// starts a NEW session, so any token a workspace refreshed from the old one is dead
-	// however recently it was written.
-	if p := c.republishedPeer(peers); p != nil {
+	// A freshly re-published credential wins on authority, not on expiry: a login
+	// starts a NEW session, so a token a workspace refreshed from the old one is dead
+	// however late it expires.
+	if p := c.republishedPeer(peers); p != nil && p.expires > 0 {
 		newest = p
 	}
 
@@ -272,23 +313,25 @@ func readPeer(path string, published bool) (credPeer, bool) {
 	if err != nil || len(data) == 0 {
 		return credPeer{}, false
 	}
-	return credPeer{path: path, published: published, mod: st.ModTime(), data: data}, true
+	return credPeer{path: path, published: published, mod: st.ModTime(), data: data, expires: sessionExpiry(data)}, true
 }
 
-// newestPeer returns the most recently modified peer whose content is valid JSON, or
-// nil when none is. Validity is the gate that stops a torn read from being spread to
-// every workspace and the host — the failure that would be hardest to recover from.
-// The published file wins an exact tie: it is the operator's own file.
+// newestPeer returns the peer whose session expires last, or nil when no peer holds
+// a logged-in session. Expiry, not modification time (D605.1): a file written last
+// can be a logout, or a torn read, and spreading either logs every party out —
+// the host included, through the published hard link. A later modification time
+// breaks an exact expiry tie, then the published file, the operator's own.
 func newestPeer(peers []credPeer) *credPeer {
 	var best *credPeer
 	for i := range peers {
 		p := &peers[i]
-		if !json.Valid(p.data) {
+		if p.expires == 0 {
 			continue
 		}
 		switch {
-		case best == nil:
+		case best == nil, p.expires > best.expires:
 			best = p
+		case p.expires < best.expires:
 		case p.mod.After(best.mod):
 			best = p
 		case p.mod.Equal(best.mod) && p.published:
@@ -339,8 +382,8 @@ func writeCredential(p *credPeer, data []byte) error {
 // The write is one syscall and the truncate follows it, so a concurrent reader sees
 // either the old bytes or the new ones for same-length content — which credential
 // files, being the same shape each time, almost always are. A shorter new credential
-// leaves a sub-millisecond window where trailing old bytes remain; the JSON-validity
-// gate in newestPeer means such a read is never propagated onward.
+// leaves a sub-millisecond window where trailing old bytes remain; newestPeer takes
+// only a parseable logged-in session, so such a read is never propagated onward.
 func writeInPlace(path string, data []byte) error {
 	f, err := os.OpenFile(path, os.O_WRONLY, credFileMode)
 	if err != nil {
