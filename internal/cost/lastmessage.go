@@ -19,6 +19,11 @@ type finalMessageLine struct {
 	Type        string `json:"type"`
 	IsMeta      bool   `json:"isMeta"`
 	IsSidechain bool   `json:"isSidechain"`
+	// IsAPIError and Error mark a message Claude Code wrote for a failed
+	// API call rather than the model: error is its kind
+	// ("authentication_failed" for a lost login, D603).
+	IsAPIError bool   `json:"isApiErrorMessage"`
+	Error      string `json:"error"`
 	Message     struct {
 		Content []struct {
 			Type string `json:"type"`
@@ -47,12 +52,32 @@ type finalMessageLine struct {
 // scanner applies, and for the same reason: one bad line must not
 // invalidate the whole read.
 func LastAssistantText(path string) (text string, ok bool) {
+	m, ok := LastAssistantMessage(path)
+	return m.Text, ok
+}
+
+// AssistantMessage is a transcript's last assistant message that said
+// something: its text, and, when Claude Code wrote it for a failed API
+// call, the failure's kind.
+type AssistantMessage struct {
+	Text string
+	// APIErrorKind is the error kind of a message Claude Code wrote for a
+	// failed API call (isApiErrorMessage), "" for the model's own:
+	// "authentication_failed" when the session lost its login — on
+	// Claude Code 2.1.310 and 2.1.312 alike, for an invalid token, an
+	// expired login and none at all (D637 item 1b captures).
+	APIErrorKind string
+}
+
+// LastAssistantMessage is LastAssistantText with the message's API-error
+// kind (D603).
+func LastAssistantMessage(path string) (msg AssistantMessage, ok bool) {
 	if path == "" {
-		return "", false
+		return AssistantMessage{}, false
 	}
 	f, err := os.Open(path)
 	if err != nil {
-		return "", false
+		return AssistantMessage{}, false
 	}
 	defer f.Close()
 
@@ -78,12 +103,12 @@ func LastAssistantText(path string) (text string, ok bool) {
 		}
 		// Keep the last turn that actually said something.
 		if b.Len() > 0 {
-			text = b.String()
+			msg = AssistantMessage{Text: b.String()}
+			if ml.IsAPIError {
+				msg.APIErrorKind = ml.Error
+			}
 		}
 	}
-	if err := sc.Err(); err != nil {
-		// A truncated tail still leaves everything read so far usable.
-		return text, text != ""
-	}
-	return text, text != ""
+	// A truncated tail (sc.Err) still leaves everything read so far usable.
+	return msg, msg.Text != ""
 }

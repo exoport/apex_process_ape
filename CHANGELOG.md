@@ -2,6 +2,11 @@
 
 ## v1.4.1 (unreleased — draft)
 
+- **A session that lost its login ends in minutes** (D603): `auth_lost` (manifest termination, `ape
+  task`/`ape prompt` exit 15, `ape status` "stopped: auth-lost", `session.auth-lost` from `ape
+  change review --run`) when its last turn ended with Claude Code's `authentication_failed` message
+  and nothing followed for 3 minutes. Before, such a run sat until the 60-minute idle ceiling.
+  `make check-claude` gains `auth_lost` (no tokens) to hold the contract.
 - **Credential sync ranks by token expiry** (aped, D605.1): a logged-out file is never spread,
   whatever its modification time, and a logged-out publication is left alone.
 - **`check.grep-test-output`** (D620): an informational notice at `change check`, `change start`

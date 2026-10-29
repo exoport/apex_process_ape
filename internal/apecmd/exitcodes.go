@@ -38,6 +38,11 @@ package apecmd
 //	   Distinct from 1 and 5: nothing failed, and re-running before the
 //	   reset fails the same way, so a caller waits for the reset
 //
+//	15 the session lost its Claude Code login (D603, termination
+//	   auth_lost): its last turn failed with authentication_failed and
+//	   nothing followed for the API-error grace window. Distinct from 5:
+//	   re-running fails the same way until a person logs in
+//
 // Other codes above 6 are command-local and are NOT declared here, because no
 // two commands mean the same thing by them. `ape framework` uses 3..7 for
 // its own install failures (framework.go), and 8, 9 and 10 are reserved
@@ -59,4 +64,7 @@ const (
 	// ExitUsageLimit is a usage-limit stop (H20): the next code no
 	// command uses (11–13 are framework's and the toolchain's).
 	ExitUsageLimit = 14
+	// ExitAuthLost is sessiondriver.AuthLostError reaching a command
+	// (D603): the next free code.
+	ExitAuthLost = 15
 )

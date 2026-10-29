@@ -113,7 +113,9 @@ make check-claude  # LOCAL ONLY: spawn the installed Claude Code and verify ape'
                    #   model_aliases: each family word starts the model ape's alias pins,
                    #   and that model has an exact price; and args_whitespace: what a typed
                    #   run of spaces reaches a skill as (logged), and the args-file route
-                   #   delivering spaces, a tab and a newline byte-exact — two Haiku turns)
+                   #   delivering spaces, a tab and a newline byte-exact — two Haiku turns; and
+                   #   auth_lost: a dead login still ends a turn with Claude Code's
+                   #   authentication_failed message, which ape's auth_lost stop reads — no tokens)
 make check-hooks   # LOCAL ONLY: verify Claude Code still sends the hook fields the completion gates read.
                    #   Seeds its own corpus (one `ape prompt` session in a temp copy of
                    #   testdata/apexv1project), so it needs no pre-existing project.

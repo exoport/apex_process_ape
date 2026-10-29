@@ -56,6 +56,8 @@ const (
 	// promptStatusUpstreamAPI: the session's own turn failed against the
 	// API and nothing followed. Upstream and retryable, not a broken skill.
 	promptStatusUpstreamAPI = "upstream_api_error"
+	// promptStatusAuthLost: the session lost its Claude Code login (D603).
+	promptStatusAuthLost = "auth_lost"
 	promptStatusClaudeDied  = "claude_died"
 )
 
@@ -171,7 +173,8 @@ apex-loop run, which starts only allow-listed skills with ape task).
 Exit codes: 0 session completed (Stop hook) · 1 idle-timeout, session
 failed, or the typed line never submitted · 2 usage or preflight error (no _apex/config.yaml, unresolved
 --agent, missing --handoff file, the nesting rule) · 3 the claude REPL never became ready
-· 4 claude exited before the Stop hook · 5 an upstream API failure ended the session.`,
+· 4 claude exited before the Stop hook · 5 an upstream API failure ended the session · 15 the session lost its Claude Code login
+(auth_lost: a person logs in with `+"`claude /login`"+`).`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// The nesting rule (D62): a prompt session runs no skill an
@@ -678,6 +681,7 @@ func promptStatus(waitErr error) (status string, code int) {
 	var ite *sessiondriver.IdleTimeoutError
 	var mde *sessiondriver.MaxDurationError
 	var tae *sessiondriver.TerminalAPIError
+	var ale *sessiondriver.AuthLostError
 	switch {
 	case waitErr == nil:
 		return promptStatusCompleted, ExitOK
@@ -685,6 +689,8 @@ func promptStatus(waitErr error) (status string, code int) {
 		return promptStatusClaudeDied, ExitClaudeDied
 	// Ahead of the two backstops: an upstream failure is decidable, and
 	// reporting it as a stall would lose the one fact a caller needs.
+	case errors.As(waitErr, &ale):
+		return promptStatusAuthLost, ExitAuthLost
 	case errors.As(waitErr, &tae):
 		return promptStatusUpstreamAPI, ExitUpstreamAPI
 	case errors.As(waitErr, &mde):

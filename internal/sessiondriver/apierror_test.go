@@ -2,6 +2,7 @@ package sessiondriver
 
 import (
 	"context"
+	"github.com/exoport/apex_process_ape/internal/cost"
 	"os"
 	"path/filepath"
 	"testing"
@@ -68,7 +69,7 @@ func TestAPIErrorGraceWindow(t *testing.T) {
 	t.Run("disabled when no reader is wired", func(t *testing.T) {
 		t.Parallel()
 		d := NewDriver(nil, time.Hour)
-		d.lastAssistantText = nil
+		d.lastAssistant = nil
 		require.Greater(t, d.apiErrorGraceWindow(), 24*time.Hour)
 	})
 }
@@ -79,9 +80,9 @@ func TestTerminalAPIError_ReadsAndMemoizes(t *testing.T) {
 	newDriver := func(text string, reads *int) *Driver {
 		d := NewDriver(nil, time.Hour)
 		d.activeTranscript = "/does/not/need/to/exist.jsonl"
-		d.lastAssistantText = func(string) (string, bool) {
+		d.lastAssistant = func(string) (cost.AssistantMessage, bool) {
 			*reads++
-			return text, true
+			return cost.AssistantMessage{Text: text}, true
 		}
 		return d
 	}
@@ -90,7 +91,7 @@ func TestTerminalAPIError_ReadsAndMemoizes(t *testing.T) {
 		t.Parallel()
 		reads := 0
 		d := newDriver("API Error: 529 Overloaded. Try again.", &reads)
-		msg, ok := d.terminalAPIError(10, time.Unix(1, 0))
+		msg, _, ok := d.terminalAPIError(10, time.Unix(1, 0))
 		require.True(t, ok)
 		require.Equal(t, "API Error: 529 Overloaded. Try again.", msg,
 			"the caller needs the upstream text, not a paraphrase")
@@ -100,7 +101,7 @@ func TestTerminalAPIError_ReadsAndMemoizes(t *testing.T) {
 		t.Parallel()
 		reads := 0
 		d := newDriver("Wrote the PRD.", &reads)
-		_, ok := d.terminalAPIError(10, time.Unix(1, 0))
+		_, _, ok := d.terminalAPIError(10, time.Unix(1, 0))
 		require.False(t, ok)
 	})
 
@@ -112,7 +113,7 @@ func TestTerminalAPIError_ReadsAndMemoizes(t *testing.T) {
 		d := newDriver("API Error: 529 Overloaded.", &reads)
 		sig := time.Unix(1, 0)
 		for range 5 {
-			_, ok := d.terminalAPIError(10, sig)
+			_, _, ok := d.terminalAPIError(10, sig)
 			require.True(t, ok)
 		}
 		require.Equal(t, 1, reads, "memoized on the transcript signature")
@@ -124,8 +125,8 @@ func TestTerminalAPIError_ReadsAndMemoizes(t *testing.T) {
 		t.Parallel()
 		reads := 0
 		d := newDriver("API Error: 529 Overloaded.", &reads)
-		_, _ = d.terminalAPIError(10, time.Unix(1, 0))
-		_, _ = d.terminalAPIError(20, time.Unix(2, 0))
+		_, _, _ = d.terminalAPIError(10, time.Unix(1, 0))
+		_, _, _ = d.terminalAPIError(20, time.Unix(2, 0))
 		require.Equal(t, 2, reads)
 	})
 
@@ -134,7 +135,7 @@ func TestTerminalAPIError_ReadsAndMemoizes(t *testing.T) {
 		reads := 0
 		d := newDriver("API Error: 529 Overloaded.", &reads)
 		d.activeTranscript = ""
-		_, ok := d.terminalAPIError(10, time.Unix(1, 0))
+		_, _, ok := d.terminalAPIError(10, time.Unix(1, 0))
 		require.False(t, ok)
 		require.Zero(t, reads)
 	})
@@ -168,8 +169,8 @@ func TestWaitStepDone_TerminalAPIErrorFailsFast(t *testing.T) {
 	d.apiErrorGrace = 40 * time.Millisecond
 	d.activeTranscript = filepath.Join(t.TempDir(), "session.jsonl")
 	require.NoError(t, os.WriteFile(d.activeTranscript, []byte("{}\n"), 0o600))
-	d.lastAssistantText = func(string) (string, bool) {
-		return "API Error: 529 Overloaded. This is a server-side issue.", true
+	d.lastAssistant = func(string) (cost.AssistantMessage, bool) {
+		return cost.AssistantMessage{Text: "API Error: 529 Overloaded. This is a server-side issue."}, true
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -202,8 +203,8 @@ func TestWaitStepDone_RecoveringSessionIsNotKilled(t *testing.T) {
 	require.NoError(t, os.WriteFile(d.activeTranscript, []byte("{}\n"), 0o600))
 	// The message never stops looking like an error; the session's own
 	// liveness is what has to save it.
-	d.lastAssistantText = func(string) (string, bool) {
-		return "API Error: 529 Overloaded. This is a server-side issue.", true
+	d.lastAssistant = func(string) (cost.AssistantMessage, bool) {
+		return cost.AssistantMessage{Text: "API Error: 529 Overloaded. This is a server-side issue."}, true
 	}
 
 	stop := make(chan struct{})
@@ -230,8 +231,8 @@ func TestWaitStepDone_APIErrorCheckDisabled(t *testing.T) {
 	d.apiErrorGrace = 0 // off
 	d.activeTranscript = filepath.Join(t.TempDir(), "session.jsonl")
 	require.NoError(t, os.WriteFile(d.activeTranscript, []byte("{}\n"), 0o600))
-	d.lastAssistantText = func(string) (string, bool) {
-		return "API Error: 529 Overloaded.", true
+	d.lastAssistant = func(string) (cost.AssistantMessage, bool) {
+		return cost.AssistantMessage{Text: "API Error: 529 Overloaded."}, true
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -239,4 +240,54 @@ func TestWaitStepDone_APIErrorCheckDisabled(t *testing.T) {
 
 	var ite *IdleTimeoutError
 	require.ErrorAs(t, d.WaitStepDone(ctx), &ite, "should fall through to the idle backstop")
+}
+
+// D603: a session that lost its login ends its last turn with Claude Code's
+// authentication_failed message, whose text is no "API Error" in first
+// position. It is terminal all the same, and reported as auth lost.
+func TestTerminalAPIError_AuthLost(t *testing.T) {
+	for _, text := range []string{
+		"Please run /login · API Error: 401 OAuth access token is invalid.",
+		"Login expired · Please run /login",
+		"Not logged in · Please run /login",
+	} {
+		d := &Driver{activeTranscript: "/t.jsonl", apiErrorGrace: time.Minute, idleTimeout: time.Hour}
+		d.lastAssistant = func(string) (cost.AssistantMessage, bool) {
+			return cost.AssistantMessage{Text: text, APIErrorKind: "authentication_failed"}, true
+		}
+		msg, auth, ok := d.terminalAPIError(10, time.Unix(1, 0))
+		require.True(t, ok, text)
+		require.True(t, auth, text)
+		require.Equal(t, text, msg)
+	}
+	// The same words from the model are not Claude Code's error.
+	d := &Driver{activeTranscript: "/t.jsonl", apiErrorGrace: time.Minute, idleTimeout: time.Hour}
+	d.lastAssistant = func(string) (cost.AssistantMessage, bool) {
+		return cost.AssistantMessage{Text: "Not logged in · Please run /login"}, true
+	}
+	_, _, ok := d.terminalAPIError(10, time.Unix(1, 0))
+	require.False(t, ok, "a model quoting the line is not a lost login")
+}
+
+// D603 end to end: the lost login ends the step within the grace window as
+// AuthLostError, not as an upstream error or after the idle ceiling.
+func TestWaitStepDone_AuthLostFailsFast(t *testing.T) {
+	t.Parallel()
+	const idle = 20 * time.Second
+	d := newTestDriver(idle)
+	d.apiErrorGrace = 40 * time.Millisecond
+	d.activeTranscript = filepath.Join(t.TempDir(), "session.jsonl")
+	require.NoError(t, os.WriteFile(d.activeTranscript, []byte("{}\n"), 0o600))
+	d.lastAssistant = func(string) (cost.AssistantMessage, bool) {
+		return cost.AssistantMessage{Text: "Login expired · Please run /login", APIErrorKind: "authentication_failed"}, true
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	start := time.Now()
+	err := d.WaitStepDone(ctx)
+	var ale *AuthLostError
+	require.ErrorAs(t, err, &ale, "want AuthLostError, got %v", err)
+	require.Contains(t, ale.Error(), "Login expired · Please run /login")
+	require.Contains(t, ale.Error(), "claude /login")
+	require.Less(t, time.Since(start), idle/2)
 }

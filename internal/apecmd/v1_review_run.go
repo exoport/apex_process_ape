@@ -141,6 +141,11 @@ func runReviewSession(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, id, mod
 	case outcome.Voided:
 		return v1Fail(cmd, f, &apexv1.FailError{Code: "review.voided", Msg: "review of " + id + " voided: the session changed more than its review.md (" +
 			strings.Join(outcome.Violations, ", ") + ") — the change is " + outcome.Status + "; review again"}, res)
+	case outcome.Verdict == "" && res.TaskExit != nil && *res.TaskExit == ExitAuthLost:
+		// D603: no verdict because the session lost its login; running it
+		// again fails the same way until a person logs in.
+		return v1Fail(cmd, f, &apexv1.FailError{Code: "session.auth-lost", Msg: "the review session for " + id + " lost its Claude Code login (no verdict; log " + res.Log +
+			") — a person logs in (`claude /login`), then `ape change review " + id + " --run` again"}, res)
 	case outcome.Verdict == "" && len(outcome.Background) > 0:
 		// D88: the session ended its turn while its own work still ran.
 		return v1Fail(cmd, f, &apexv1.FailError{Code: "review.no-verdict", Msg: "the review session for " + id + " " + apexv1.LiveBackgroundReason(outcome.Background) +

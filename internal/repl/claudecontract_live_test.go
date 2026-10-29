@@ -81,6 +81,7 @@ func TestLive_ClaudeCodeContract(t *testing.T) {
 	t.Run("foreground_agent_sync", func(t *testing.T) { liveForegroundAgentSync(t, claudeBin) })
 	t.Run("model_aliases", func(t *testing.T) { liveModelAliases(t, claudeBin) })
 	t.Run("transcript_persists", func(t *testing.T) { liveTranscriptPersists(t, claudeBin) })
+	t.Run("auth_lost", func(t *testing.T) { liveAuthLost(t, claudeBin) })
 	t.Run("pty_repaints_during_tool", func(t *testing.T) { livePTYRepaintsDuringTool(t, claudeBin) })
 	t.Run("typed_line_renders", func(t *testing.T) { liveTypedLineRenders(t, claudeBin) })
 	t.Run("args_whitespace", func(t *testing.T) { liveArgsWhitespace(t, claudeBin) })
@@ -1130,4 +1131,50 @@ func versionOf(t *testing.T, claudeBin string) string {
 	out, err := exec.CommandContext(ctx, claudeBin, "--version").Output()
 	require.NoError(t, err, "`claude --version` failed")
 	return strings.TrimSpace(string(out))
+}
+
+// liveAuthLost: a session whose login is gone ends its turn with Claude
+// Code's own message of kind authentication_failed — what the session
+// driver's auth_lost stop reads (D603). Spends no tokens: the session runs
+// in a scratch CLAUDE_CONFIG_DIR holding an expired credential whose
+// refresh token is bogus, so the request never authenticates, and the
+// operator's own ~/.claude is never read or written. A Claude Code that
+// renames the kind fails here, rather than leaving lost-login runs to sit
+// until the idle ceiling again.
+func liveAuthLost(t *testing.T, claudeBin string) {
+	t.Helper()
+	cfg := t.TempDir()
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(cfg, ".claude.json"),
+		[]byte(`{"hasCompletedOnboarding":true,"theme":"dark","bypassPermissionsModeAccepted":true}`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(cfg, ".credentials.json"), fmt.Appendf(nil,
+		`{"claudeAiOauth":{"accessToken":"sk-ant-oat01-ape-live-bogus","refreshToken":"sk-ant-ort01-ape-live-bogus","expiresAt":%d,"scopes":["user:inference"]}}`,
+		time.Now().Add(-time.Hour).UnixMilli()), 0o600))
+	name := sessionName(t, "authlost")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	env := []string{"CLAUDE_CONFIG_DIR=" + cfg, "ANTHROPIC_API_KEY=", "ANTHROPIC_AUTH_TOKEN="}
+	require.NoError(t, NewSessionWithEnv(ctx, name, dir, []string{claudeBin, "--dangerously-skip-permissions"}, env))
+	t.Cleanup(func() { _ = KillSession(context.Background(), name) })
+	require.NoError(t, WaitForReady(ctx, name), "last pane:\n%s", paneOf(ctx, name))
+	require.NoError(t, SendCommand(ctx, name, "say hi"))
+
+	var got cost.AssistantMessage
+	for ctx.Err() == nil {
+		files, _ := filepath.Glob(filepath.Join(cfg, "projects", "*", "*.jsonl"))
+		for _, f := range files {
+			if m, ok := cost.LastAssistantMessage(f); ok {
+				got = m
+			}
+		}
+		if got.Text != "" {
+			break
+		}
+		time.Sleep(time.Second)
+	}
+	require.Equal(t, "authentication_failed", got.APIErrorKind,
+		"the lost-login message is no longer of kind authentication_failed (text %q): the session driver's auth_lost stop "+
+			"(sessiondriver.IsAuthLost) would never fire, and a run that lost its login would sit until the idle ceiling\nlast pane:\n%s",
+		got.Text, paneOf(ctx, name))
+	t.Logf("lost-login message: %q", got.Text)
 }

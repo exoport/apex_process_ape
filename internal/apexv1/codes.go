@@ -320,6 +320,7 @@ var DiagnosticCodes = []CodeDoc{
 	{"project.check-failed", 1, "person", "`ape project check` found problems (findings follow)"},
 	{"review.block", 1, "apply", "review --run: the review session's verdict is block"},
 	{"review.no-verdict", 1, "retry", "review --run: the session ended without recording a verdict"},
+	{CodeSessionAuthLost, 1, "person", "a session ape started lost its Claude Code login (v1.4.1, D603): its last turn failed with authentication_failed and nothing followed for 3 minutes, so ape ended it (termination auth_lost, ape task exit 15) — review --run reports it in place of review.no-verdict. Running it again fails the same way: a person logs in (`claude /login`; in a sandbox, publishes the credential again) and runs it again"},
 	{"review.stale", 1, "review", "archive: code changed since the review; `ape change review <id> --run` verifies it again first, then reviews it (D51 Q16)"},
 	{"review.start-failed", 1, "retry", "review --run: the review session could not be started"},
 	{"review.voided", 1, "retry", "review --run: the session changed more than review.md; verdict voided"},

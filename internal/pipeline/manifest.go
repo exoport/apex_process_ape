@@ -337,6 +337,11 @@ const (
 	// TerminationAPIError — claude's own upstream-failure text, which is
 	// a failure of the harness rather than of the step.
 	TerminationAPIError = "api_error"
+	// TerminationAuthLost — the session lost its Claude Code login
+	// (D603): its last turn failed with authentication_failed and nothing
+	// followed it for the API-error grace window. A person logs in and runs
+	// it again; before this kind existed the run sat until the idle ceiling.
+	TerminationAuthLost = "auth_lost"
 	// TerminationNotSubmitted — ape typed a step's line and claude never
 	// submitted it: no UserPromptSubmit hook through every Enter
 	// repl.Deliver pressed. Before this kind existed the line sat in the

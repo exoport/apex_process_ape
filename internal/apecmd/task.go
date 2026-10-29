@@ -351,7 +351,10 @@ holds (session.child-running, session.loop-running — formerly
 session.orchestrator-running) · 5 upstream
 API failure · 6 the dispatch violated its declared commit ownership (the run
 itself may have succeeded) · 14 a claude.ai usage limit stopped the session,
-or ape's usage guard did not start it (termination usage_guard).`
+or ape's usage guard did not start it (termination usage_guard) · 15 the session
+lost its Claude Code login (termination auth_lost: its last turn failed with
+authentication_failed and nothing followed for 3 minutes; a person logs in with
+`+"`claude /login`"+` and runs it again).`
 
 func newTaskCmd() *cobra.Command {
 	var (
@@ -719,6 +722,11 @@ func taskExitCode(runErr error) int {
 	}
 	// Upstream, not the skill. Reported separately so a caller can tell a
 	// degraded API from a run that genuinely failed.
+	// D603: a lost login, not the skill, and not retryable until a person
+	// logs in.
+	if _, ok := errors.AsType[*sessiondriver.AuthLostError](runErr); ok {
+		return ExitAuthLost
+	}
 	if _, ok := errors.AsType[*sessiondriver.TerminalAPIError](runErr); ok {
 		return ExitUpstreamAPI
 	}

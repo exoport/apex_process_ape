@@ -34,6 +34,9 @@ func sessionEnded(taskExit *int) string {
 	if taskExit == nil {
 		return "the session was lost"
 	}
+	if *taskExit == ExitAuthLost {
+		return fmt.Sprintf("ape task exited %d: the session lost its Claude Code login — a person logs in (`claude /login`)", *taskExit)
+	}
 	return fmt.Sprintf("ape task exited %d", *taskExit)
 }
 

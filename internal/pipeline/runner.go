@@ -657,6 +657,7 @@ func newTerminationRecord(runErr error) *TerminationRecord {
 		ite *sessiondriver.IdleTimeoutError
 		mde *sessiondriver.MaxDurationError
 		tae *sessiondriver.TerminalAPIError
+		ale *sessiondriver.AuthLostError
 		nse *repl.NotSubmittedError
 		lse *LimitStopError
 	)
@@ -691,6 +692,12 @@ func newTerminationRecord(runErr error) *TerminationRecord {
 			Diagnostic:  mde.Diagnostic,
 			ElapsedSecs: mde.Elapsed.Seconds(),
 			MaxSecs:     mde.Max.Seconds(),
+		}
+	case errors.As(runErr, &ale):
+		return &TerminationRecord{
+			Kind:      TerminationAuthLost,
+			Message:   ale.Error(),
+			QuietSecs: ale.Quiet.Seconds(),
 		}
 	case errors.As(runErr, &tae):
 		return &TerminationRecord{

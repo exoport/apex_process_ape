@@ -6434,7 +6434,8 @@ apex-loop run, which starts only allow-listed skills with ape task).
 Exit codes: 0 session completed (Stop hook) · 1 idle-timeout, session
 failed, or the typed line never submitted · 2 usage or preflight error (no _apex/config.yaml, unresolved
 --agent, missing --handoff file, the nesting rule) · 3 the claude REPL never became ready
-· 4 claude exited before the Stop hook · 5 an upstream API failure ended the session.
+· 4 claude exited before the Stop hook · 5 an upstream API failure ended the session · 15 the session lost its Claude Code login
+(auth_lost: a person logs in with `claude /login`).
 
 Flags:
 
@@ -8365,7 +8366,10 @@ holds (session.child-running, session.loop-running — formerly
 session.orchestrator-running) · 5 upstream
 API failure · 6 the dispatch violated its declared commit ownership (the run
 itself may have succeeded) · 14 a claude.ai usage limit stopped the session,
-or ape's usage guard did not start it (termination usage_guard).
+or ape's usage guard did not start it (termination usage_guard) · 15 the session
+lost its Claude Code login (termination auth_lost: its last turn failed with
+authentication_failed and nothing followed for 3 minutes; a person logs in with
+`claude /login` and runs it again).
 
 Examples:
 

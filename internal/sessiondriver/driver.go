@@ -138,6 +138,22 @@ func (e *TerminalAPIError) Error() string {
 		e.Label, e.Quiet.Round(time.Second), strings.TrimSpace(e.Message))
 }
 
+// AuthLostError reports that the session lost its Claude Code login
+// (D603): its last turn failed with authentication_failed and nothing
+// followed it for the API-error grace window. Nothing the session does
+// fixes it — a person logs in (`claude /login`, or the sandbox credential
+// is published again) and runs the step again.
+type AuthLostError struct {
+	Label   string        // "interactive step" / "session"
+	Message string        // the transcript's last assistant text, verbatim
+	Quiet   time.Duration // how long every signal had been silent
+}
+
+func (e *AuthLostError) Error() string {
+	return fmt.Sprintf("%s lost its Claude Code login and made no progress for %v: %s — a person logs in (`claude /login`) and runs it again",
+		e.Label, e.Quiet.Round(time.Second), strings.TrimSpace(e.Message))
+}
+
 // IdleTimeoutError reports that WaitStepDone tripped the idle backstop:
 // no progress across any watched signal (hook / transcript / PTY) for a
 // full idle window. Diagnostic carries the per-source ages + child
@@ -196,10 +212,10 @@ type Driver struct {
 	// apiErrorGrace is the quiet window before a terminal API error in the
 	// transcript is acted on. Zero disables the check entirely.
 	apiErrorGrace time.Duration
-	// lastAssistantText reads a transcript's final assistant message. A
+	// lastAssistant reads a transcript's final assistant message. A
 	// seam so the check can be driven without a real transcript; production
-	// always uses cost.LastAssistantText.
-	lastAssistantText func(path string) (string, bool)
+	// always uses cost.LastAssistantMessage.
+	lastAssistant func(path string) (cost.AssistantMessage, bool)
 
 	// Memo for terminalAPIError, keyed on the transcript signature so an
 	// unchanged file is read once rather than once per poll tick.
@@ -207,6 +223,7 @@ type Driver struct {
 	apiCheckedSize  int64
 	apiCheckedMTime time.Time
 	apiCheckedMsg   string
+	apiCheckedAuth  bool
 
 	// childAliveProbe, when set, reports the child claude process's pid
 	// and liveness for the D4 termination diagnostic (PLAN-19 D4). nil →
@@ -287,7 +304,7 @@ func NewDriver(getRunLog func() *runlog.Writer, idleTimeout time.Duration) *Driv
 		idleTimeout:       idleTimeout,
 		maxDuration:       DefaultMaxDuration,
 		apiErrorGrace:     DefaultAPIErrorGrace,
-		lastAssistantText: cost.LastAssistantText,
+		lastAssistant:     cost.LastAssistantMessage,
 		idleErrLabel:      "session",
 		stepDoneCh:        make(chan struct{}, 64),
 		fatalCh:           make(chan error, 1),
@@ -830,7 +847,10 @@ func (d *Driver) WaitStepDone(ctx context.Context) error {
 			// fire while the transcript sits. Keyed off lastProgress rather
 			// than lastTranscript for exactly that reason.
 			if quiet := now.Sub(lastProgress); quiet >= d.apiErrorGraceWindow() {
-				if msg, ok := d.terminalAPIError(tSize, tMtime); ok {
+				if msg, authLost, ok := d.terminalAPIError(tSize, tMtime); ok {
+					if authLost {
+						return &AuthLostError{Label: d.idleErrLabel, Message: msg, Quiet: quiet}
+					}
 					return &TerminalAPIError{Label: d.idleErrLabel, Message: msg, Quiet: quiet}
 				}
 			}
@@ -911,7 +931,7 @@ func (d *Driver) ptyOutputAt() (time.Time, bool) {
 // step is decidable in 60 s, and a 3 min grace inside that would never fire.
 // Returns a window larger than any real quiet period when the check is off.
 func (d *Driver) apiErrorGraceWindow() time.Duration {
-	if d.apiErrorGrace <= 0 || d.lastAssistantText == nil {
+	if d.apiErrorGrace <= 0 || d.lastAssistant == nil {
 		return timeForever
 	}
 	if d.apiErrorGrace > d.idleTimeout {
@@ -928,23 +948,36 @@ func (d *Driver) apiErrorGraceWindow() time.Duration {
 // re-read an unchanged file every tick for the length of a stall. Re-reading
 // only when the file has actually changed makes the cost proportional to
 // what happened rather than to how long the stall lasted.
-func (d *Driver) terminalAPIError(size int64, mtime time.Time) (string, bool) {
+func (d *Driver) terminalAPIError(size int64, mtime time.Time) (msg string, authLost, ok bool) {
 	d.activityMu.Lock()
 	path := d.activeTranscript
 	d.activityMu.Unlock()
-	if path == "" || d.lastAssistantText == nil {
-		return "", false
+	if path == "" || d.lastAssistant == nil {
+		return "", false, false
 	}
 	if d.apiCheckedOK && d.apiCheckedSize == size && d.apiCheckedMTime.Equal(mtime) {
-		return d.apiCheckedMsg, d.apiCheckedMsg != ""
+		return d.apiCheckedMsg, d.apiCheckedAuth, d.apiCheckedMsg != ""
 	}
-	text, ok := d.lastAssistantText(path)
-	msg := ""
-	if ok && IsTerminalAPIError(text) {
-		msg = text
+	m, read := d.lastAssistant(path)
+	switch {
+	case read && IsAuthLost(m):
+		msg, authLost = m.Text, true
+	case read && IsTerminalAPIError(m.Text):
+		msg = m.Text
 	}
-	d.apiCheckedOK, d.apiCheckedSize, d.apiCheckedMTime, d.apiCheckedMsg = true, size, mtime, msg
-	return msg, msg != ""
+	d.apiCheckedOK, d.apiCheckedSize, d.apiCheckedMTime, d.apiCheckedMsg, d.apiCheckedAuth = true, size, mtime, msg, authLost
+	return msg, authLost, msg != ""
+}
+
+// IsAuthLost reports whether a transcript's final assistant message is
+// Claude Code's own for a session that lost its login (D603): the API
+// error kind authentication_failed. Its text is not an "API Error" in
+// first position ("Please run /login · API Error: 401 …", "Login expired ·
+// Please run /login", "Not logged in · Please run /login" on 2.1.310 and
+// 2.1.312), so before this it was never terminal and the run sat until
+// the idle ceiling — 50 minutes of a C2 cell, 2026-10-27.
+func IsAuthLost(m cost.AssistantMessage) bool {
+	return m.APIErrorKind == "authentication_failed"
 }
 
 // IsTerminalAPIError reports whether a transcript's final assistant text is

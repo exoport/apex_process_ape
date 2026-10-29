@@ -244,7 +244,7 @@ termination:
   window_seconds: 3600.0      # idle_timeout only
   elapsed_seconds: 14400.0    # max_duration; prompt_not_submitted: how long ape pressed Enter
   max_seconds: 10800.0        # max_duration only
-  quiet_seconds: 90.0         # api_error only
+  quiet_seconds: 90.0         # api_error and auth_lost only
   spent_usd: 41.20            # budget only: the milestone's spend
   budget_usd: 40.00           # budget only: the milestone's Budget: line
   session_cost_usd: 6.10      # budget only: this session's live cost
@@ -257,6 +257,7 @@ termination:
 | `idle_timeout` | No progress on any watched signal for a full `--idle-timeout` window. | 1 |
 | `max_duration` | The `--max-duration` ceiling, progress or not. | 1 |
 | `api_error` | claude's own upstream-failure text: a failure of the harness, not of the step. | 5 |
+| `auth_lost` | v1.4.1: the session lost its Claude Code login. Its last turn ended with Claude Code's own message of kind `authentication_failed` ("Login expired · Please run /login", "Not logged in · …", "Please run /login · API Error: 401 …") and nothing followed for the 3-minute API-error grace window. Running it again fails the same way until a person logs in (`claude /login`). `ape status` shows "stopped: auth-lost"; `ape change review --run` reports `session.auth-lost`. | 15 |
 | `prompt_not_submitted` | ape typed the line and claude never submitted it: no `UserPromptSubmit` through the Enter press and the two retries. `message` says whether the line was drawn and quotes the input row. | 1 |
 | `repl_not_ready` | claude never came up inside the PTY within the 30-second window: an unknown blocking modal, a trust dialog ape could not get past, or a claude that drew nothing. Claude Code's Settings Warning (a settings file holds a value it skips, such as an invalid permission rule) ends the wait at once instead: ape never presses Continue, which would run without the skipped rule, and `message` carries the warning's lines. `message` carries the last pane; the raw PTY bytes are saved beside the run. `status` is `failed`. A `--max-duration` shorter than the window records `max_duration` instead, and a run you cancel while claude is still starting stays `cancelled`. | 3 |
 | `budget` | APEX v1, `limits.budget: enforce`: the milestone's spend reached its budget, and ape stopped the session. | 1 |

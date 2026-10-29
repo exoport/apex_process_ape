@@ -61,6 +61,9 @@ func renderReport(m *Manifest) string {
 		case TerminationAPIError:
 			fmt.Fprintf(&b, "- every signal had been quiet for %s; this is claude's own upstream failure, not the step's\n",
 				formatDuration(t.QuietSecs))
+		case TerminationAuthLost:
+			fmt.Fprintf(&b, "- the session lost its Claude Code login and every signal had been quiet for %s; a person logs in (`claude /login`) and runs it again\n",
+				formatDuration(t.QuietSecs))
 		case TerminationNotSubmitted:
 			fmt.Fprintf(&b, "- ape typed the step's line and pressed Enter for %s without claude submitting it; the step never started\n",
 				formatDuration(t.ElapsedSecs))

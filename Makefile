@@ -189,6 +189,8 @@ check-claude:  ## Spawn the LOCAL Claude Code and verify it still honours the PT
 	@#
 	@# Costs a few short turns (Haiku, Opus+Sonnet, Sonnet+Haiku, two Haiku turns for
 	@# args_whitespace, one for statusline_usage_recorded); APE_CLAUDE_LIVE_TOKENS=0 skips them.
+	@# auth_lost spends none: a scratch config dir with a dead login, so its turn
+	@# fails with authentication_failed, the kind the auth_lost stop reads (D603).
 	APE_CLAUDE_LIVE=1 go test ./internal/repl/ \
 	  -run TestLive_ClaudeCodeContract -v -count=1 -timeout 20m
 

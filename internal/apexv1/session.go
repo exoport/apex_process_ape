@@ -12,6 +12,10 @@ import (
 // with no grant from the person's own words (E2, personact.go).
 const CodePersonOnly = "session.person-only"
 
+// CodeSessionAuthLost: a session ape started lost its Claude Code login
+// (D603) and ape ended it (termination auth_lost).
+const CodeSessionAuthLost = "session.auth-lost"
+
 // envApeSession is repl.EnvApeSession: every session ape spawns carries it.
 const envApeSession = "APE_SESSION"
 

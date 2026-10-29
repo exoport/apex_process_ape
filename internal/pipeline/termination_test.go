@@ -66,6 +66,11 @@ func TestNewTerminationRecord_ClassifiesThroughWrapping(t *testing.T) {
 			wantKind: TerminationAPIError,
 		},
 		{
+			name:     "auth lost",
+			err:      fmt.Errorf("stage x: %w", &sessiondriver.AuthLostError{Message: "Login expired · Please run /login", Quiet: 3 * time.Minute}),
+			wantKind: TerminationAuthLost,
+		},
+		{
 			name:     "v1 budget stop",
 			err:      fmt.Errorf("stage x: %w", &LimitStopError{Kind: TerminationBudget, Message: "M1 budget reached"}),
 			wantKind: TerminationBudget,

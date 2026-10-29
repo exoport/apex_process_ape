@@ -51,6 +51,9 @@ func (r *LatestRun) Describe() string {
 		if r.ResetsAt != nil {
 			s += ", resets " + r.ResetsAt.Format(time.RFC3339)
 		}
+	case r.Stopped == "auth_lost":
+		// D603: nothing runs again until a person logs in.
+		s += ", stopped: auth-lost (a person logs in: claude /login)"
 	case r.Stopped != "":
 		s += ", stopped: " + r.Stopped
 	}

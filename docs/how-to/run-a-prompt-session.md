@@ -161,6 +161,7 @@ elsewhere. `prompt-id` is `YYYYMMDD-HHMMSS-<7hex>`. Prompt sessions appear in
 | 3 | The claude REPL never became ready, or the claude startup check found a claude ape cannot drive. The last pane is on stderr, and the raw terminal bytes are saved (`pty-tail.bin` in the record, or the user cache for the startup check). |
 | 4 | claude exited before the Stop hook fired. |
 | 5 | The session's own turn failed against the API and nothing followed, with `status: upstream_api_error`. Upstream and retryable. |
+| 15 | The session lost its Claude Code login (`status: auth_lost`): its turn failed with `authentication_failed` and nothing followed for 3 minutes. A person logs in (`claude /login`) before running it again. |
 
 ## `ape chat` vs `ape task` vs `ape prompt`
 

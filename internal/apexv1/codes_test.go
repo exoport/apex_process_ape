@@ -141,7 +141,7 @@ func TestDiagnosticCodes_PublishedListMatchesTheCode(t *testing.T) {
 		"CodeGateStubRed": CodeGateStubRed, "CodePassDrop": CodePassDrop, "CodeFullRed": CodeFullRed, "CodeLiftDispositionLeft": CodeLiftDispositionLeft, "CodeLiftCheckFailed": CodeLiftCheckFailed,
 		"CodeTagMismatch": CodeTagMismatch,
 		// v1.4.1.
-		"CodeCheckGrepTestOutput": CodeCheckGrepTestOutput,
+		"CodeCheckGrepTestOutput": CodeCheckGrepTestOutput, "CodeSessionAuthLost": CodeSessionAuthLost,
 	}
 	for _, glob := range []string{"*.go", filepath.Join("..", "apecmd", "v1_*.go")} {
 		files, err := filepath.Glob(glob)
