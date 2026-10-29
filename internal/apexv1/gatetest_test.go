@@ -25,8 +25,10 @@ func TestGateGuard(t *testing.T) {
 		"bash development/gates/M4-time-entries/gate.sh":                                                 true,
 		"sh -x development/gates/M4-time-entries/gate.sh":                                                true,
 		`sh -c "./development/gates/M4-time-entries/gate.sh; echo $?"`:                                   true,
-		root + "/development/gates/M4-time-entries/gate.sh":                                              true,
-		"go build ./... && ./development/gates/M4-time-entries/gate.sh":                                  true,
+		// As a session's shell writes it: forward slashes (Git Bash on
+		// Windows reads a backslash as an escape, as the guard does).
+		filepath.ToSlash(root) + "/development/gates/M4-time-entries/gate.sh": true,
+		"go build ./... && ./development/gates/M4-time-entries/gate.sh":       true,
 		// allowed
 		"./development/gates/M4-time-entries/gate.sh --stub development/gates/M4-time-entries/stub": false,
 		"./development/gates/M4-time-entries/gate.sh --stub=development/gates/M4-time-entries/stub": false,

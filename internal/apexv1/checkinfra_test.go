@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -32,8 +33,13 @@ func TestRunCheck_OwnTmpdir(t *testing.T) {
 
 func TestTmpRoot(t *testing.T) {
 	uid := strconv.Itoa(os.Getuid())
-	require.Equal(t, "/run/user/x/ape-"+uid, tmpRoot("/run/user/x"))
+	base := string(filepath.Separator) + filepath.Join("run", "user", "x")
+	require.Equal(t, filepath.Join(base, "ape-"+uid), tmpRoot(base))
 	long := "/tmp/claude-1000/-home-someone--dev-a-long-project/scratch"
+	if runtime.GOOS == "windows" {
+		require.Equal(t, filepath.Join(long, "ape-"+uid), tmpRoot(long), "no unix-socket path limit to keep on Windows: no /tmp")
+		return
+	}
 	require.Equal(t, "/tmp/ape-"+uid, tmpRoot(long), "too long for a socket under it: /tmp")
 }
 

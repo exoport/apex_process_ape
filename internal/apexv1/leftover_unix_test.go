@@ -170,8 +170,13 @@ func TestRunCheck_EscapedPipeHolderBoundsTheDrain(t *testing.T) {
 		requireGone(t, pid)
 		return
 	}
-	require.Empty(t, r.Leftovers, "outside the group: not seen")
-	require.Contains(t, strings.Join(r.Tail, "\n"), "still held open 500ms after the check exited")
+	// Group reaping (no user manager: CI runners, containers): it left the
+	// group, but it inherited the check's TMPDIR, so B1's sweep of the
+	// TMPDIR's holders ends and names it (v1.4, T1) — and the drain does
+	// not wait for it.
+	requireNamed(t, r.Leftovers, pid, "sleep 300")
+	require.Contains(t, strings.Join(r.Leftovers, "\n"), "held the check's TMPDIR")
+	requireGone(t, pid)
 }
 
 // Where ps lists the group (macOS, the BSDs): pid, pgid and state parse,
