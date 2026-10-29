@@ -68,6 +68,7 @@ func reviewProject(t *testing.T) (ape, project, fake string, env []string) {
 	project = t.TempDir()
 	fake = t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(fake, "claude"), []byte(fakeReviewer), 0o755))
+	dumpOnFailure(t, project, fake)
 	env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t",
 		"GIT_CONFIG_GLOBAL=/dev/null", "APE_SESSION=", "CLAUDECODE=", "APE_REVIEW=", "PATH="+fake+":"+os.Getenv("PATH"),
 		"APE_CLAUDE_PROBE=off", "FAKE_DIR="+fake)
