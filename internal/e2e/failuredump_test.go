@@ -23,28 +23,28 @@ func dumpOnFailure(t *testing.T, dirs ...string) {
 			return
 		}
 		for _, dir := range dirs {
-			_ = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
-				if err != nil || d.IsDir() {
-					if d != nil && d.IsDir() && (d.Name() == ".git" || d.Name() == "transcripts") {
-						return filepath.SkipDir
-					}
+			_ = filepath.WalkDir(dir, func(p string, d fs.DirEntry, werr error) error {
+				switch {
+				case werr != nil:
+					return nil //nolint:nilerr // a dump on failure reads what it can
+				case d.IsDir() && (d.Name() == ".git" || d.Name() == "transcripts"):
+					return filepath.SkipDir
+				case d.IsDir():
 					return nil
 				}
 				if !dumpWorthy(p, dir) {
 					return nil
 				}
-				data, err := os.ReadFile(p)
-				if err != nil {
-					return nil
+				if data, rerr := os.ReadFile(p); rerr == nil {
+					t.Logf("=== %s\n%s", p, tailBytes(string(data), 8<<10))
 				}
-				t.Logf("=== %s\n%s", p, tailBytes(string(data), 8<<10))
 				return nil
 			})
 		}
 		if os.Getenv("KEEP_FAILED_TMP") != "1" {
 			return
 		}
-		kept, err := os.MkdirTemp("", "ape-failed-"+strings.ReplaceAll(t.Name(), "/", "_")+"-")
+		kept, err := os.MkdirTemp("", "ape-failed-"+strings.ReplaceAll(t.Name(), "/", "_")+"-") //nolint:usetesting // must outlive the test
 		if err != nil {
 			return
 		}

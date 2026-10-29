@@ -37,18 +37,24 @@ func (p *Project) testGrepNotices(c *Change, file string) []Diagnostic {
 		}
 		seen[t.Check] = true
 		for _, why := range testGrepShapes(t.Check) {
-			out = append(out, notice(Diagnostic{Code: CodeCheckGrepTestOutput, File: file, Line: t.Line,
-				Message: t.ID + "'s check `" + t.Check + "` " + why}))
+			out = append(out, notice(Diagnostic{
+				Code: CodeCheckGrepTestOutput, File: file, Line: t.Line,
+				Message: t.ID + "'s check `" + t.Check + "` " + why,
+			}))
 		}
 	}
-	for _, pc := range p.EffectiveSpecChecks(c) {
+	specs := p.EffectiveSpecChecks(c)
+	for i := range specs {
+		pc := &specs[i]
 		if !pc.Delta || seen[pc.Cmd] {
 			continue
 		}
 		seen[pc.Cmd] = true
 		for _, why := range testGrepShapes(pc.Cmd) {
-			out = append(out, notice(Diagnostic{Code: CodeCheckGrepTestOutput, File: file, Line: pc.Line,
-				Message: "scenario " + pc.Ref + "'s check `" + pc.Cmd + "` " + why}))
+			out = append(out, notice(Diagnostic{
+				Code: CodeCheckGrepTestOutput, File: file, Line: pc.Line,
+				Message: "scenario " + pc.Ref + "'s check `" + pc.Cmd + "` " + why,
+			}))
 		}
 	}
 	return out

@@ -122,9 +122,9 @@ var AdviseForValues = []string{AdvisePlan, AdviseChange, AdviseApply, AdviseRevi
 // PlanAdvise are the tools.advise entries whose for: names plan, in order.
 func (t ToolsConfig) PlanAdvise() []string {
 	var out []string
-	for _, a := range t.Advise {
-		if slices.Contains(a.For, AdvisePlan) {
-			out = append(out, a.Name)
+	for i := range t.Advise {
+		if slices.Contains(t.Advise[i].For, AdvisePlan) {
+			out = append(out, t.Advise[i].Name)
 		}
 	}
 	return out

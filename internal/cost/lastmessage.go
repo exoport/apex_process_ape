@@ -22,9 +22,9 @@ type finalMessageLine struct {
 	// IsAPIError and Error mark a message Claude Code wrote for a failed
 	// API call rather than the model: error is its kind
 	// ("authentication_failed" for a lost login, D603).
-	IsAPIError bool   `json:"isApiErrorMessage"`
+	IsAPIError bool   `json:"isApiErrorMessage"` //nolint:tagliatelle // Claude Code's transcript field name
 	Error      string `json:"error"`
-	Message     struct {
+	Message    struct {
 		Content []struct {
 			Type string `json:"type"`
 			Text string `json:"text"`

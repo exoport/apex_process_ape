@@ -354,7 +354,7 @@ itself may have succeeded) · 14 a claude.ai usage limit stopped the session,
 or ape's usage guard did not start it (termination usage_guard) · 15 the session
 lost its Claude Code login (termination auth_lost: its last turn failed with
 authentication_failed and nothing followed for 3 minutes; a person logs in with
-`+"`claude /login`"+` and runs it again).`
+` + "`claude /login`" + ` and runs it again).`
 
 func newTaskCmd() *cobra.Command {
 	var (

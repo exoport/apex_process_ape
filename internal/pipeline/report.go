@@ -51,32 +51,7 @@ func renderReport(m *Manifest) string {
 		b.WriteString("\n## Why this run ended\n\n")
 		fmt.Fprintf(&b, "- reason: **%s**\n", t.Kind)
 		fmt.Fprintf(&b, "- %s\n", t.Message)
-		switch t.Kind {
-		case TerminationIdle:
-			fmt.Fprintf(&b, "- idle %s against a %s window; last progress from `%s`\n",
-				formatDuration(t.IdleSecs), formatDuration(t.WindowSecs), orNone(t.LastSource))
-		case TerminationMaxDuration:
-			fmt.Fprintf(&b, "- ran %s against a %s ceiling — the ceiling fires whether or not the step was progressing\n",
-				formatDuration(t.ElapsedSecs), formatDuration(t.MaxSecs))
-		case TerminationAPIError:
-			fmt.Fprintf(&b, "- every signal had been quiet for %s; this is claude's own upstream failure, not the step's\n",
-				formatDuration(t.QuietSecs))
-		case TerminationAuthLost:
-			fmt.Fprintf(&b, "- the session lost its Claude Code login and every signal had been quiet for %s; a person logs in (`claude /login`) and runs it again\n",
-				formatDuration(t.QuietSecs))
-		case TerminationNotSubmitted:
-			fmt.Fprintf(&b, "- ape typed the step's line and pressed Enter for %s without claude submitting it; the step never started\n",
-				formatDuration(t.ElapsedSecs))
-		case TerminationUsageLimit:
-			resets := t.Resets
-			if resets == "" {
-				resets = "a time Claude Code did not print"
-			}
-			fmt.Fprintf(&b, "- the claude.ai plan's usage limit stopped the session; it resets %s\n", resets)
-		case TerminationBudget:
-			fmt.Fprintf(&b, "- the milestone had spent $%.2f of its $%.2f budget, $%.2f of it this session (measured live; the totals below count only completed steps)\n",
-				t.SpentUSD, t.BudgetUSD, t.SessionCostUSD)
-		}
+		writeTerminationDetail(&b, t)
 		if t.Diagnostic != "" {
 			fmt.Fprintf(&b, "- diagnostic: `%s`\n", t.Diagnostic)
 			b.WriteString("\n> `pty n/a` in that diagnostic means ape was not watching PTY output on this path " +
@@ -241,4 +216,35 @@ func orNone(s string) string {
 		return "none"
 	}
 	return s
+}
+
+// writeTerminationDetail is the kind-specific line under "Why this run
+// ended": the numbers that say what the backstop measured.
+func writeTerminationDetail(b *strings.Builder, t *TerminationRecord) {
+	switch t.Kind {
+	case TerminationIdle:
+		fmt.Fprintf(b, "- idle %s against a %s window; last progress from `%s`\n",
+			formatDuration(t.IdleSecs), formatDuration(t.WindowSecs), orNone(t.LastSource))
+	case TerminationMaxDuration:
+		fmt.Fprintf(b, "- ran %s against a %s ceiling — the ceiling fires whether or not the step was progressing\n",
+			formatDuration(t.ElapsedSecs), formatDuration(t.MaxSecs))
+	case TerminationAPIError:
+		fmt.Fprintf(b, "- every signal had been quiet for %s; this is claude's own upstream failure, not the step's\n",
+			formatDuration(t.QuietSecs))
+	case TerminationAuthLost:
+		fmt.Fprintf(b, "- the session lost its Claude Code login and every signal had been quiet for %s; a person logs in (`claude /login`) and runs it again\n",
+			formatDuration(t.QuietSecs))
+	case TerminationNotSubmitted:
+		fmt.Fprintf(b, "- ape typed the step's line and pressed Enter for %s without claude submitting it; the step never started\n",
+			formatDuration(t.ElapsedSecs))
+	case TerminationUsageLimit:
+		resets := t.Resets
+		if resets == "" {
+			resets = "a time Claude Code did not print"
+		}
+		fmt.Fprintf(b, "- the claude.ai plan's usage limit stopped the session; it resets %s\n", resets)
+	case TerminationBudget:
+		fmt.Fprintf(b, "- the milestone had spent $%.2f of its $%.2f budget, $%.2f of it this session (measured live; the totals below count only completed steps)\n",
+			t.SpentUSD, t.BudgetUSD, t.SessionCostUSD)
+	}
 }

@@ -300,15 +300,15 @@ func NewDriver(getRunLog func() *runlog.Writer, idleTimeout time.Duration) *Driv
 		idleTimeout = DefaultIdleTimeout
 	}
 	return &Driver{
-		getRunLog:         getRunLog,
-		idleTimeout:       idleTimeout,
-		maxDuration:       DefaultMaxDuration,
-		apiErrorGrace:     DefaultAPIErrorGrace,
-		lastAssistant:     cost.LastAssistantMessage,
-		idleErrLabel:      "session",
-		stepDoneCh:        make(chan struct{}, 64),
-		fatalCh:           make(chan error, 1),
-		subSessions:       map[string]*SubCapture{},
+		getRunLog:     getRunLog,
+		idleTimeout:   idleTimeout,
+		maxDuration:   DefaultMaxDuration,
+		apiErrorGrace: DefaultAPIErrorGrace,
+		lastAssistant: cost.LastAssistantMessage,
+		idleErrLabel:  "session",
+		stepDoneCh:    make(chan struct{}, 64),
+		fatalCh:       make(chan error, 1),
+		subSessions:   map[string]*SubCapture{},
 	}
 }
 

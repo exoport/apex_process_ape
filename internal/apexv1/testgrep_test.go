@@ -11,7 +11,8 @@ func TestShellPipelines(t *testing.T) {
 	require.Equal(t, [][][]string{
 		{{"go", "test", "-v", "./..."}, {"grep", "-q", "PASS"}},
 		{{"echo", "done"}},
-		{{"a"}}, {{"b"}},
+		{{"a"}},
+		{{"b"}},
 		{{"c"}, {"d"}},
 	}, shellPipelines(`go test -v ./... 2>&1 | grep -q PASS; echo done && a || b; c |& d`))
 }
@@ -57,7 +58,7 @@ func TestTestGrepShapes(t *testing.T) {
 // never a finding.
 func TestChangeNotices_GrepTestOutput(t *testing.T) {
 	p := adviseProject(t, adviseConfig, "rules\n")
-	doc := strings.Replace(waveChange("add-wave"), "check: ./wave.sh", "check: go test -v ./... | grep -q '^--- PASS: TestWave$'", -1)
+	doc := strings.ReplaceAll(waveChange("add-wave"), "check: ./wave.sh", "check: go test -v ./... | grep -q '^--- PASS: TestWave$'")
 	addChange(t, p, "add-wave", doc)
 	commitAll(t, p, "plan")
 	var ns []Diagnostic
