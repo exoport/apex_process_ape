@@ -13,7 +13,7 @@ curl -fsSL "https://github.com/exoport/apex_process_ape/releases/download/${VERS
 ape version
 ```
 
-To pin a specific version, set `VERSION` directly: `VERSION=v1.3.0`.
+To pin a specific version, set `VERSION` directly: `VERSION=v1.4.0`.
 
 The Linux asset is `ape_linux_amd64.tar.gz`. Replace with `ape_darwin_amd64.tar.gz`, `ape_darwin_arm64.tar.gz`, or `ape_windows_amd64.zip` as needed (Windows uses zip, not tar.gz).
 
@@ -26,7 +26,7 @@ If you want a specific ape version checked into a project's own tooling (so ever
 ```bash
 # In your project repo:
 bingo get -l github.com/exoport/apex_process_ape/cmd/ape@latest
-# or a specific release tag, e.g. v1.3.0
+# or a specific release tag, e.g. v1.4.0
 ```
 
 This adds a per-tool `.mod` file under `.bingo/` and a `Makefile`-friendly variable for invoking the pinned binary, the same pattern this repo itself uses for its own dev tooling (see `.bingo/Variables.mk`). Commit the generated `.bingo/` files so the pin travels with the repo.
@@ -62,7 +62,7 @@ ape version
 Should print something like:
 
 ```
-ape 1.3.0
+ape 1.4.0
   build date: ...
   git commit: ...
 ```

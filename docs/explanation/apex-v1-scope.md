@@ -7,11 +7,13 @@ when a record would be wrong. This page says what that buys you, and the shape o
 built and measured for. The reference for each command is `ape <command> --help` and
 [cli.md](../reference/cli.md).
 
-v1.1, v1.2 and v1.3 keep this promise and the shape below, and add to it (v1.1: usage-aware
+v1.1, v1.2, v1.3 and v1.4 keep this promise and the shape below, and add to it (v1.1: usage-aware
 launching, waiting on events, module fences for libraries, expert advise; v1.2: a check's own exit
 and its leftovers ended, a gate's verdict last, approval freezing what a gate reaches; v1.3:
 plugin tools that run, the guards on Claude Code's Monitor tool, clearer code and check-kind
-names); the repository's `CHANGELOG.md` lists what.
+names; v1.4: what a check starts ends with it, a check that tested nothing unrun, the gate's full
+run recorded once, gates self-tested, plan-time refusals, and what each check was seen doing);
+the repository's `CHANGELOG.md` lists what.
 
 ## The shape v1.0 is built for
 
