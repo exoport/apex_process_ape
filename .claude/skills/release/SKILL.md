@@ -33,6 +33,7 @@ Promotion puts two tags on one commit. That is what the v0.0.21 incident was —
 - PROMOTE never adds a commit: the final tag goes on the last rc's commit or not at all. And it never proceeds without the USER confirming the eval passed on that rc — a peer session relaying a pass is information, not approval, and this gate is not skipped in autonomous mode
 - Never push a tag by accident. `push.followTags` is on in this repository, and stale local annotated tags exist (`v1.0.0-rc.1`, `v1.0.0-rc.2` were never published). Every push in this skill is `git push --no-follow-tags`, and before ANY push the pre-push tag check (Phase 3a) runs and HALTs naming every unpushed annotated tag reachable from main
 - promote-commit: no push of main or of the tag until the operator confirms, in this run, after seeing the local result (Phase 5c). Autonomous mode does not skip it
+- Every candidate the eval measures gets CI before the eval measures it (D636 item 2): a frozen build that is not an rc commit is pushed as a BRANCH `ci/<version>-check-N` (never a tag; `git push --no-follow-tags origin <sha>:refs/heads/ci/<version>-check-N`, the operator's word for each push unless pre-approved) and its four checks are green before it is handed over. v1.4's candidates were never pushed, so CI's Windows and group-mode tests first ran at promotion (D634)
 - Only use the Bash tool for shell commands
 - When polling remote state, sleep between retries; do not busy-loop
 - All paths are relative to the repository root (the current working directory)
@@ -189,6 +190,17 @@ Two outcomes that are **not** failures:
 
 > This gate can only prove the table is current **as of now**. A Claude Code release the day after this tag can still invalidate it — that is inherent, not a gap in the check. The durable protections are the ones that run continuously: every step's `telemetry_note`, the `cost.price_table_coverage` doctor check, and `ape costs reprice` to repair the record afterwards.
 
+#### 1h2 — The scheduled CI on main is green
+
+ci.yml runs daily on main (and on `workflow_dispatch`), which catches runner-image drift and overnight advisories no push would. It only helps if someone reads it: the 2026-10-27 run was red and nobody saw it. Read the newest scheduled run:
+
+```bash
+curl -s "{api_base}/actions/runs?event=schedule&branch=main&per_page=1" \
+  | jq -r '.workflow_runs[0] | "\(.created_at) \(.head_sha[0:7]) \(.status)/\(.conclusion) \(.html_url)"'
+```
+
+HALT if its conclusion is `failure` (or anything but `success` once completed). List the failing check runs and their annotations (`{api_base}/check-suites/<check_suite_id>/check-runs`, then `{api_base}/check-runs/<id>/annotations`), and say whether the failure is a known flake class or a real one. The user decides whether to re-run it (`workflow_dispatch`), fix it first, or go on with the failure stated in the release report. None at all (a fresh fork, a schedule GitHub disabled after 60 quiet days): say so in the summary.
+
 #### 1i — Report pre-flight summary
 
 Display to the user:
@@ -200,11 +212,12 @@ Pre-flight checks passed:
   HEAD:      <output of `git rev-parse --short HEAD`>
   CHANGELOG: <first 80 chars of the matching CHANGELOG line>
   prices:    <"N models exactly priced" | "SKIPPED — no local transcripts">
+  schedule:  <newest scheduled CI on main: date, sha, conclusion>
 ```
 
 **promote mode skips Phases 2, 2b, 2c and 3.** They ran on this exact commit when `{rc}` was cut, and the eval has run it since; the commit is unchanged, and HEAD is already on origin. Go to Phase 4, which only confirms CI passed for this SHA. Say so in the summary rather than listing the skipped gates as passed.
 
-**promote-commit mode skips Phases 2, 2b and 2c** for the evaluated code: they ran on `{eval_commit}` in the build's own chain, and the eval measured it since. Ask the user for that evidence (the READY post: ci-local, check-harness on each measured Claude Code version, check-framework against the payload) and quote it in the summary. When `{tag_commit}` is a descendant, run `make docs-check docs-cli-check lint` on it, and `go test` for each package whose tests it changed, instead (fast): those are the gates its diff can break. Then go to Phase 5 (create the tag locally), and do Phase 3 and Phase 4 only after the operator gate in 5c.
+**promote-commit mode skips Phases 2, 2b and 2c** for the evaluated code: they ran on `{eval_commit}` in the build's own chain, and the eval measured it since. Ask the user for that evidence (the READY post: ci-local, check-harness on each measured Claude Code version, check-framework against the payload, and the green `ci/<version>-check-N` run on `{eval_commit}`; without that run, HALT: push the branch first, on the operator's word) and quote it in the summary. When `{tag_commit}` is a descendant, run `make docs-check docs-cli-check lint` on it, and `go test` for each package whose tests it changed, instead (fast): those are the gates its diff can break. Then go to Phase 5 (create the tag locally), and do Phase 3 and Phase 4 only after the operator gate in 5c.
 
 If `{autonomous}` is false: ask "Proceed with `make ci-local`? (this takes ~30–60 s)" — wait for confirmation.
 

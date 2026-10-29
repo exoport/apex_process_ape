@@ -38,6 +38,12 @@ It is also the routine of the v1.1 "update Claude Code" item: re-measure the har
    git fetch -q origin main && git rev-list --left-right --count origin/main...HEAD
    ```
    HALT if not on `main`, if the tree is dirty, or if main is BEHIND origin (left count > 0). Record `{ahead}` = the right count: commits already waiting to be pushed.
+   Then read the newest scheduled CI run on main (ci.yml runs daily; nothing else watches it):
+   ```bash
+   curl -s "https://api.github.com/repos/exoport/apex_process_ape/actions/runs?event=schedule&branch=main&per_page=1" \
+     | jq -r '.workflow_runs[0] | "\(.created_at) \(.head_sha[0:7]) \(.status)/\(.conclusion)"'
+   ```
+   HALT on a red one: list its failing check runs' annotations and ask before going on. A bump measured on top of an unexplained red main cannot tell its own failures from the old one.
 3. Versions:
    ```bash
    claude --version
