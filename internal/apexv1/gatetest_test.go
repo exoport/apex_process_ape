@@ -3,6 +3,8 @@ package apexv1
 import (
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -45,6 +47,14 @@ func TestGateGuard(t *testing.T) {
 		require.Equal(t, deny, d.Deny, cmd)
 		if deny {
 			require.Contains(t, d.Reason, "`ape milestone gate-test development/gates/M4-time-entries`", cmd)
+		}
+	}
+	// D634: Git Bash's and Cygwin's spelling of the same absolute path.
+	if runtime.GOOS == "windows" {
+		vol := filepath.VolumeName(root)
+		rest := filepath.ToSlash(root[len(vol):]) + "/development/gates/M4-time-entries/gate.sh"
+		for _, cmd := range []string{"/" + strings.ToLower(vol[:1]) + rest, "/cygdrive/" + strings.ToLower(vol[:1]) + rest, "bash /" + vol[:1] + rest} {
+			require.True(t, GateGuard(cmd, root).Deny, cmd)
 		}
 	}
 	// From inside the folder.
@@ -120,4 +130,21 @@ func TestGateTest_EndsLeftovers(t *testing.T) {
 	require.Len(t, res.Runs, 1, "no stub: the plain run only")
 	require.Len(t, res.Runs[0].Leftovers, 1)
 	require.Contains(t, res.Runs[0].Leftovers[0], "sleep 300")
+}
+
+func TestDrivePath(t *testing.T) {
+	for in, want := range map[string]string{
+		"/c/repo/development/gates/M1/gate.sh": "C:/repo/development/gates/M1/gate.sh",
+		"/D/x":                                 "D:/x",
+		"/c":                                   "C:/",
+		"/cygdrive/e/repo/gate.sh":             "E:/repo/gate.sh",
+		"/cc/repo/gate.sh":                     "/cc/repo/gate.sh",
+		"/1/repo":                              "/1/repo",
+		"./development/gates/M1/gate.sh":       "./development/gates/M1/gate.sh",
+		"C:/repo/gate.sh":                      "C:/repo/gate.sh",
+		"development/gates/M1/gate.sh":         "development/gates/M1/gate.sh",
+	} {
+		require.Equal(t, want, drivePath(in, "windows"), in)
+		require.Equal(t, in, drivePath(in, "linux"), in)
+	}
 }

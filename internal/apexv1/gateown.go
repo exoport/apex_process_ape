@@ -164,7 +164,14 @@ func (p *Project) gateOwnScan(m *Milestone) gateOwn {
 var scriptExts = map[string]bool{
 	".sh": true, ".bash": true, ".zsh": true, ".ksh": true, ".py": true, ".pl": true, ".rb": true,
 	".js": true, ".mjs": true, ".cjs": true, ".ts": true, ".awk": true, ".sed": true, ".php": true, ".lua": true, ".tcl": true,
+	// D582: run through a tool rather than an interpreter, with no x bit or
+	// #! line all the same: `go run x.go`, `make -f x.mk`, `pwsh x.ps1`.
+	".go": true, ".mk": true, ".ps1": true,
 }
+
+// scriptNames are the basenames that make an ignored file a script with no
+// extension at all: `make -C <dir>` runs the Makefile it finds there (D582).
+var scriptNames = map[string]bool{"makefile": true, "gnumakefile": true}
 
 // gateScratch are the files among names that are a gate's scratch (D581):
 // git ignores them (a tracked file never is), keep does not hold them, and
@@ -189,7 +196,7 @@ func (p *Project) gateScratch(names []string, keep map[string]bool) map[string]b
 // isScript reports a file a gate could run: an executable bit, a #! line
 // or a script's extension (scriptExts).
 func (p *Project) isScript(rel string) bool {
-	if scriptExts[strings.ToLower(path.Ext(rel))] {
+	if scriptExts[strings.ToLower(path.Ext(rel))] || scriptNames[strings.ToLower(path.Base(rel))] {
 		return true
 	}
 	abs := filepath.Join(p.Root, filepath.FromSlash(rel))

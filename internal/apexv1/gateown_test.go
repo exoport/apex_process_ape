@@ -240,6 +240,21 @@ func TestGateOwnFiles_IgnoredScratchIsNotDrift(t *testing.T) {
 			require.Equal(t, []string{dir + f + " changed"}, p.gateDrift(m, a), f+": its x bit or #! line removed in the same edit")
 		}
 	})
+	t.Run("an ignored file a tool runs stays frozen (D582)", func(t *testing.T) {
+		p, m := setup(t)
+		tools := []string{".work/x.go", ".work/x.mk", ".work/x.ps1", ".work/Makefile", ".work/sub/GNUmakefile", ".work/sub/makefile"}
+		for _, f := range tools {
+			plain(t, p, dir+f, "x\n")
+		}
+		plain(t, p, dir+".work/x.golden", "x\n")
+		a := p.newApproval(m, "ann")
+		for _, f := range tools {
+			require.Contains(t, a.GateOwnFiles, dir+f)
+		}
+		require.NotContains(t, a.GateOwnFiles, dir+".work/x.golden", "not a script: scratch")
+		plain(t, p, dir+".work/x.go", "package main\n")
+		require.Equal(t, []string{dir + ".work/x.go changed"}, p.gateDrift(m, a))
+	})
 	t.Run("a declared ignored file stays frozen", func(t *testing.T) {
 		p, m := setup(t)
 		write(t, p, dir+"gate.sh", "#!/bin/bash\n# ape: gate-files "+dir+".work/expected\nexit 1\n")

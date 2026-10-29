@@ -6,6 +6,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 )
 
@@ -200,7 +201,7 @@ func GateGuard(command, cwd string) PreToolDecision {
 				return ""
 			}
 		}
-		abs := script
+		abs := filepath.FromSlash(drivePath(script, runtime.GOOS))
 		if !filepath.IsAbs(abs) {
 			abs = filepath.Join(dir, abs)
 		}
@@ -221,3 +222,24 @@ func GateGuard(command, cwd string) PreToolDecision {
 	}
 	return PreToolDecision{Deny: true, Reason: fmt.Sprintf(gateGuardReason, what, folder) + inlineOverrideNote(command)}
 }
+
+// drivePath reads a Git Bash (MSYS) `/c/…` or Cygwin `/cygdrive/c/…` path
+// as the Windows drive path `C:/…` it names, so a session's shell on Windows
+// cannot step past the gate guard by spelling the absolute path its own way
+// (D634: such a path was joined onto the cwd as if relative). Other paths,
+// and every path off Windows, come back unchanged.
+func drivePath(p, goos string) string {
+	if goos != "windows" {
+		return p
+	}
+	s := filepath.ToSlash(p)
+	if rest, ok := strings.CutPrefix(s, "/cygdrive/"); ok {
+		s = "/" + rest
+	}
+	if len(s) < 2 || s[0] != '/' || !isDriveLetter(s[1]) || (len(s) > 2 && s[2] != '/') {
+		return p
+	}
+	return strings.ToUpper(s[1:2]) + ":/" + strings.TrimPrefix(s[2:], "/")
+}
+
+func isDriveLetter(c byte) bool { return 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' }
