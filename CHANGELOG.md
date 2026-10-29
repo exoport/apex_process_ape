@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## v1.4.1 (unreleased — draft)
+
+- **Credential sync ranks by token expiry** (aped, D605.1): a logged-out file is never spread,
+  whatever its modification time, and a logged-out publication is left alone.
+- **`check.grep-test-output`** (D620): an informational notice at `change check`, `change start`
+  (new JSON `notices`) and `change verify` for a check that greps test output in a way that
+  misjudges the tests.
+- **`for: plan` advise entries** (D611): listed at the top of `ape status --json` (`advise`) for the
+  planning session; `ape project check` caps them by `caps.advise_session`.
+- **Gate scratch and the gate guard** (D582, D634): `.go`, `.mk`, `.ps1` and Makefiles count as gate
+  scripts; on Windows the gate guard reads Git Bash `/c/…` and Cygwin `/cygdrive/c/…` paths.
+- Claude Code surface reviewed through 2.1.312; no pin moved.
+- 1.4.0's evaluation note: the run that stopped did so in its sixth and last milestone, not its
+  sixth of seven.
+
 ## v1.4.0 (2026-10-29)
 
 APEX v1.4, on v1.3.0: what a check starts no longer outlives it, a check that tested nothing is
