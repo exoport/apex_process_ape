@@ -105,6 +105,7 @@ v1.2, v1.3 and v1.4 keep that promise and add to it: the repository's `CHANGELOG
 
 - [What APEX v1.0 promises, and where it stops](explanation/apex-v1-scope.md) — start here
 - [What only a person does](explanation/person-acts.md) — the person acts, and typing them in your own Claude Code session
+- [Security model and known limits](explanation/security-model.md) — what the guards hold against, and what they do not
 - [The orchestrator and the loop](explanation/orchestrator-and-loop.md) — `/apex-orchestrator` and `ape task apex-loop`
 - [When `ape` runs inside a session `ape` started](explanation/nested-ape-runs.md) — the nesting rule
 - [Choosing between `ape chat`, `ape task`, and `ape prompt`](explanation/chat-task-prompt.md)

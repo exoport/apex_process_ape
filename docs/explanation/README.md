@@ -6,6 +6,7 @@ Explanation docs answer "why" — design rationale, conceptual background, the s
 
 - [apex-v1-scope.md](apex-v1-scope.md) — what APEX v1.0 promises (code reaches the base only as a reviewed squash), the shape it is built for (one operator per checkout, local trunk), the fix queue, and what only a person does. Start here.
 - [person-acts.md](person-acts.md) — the acts only a person does, why, and the two ways a person does them: a plain terminal, or the typed phrase in their own Claude Code session.
+- [security-model.md](security-model.md) — what ape's guards are for, where they stop (a steered model), and the known limits in 1.4.1 with what to do meanwhile: person acts and pushes through a script, the inherited environment, unscanned transcripts, expert plugins.
 - [orchestrator-and-loop.md](orchestrator-and-loop.md) — `/apex-orchestrator`, the person's own session, versus `ape task apex-loop`, the unattended runner; the relay, the nesting rule and delegates as the loop meets them.
 - [nested-ape-runs.md](nested-ape-runs.md) — the nesting rule: depth 0/1/2, which skills a loop may start, and how ape knows.
 - [chat-task-prompt.md](chat-task-prompt.md) — the three ways ape drives a Claude session (`ape chat` / `ape task` / `ape prompt`) and how to choose between them.

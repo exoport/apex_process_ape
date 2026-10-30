@@ -12,11 +12,18 @@
 - **`check.grep-test-output`** (D620): an informational notice at `change check`, `change start`
   (new JSON `notices`) and `change verify` for a check that greps test output in a way that
   misjudges the tests.
-- **`for: plan` advise entries** (D611): listed at the top of `ape status --json` (`advise`) for the
-  planning session; `ape project check` caps them by `caps.advise_session`.
+- **`for: plan` advise entries** (D611, D641): an expert's advise files reach the planning session.
+  An entry whose `for:` names `plan` is listed at the top of `ape status --json` (`advise`), where
+  the framework's apex-plan reads it before it plans a milestone; `ape project check` caps those
+  files together by `caps.advise_session`. An entry without `for:` is unchanged.
 - **Gate scratch and the gate guard** (D582, D634): `.go`, `.mk`, `.ps1` and Makefiles count as gate
   scripts; on Windows the gate guard reads Git Bash `/c/…` and Cygwin `/cygdrive/c/…` paths.
 - Claude Code surface reviewed through 2.1.312; no pin moved.
+- **Security model and known limits:** a new page, [docs/explanation/security-model.md](docs/explanation/security-model.md),
+  states what ape's guards hold against and the known gaps, with what to do meanwhile: a person act
+  or a push carried out through a script (SEC-1, SEC-2), sessions inheriting your environment
+  (SEC-3), transcripts and logs not scanned for secrets (SEC-6), expert plugins pinned by ref
+  rather than content (SEC-8).
 - 1.4.0's evaluation note: the run that stopped did so in its sixth and last milestone, not its
   sixth of seven.
 
