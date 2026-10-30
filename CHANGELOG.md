@@ -22,6 +22,9 @@
   in v1.5: the check tag `(live)` (run `ape project rewrite-live` to write `(full)`), the codes
   `session.orchestrator-running`, `models.operator-row` and `check.live-suggested`, and the JSON
   fields `live_skipped` and a task's `live` (read `full_skipped` and `full`).
+- **`ape aboard` is aboard v0.4.2:** a board's server now closes before it removes its instance record,
+  so a client never finds no record while the old board still answers on its port (D564). capsHash
+  unchanged.
 - Claude Code surface reviewed through 2.1.312; no pin moved.
 - **Security model and known limits:** a new page, [docs/explanation/security-model.md](docs/explanation/security-model.md),
   says what ape's guards protect against (mistakes) and where they are weaker (a steered model), with what to do
