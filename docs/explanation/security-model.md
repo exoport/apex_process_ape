@@ -77,25 +77,28 @@ anywhere. The sandbox, once it is complete, is where this is meant to be closed.
 
 ### Logs and session transcripts are not scanned for secrets
 
-Commits are scanned; `ape`'s logs and the session transcripts under `_apex/state/` are not. They hold whatever a
-session read, including environment output and the contents of files with credentials. They are git-ignored and stay
-on your machine.
+Commits are scanned; `ape`'s logs and run records under `_apex/state/`, and Claude Code's own
+session transcripts (kept in your home folder), are not. They hold whatever a session read,
+including environment output and the contents of files with credentials. They are not committed and
+stay on your machine.
 
 **Meanwhile:**
 
 - Read a log or transcript before attaching it to an issue or sharing it.
 - Keep real secrets out of the files a session is likely to read (see the previous limit).
 
-### Plugins are pinned by name and version, not by content
+### Plugins are pinned by a ref, not by their content
 
-An expert or other plugin you list is installed by its name and version. A plugin's skills, rules and scripts run
-with your session's rights, and its text is read as instructions. Nothing checks that the content behind a version
-is the content you reviewed.
+A plugin you list is checked at a ref: the version its marketplace serves, or the git ref you point
+the marketplace at. A plugin's skills, rules and scripts run with your session's rights, and its
+text is read as instructions. Nothing checks that the content behind a ref is the content you
+reviewed.
 
 **Meanwhile:**
 
-- Install plugins only from sources you trust, and pin a version.
-- Before moving a plugin to a new version, read what changed.
+- Install plugins only from sources you trust, and pin them: point the marketplace at a git ref you
+  reviewed (a commit, which cannot be moved the way a tag or branch can).
+- Before bumping a plugin's ref, read what changed.
 
 ## Planned: a security review in the loop
 
