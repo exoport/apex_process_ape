@@ -149,8 +149,8 @@ const EpochKey = "epoch"
 // Token is a lease token: the cluster's epoch and the lease key's KV
 // revision (§3.1 fencing, §4.4). Only tokens of one epoch compare.
 type Token struct {
-	Epoch    uint64
-	Revision uint64
+	Epoch    uint64 `json:"epoch"`
+	Revision uint64 `json:"revision"`
 }
 
 // String is the token's wire form, "<epoch>.<revision>".
