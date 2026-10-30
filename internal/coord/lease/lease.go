@@ -14,9 +14,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
+	"github.com/exoport/apex_process_ape/internal/coord/kvttl"
 	"github.com/exoport/apex_process_ape/internal/coord/layout"
 )
 
@@ -135,7 +135,7 @@ func (s *Store) Claim(ctx context.Context, key, holder string, ttl time.Duration
 		return Lease{}, err
 	}
 	rev, err := s.leases.Create(ctx, key, val, jetstream.KeyTTL(ttl))
-	if errors.Is(err, jetstream.ErrKeyExists) || wrongLastSeq(err) {
+	if errors.Is(err, jetstream.ErrKeyExists) || kvttl.Conflict(err) {
 		return Lease{}, fmt.Errorf("%w: %s", ErrHeld, key)
 	}
 	if err != nil {
@@ -158,9 +158,7 @@ func (s *Store) Handover(ctx context.Context, l Lease, to string) (Lease, error)
 	return s.write(ctx, l, to)
 }
 
-// write is a compare-and-swap at l's revision that resets the key's TTL:
-// the KV update API takes no TTL, so it publishes to the bucket's subject
-// with the expected-last-subject-sequence and per-message TTL headers.
+// write is a compare-and-swap at l's revision that resets the key's TTL.
 func (s *Store) write(ctx context.Context, l Lease, holder string) (Lease, error) {
 	if err := s.Fence(ctx, l.Key, l.Token); err != nil {
 		return Lease{}, err
@@ -169,18 +167,14 @@ func (s *Store) write(ctx context.Context, l Lease, holder string) (Lease, error
 	if err != nil {
 		return Lease{}, err
 	}
-	msg := nats.NewMsg("$KV." + LeasesBucket + "." + l.Key)
-	msg.Data = val
-	msg.Header.Set(jetstream.ExpectedLastSubjSeqHeader, strconv.FormatUint(l.Token.Revision, 10))
-	msg.Header.Set(jetstream.MsgTTLHeader, l.TTL.String())
-	ack, err := s.js.PublishMsg(ctx, msg)
+	rev, err := kvttl.Update(ctx, s.js, LeasesBucket, l.Key, val, l.Token.Revision, l.TTL)
 	if err != nil {
-		if wrongLastSeq(err) {
+		if kvttl.Conflict(err) {
 			return Lease{}, fmt.Errorf("%w: %s moved on", ErrStale, l.Key)
 		}
 		return Lease{}, fmt.Errorf("lease: write %s: %w", l.Key, err)
 	}
-	return Lease{Key: l.Key, Holder: holder, Token: layout.Token{Epoch: l.Token.Epoch, Revision: ack.Sequence}, TTL: l.TTL}, nil
+	return Lease{Key: l.Key, Holder: holder, Token: layout.Token{Epoch: l.Token.Epoch, Revision: rev}, TTL: l.TTL}, nil
 }
 
 // Release deletes l at its revision. A stale token is ErrStale and
@@ -190,7 +184,7 @@ func (s *Store) Release(ctx context.Context, l Lease) error {
 		return err
 	}
 	if err := s.leases.Delete(ctx, l.Key, jetstream.LastRevision(l.Token.Revision)); err != nil {
-		if wrongLastSeq(err) {
+		if kvttl.Conflict(err) {
 			return fmt.Errorf("%w: %s moved on", ErrStale, l.Key)
 		}
 		return fmt.Errorf("lease: release %s: %w", l.Key, err)
@@ -239,15 +233,4 @@ func (s *Store) Holder(ctx context.Context, key string) (string, layout.Token, e
 		return "", layout.Token{}, err
 	}
 	return v.Holder, layout.Token{Epoch: epoch, Revision: e.Revision()}, nil
-}
-
-// wrongLastSeq is a compare-and-swap conflict: 10071, or 10164 on a
-// replicated (R3) stream.
-func wrongLastSeq(err error) bool {
-	if errors.Is(err, jetstream.ErrKeyExists) {
-		return true
-	}
-	var apiErr *jetstream.APIError
-	return errors.As(err, &apiErr) && (apiErr.ErrorCode == jetstream.JSErrCodeStreamWrongLastSequence ||
-		apiErr.ErrorCode == jetstream.JSErrCodeStreamWrongLastSequenceConstant)
 }
