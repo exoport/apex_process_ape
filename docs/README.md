@@ -93,6 +93,7 @@ v1.2, v1.3 and v1.4 keep that promise and add to it: the repository's `CHANGELOG
 - [`apescript` library reference](reference/apescript.md) — the surface `ape script` files import
 - [`ape service` endpoint contract](reference/service-api.md)
 - [NATS subjects & event payloads](reference/events.md)
+- [Coordination layout (APEX v1.5, not released)](reference/coordination.md) — the subjects, buckets, leases, tokens and message ids v1.5 adds
 - [Transcript blob offload](reference/blob-offload.md)
 - [Bridge IPC wire schema](reference/bridge-ipc.md) and [bridge security model](reference/bridge-security.md)
 
