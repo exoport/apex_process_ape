@@ -424,6 +424,16 @@ check-task-subagents:  ## Run a framework-shaped skill that fans out to sub-agen
 	APE_CLAUDE_LIVE=1 go test ./internal/e2e/ \
 	  -run TestLive_TaskSubagents -v -count=1 -timeout 25m
 
+.PHONY: check-natslocal
+check-natslocal:  ## v1.5 stage 0: bring up the local 3-node NATS cluster (deploy/natslocal), run the Tier-2 smoke, take it down.
+	@# LOCAL ONLY: needs nats-server v2.14.5 (NATS_SERVER= to point at it). No
+	@# network, no Docker. The cluster is always taken down, pass or fail.
+	@d=$$(mktemp -d "$${TMPDIR:-/tmp}/ape-natslocal.XXXX"); \
+	export NATSLOCAL_DIR=$$d NATSLOCAL_SCRIPT=$(CURDIR)/deploy/natslocal/natslocal.sh; \
+	$$NATSLOCAL_SCRIPT up && NATSLOCAL_URLS=$$($$NATSLOCAL_SCRIPT urls) \
+	  go test ./internal/natstest/ -run TestLive_NatsLocalCluster -v -count=1 -timeout 5m; rc=$$?; \
+	$$NATSLOCAL_SCRIPT down; exit $$rc
+
 .PHONY: check-agents-md
 check-agents-md:  ## Verify the installed Claude Code loads this repo's AGENTS.md (the repo has no CLAUDE.md on purpose).
 	@# This repository's instructions live only in AGENTS.md, which Claude
