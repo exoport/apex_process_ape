@@ -11,7 +11,9 @@
   whatever its modification time, and a logged-out publication is left alone.
 - **`check.grep-test-output`** (D620): an informational notice at `change check`, `change start`
   (new JSON `notices`) and `change verify` for a check that greps test output in a way that
-  misjudges the tests.
+  misjudges the tests, including `grep -q` or `head` after the test runner under `set -o pipefail`,
+  which exits 141 on a pass. Its fix text suggests running the test by name or capturing the output
+  first, never `pipefail`.
 - **`for: plan` advise entries** (D611, D641): an expert's advise files reach the planning session.
   An entry whose `for:` names `plan` is listed at the top of `ape status --json` (`advise`), where
   the framework's apex-plan reads it before it plans a milestone; `ape project check` caps those

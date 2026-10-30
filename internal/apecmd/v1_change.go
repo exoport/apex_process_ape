@@ -326,8 +326,10 @@ checks — a task's, or a scenario of its delta — that pipes a test runner's o
 shape that misjudges the tests: the pipeline's exit is its last command's, so a failing
 test can pass (no `+"`set -o pipefail`"+`, no PIPESTATUS); a grep for go test's PASS line ending
 in $, which never matches the "(0.00s)" go test prints after the name; or a PASS-line grep
-whose test name is unanchored, which also matches a longer name and every subtest. Start
-and verify give it too. Printed as "notice: <file>:1: …" lines on stderr; JSON "notices": [{severity:
+whose test name is unanchored, which also matches a longer name and every subtest; or
+`+"`grep -q`"+` or `+"`head`"+` after the runner under `+"`set -o pipefail`"+`, which exits 141 on a pass. Its fix
+is to run the test by name and use its exit, or to capture the output first. Start and
+verify give it too. Printed as "notice: <file>:1: …" lines on stderr; JSON "notices": [{severity:
 "notice", code, message, fix, action, file, line}] ([] when none), beside the findings
 on a failure too.
 

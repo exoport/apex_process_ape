@@ -21,8 +21,9 @@ func init() {
 			"one of the change's own checks (a task's, or a scenario of its delta) pipes a test runner's output on, in a shape that misjudges the tests — " +
 			"the pipeline's exit is its last command's, so a failing test can pass the check (no `set -o pipefail`, no PIPESTATUS); " +
 			"a grep for go test's PASS line ending in `$`, which never matches the `(0.00s)` go test prints after the name, so the check is never green; " +
-			"or a PASS-line grep whose test name is unanchored, which also matches a longer name and every subtest. " +
-			"The fix is apex-change's, at its next re-plan of the change: run the test by name and use its exit (`go test -run '^TestX$' ./pkg`)"},
+			"a PASS-line grep whose test name is unanchored, which also matches a longer name and every subtest; " +
+			"or (v1.4.1, FINDING-D2-1) `grep -q` or `head` after the runner under `set -o pipefail`, which exits 141 on a pass. " +
+			"The fix is apex-change's, at its next re-plan of the change: run the test by name and use its exit (`go test -run '^TestX$' ./pkg`), or capture the output first"},
 	)
 }
 
@@ -64,12 +65,13 @@ func (p *Project) testGrepNotices(c *Change, file string) []Diagnostic {
 // shape (empty: none). Each sentence ends with the fix.
 func testGrepShapes(cmd string) []string {
 	var out []string
-	pipefail := strings.Contains(cmd, "PIPESTATUS")
+	setPipefail := false
 	for _, words := range shellCommands(cmd) {
 		if len(words) > 1 && words[0] == "set" && strings.Contains(strings.Join(words[1:], " "), "pipefail") {
-			pipefail = true
+			setPipefail = true
 		}
 	}
+	pipefail := setPipefail || strings.Contains(cmd, "PIPESTATUS")
 	for _, pl := range shellPipelines(cmd) {
 		runner := -1
 		for i, words := range pl {
@@ -83,8 +85,17 @@ func testGrepShapes(cmd string) []string {
 		name := strings.Join(bareCommand(pl[runner]), " ")
 		if !pipefail {
 			out = append(out, fmt.Sprintf("pipes `%s` into `%s`, so the check's exit is the last command's, not the tests' — "+
-				"a failing test can pass the check: run the tests by name and use their exit (`go test -run '^TestX$' ./pkg`), or put `set -o pipefail;` first",
+				"a failing test can pass the check: run the tests by name and use their exit (`go test -run '^TestX$' ./pkg`), "+
+				"or capture the output first (`out=$(go test -v ./pkg) && grep -q … <<<\"$out\"`)",
 				name, filepath.Base(bareCommand(pl[len(pl)-1])[0])))
+		}
+		if setPipefail {
+			if early := earlyExit(pl[runner+1:]); early != "" {
+				out = append(out, fmt.Sprintf("pipes `%s` into `%s` under pipefail: `%s` stops reading at its first match, `%s` then dies of SIGPIPE, "+
+					"and the check exits 141 although the tests passed — run the tests by name and use their exit (`go test -run '^TestX$' ./pkg`), "+
+					"or capture the output first (`out=$(go test -v ./pkg) && grep -q … <<<\"$out\"`)",
+					name, early, early, name))
+			}
 		}
 		goTest := testCommand(pl[runner]) == "go test"
 		for _, words := range pl[runner+1:] {
@@ -206,4 +217,34 @@ func grepPattern(words []string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// earlyExit names the first command after a test runner that stops reading
+// its input early — `grep -q` (or --quiet/--silent, -m), `head` — "" when
+// none does. Under pipefail the runner then dies of SIGPIPE (FINDING-D2-1).
+func earlyExit(after [][]string) string {
+	for _, words := range after {
+		w := bareCommand(words)
+		if len(w) == 0 {
+			continue
+		}
+		switch filepath.Base(w[0]) {
+		case "head":
+			return "head"
+		case "grep", "egrep", "fgrep":
+			for _, a := range w[1:] {
+				switch {
+				case a == "--":
+					return ""
+				case a == "--quiet" || a == "--silent" || strings.HasPrefix(a, "--max-count"):
+					return "grep " + a
+				case len(a) > 1 && a[0] == '-' && a[1] != '-' && strings.ContainsAny(a[1:], "qsm"):
+					if strings.ContainsAny(a[1:], "qm") {
+						return "grep " + a
+					}
+				}
+			}
+		}
+	}
+	return ""
 }

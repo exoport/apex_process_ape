@@ -24,6 +24,7 @@ func TestTestGrepShapes(t *testing.T) {
 		exit      = "so the check's exit is the last command's"
 		anchored  = "which can never match"
 		unanchord = "whose test name is not anchored"
+		early     = "exits 141 although the tests passed"
 	)
 	for cmd, want := range map[string][]string{
 		// The eval's cells (ledger Q2:3, taskforge Q2:3; ledger PL:2/PL:3).
@@ -32,19 +33,23 @@ func TestTestGrepShapes(t *testing.T) {
 		`go test ./... | tail -5`:                                               {exit},
 		`cd app && npm test 2>&1 | grep -q "passing"`:                           {exit},
 		`python -m pytest -q tests/ | tee out.txt`:                              {exit},
-		`set -o pipefail; go test -v ./x | grep -q -e '--- PASS: TestX$'`:       {anchored},
-		`set -euo pipefail; go test -v ./x | grep -q 'PASS: TestX'`:             {unanchord},
+		`set -o pipefail; go test -v ./x | grep -q -e '--- PASS: TestX$'`:       {early, anchored},
+		`set -euo pipefail; go test -v ./x | grep -q 'PASS: TestX'`:             {early, unanchord},
 		`timeout 60 env CGO_ENABLED=0 go test -v ./x | grep -E 'PASS: TestX\b'`: {exit},
+		// FINDING-D2-1: grep -q / head under pipefail exit 141 on a pass.
+		`set -o pipefail; go test -v ./x | grep -qE -- '--- PASS: TestX '`: {early},
+		`set -o pipefail; go test ./... | head -1`:                         {early},
 		// Right.
-		`go test -run '^TestX$' ./x`:                                          nil,
-		`set -o pipefail; go test -v ./x | grep -q -- '--- PASS: TestX '`:     nil,
-		`go test -v ./x 2>&1 | tee log; test ${PIPESTATUS[0]} -eq 0`:          nil,
-		`grep -q 'PASS: TestX' out.txt`:                                       nil,
-		`./wave.sh | grep -q wave`:                                            nil,
-		`go vet ./... | grep -v vendor`:                                       nil,
-		`go test ./... || echo "go test failed" | grep -q failed`:             nil,
-		`set -o pipefail; cargo test 2>&1 | grep -q "test result: ok"`:        nil,
-		`set -o pipefail; go test -v ./x | grep -q '--- PASS: TestX (0.00s)'`: nil,
+		`out=$(go test -v ./x) && grep -q -- '--- PASS: TestX ' <<<"$out"`: nil,
+		`go test -run '^TestX$' ./x`:                                       nil,
+		`set -o pipefail; go test -v ./x | grep -- '--- PASS: TestX '`:     nil,
+		`go test -v ./x 2>&1 | tee log; test ${PIPESTATUS[0]} -eq 0`:       nil,
+		`grep -q 'PASS: TestX' out.txt`:                                    nil,
+		`./wave.sh | grep -q wave`:                                         nil,
+		`go vet ./... | grep -v vendor`:                                    nil,
+		`go test ./... || echo "go test failed" | grep -q failed`:          nil,
+		`set -o pipefail; cargo test 2>&1 | grep "test result: ok"`:        nil,
+		`set -o pipefail; go test -v ./x | grep '--- PASS: TestX (0.00s)'`: nil,
 	} {
 		got := testGrepShapes(cmd)
 		require.Len(t, got, len(want), "%s: %q", cmd, got)
@@ -77,4 +82,14 @@ func TestChangeNotices_GrepTestOutput(t *testing.T) {
 		require.Contains(t, n.Fix, "go test -run '^TestX$' ./pkg")
 	}
 	require.Empty(t, p.CheckChange("add-wave"), "a notice is not a finding")
+}
+
+// D650: no notice suggests pipefail any more (with grep -q it exits 141).
+func TestTestGrepShapes_FixTextNeverSuggestsPipefail(t *testing.T) {
+	for _, cmd := range []string{"go test ./... | tail -5", "go test -v ./x | grep -q 'PASS: TestX'", "set -o pipefail; go test ./... | head -1"} {
+		for _, n := range testGrepShapes(cmd) {
+			_, fix, _ := strings.Cut(n, " — ")
+			require.NotContains(t, fix, "pipefail", cmd)
+		}
+	}
 }
