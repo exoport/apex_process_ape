@@ -192,7 +192,7 @@ func personEnv() []string {
 	return out
 }
 
-func waitFor(ctx context.Context, d time.Duration, cond func() bool) bool {
+func waitFor(ctx context.Context, d time.Duration, cond func() bool) bool { //nolint:unparam // every gate waits 4 min today; the bound stays a parameter
 	deadline := time.Now().Add(d)
 	for time.Now().Before(deadline) && ctx.Err() == nil {
 		if cond() {
