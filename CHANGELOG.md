@@ -22,8 +22,8 @@
 - **Security model and known limits:** a new page, [docs/explanation/security-model.md](docs/explanation/security-model.md),
   says what ape's guards protect against (mistakes) and where they are weaker (a steered model), with what to do
   meanwhile for each known limit: a person act carried out through a script; the push and tag guards' same gap;
-  sessions inheriting your whole environment; logs and transcripts not scanned for secrets; plugins pinned by name
-  and version, not content. It also describes the planned security review in the loop. The framework's user docs
+  sessions inheriting your whole environment; logs and transcripts not scanned for secrets; plugins pinned by a ref,
+  not by their content. It also describes the planned security review in the loop. The framework's user docs
   carry the same page.
 - 1.4.0's evaluation note: the run that stopped did so in its sixth and last milestone, not its
   sixth of seven.
