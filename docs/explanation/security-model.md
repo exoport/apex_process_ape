@@ -1,97 +1,127 @@
 # Security model and known limits
 
-ape keeps a model to the APEX flow with guards: commands that refuse themselves in a model
-session, a hook that reads every tool call before it runs, and records only ape writes. Those
-guards hold against a model that follows its instructions. They are not a boundary against a
-model that has been steered to get past them, for example by text in a file it read. This page
-says where that line is, which gaps are known in ape 1.4.1, and what to do about each until it
-is closed. The full threat model is the APEX security proposal of 2026-10-29 (findings SEC-1
-to SEC-9); this page states the ones that bear on how you run ape today.
+APEX runs much of your work unattended: the loop plans, applies, reviews and archives changes while you are away.
+This page says what keeps that safe, where the limits are today, and what you can do about each limit until it is
+closed.
 
-## What the guards are for
+## What APEX protects, and against what
 
-Each person act ([What only a person does](person-acts.md)) refuses itself when it runs in a
-model session, and in your own Claude Code session the hook grants it only on the phrase you
-typed in that turn. Every `git push` and tag write is denied in any form the hook can parse.
-ape's records (specs, change state, the archive, `_apex/state/`) cannot be edited with Claude
-Code's edit tools, and a write made another way is found by `ape project check` and refused by
-the change commands until a person restores or accepts it. Every commit is scanned for secrets.
+APEX and `ape` are built to catch **mistakes**: a model that edits a spec directly, runs a gate script outside `ape`,
+pushes, tags, kills processes it should not, commits a secret, or tries to approve its own work. These protections
+are mechanical, so they do not depend on the model following instructions:
 
-These make the honest path the only easy one: a model following the APEX skills never meets a
-refusal it has to work around. What they do not do is stop a model that is trying to.
+- the PreToolUse guard parses each command, so quoting, chains, `sh -c` and `env` wrappers do not hide it;
+- the hooks fail closed: if `ape` cannot run, the session cannot edit or run commands;
+- `ape`'s own records can be changed only through `ape`, and a forged one stops the next change command;
+- every commit is scanned for secrets;
+- the eight person acts (approving a milestone or tweak, answering a blocked change, accepting a human-review task,
+  accepting the config, accepting a red gate, allowing pending human work, accepting an ADR) are refused when a
+  model runs them, unless you typed the act's words yourself in that turn
+  ([What only a person does](person-acts.md)).
+
+They hold against a model that makes an honest mistake. They are weaker against a model that has been **steered**:
+one that read instructions planted in a file, an issue, a web page, a plugin's text or a tool's output, and follows
+them. In the unattended loop that is the case to plan for. The limits below are all of this kind.
 
 ## Known limits
 
-### A script can carry out a person act (SEC-1)
+### A model can carry out a person act through a script
 
-ape tells a model from a person by two environment variables, `APE_SESSION` and `CLAUDECODE`,
-and the hook does not read script files (see [hooks.md](../reference/hooks.md): it does not see
-`"$(…)"` inside double quotes, git aliases or script files). A model that writes a script which
-clears both variables and runs, say, `ape milestone approve`, gets past both layers. This was
-verified on ape 1.4.0. Nothing in the shipped skills does it; it needs a steered model.
+`ape` tells a model from a person by two environment variables that every model session carries. The guard reads the
+command a model runs, but not the contents of a script file
+([hooks.md](../reference/hooks.md) lists what it does not see). A model that writes a script which clears those
+variables and then runs a person act gets past both checks, so the act is recorded as if a person had done it.
 
-A check of the process's ancestry (refuse when a Claude Code or ape session process is among
-its parents) was designed and is not in 1.4.1: it raises the bar but a double fork escapes it,
-so it would not be a boundary either. The boundary is a person act confirmed on a channel a
-model cannot write to; that is v1.5 design work.
+This needs a steered model. It has never been seen in APEX's measurements. A fix is not scheduled yet: telling a
+person from a model reliably needs a confirmation the model cannot give, and that is a design question for a later
+release.
 
-**Meanwhile:** read what the loop did before you rely on it. `ape status` and the milestone's
-records show every approval, answer and acceptance with who recorded it and when; an act you did
-not make is a reason to stop the loop and look. Do not run the loop on a project whose files you
-have not read (a hostile `AGENTS.md`, spec or expert rules file is how a model gets steered).
+**Meanwhile:**
 
-### Pushes and tags go through the same route (SEC-2)
+- Read the record. Person acts are recorded in commits whose subject starts `apex:` (for example
+  `apex: M2 approved`, `apex: <change> answered`, `apex: config accepted by <name>`), and an act granted in your own
+  Claude Code session records your words: `by: <name> (prompt <time>: "<your words>")`.
+  An approval, acceptance or answer you do not remember making is the sign to look for:
+  `git log --grep '^apex: ' --format='%h %an %s'`.
+- Keep text you have not read away from unattended runs: plugins you have not reviewed, pasted issue text, pages
+  fetched from the web.
+- Treat a change that adds a script calling `ape` or `git push` as worth a look in review.
 
-The push and tag guards are the same hook, so the same script route passes them. Whether a push
-then succeeds depends on what the session can reach: your SSH agent and git credential helpers
-pass into every session ape starts.
+### The push and tag guards have the same gap
 
-**Meanwhile:** protect the branches and tags that matter on the remote (GitHub branch and tag
-protection), so a push from a session meets the remote's own rules. For unattended runs, prefer a
-checkout whose remote credentials cannot push, or run the loop where `SSH_AUTH_SOCK` is not set.
-No APEX skill ever pushes.
+The guard refuses every `git push` and tag write a model runs, in any form it can parse. The same script route gets
+past it, and whether a push then succeeds depends on the credentials the session can reach: an `ssh-agent` socket, a
+git credential helper, a token in the environment. No model in APEX ever needs to push.
 
-### Sessions inherit your environment (SEC-3)
+**Meanwhile:**
 
-ape removes Claude Code's own variables from the sessions it starts and passes everything else:
-cloud keys, `GITHUB_TOKEN`, `ANTHROPIC_*`, `SSH_AUTH_SOCK`. A session on the host has no egress
-control, so a steered model can send any of it out.
+- Protect `main` and your release branches on the git host, and restrict who may create tags. A protected branch
+  refuses the push whatever the guard missed.
+- Start unattended runs from a shell without push credentials. `ape` never fetches or pushes for the loop, so
+  nothing in the loop needs them. For example:
+  `env -u SSH_AUTH_SOCK -u GITHUB_TOKEN -u GH_TOKEN ape …`. If git uses a credential helper, give that shell a
+  configuration without it.
 
-**Meanwhile:** start unattended runs (`ape task apex-loop`, review and delegate sessions start
-from it) from a shell that holds only what the project needs, not your everyday login shell
-with every token exported. An `ape sandbox` workspace runs with its own environment and a
-deny-by-default egress proxy; sandboxes are not yet supported end to end for APEX projects.
+### Sessions inherit your whole environment
 
-### Transcripts and logs are not scanned for secrets (SEC-6)
+A session `ape` starts gets every environment variable of the shell that started it, except Claude Code's own.
+Anything there (cloud keys, API tokens, a database password) is readable by the model and, on the host, can be sent
+anywhere. The sandbox, once it is complete, is where this is meant to be closed.
 
-Commits are scanned; session transcripts (under Claude Code's `~/.claude/projects/`) and ape's
-logs under `_apex/state/` are not, and they hold whatever a session read: command output, `.env`
-files, fixtures. Today they stay on your machine and git ignores them.
+**Meanwhile:**
 
-**Meanwhile:** treat transcripts and `_apex/state/` as secret-bearing. Do not attach them to
-issues or share them without reading them first. (v1.5 plans to share transcripts across a
-team; it scans and redacts them first.)
+- Start loops from a shell that holds only what the project needs. Keep admin and production credentials out of it.
+- Prefer short-lived and narrowly scoped tokens for anything a project's checks must use.
+- For a local development stack, prefer settings that need no secret (trust or passwordless authentication on a
+  local database), or keep the value in a git-ignored file.
 
-### Expert plugins run with the session's rights (SEC-8)
+### Logs and session transcripts are not scanned for secrets
 
-An expert plugin's skills, rules files and scripts are read and run by the session with
-everything the session can do, and its text is read as instructions. ape pins a plugin by its
-marketplace ref, not by the content's digest, so a plugin that changes under the same ref is
-not noticed.
+Commits are scanned; `ape`'s logs and the session transcripts under `_apex/state/` are not. They hold whatever a
+session read, including environment output and the contents of files with credentials. They are git-ignored and stay
+on your machine.
 
-**Meanwhile:** add only plugins whose source you trust and have read, pin them to a tag or a
-commit rather than a branch, and read a plugin's diff before you move its pin
-(`ape plugins status` lists what is installed and at which ref).
+**Meanwhile:**
+
+- Read a log or transcript before attaching it to an issue or sharing it.
+- Keep real secrets out of the files a session is likely to read (see the previous limit).
+
+### Plugins are pinned by name and version, not by content
+
+An expert or other plugin you list is installed by its name and version. A plugin's skills, rules and scripts run
+with your session's rights, and its text is read as instructions. Nothing checks that the content behind a version
+is the content you reviewed.
+
+**Meanwhile:**
+
+- Install plugins only from sources you trust, and pin a version.
+- Before moving a plugin to a new version, read what changed.
+
+## Planned: a security review in the loop
+
+A security review of each milestone's work is planned, in this shape:
+
+- It runs **after the milestone's full test run and before its gate**.
+- `ape` first runs the mechanical checks it can decide by itself, such as known-vulnerable dependencies and changes to
+  CI, hooks or settings. Then a model session reviews the milestone's code for the problems a check cannot see:
+  injection, missing authorisation on a new entry point, unsafe defaults, credentials that would ship.
+- A security issue it finds **must be handled before the gate and the milestone's close**: either **fixed**, or
+  **accepted by you as an exception, with the fix postponed**. That acceptance is a person act, recorded like the
+  others.
+
+It will be built only once a measurement shows it helps: projects with planted vulnerabilities, run with and without
+it, under rules fixed in advance. Whether it becomes its own skill, a mode of review or an expert plugin is decided
+after that measurement.
+
+Before `ape`'s sandboxes run APEX projects end to end, their isolation will get an outside security review.
 
 ## Fixed in 1.4.1
 
-**`aped` credential sync (SEC-7).** In `credentials: oauth` mode the sync could copy a
-logged-out credential over the host's and every workspace's. 1.4.1 ranks copies by the token's
-expiry and never spreads a logged-out one. An outside review of `aped` is planned before
-sandboxes run APEX projects end to end.
+The sandbox's credential sync could copy a logged-out credential over your own and every workspace's. `ape` 1.4.1
+ranks the copies by the token's expiry and never spreads a logged-out one.
 
 ## See also
 
 - [What only a person does](person-acts.md)
-- [hooks.md](../reference/hooks.md): what the pre-tool guard parses and what it does not see
+- [hooks.md](../reference/hooks.md): what the guard parses and what it does not see
 - [bridge-security.md](../reference/bridge-security.md): the session bridge's trust model
