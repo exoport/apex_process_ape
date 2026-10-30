@@ -90,12 +90,14 @@ func Filters(ens string, projects []string) []string {
 	return out
 }
 
-// Format is a delivery as ape types it: the marker the user-prompt hook
-// reads (apexv1.DeliveryTag; such a prompt never grants a person act), the
-// event, and how to acknowledge it.
+// Format is a delivery as ape types it, one line (a typed newline would
+// submit early): the marker the user-prompt hook reads (apexv1.DeliveryTag;
+// such a prompt never grants a person act), the event, and how to
+// acknowledge it.
 func Format(seq uint64, nonce, subject string, data []byte, ackToken string) string {
-	return fmt.Sprintf("%sseq=\"%d\" nonce=%q>\n%s\n%s\n</ape-delivery>\nWhen you have handled this event, run: ape conductor ack %s",
-		apexv1.DeliveryTag, seq, nonce, subject, strings.TrimSpace(string(data)), ackToken)
+	body := strings.Join(strings.Fields(string(data)), " ")
+	return fmt.Sprintf("%sseq=\"%d\" nonce=%q> %s %s </ape-delivery> When you have handled this event, run: ape conductor ack %s",
+		apexv1.DeliveryTag, seq, nonce, subject, body, ackToken)
 }
 
 // Ack acknowledges a delivery by its token (the event's ack subject): what
