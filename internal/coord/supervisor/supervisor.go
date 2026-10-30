@@ -50,6 +50,10 @@ type Config struct {
 	// Verify is the health check of §3.3. Off, a single report kills a
 	// coordinator: the v1.4-shaped control the drills compare with.
 	Verify bool
+	// HeartbeatEvery is how often the leader sends each held conductor
+	// lease a heartbeat event it must acknowledge (§3.1 requirement 2);
+	// zero sends none.
+	HeartbeatEvery time.Duration
 }
 
 func (c *Config) defaults() {
@@ -124,9 +128,14 @@ func Run(ctx context.Context, nc *nats.Conn, cfg Config) error {
 	t := time.NewTicker(cfg.Renew)
 	defer t.Stop()
 	var lead leadership
+	lastBeat := time.Time{}
 	for {
 		if err := s.contend(ctx, &lead); err != nil {
 			return err
+		}
+		if lead.svc != nil && cfg.HeartbeatEvery > 0 && time.Since(lastBeat) >= cfg.HeartbeatEvery {
+			s.heartbeat(ctx)
+			lastBeat = time.Now()
 		}
 		select {
 		case <-ctx.Done():
@@ -347,4 +356,31 @@ func (s *Supervisor) publish(ens, event string, payload any) {
 	defer cancel()
 	subj := events.Subject(coordinator.Owner, ens, events.KindCoord, s.cfg.ID, event)
 	_, _ = events.Publish(ctx, s.js, subj, s.cfg.ID+"/"+event+"/"+time.Now().UTC().Format(time.RFC3339Nano), data)
+}
+
+// heartbeat publishes a heartbeat to every held conductor lease: kind
+// coord, on the lease's ensemble, its <id> the lease key (S-1). The
+// conductor receives it like any event and must acknowledge it, so a
+// session alive but silent stops renewing even when nothing else happens.
+func (s *Supervisor) heartbeat(ctx context.Context) {
+	kv, err := s.js.KeyValue(ctx, lease.LeasesBucket)
+	if err != nil {
+		return
+	}
+	keys, err := kv.ListKeys(ctx)
+	if err != nil {
+		return
+	}
+	for key := range keys.Keys() {
+		if !strings.HasPrefix(key, "conductor.") {
+			continue
+		}
+		ens := key[strings.LastIndex(key, ".")+1:]
+		data, err := json.Marshal(map[string]string{"lease": key, "by": s.cfg.ID})
+		if err != nil {
+			continue
+		}
+		subj := events.Subject(coordinator.Owner, ens, events.KindCoord, key, "heartbeat")
+		_, _ = events.Publish(ctx, s.js, subj, s.cfg.ID+"/heartbeat/"+key+"/"+time.Now().UTC().Format(time.RFC3339Nano), data)
+	}
 }

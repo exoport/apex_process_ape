@@ -50,6 +50,15 @@ const (
 	EventRunLost = "run-lost"
 )
 
+// v1.5 (OQ24, S-2): a conductor's ape escalates a question left waiting,
+// then pauses its milestone, and resumes it once the question is answered.
+// Published on NATS only (kind project), not in events.jsonl.
+const (
+	EventQuestionEscalated = "question-escalated"
+	EventMilestonePaused   = "milestone-paused"
+	EventMilestoneResumed  = "milestone-resumed"
+)
+
 // EventNames are every event, in the order the docs list them.
 var EventNames = []string{EventPerson, EventGateGreen, EventMilestoneDone, EventRunEnd, EventRunLost, EventStop, EventBlock}
 

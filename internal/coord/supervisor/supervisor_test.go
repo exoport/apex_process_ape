@@ -268,3 +268,17 @@ func TestTwoSupervisors(t *testing.T) {
 	cancelA()
 	require.Eventually(t, func() bool { return who() == "sup-b" }, 3*ttl, 100*time.Millisecond, "the standby takes over on expiry")
 }
+
+// §3.1 requirement 2: the leader sends every held conductor lease a
+// heartbeat, kind coord, its id naming the lease.
+func TestHeartbeat(t *testing.T) {
+	url, nc, js := rig(t)
+	got, mu := coordEvents(t, nc)
+	ls, err := lease.Open(context.Background(), js)
+	require.NoError(t, err)
+	_, err = ls.Claim(context.Background(), layout.ConductorKey("ann", "atomix"), "cond-a", time.Minute)
+	require.NoError(t, err)
+	var ids atomic.Int32
+	runSup(t, url, "sup-a", Config{Start: starter(t, url, &ids), HeartbeatEvery: 300 * time.Millisecond})
+	require.Eventually(t, func() bool { return has(got, mu, "atomix.coord.conductor-ann-atomix.heartbeat") }, 5*time.Second, 50*time.Millisecond)
+}

@@ -40,6 +40,9 @@ type Config struct {
 	// Probe reads the host's free memory and pressure for the guard
 	// (-1, -1 when unknown); nil never blocks.
 	Probe func() (availBytes int64, psiAvg10 float64)
+	// Projects are the ensemble's members, whose milestone leases it
+	// watches (the ensemble view, step 9).
+	Projects []string
 }
 
 // AcquireRequest is ape.coord.<ens>.slot.acquire's body.
@@ -148,6 +151,7 @@ func Run(ctx context.Context, nc *nats.Conn, cfg Config) error {
 			c.publish(wctx, "slot-reclaimed", r.Key, r)
 		})
 	}()
+	go c.watchLeaseExpiries(wctx)
 
 	t := time.NewTicker(cfg.Renew)
 	defer t.Stop()
@@ -259,4 +263,50 @@ func (c *Coordinator) publish(ctx context.Context, event, id string, payload any
 	}
 	subj := events.Subject(Owner, c.cfg.Ensemble, events.KindCoord, id, event)
 	_, _ = events.Publish(ctx, c.js, subj, c.cfg.ID+"/"+event+"/"+id+"/"+time.Now().UTC().Format(time.RFC3339Nano), data)
+}
+
+// watchLeaseExpiries publishes lease-expired for every lease of the
+// ensemble whose TTL ran out (a release is a delete; an expiry is the
+// server's purge marker): a conductor that went silent, a milestone whose
+// orchestrator stopped renewing. The event names the key (§3.1).
+func (c *Coordinator) watchLeaseExpiries(ctx context.Context) {
+	kv, err := c.js.KeyValue(ctx, lease.LeasesBucket)
+	if err != nil {
+		return
+	}
+	w, err := kv.WatchAll(ctx, jetstream.UpdatesOnly())
+	if err != nil {
+		return
+	}
+	defer func() { _ = w.Stop() }()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case e, ok := <-w.Updates():
+			if !ok {
+				return
+			}
+			if e != nil && e.Operation() == jetstream.KeyValuePurge && c.ours(e.Key()) {
+				c.publish(ctx, "lease-expired", e.Key(), map[string]string{"key": e.Key()})
+			}
+		}
+	}
+}
+
+// ours reports whether a lease key belongs to this coordinator's ensemble.
+func (c *Coordinator) ours(key string) bool {
+	ens := c.cfg.Ensemble
+	switch {
+	case key == layout.StewardKey(ens) || key == layout.CoordKey(ens):
+		return true
+	case strings.HasPrefix(key, "conductor.") && strings.HasSuffix(key, "."+ens):
+		return true
+	}
+	for _, p := range c.cfg.Projects {
+		if strings.HasPrefix(key, "milestone."+p+".") {
+			return true
+		}
+	}
+	return false
 }
