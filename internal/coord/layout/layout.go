@@ -11,6 +11,7 @@ package layout
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 )
@@ -50,8 +51,8 @@ var Stores = []Store{
 	{Name: "ape-runs", Type: "KV", Keys: []string{"run.<project>.<run-id>"}, Class: Native, Writer: byRunner, Retention: "90 days"},
 	{Name: "ape-attempts", Type: "KV", Keys: []string{"attempt.<project>.<change>.<n>"}, Class: Native, Writer: "the change's ape", Retention: "deleted at milestone close"},
 	{Name: "ape-usage", Type: "KV", Keys: []string{"usage.<user>"}, Class: Native, Writer: "that developer's ape", Retention: "latest only; history in the stream"},
-	{Name: "ape-state", Type: "KV", Keys: []string{"milestone.<project>.<M>", "change.<project>.<id>", "contract.<ens>.<name>.v<N>"}, Class: View, Writer: "ape, from git", Retention: "until the referencing close"},
-	{Name: "ape-queue", Type: "KV", Keys: []string{"pr.<project>.<M>.<change | take-in-<n> | close>"}, Class: ViewGitHub, Writer: "the coordinator", Retention: "deleted at merge or close"},
+	{Name: "ape-state", Type: "KV", Keys: []string{"milestone.<project>.<M>", "change.<project>.<id>", "contract.<ens>.<name>.v<N>", "ensemble.<ens>"}, Class: View, Writer: "ape, from git", Retention: "until the referencing close"},
+	{Name: "ape-queue", Type: "KV", Keys: []string{"pr.<project>.<M>.change.<id>", "pr.<project>.<M>.close"}, Class: ViewGitHub, Writer: "the coordinator", Retention: "deleted at merge or close"},
 	{Name: "APE_EVENTS", Type: "stream", Keys: []string{"ape.evt.>"}, Class: Native, Writer: "each publisher", Retention: "90 days"},
 	{Name: "APE_METRICS", Type: "stream", Keys: []string{"ape.metrics.>"}, Class: Native, Writer: "each publisher", Retention: "90 days"},
 	{Name: "ape-transcripts", Type: "Object Store", Keys: []string{"sha256/<hex>"}, Class: Native, Writer: byRunner, Retention: "90 days, or until the referencing close", Exists: true},
@@ -71,7 +72,8 @@ var Subjects = []Subject{
 	{Pattern: "ape.evt.<user>.<project>.project.<milestone>.<event>", Kind: "project", Names: []string{
 		"person", "gate-green", "milestone-done", "run-end", "run-lost", "stop", "block",
 		"plan-approved", "change-archived", "gate-red", "milestone-claimed", "milestone-released",
-		"take-in-queued", "take-in-merged", "close-queued", "close-merged", "act-requested",
+		"close-queued", "close-merged", "act-requested",
+		"question-escalated", "milestone-paused", "milestone-resumed",
 	}},
 	{Pattern: "ape.evt.<user>.<project>.change.<change-id>.<event>", Kind: "change", Names: []string{
 		"pr-opened", "queued", "ejected", "merged", "rebased", "conflicted",
@@ -81,7 +83,7 @@ var Subjects = []Subject{
 	}},
 	{Pattern: "ape.evt.coord.<ensemble>.coord.<id>.<event>", Kind: "coord", Names: []string{
 		"lease-expired", "slot-granted", "slot-reclaimed", "impact-notice", "hold-requested",
-		"coordinator-replaced", "health-unconfirmed", "nats-paused", "nats-resumed",
+		"coordinator-replaced", "health-unconfirmed", "nats-paused", "nats-resumed", "heartbeat",
 	}},
 	{Pattern: "ape.coord.<ensemble>.<verb>", Kind: "service", Names: []string{"slot.acquire", "slot.release", "status", "hold.ack"}},
 	{Pattern: "ape.sup.<verb>", Kind: "service", Names: []string{"ensure", "health.report", "status"}},
@@ -116,6 +118,26 @@ func SlotKey(host, res string, n int) string { return fmt.Sprintf("slot.%s.%s.%d
 // MessageID is an event's message id (OQ14).
 func MessageID(project, checkout string, seq uint64) string {
 	return fmt.Sprintf("%s/%s/%d", project, checkout, seq)
+}
+
+// ConductorConsumer is the durable consumer on APE_EVENTS through which a
+// conductor receives its ensemble's events (R4): only the holder of
+// ConductorKey(user, ens) binds it, and its acks are the lease's renewal
+// signal (OQ22).
+func ConductorConsumer(user, ens string) string { return "conductor-" + user + "-" + ens }
+
+// ReservedTokens are the <user> tokens no member credential may carry
+// (R1): the coordinator's and the supervisors' own, so a member cannot
+// publish as them. A token starting with ReservedPrefix (aped's per-VM
+// identities) is reserved too.
+var ReservedTokens = []string{"coord", "sup"}
+
+// ReservedPrefix marks aped's per-VM tokens, `vm-<id>`.
+const ReservedPrefix = "vm-"
+
+// Reserved reports whether a <user> token is one a member may not hold.
+func Reserved(token string) bool {
+	return slices.Contains(ReservedTokens, token) || strings.HasPrefix(token, ReservedPrefix)
 }
 
 // SupLeaderKey is the supervisors' leader lease (OQ9).

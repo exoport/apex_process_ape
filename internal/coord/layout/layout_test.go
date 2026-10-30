@@ -51,3 +51,13 @@ func TestKeysAndTokens(t *testing.T) {
 		require.Contains(t, Stores[1].Keys, k)
 	}
 }
+
+func TestReservedTokens(t *testing.T) {
+	for _, tok := range []string{"coord", "sup", "vm-12", "vm-"} {
+		require.True(t, Reserved(tok), tok)
+	}
+	for _, tok := range []string{"diego", "coordinator", "supper", "v-m"} {
+		require.False(t, Reserved(tok), tok)
+	}
+	require.Equal(t, "conductor-diego-atomix", ConductorConsumer("diego", "atomix"))
+}
