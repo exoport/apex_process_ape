@@ -186,8 +186,8 @@ github.com/dsnet/compress v0.0.2-0.20230904184137-39efe44ab707/go.mod h1:qssHWj6
 github.com/dsnet/golib v0.0.0-20171103203638-1ea166775780/go.mod h1:Lj+Z9rebOhdfkVLjJ8T6VcRQv3SXugXy999NBtR9aFY=
 github.com/erofs/go-erofs v0.3.0 h1:o/W5ABAA3sHYl97WL93dacKEfeDpJhdFf3c2snAti7I=
 github.com/erofs/go-erofs v0.3.0/go.mod h1:XkSeN9MHszGd4+3gcEjadJLYHCQpWzJ7/8yznzMuzJs=
-github.com/exoport/aboard v0.4.1 h1:8CgbvUsqGLFBEstRg2+SDpy01r2Xq5/err4lqXtT7WI=
-github.com/exoport/aboard v0.4.1/go.mod h1:iY0FZoojUjLL39paDkPQFoDNYzFXDwQKQqZUm7S4upU=
+github.com/exoport/aboard v0.4.2 h1:2BsnfpMwRp/dRdOtosI4Xf9DN7hYU541GRDMBbLQ0dU=
+github.com/exoport/aboard v0.4.2/go.mod h1:iY0FZoojUjLL39paDkPQFoDNYzFXDwQKQqZUm7S4upU=
 github.com/expr-lang/expr v1.17.8 h1:W1loDTT+0PQf5YteHSTpju2qfUfNoBt4yw9+wOEU9VM=
 github.com/expr-lang/expr v1.17.8/go.mod h1:8/vRC7+7HBzESEqt5kKpYXxrxkr31SaO8r40VO/1IT4=
 github.com/felixge/httpsnoop v1.1.0 h1:3YtUj32ZZkqZtt3sZZsClsymw/QDuVfpNhoA31zeORc=

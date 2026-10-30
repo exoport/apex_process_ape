@@ -18,6 +18,13 @@
   files together by `caps.advise_session`. An entry without `for:` is unchanged.
 - **Gate scratch and the gate guard** (D582, D634): `.go`, `.mk`, `.ps1` and Makefiles count as gate
   scripts; on Windows the gate guard reads Git Bash `/c/…` and Cygwin `/cygdrive/c/…` paths.
+- **Announced: v1.5 removes the names v1.3 renamed** (D526, D637). They warn in 1.4 and stop working
+  in v1.5: the check tag `(live)` (run `ape project rewrite-live` to write `(full)`), the codes
+  `session.orchestrator-running`, `models.operator-row` and `check.live-suggested`, and the JSON
+  fields `live_skipped` and a task's `live` (read `full_skipped` and `full`).
+- **`ape aboard` is aboard v0.4.2:** a board's server now closes before it removes its instance record,
+  so a client never finds no record while the old board still answers on its port (D564). capsHash
+  unchanged.
 - Claude Code surface reviewed through 2.1.312; no pin moved.
 - **Security model and known limits:** a new page, [docs/explanation/security-model.md](docs/explanation/security-model.md),
   says what ape's guards protect against (mistakes) and where they are weaker (a steered model), with what to do
