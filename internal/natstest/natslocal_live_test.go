@@ -29,7 +29,12 @@ func TestLive_NatsLocalCluster(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	require.Eventually(t, func() bool { _, err := js.AccountInfo(ctx); return err == nil }, 30*time.Second, 200*time.Millisecond, "no meta leader")
+	require.Eventually(t, func() bool {
+		c, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+		_, err := js.AccountInfo(c)
+		return err == nil
+	}, 30*time.Second, 200*time.Millisecond, "no meta leader")
 	kv, err := js.CreateKeyValue(ctx, jetstream.KeyValueConfig{Bucket: "ape-natslocal-smoke", Replicas: 3})
 	require.NoError(t, err)
 	defer func() { _ = js.DeleteKeyValue(context.Background(), "ape-natslocal-smoke") }()

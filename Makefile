@@ -434,6 +434,16 @@ check-natslocal:  ## v1.5 stage 0: bring up the local 3-node NATS cluster (deplo
 	  go test ./internal/natstest/ -run TestLive_NatsLocalCluster -v -count=1 -timeout 5m; rc=$$?; \
 	$$NATSLOCAL_SCRIPT down; exit $$rc
 
+.PHONY: check-coord-cluster
+check-coord-cluster:  ## v1.5 stage 0: the coordination drills that need a real three-node cluster (drill 3, wipe and rebuild), on deploy/natslocal.
+	@# LOCAL ONLY: needs nats-server v2.14.5 (NATS_SERVER= to point at it). The
+	@# cluster is always taken down, pass or fail.
+	@d=$$(mktemp -d "$${TMPDIR:-/tmp}/ape-natslocal.XXXX"); \
+	export NATSLOCAL_DIR=$$d NATSLOCAL_SCRIPT=$(CURDIR)/deploy/natslocal/natslocal.sh; \
+	$$NATSLOCAL_SCRIPT up && NATSLOCAL_URLS=$$($$NATSLOCAL_SCRIPT urls) \
+	  go test ./internal/coord/... ./internal/natstest/ -run 'TestLive_' -v -count=1 -timeout 10m; rc=$$?; \
+	$$NATSLOCAL_SCRIPT down; exit $$rc
+
 .PHONY: check-agents-md
 check-agents-md:  ## Verify the installed Claude Code loads this repo's AGENTS.md (the repo has no CLAUDE.md on purpose).
 	@# This repository's instructions live only in AGENTS.md, which Claude
