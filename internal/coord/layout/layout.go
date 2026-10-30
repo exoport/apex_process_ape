@@ -38,21 +38,24 @@ type Store struct {
 	Exists    bool   // already shipped before v1.5
 }
 
+// byRunner is the single writer of a run's records: the ape that ran it.
+const byRunner = "the ape that ran it"
+
 // Stores are every bucket, stream and Object Store v1.5 uses, in the order
 // the page lists them.
 var Stores = []Store{
 	{Name: "ape-meta", Type: "KV", Keys: []string{"epoch"}, Class: Native, Writer: "the `sup.leader` holder", Retention: "no TTL; rewritten at each rebuild"},
 	{Name: "ape-leases", Type: "KV, per-key TTL", Keys: []string{"steward.<ens>", "coord.<ens>", "sup.leader", "milestone.<project>.<M>", "conductor.<user>.<ens>"}, Class: Native, Writer: "the claimant", Retention: "TTL; deleted on release or close"},
 	{Name: "ape-slots", Type: "KV, per-key TTL", Keys: []string{"slot.<host>.<resource>.<n>"}, Class: Native, Writer: "the holder", Retention: "TTL"},
-	{Name: "ape-runs", Type: "KV", Keys: []string{"run.<project>.<run-id>"}, Class: Native, Writer: "the ape that ran it", Retention: "90 days"},
+	{Name: "ape-runs", Type: "KV", Keys: []string{"run.<project>.<run-id>"}, Class: Native, Writer: byRunner, Retention: "90 days"},
 	{Name: "ape-attempts", Type: "KV", Keys: []string{"attempt.<project>.<change>.<n>"}, Class: Native, Writer: "the change's ape", Retention: "deleted at milestone close"},
 	{Name: "ape-usage", Type: "KV", Keys: []string{"usage.<user>"}, Class: Native, Writer: "that developer's ape", Retention: "latest only; history in the stream"},
 	{Name: "ape-state", Type: "KV", Keys: []string{"milestone.<project>.<M>", "change.<project>.<id>", "contract.<ens>.<name>.v<N>"}, Class: View, Writer: "ape, from git", Retention: "until the referencing close"},
 	{Name: "ape-queue", Type: "KV", Keys: []string{"pr.<project>.<M>.<change | take-in-<n> | close>"}, Class: ViewGitHub, Writer: "the coordinator", Retention: "deleted at merge or close"},
 	{Name: "APE_EVENTS", Type: "stream", Keys: []string{"ape.evt.>"}, Class: Native, Writer: "each publisher", Retention: "90 days"},
 	{Name: "APE_METRICS", Type: "stream", Keys: []string{"ape.metrics.>"}, Class: Native, Writer: "each publisher", Retention: "90 days"},
-	{Name: "ape-transcripts", Type: "Object Store", Keys: []string{"sha256/<hex>"}, Class: Native, Writer: "the ape that ran it", Retention: "90 days, or until the referencing close", Exists: true},
-	{Name: "ape-gatelogs", Type: "Object Store", Keys: []string{"<project>/<M>/<run-id>/<check>.log.zst"}, Class: Native, Writer: "the ape that ran it", Retention: "90 days"},
+	{Name: "ape-transcripts", Type: "Object Store", Keys: []string{"sha256/<hex>"}, Class: Native, Writer: byRunner, Retention: "90 days, or until the referencing close", Exists: true},
+	{Name: "ape-gatelogs", Type: "Object Store", Keys: []string{"<project>/<M>/<run-id>/<check>.log.zst"}, Class: Native, Writer: byRunner, Retention: "90 days"},
 }
 
 // Subject is one subject pattern coordination publishes or serves.
@@ -95,12 +98,22 @@ const (
 	HeavyPerHost      = 3
 )
 
-// Lease keys, by kind.
-func StewardKey(ens string) string           { return "steward." + ens }
-func CoordKey(ens string) string             { return "coord." + ens }
-func MilestoneKey(project, m string) string  { return "milestone." + project + "." + m }
-func ConductorKey(user, ens string) string   { return "conductor." + user + "." + ens }
+// StewardKey is the ensemble's steward lease.
+func StewardKey(ens string) string { return "steward." + ens }
+
+// CoordKey is the ensemble's coordinator lease.
+func CoordKey(ens string) string { return "coord." + ens }
+
+// MilestoneKey is a milestone's lease, held by its orchestrator.
+func MilestoneKey(project, m string) string { return "milestone." + project + "." + m }
+
+// ConductorKey is one person's conductor lease for an ensemble.
+func ConductorKey(user, ens string) string { return "conductor." + user + "." + ens }
+
+// SlotKey is a slot's lease: the n-th unit of a resource on a host.
 func SlotKey(host, res string, n int) string { return fmt.Sprintf("slot.%s.%s.%d", host, res, n) }
+
+// MessageID is an event's message id (OQ14).
 func MessageID(project, checkout string, seq uint64) string {
 	return fmt.Sprintf("%s/%s/%d", project, checkout, seq)
 }
