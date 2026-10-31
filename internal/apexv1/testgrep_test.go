@@ -1,12 +1,14 @@
 package apexv1
 
 import (
+	"errors"
 	"os/exec"
 	"regexp"
 	"runtime"
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -139,4 +141,52 @@ func TestTestGrepShapes_SuggestedCommandsAreSh(t *testing.T) {
 	if err == nil {
 		t.Log("this host's /bin/sh accepts <<< (bash as sh); the control proves nothing here")
 	}
+}
+
+// TestTestGrepShapes_CaptureFormSurvivesPipefail runs the capture form the
+// notices suggest under `set -o pipefail` on more output than a pipe buffer
+// holds: the l.96 notice fires only under pipefail, and `grep -q` there
+// stops at its first match and kills printf with SIGPIPE, exit 141 on a
+// pass (D653+, rc4's text). Without -q grep reads to the end.
+func TestTestGrepShapes_CaptureFormSurvivesPipefail(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("checks run under sh; no /bin/sh here")
+	}
+	if err := exec.Command("sh", "-c", "set -o pipefail").Run(); err != nil {
+		t.Skip("this host's /bin/sh has no pipefail")
+	}
+	tick := regexp.MustCompile("`([^`]+)`")
+	forms := map[string]bool{}
+	for _, cmd := range []string{
+		"go test -v ./x | grep -q '^--- PASS: TestX$'",
+		"set -o pipefail; go test -v ./x | grep -q 'PASS: TestX'",
+	} {
+		for _, n := range testGrepShapes(cmd) {
+			for _, m := range tick.FindAllStringSubmatch(n, -1) {
+				if strings.HasPrefix(m[1], "out=$(go test") {
+					forms[m[1]] = true
+				}
+			}
+		}
+	}
+	require.NotEmpty(t, forms)
+	// seq 1 300000 is about 2 MB, far past a 64 KB pipe buffer; the match
+	// sits at the start, so an early exit would leave most of it unread.
+	run := func(form, pattern string) int {
+		line := strings.Replace(form, "go test -v ./pkg", "seq 1 300000", 1)
+		line = strings.ReplaceAll(line, "…", pattern)
+		err := exec.Command("sh", "-c", "set -o pipefail; "+line).Run()
+		if exit, ok := errors.AsType[*exec.ExitError](err); ok {
+			return exit.ExitCode()
+		}
+		require.NoError(t, err, line)
+		return 0
+	}
+	for form := range forms {
+		assert.Equal(t, 0, run(form, "-x 1"), "a match must exit 0: %s", form)
+		assert.Equal(t, 1, run(form, "-x 0"), "no match must exit 1: %s", form)
+	}
+	// The control: rc4's -q form exits 141 on the same match.
+	assert.Equal(t, 141, run(`out=$(go test -v ./pkg) && printf '%s\n' "$out" | grep -q …`, "-x 1"),
+		"grep -q under pipefail on 2 MB should die of SIGPIPE; the test proves nothing if it does not")
 }
