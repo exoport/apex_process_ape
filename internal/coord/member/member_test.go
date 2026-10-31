@@ -123,3 +123,41 @@ func TestGate(t *testing.T) {
 	require.ErrorAs(t, Gate(ctx, project(t, block, false), "change start", "", now), &fe)
 	require.Equal(t, apexv1.CodeCoordMembership, fe.Code)
 }
+
+// Stage 1a step 1: coordination.github names the coordinated repository;
+// its token is hot/github.token, read by ape alone. A repo that is not
+// <owner>/<name>, or a missing or empty token, is ErrGitHub (a person's
+// fix); without the github key the project integrates by local trunk.
+func TestLoad_GitHub(t *testing.T) {
+	gh := block + "  github:\n    repo: exoport/atomix-mirror\n"
+	token := func(p *apexv1.Project, s string) {
+		require.NoError(t, os.WriteFile(filepath.Join(p.Root, "hot", "github.token"), []byte(s), 0o600))
+	}
+	p := project(t, gh, true)
+	_, err := Load(p)
+	require.ErrorIs(t, err, ErrGitHub, "no token")
+	token(p, "")
+	_, err = Load(p)
+	require.ErrorIs(t, err, ErrGitHub, "an empty token")
+	token(p, "github_pat_x\n")
+	m, err := Load(p)
+	require.NoError(t, err)
+	require.Equal(t, "exoport/atomix-mirror", m.GitHubRepo)
+	require.Equal(t, DefaultGitHubAPI, m.GitHubAPI)
+	tok, err := m.ReadGitHubToken()
+	require.NoError(t, err)
+	require.Equal(t, "github_pat_x", tok)
+
+	for _, bad := range []string{"atomix", "exoport/", "/atomix", "a/b/c"} {
+		p := project(t, block+"  github:\n    repo: "+bad+"\n", true)
+		token(p, "t")
+		_, err := Load(p)
+		require.ErrorIs(t, err, ErrGitHub, bad)
+	}
+
+	m, err = Load(project(t, block, true))
+	require.NoError(t, err)
+	require.Empty(t, m.GitHubRepo, "no github key: local trunk")
+	_, err = m.ReadGitHubToken()
+	require.ErrorIs(t, err, ErrGitHub)
+}

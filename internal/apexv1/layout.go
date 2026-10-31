@@ -144,6 +144,19 @@ type CoordinationConfig struct {
 	Home string `yaml:"home"`
 	// URL is the NATS server URL, or a comma-separated list of them.
 	URL string `yaml:"url"`
+	// GitHub is the coordinated repository (v1.5 stage 1a, section 5):
+	// ape opens and enqueues its pull requests there, with the token in
+	// GitHubTokenRel. Absent, the project integrates by local trunk.
+	GitHub *GitHubConfig `yaml:"github"`
+}
+
+// GitHubConfig is coordination.github.
+type GitHubConfig struct {
+	// Repo is <owner>/<name>.
+	Repo string `yaml:"repo"`
+	// API is the API's base URL; default https://api.github.com (a
+	// test's fake, or GitHub Enterprise).
+	API string `yaml:"api,omitempty"`
 }
 
 // ConductorConfig is the conductor: block.

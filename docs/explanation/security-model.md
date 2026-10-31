@@ -86,7 +86,8 @@ anywhere. The sandbox, once it is complete, is where this is meant to be closed.
 The NATS credentials are a case of this (v1.5, in development). A project that coordinates with an ensemble
 connects with `hot/ape-nats.creds`, which `ape` reads from that path only: it is never put in an environment
 variable, the edit and read tools are denied the file (`ape project init` writes `permissions.deny` rules for it, and every `ape task` session also gets them inline),
-and a Bash or Monitor command that names it, names `hot` as a folder, or holds a pattern matching it is denied. The
+and a Bash or Monitor command that names it (`@hot/…` included), names `hot` as a folder, or holds a pattern matching
+it is denied. The coordinated repository's GitHub token, `hot/github.token`, is kept the same way. The
 older service credential, `APE_NATS_URL` and `APE_NATS_CREDS` (`ape service`, `ape event`), is an environment
 variable like any other: a session started from a shell that sets them inherits them. Unset them in the shell that
 starts a loop if the loop does not publish through them.

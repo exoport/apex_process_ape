@@ -31,7 +31,13 @@ var (
 	ErrNameClash = errors.New("member: the ensemble's name is a member project's")
 	// ErrNoCreds: hot/ape-nats.creds is missing.
 	ErrNoCreds = errors.New("member: no NATS credential at " + apexv1.NATSCredsRel)
+	// ErrGitHub: coordination.github names no <owner>/<name> repository,
+	// or hot/github.token is missing or empty (stage 1a).
+	ErrGitHub = errors.New("member: coordination.github cannot be used")
 )
+
+// DefaultGitHubAPI is coordination.github.api when unset.
+const DefaultGitHubAPI = "https://api.github.com"
 
 // Membership is a resolved coordination: block.
 type Membership struct {
@@ -40,6 +46,11 @@ type Membership struct {
 	Home, URL         string
 	// Creds is the credential's absolute path.
 	Creds string
+	// GitHubRepo (<owner>/<name>) and GitHubAPI are the coordinated
+	// repository (stage 1a, section 5), "" when the block names none: the
+	// project then integrates by local trunk. GitHubToken is the token's
+	// absolute path.
+	GitHubRepo, GitHubAPI, GitHubToken string
 }
 
 // Load resolves the project's membership. A block that names its own
@@ -79,7 +90,38 @@ func Load(p *apexv1.Project) (Membership, error) {
 	if _, err := os.Stat(m.Creds); err != nil {
 		return Membership{}, fmt.Errorf("%w: %w", ErrNoCreds, err)
 	}
+	if g := c.GitHub; g != nil {
+		owner, name, ok := strings.Cut(strings.TrimSpace(g.Repo), "/")
+		if !ok || owner == "" || name == "" || strings.Contains(name, "/") {
+			return Membership{}, fmt.Errorf("%w: repo %q is not <owner>/<name>", ErrGitHub, g.Repo)
+		}
+		m.GitHubRepo, m.GitHubAPI = owner+"/"+name, strings.TrimRight(strings.TrimSpace(g.API), "/")
+		if m.GitHubAPI == "" {
+			m.GitHubAPI = DefaultGitHubAPI
+		}
+		m.GitHubToken = filepath.Join(p.Root, filepath.FromSlash(apexv1.GitHubTokenRel))
+		if st, err := os.Stat(m.GitHubToken); err != nil || st.Size() == 0 {
+			return Membership{}, fmt.Errorf("%w: no token at %s (a fine-grained token for %s, placed by a person)", ErrGitHub, apexv1.GitHubTokenRel, m.GitHubRepo)
+		}
+	}
 	return m, nil
+}
+
+// ReadGitHubToken reads the coordinated repository's token, for ape's own
+// calls only: it is never put in an environment or a log.
+func (m Membership) ReadGitHubToken() (string, error) {
+	if m.GitHubToken == "" {
+		return "", fmt.Errorf("%w: the block names no github repository", ErrGitHub)
+	}
+	data, err := os.ReadFile(m.GitHubToken)
+	if err != nil {
+		return "", fmt.Errorf("%w: %w", ErrGitHub, err)
+	}
+	tok := strings.TrimSpace(string(data))
+	if tok == "" {
+		return "", fmt.Errorf("%w: %s is empty", ErrGitHub, apexv1.GitHubTokenRel)
+	}
+	return tok, nil
 }
 
 // CheckEnsemble refuses an ensemble whose token equals a member project's

@@ -17,7 +17,7 @@ const CodeCoordMembership = "coord.membership"
 func init() {
 	DiagnosticCodes = append(DiagnosticCodes,
 		CodeDoc{CodeCoordMilestonePaused, 1, ActionPerson, "the milestone is paused (v1.5, OQ24): a question to the ensemble's conductor went unanswered past the pause age, so change new and change start of that milestone refuse; other milestones go on — the conductor's answer resumes it (milestone-resumed)"},
-		CodeDoc{CodeCoordMembership, 1, ActionPerson, "the project's coordination: block in _apex/config.yaml cannot be used (v1.5, OQ3, OQ4): it lacks ensemble, home or url, its ensemble is named as a member project (R8: both compared as subject tokens), or the ensemble credential hot/ape-nats.creds is missing — a person fixes the block or places the credential"},
+		CodeDoc{CodeCoordMembership, 1, ActionPerson, "the project's coordination: block in _apex/config.yaml cannot be used (v1.5, OQ3, OQ4): it lacks ensemble, home or url, its ensemble is named as a member project (R8: both compared as subject tokens), the ensemble credential hot/ape-nats.creds is missing, or coordination.github names no <owner>/<name> repository or its token hot/github.token is missing (stage 1a) — a person fixes the block or places the credential"},
 		CodeDoc{CodeCoordNATSUnreachable, 1, ActionRetry, "a project in an ensemble (coordination: in _apex/config.yaml) needs NATS to start a milestone or a change and to integrate (claim, enqueue, elect), and NATS is unreachable (v1.5, OQ5): work already in flight continues; run the command again once NATS is back (`ape status` says since when it is down)"},
 	)
 }

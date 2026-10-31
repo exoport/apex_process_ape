@@ -261,8 +261,10 @@ func (p *Project) protectedReason(abs string) string {
 	if resolvedRoot, err := filepath.EvalSymlinks(p.Root); err == nil {
 		root = resolvedRoot
 	}
-	if abs == filepath.Join(root, filepath.FromSlash(NATSCredsRel)) || abs == filepath.Join(p.Root, filepath.FromSlash(NATSCredsRel)) {
-		return credsReason
+	for _, sec := range ApeSecrets {
+		if abs == filepath.Join(root, filepath.FromSlash(sec)) || abs == filepath.Join(p.Root, filepath.FromSlash(sec)) {
+			return secretReason(sec)
+		}
 	}
 	for _, r := range []string{root, p.Root} {
 		if rel, err := filepath.Rel(filepath.Join(r, filepath.FromSlash(OrdersDirRel)), abs); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {

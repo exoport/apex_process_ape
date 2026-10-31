@@ -626,6 +626,9 @@ coordination:
   ensemble: shop                          # the ensemble's name; its subject token is its slug
   home: git@example.com:shop/home.git     # the repository holding the ensemble's roadmap and contracts
   url: nats://nats.example.com:4222       # the NATS server, or a comma-separated list
+  github:                                 # optional (v1.5 stage 1a): the coordinated repository
+    repo: shop/notes                      # <owner>/<name>: where the pull requests are opened and enqueued
+    # api: https://github.example.com/api/v3   # default https://api.github.com
 ```
 
 - **The credential is not in the config.** ape connects with `hot/ape-nats.creds`, a credential
@@ -633,7 +636,12 @@ coordination:
   by the `permissions.deny` rules `ape project init` writes (and every `ape task` session also gets
   them inline in its `--settings`, so they hold even if the project file loses them), and a
   Bash or Monitor command that names it, names `hot` as a folder, or holds a pattern matching it is
-  denied ([security model](../explanation/security-model.md)).
+  denied ([security model](../explanation/security-model.md)). A `curl -d @hot/…` form counts as naming the file.
+- **The GitHub token is kept the same way.** With `github:` set, ape uses `hot/github.token`, a fine-grained
+  token for that repository only, which a person places there. ape reads it for its own API calls and never
+  puts it in an environment. The same rules deny it to every session tool. A missing or empty token, or a
+  `repo` that is not `<owner>/<name>`, is `coord.membership` (action `person`). Without `github:`, the project
+  integrates by local trunk, as before.
 - **An ensemble named as a member project is refused.** Both are compared as subject tokens
   (lowercase, `.`, `*`, `>` and spaces as `-`), so `notes.svc` clashes with the project `Notes Svc`.
 - **NATS is required to start and to integrate.** When it is unreachable, `ape change new`, `ape change
