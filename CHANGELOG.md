@@ -23,6 +23,12 @@ v1.4.2 release.
   other key and hook in `.claude/settings.json` is kept, and a `hook` line is printed for each
   change. Before, only the v0 lift did this, so an updated v1 project kept an older init's
   fail-open hook.
+- **`ape task apex-loop … --usage-ok` carries the override to the loop's children**, for that run
+  only. Each child that run launches gets past the usage guard whatever the reading says, and its
+  manifest records `usage_ok` with `usage_ok_from: <the loop's run>`. Before, the first child (an
+  `apex-apply`) stopped on the guard and the tweak blocked. A child carries the override only when
+  ape finds the loop by process ancestry, or for a detached child through the handle its launcher
+  wrote. A session that only names the loop in its environment carries nothing.
 
 ## v1.4.2 (2026-10-31)
 

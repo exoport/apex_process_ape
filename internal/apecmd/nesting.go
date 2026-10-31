@@ -83,6 +83,10 @@ type sessionAt struct {
 	RunnerPID int
 	// Source says how it was found: "ancestry", "env", or "" at depth 0.
 	Source string
+	// UsageOK: the session found by ancestry was started with a person's
+	// --usage-ok (its registry row says so). Never set from the
+	// environment, which a model can rewrite (1.4.3 PDFA-5).
+	UsageOK bool
 }
 
 // currentSession finds the ape session this process runs in. projectRoot
@@ -94,7 +98,7 @@ func currentSession(projectRoot string) sessionAt {
 	if row := ancestorSession(rows); row != nil {
 		at := sessionAt{
 			Depth: rowDepth(*row), Run: row.RunID, Skill: row.Skill, Kind: row.Command,
-			RunnerPID: row.PID, Source: "ancestry",
+			RunnerPID: row.PID, Source: "ancestry", UsageOK: row.UsageOK,
 		}
 		at.Depth = max(at.Depth, env.Depth)
 		return at
@@ -195,6 +199,11 @@ type sessionLaunch struct {
 	parentPID int
 	// skill is the skill the session runs ("" for a prompt or chat).
 	skill string
+	// usageOK is this session's own --usage-ok (a person's, from a
+	// terminal); usageOKFrom the parent run whose --usage-ok it carries
+	// (1.4.3 PDFA-5), "" when none.
+	usageOK     bool
+	usageOKFrom string
 	// token identifies the holder of locks: the detached run's id, or
 	// pid-<pid>.
 	token string
@@ -248,6 +257,18 @@ func gateSession(verb, skill, projectRoot string) (*sessionLaunch, error) {
 	l := &sessionLaunch{depth: depth, skill: skill}
 	if depth > 1 {
 		l.parentRun, l.parentPID = at.Run, at.RunnerPID
+		// 1.4.3 PDFA-5: a person's --usage-ok on the parent run reaches
+		// the children that run launches — only when the parent is found
+		// by process ancestry, never by an environment variable.
+		if at.Source == "ancestry" && at.UsageOK {
+			l.usageOKFrom = at.Run
+		}
+	}
+	// A detached run's own ape is the supervisor's child, re-parented away
+	// from the loop: the launching process decided the carry and wrote it
+	// on the run's handle.
+	if h := ownHandle(projectRoot); h != nil && h.UsageOKFrom != "" && h.ParentRun == l.parentRun && l.parentRun != "" {
+		l.usageOKFrom = h.UsageOKFrom
 	}
 	return l, nil
 }
@@ -491,6 +512,7 @@ func registerSession(kind, projectRoot, runID string, l *sessionLaunch) *liveSes
 	row := sessions.Session{PID: os.Getpid(), CWD: abs, Command: kind, StartedAt: time.Now().UTC(), RunID: runID, Depth: 1}
 	if l != nil {
 		row.Skill, row.Depth, row.ParentRun = l.skill, l.depth, l.parentRun
+		row.UsageOK = l.usageOK
 	}
 	if sessions.Register(sessions.Path(), row) != nil {
 		return nil

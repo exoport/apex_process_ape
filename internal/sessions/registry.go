@@ -49,6 +49,10 @@ type Session struct {
 	// HeldUntil is set while ape's usage guard holds the session's launch
 	// on the plan's 5-hour window (W4): when it decides again.
 	HeldUntil *time.Time `json:"held_until,omitempty"`
+	// UsageOK: a person started this session with `ape task --usage-ok`
+	// (1.4.3 PDFA-5). A child it launches, found under it by process
+	// ancestry, carries the override for that run.
+	UsageOK bool `json:"usage_ok,omitempty"`
 
 	// PIDStart and ClaudeStart are PID's and ClaudePID's start times
 	// (proctree.StartTime), so a reused pid is not taken for the session

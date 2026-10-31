@@ -267,9 +267,12 @@ type UsageGuardRecord struct {
 	// decision above.
 	HeldUntil   *time.Time `yaml:"held_until,omitempty"`
 	HeldSeconds float64    `yaml:"held_seconds,omitempty"`
-	// UsageOK: a person launched it with --usage-ok.
-	UsageOK bool   `yaml:"usage_ok,omitempty"`
-	Note    string `yaml:"note,omitempty"`
+	// UsageOK: a person launched it with --usage-ok — or launched the loop
+	// run that started it with --usage-ok: UsageOKFrom names that run
+	// (1.4.3 PDFA-5).
+	UsageOK     bool   `yaml:"usage_ok,omitempty"`
+	UsageOKFrom string `yaml:"usage_ok_from,omitempty"`
+	Note        string `yaml:"note,omitempty"`
 }
 
 // UsageReading is one reading of the plan's windows: fractions 0..1, and

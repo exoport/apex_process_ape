@@ -283,27 +283,8 @@ failed (the changes are left staged).`,
 	return cmd
 }
 
-func newFrameworkUpdateCmd(repoFlag, cwdFlag *string) *cobra.Command {
-	var (
-		noFetch      bool
-		force        bool
-		forceClone   bool
-		outputFormat string
-		dryRun       bool
-		noMigrate    bool
-		repair       bool
-		plan         bool
-		noCheck      bool
-		updateApe    bool
-		rf           releaseFlags
-	)
-	cmd := &cobra.Command{
-		Use: "update",
-		// Takes none: without this, a stray argument is silently ignored
-		// and the command answers 0 to an invocation nobody meant.
-		Args:  cobra.NoArgs,
-		Short: "Install the framework's newest release, run pending migrations, and commit the result",
-		Long: `Install the framework's newest release tag (or the one --version names;
+// frameworkUpdateLong is `ape framework update --help`.
+const frameworkUpdateLong = `Install the framework's newest release tag (or the one --version names;
 --from-worktree installs the repo's working tree instead) into <project>:
 
   - .claude/skills/apex-*  re-copied from <repo>/.claude/skills
@@ -431,7 +412,29 @@ min_ape_version; 12 a commit failed (the changes are left staged).
 A migration is skipped (never forced) when ITS OWN paths have uncommitted
 changes. The gate is path-scoped rather than whole-tree: those paths are
 disjoint from what the install writes, so the two are order-independent,
-and unrelated work-in-progress elsewhere does not block anything.`,
+and unrelated work-in-progress elsewhere does not block anything.`
+
+func newFrameworkUpdateCmd(repoFlag, cwdFlag *string) *cobra.Command {
+	var (
+		noFetch      bool
+		force        bool
+		forceClone   bool
+		outputFormat string
+		dryRun       bool
+		noMigrate    bool
+		repair       bool
+		plan         bool
+		noCheck      bool
+		updateApe    bool
+		rf           releaseFlags
+	)
+	cmd := &cobra.Command{
+		Use: "update",
+		// Takes none: without this, a stray argument is silently ignored
+		// and the command answers 0 to an invocation nobody meant.
+		Args:  cobra.NoArgs,
+		Short: "Install the framework's newest release, run pending migrations, and commit the result",
+		Long:  frameworkUpdateLong,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			clone, err := resolveFrameworkClone(*repoFlag)
 			if err != nil {

@@ -448,11 +448,11 @@ func TestEmitFrameworkDryRun_FailedFetchIsNotInSync(t *testing.T) {
 // hook fail-open.
 func TestFrameworkInstallV1_UpdateRefreshesTheHooks(t *testing.T) {
 	v1Env(t)
-	fw := v1FrameworkRepo(t, "v1.0.0-rc.9", v1LiftEntry("exit 0", "true"))
+	fw := v1FrameworkRepo(t, "v1.0.0-rc.8", v1LiftEntry("exit 0", "true"))
 	root := emptyGitProject(t)
 	_, stderr, err := v1Exec(t, newProjectCmd, "init", "--cwd", root)
 	require.NoError(t, err, stderr)
-	out, err := runFramework(t, "setup", fw, root, "--version", "v1.0.0-rc.9", "--no-fetch")
+	out, err := runFramework(t, "setup", fw, root, "--version", "v1.0.0-rc.8", "--no-fetch")
 	require.NoError(t, err, out)
 
 	settings := filepath.Join(root, ".claude", "settings.json")

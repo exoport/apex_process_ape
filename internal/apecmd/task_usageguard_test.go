@@ -342,3 +342,83 @@ func TestUsageGuard_StopShownInStatus(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, stdout, "stopped: usage-guard (not started: the 7-day window), resets 2026-10-24T12:00:00Z")
 }
+
+// 1.4.3 PDFA-5: a person's --usage-ok on a loop run reaches the children
+// that run launches (pdfa run 20261031-230644-c3f9d36 stopped its
+// apex-apply child on the guard, and the tweak blocked). The carry needs
+// the loop found by process ancestry: a session that only names the loop
+// in its environment (which a model can rewrite) carries nothing, and a
+// loop started without --usage-ok passes nothing on. A detached child gets
+// it from its handle, where the launching process wrote it.
+func TestUsageOK_CarriedToTheLoopsChildren(t *testing.T) {
+	root := v1Repo(t)
+	loop := func(usageOK bool) sessions.Session {
+		r := orchestratorRow()
+		r.UsageOK = usageOK
+		return r
+	}
+
+	t.Run("ancestry, the loop started with --usage-ok: carried", func(t *testing.T) {
+		outsideEverySession(t)
+		inSession(t, "task/orch-run", 1)
+		registerRow(t, loop(true))
+		withAncestors(t, 7001, 7000, os.Getppid())
+		l, err := gateSession("ape task", "apex-change", root)
+		require.NoError(t, err)
+		require.Equal(t, 2, l.depth)
+		require.Equal(t, "orch-run", l.usageOKFrom)
+	})
+	t.Run("the control: the loop started without it: nothing", func(t *testing.T) {
+		outsideEverySession(t)
+		inSession(t, "task/orch-run", 1)
+		registerRow(t, loop(false))
+		withAncestors(t, 7001, 7000, os.Getppid())
+		l, err := gateSession("ape task", "apex-change", root)
+		require.NoError(t, err)
+		require.Empty(t, l.usageOKFrom)
+	})
+	t.Run("the environment alone names the loop: nothing", func(t *testing.T) {
+		outsideEverySession(t)
+		inSession(t, "task/orch-run", 1)
+		registerRow(t, loop(true)) // the loop's row exists, but this process is not under it
+		l, err := gateSession("ape task", "apex-change", root)
+		require.NoError(t, err)
+		require.Equal(t, 2, l.depth, "the env still decides the depth, as before")
+		require.Empty(t, l.usageOKFrom, "a model can rewrite its environment: no override from it")
+	})
+	t.Run("detached: from the run's handle, for its own parent run only", func(t *testing.T) {
+		outsideEverySession(t)
+		inSession(t, "task/orch-run", 1)
+		registerRow(t, loop(true))
+		path := handlePath(root, "d1")
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+		require.NoError(t, writeHandle(path, &detachedHandle{ID: "d1", ParentRun: "orch-run", UsageOKFrom: "orch-run"}))
+		t.Setenv(envDetachedID, "d1")
+		l, err := gateSession("ape task", "apex-change", root)
+		require.NoError(t, err)
+		require.Equal(t, "orch-run", l.usageOKFrom)
+		require.NoError(t, writeHandle(path, &detachedHandle{ID: "d1", ParentRun: "other-run", UsageOKFrom: "other-run"}))
+		l, err = gateSession("ape task", "apex-change", root)
+		require.NoError(t, err)
+		require.Empty(t, l.usageOKFrom, "a handle naming another parent carries nothing")
+	})
+
+	t.Run("the guard: carried, the child launches over 0.85 and records it", func(t *testing.T) {
+		usageTempCache(t)
+		fakeUsageClock(t, guardStart)
+		seedReading(t, guardStart.Add(-time.Minute), 0.10, 0.93, guardStart.Add(time.Hour))
+		g := guardFor(usage.DefaultGuard(), false)
+		g.usageOKFrom = "orch-run"
+		var out bytes.Buffer
+		require.NoError(t, g.beforeSpawn(context.Background(), func(*time.Time) {}, &out))
+		require.Contains(t, out.String(), "--usage-ok on the loop run orch-run, carried to the children it launches")
+		rec := g.record()
+		require.Equal(t, "usage_ok", rec.Decision)
+		require.True(t, rec.UsageOK)
+		require.Equal(t, "orch-run", rec.UsageOKFrom)
+
+		g = guardFor(usage.DefaultGuard(), false)
+		err := g.beforeSpawn(context.Background(), func(*time.Time) { t.Fatal("no hold") }, &bytes.Buffer{})
+		require.Error(t, err, "the control: the same child without the carry stops on 0.93, as pdfa's did")
+	})
+}
