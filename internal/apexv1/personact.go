@@ -286,8 +286,18 @@ const (
 func (r *PromptRecord) notification() bool { return r.Kind == promptNotification }
 
 // harnessTagPrefixes open a prompt Claude Code generates, never one a
-// person types (D238; measured on claude 2.1.294–2.1.304).
-var harnessTagPrefixes = []string{"<task-notification>", "<system-reminder>", "<local-command-"}
+// person types (D238; measured on claude 2.1.294–2.1.304), or one ape typed
+// into a session it owns: a conductor message (v1.4.2, D659 A8; v1.5's
+// deliveries, OQ25, use the same form). ape types it into the PTY, so the
+// transcript calls it the person's; the record's kind is what keeps its
+// text — the conductor's, an event's — from ever granting a person act.
+var harnessTagPrefixes = []string{"<task-notification>", "<system-reminder>", "<local-command-", DeliveryTag}
+
+// DeliveryTag opens every message ape types into a session it owns on a
+// conductor's behalf (v1.4.2: into a project's orchestrator; v1.5: a
+// delivery into the conductor's own session, OQ25):
+// `<ape-delivery seq="…" nonce="…">…</ape-delivery>`.
+const DeliveryTag = "<ape-delivery "
 
 // promptKindOf is the kind `ape hook user-prompt` records for prompt: a
 // notification when it starts with a harness tag or is nothing but
