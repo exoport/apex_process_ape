@@ -94,6 +94,12 @@ func TestKillGuard(t *testing.T) {
 		"echo $(pkill x)":                    true,
 		"APE_ALLOW_KILL=1 pkill x":           true,
 		"export APE_ALLOW_KILL=1 && pkill x": true,
+		// v1.4.2 A8: a kill of what a name lookup finds is a kill by name.
+		"kill $(pgrep -f server)":           true,
+		"kill -9 `pidof node`":              true,
+		"pgrep -f 'go test' | xargs kill":   true,
+		"pid=$(pgrep -f server); kill $pid": true,
+		"sh -c 'kill $(pgrep -f x)'":        true,
 		// allowed
 		"kill 12345":                     false,
 		"kill -9 12345":                  false,

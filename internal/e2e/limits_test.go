@@ -192,3 +192,36 @@ func TestTask_V1BudgetOffByDefault(t *testing.T) {
 	require.Equal(t, 2, exitStatus(c.Run()))
 	require.Contains(t, stderr.String(), `limits.budget: "enforced" is not enforce or off`)
 }
+
+// v1.4.2 D1 L3 end to end: `ape task --max-tokens` stops a session whose
+// live tokens (200k output) reach the cap, with no milestone budget
+// enforced; the manifest records max_tokens and the figures, and the stop
+// is the session's — nothing in limit-stops.json. The control: a cap
+// above the session's tokens lets it run to its Stop.
+func TestTask_V1MaxTokensStopsTheSession(t *testing.T) {
+	for _, bin := range []string{"bash", "git"} {
+		if _, err := exec.LookPath(bin); err != nil {
+			t.Skip(bin + " not installed")
+		}
+	}
+	ape := buildApe(t)
+	project, _, env := budgetProject(t, ape)
+	env = append(slices.Clone(env), "FAKE_STOP_AFTER=20")
+	_, code := runApe(t, ape, project, env, "task", "apex-foo", "--max-tokens", "100k", "--idle-timeout", "60s", "--output-format", "json", "--cwd", project)
+	require.Equal(t, 1, code, "the cap stop is a failed run")
+	m := v1TaskManifest(t, project)
+	require.NotNil(t, m.Termination)
+	require.Equal(t, pipeline.TerminationMaxTokens, m.Termination.Kind)
+	require.Equal(t, int64(100_000), m.Termination.MaxTokens)
+	require.Equal(t, int64(200_000), m.Termination.SessionTokens)
+	require.Contains(t, m.Termination.Message, "session token cap reached: 200k of 100k tokens")
+	require.NoFileExists(t, filepath.Join(project, "_apex", "state", "limit-stops.json"), "a session cap is not the milestone's")
+
+	env = append(slices.Clone(env), "FAKE_STOP_AFTER=4")
+	_, code = runApe(t, ape, project, env, "task", "apex-foo", "--max-tokens", "1M", "--idle-timeout", "60s", "--output-format", "json", "--cwd", project)
+	require.Equal(t, 0, code, "the control: under its cap the session runs to its Stop")
+	require.Nil(t, v1TaskManifest(t, project).Termination)
+
+	_, code = runApe(t, ape, project, env, "task", "apex-foo", "--max-tokens", "lots", "--cwd", project)
+	require.Equal(t, 2, code, "a cap ape cannot read is a usage error")
+}

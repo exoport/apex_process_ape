@@ -362,6 +362,11 @@ const (
 	// milestone's spend reached the milestone's budget (limits.budget:
 	// enforce, backlog 30). The spend fields say how far it got.
 	TerminationBudget = "budget"
+	// TerminationMaxTokens — the session reached its own token cap
+	// (limits.session.tokens or `ape task --max-tokens`, v1.4.2 D1 L3): a
+	// person's call. A session's wall cap (limits.session.wall) ends it as
+	// max_duration.
+	TerminationMaxTokens = "max_tokens"
 	// TerminationUsageLimit — the session's claude.ai plan limit stopped it
 	// (H20): ape read Claude Code's usage-limit line in the PTY pane and
 	// ended the run. resets / resets_at say when the limit resets, when the
@@ -410,6 +415,18 @@ type TerminationRecord struct {
 	SpentUSD       float64 `yaml:"spent_usd,omitempty"`
 	BudgetUSD      float64 `yaml:"budget_usd,omitempty"`
 	SessionCostUSD float64 `yaml:"session_cost_usd,omitempty"`
+	// Unit is the budget a budget stop reached (v1.4.2 D1 L2): usd,
+	// tokens or wall. The tokens and wall fields describe a token or wall
+	// budget stop as the USD ones do, and a session cap stop (max_tokens,
+	// max_duration from limits.session) by its session_* and max fields.
+	Unit            string  `yaml:"unit,omitempty"`
+	SpentTokens     int64   `yaml:"spent_tokens,omitempty"`
+	BudgetTokens    int64   `yaml:"budget_tokens,omitempty"`
+	SessionTokens   int64   `yaml:"session_tokens,omitempty"`
+	MaxTokens       int64   `yaml:"max_tokens,omitempty"`
+	SpentWallSecs   float64 `yaml:"spent_wall_seconds,omitempty"`
+	BudgetWallSecs  float64 `yaml:"budget_wall_seconds,omitempty"`
+	SessionWallSecs float64 `yaml:"session_wall_seconds,omitempty"`
 	// Resets / ResetsAt describe a usage-limit stop: the reset as Claude
 	// Code printed it, and parsed (RFC 3339; absent when it did not parse).
 	Resets   string     `yaml:"resets,omitempty"`
@@ -424,6 +441,17 @@ type LimitStopError struct {
 	SpentUSD       float64
 	BudgetUSD      float64
 	SessionCostUSD float64
+	// v1.4.2 D1: the unit a budget stop reached, the token and wall
+	// figures, and a session cap's (MaxTokens; MaxSecs for a wall cap).
+	Unit            string
+	SpentTokens     int64
+	BudgetTokens    int64
+	SessionTokens   int64
+	MaxTokens       int64
+	SpentWallSecs   float64
+	BudgetWallSecs  float64
+	SessionWallSecs float64
+	MaxSecs         float64
 	// Resets / ResetsAt: a usage-limit stop's reset (zero ResetsAt: none parsed).
 	Resets   string
 	ResetsAt time.Time
@@ -489,9 +517,14 @@ type ManifestTotals struct {
 	// remains the sum of the two, so v2 readers are unaffected.
 	TokensCacheCreation5m int `yaml:"tokens_cache_creation_5m"`
 	TokensCacheCreation1h int `yaml:"tokens_cache_creation_1h"`
-	NumTurns              int `yaml:"num_turns"`
-	StepsRun              int `yaml:"steps_run"`
-	StepsFailed           int `yaml:"steps_failed"`
+	// TokensTotal is the four kinds together — input, output, cache read
+	// and cache creation — the one token count limits and reports use
+	// (v1.4.2 D1, D656 Q-L1: cache reads included; the kinds stay above, so
+	// a cap or a report can be derived again).
+	TokensTotal int `yaml:"tokens_total"`
+	NumTurns    int `yaml:"num_turns"`
+	StepsRun    int `yaml:"steps_run"`
+	StepsFailed int `yaml:"steps_failed"`
 	// StepsSkipped / StagesSkipped count records with status skipped.
 	// Skipped steps are not in StepsRun. Omitted when zero, so a run that
 	// skipped nothing writes the same totals as before they existed.

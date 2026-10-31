@@ -37,6 +37,9 @@ A fresh project with one approved milestone gives, in part:
     "approval_self_check": {"sha": "0fd56f53b5f5078d5ccf36d5f833ce8d8e05a433", "exit": 1, "at": "2026-10-21T14:52:45Z", "log": "_apex/state/logs/gate-M1-approve.log"},
     "base_sha": "0fd56f53b5f5078d5ccf36d5f833ce8d8e05a433",
     "spent_usd": 0,
+    "spent_tokens": 0,
+    "spent_tokens_non_cache": 0,
+    "spent_wall_secs": 0,
     "budget_enforced": false,
     "stops": [],
     "consecutive_blocks": 0,
@@ -71,6 +74,7 @@ A fresh project with one approved milestone gives, in part:
 | `next` | string | What comes next, derived from the state alone. |
 | `next_why` | string | Its reason, one line. |
 | `roadmap_next` | array of strings | The Next findings (`development/next.md`, then any the roadmap still holds), as the base branch has them. Not the same as `next`. |
+| `questions` | array | v1.4.2: the open questions (`ape question ask`, not answered yet), oldest first: `{id, at, milestone, change, text, options}`. Each is a person action. `[]` when none. |
 | `docs` | object | `docs:` from `_apex/config.yaml`: `changelog`, `user_docs`, `tested`. `{}` when unset. |
 | `base_upstream` | object or null | `{branch, upstream, ahead, behind}`: the base branch against its upstream, from the local remote-tracking ref (ape never fetches). `null` with no upstream. |
 | `outside_flow` | array | Commits on the base branch since the last archive squash (else the v1 epoch) that touch paths outside `development/` and `_apex/`, carry no `Change:` trailer and have no `apex:` subject: `{sha, subject, files}`, newest first. Shown, never failed. |
@@ -89,14 +93,16 @@ A fresh project with one approved milestone gives, in part:
 | --- | --- |
 | `id`, `title`, `status`, `status_text` | From the roadmap. `status` is `proposed`, `approved` or `done`; `status_text` is the whole `Status:` value. |
 | `gate` | The `Gate:` command. |
-| `budget` | The budget in USD, when the roadmap gives one. |
+| `budget` | The budget in USD, when the roadmap gives one (`Budget:`, legacy). |
+| `budget_tokens`, `budget_wall_secs` | v1.4.2: the `Budget-tokens:` and `Budget-wall:` lines, when the roadmap gives them. |
 | `gate_last` | The latest gate run: `exit`, `at`, `sha`, `secs`, `output_sha256`, `cmd`, `log`, `tail`, `spec_checks`, `spec_failed`, `stray_files`, `strays_kept`, `regression`, `reason`, `detail`, `shell_note`, `leftovers` (v1.2: what the gate command left running and ape ended), `flaky`, `full_skipped` (v1.3), `full_run_reused` (v1.4: when the green full run this gate took instead of running the full checks and the regression command ran), `live_skipped` (deprecated: the same number under its v1.2 name, removed no earlier than v1.5; a v1.2 record has it alone and ape reads it as both), and `current` (v1.2): `true` when this run still describes the project — no run in progress, HEAD and the working tree (outside `_apex/state/`) unchanged since it ended, and the gate not refused; `false` otherwise, always for a run recorded by ape v1.1. A current run is not what the next gate call returns: that call returns it only when no call has printed its result yet, and otherwise runs the gate again. A red `Gate:` command skips the full scenario checks (`full_skipped`: how many) and the regression command (`regression.skipped: "gate-red"`). Absent before the gate ran. |
 | `approval_self_check` | The latest approval's gate run: `{sha, exit, at, log}`, plus `accept_green: {reason, by, at}` when a person re-approved it green (`milestone approve --accept-green`, v1.2). It is the gate's newest result when its `at` is later than `gate_last.at`, or there is no `gate_last`: the human output and the board then show it, and after an accepted green the next step is `ape milestone close`. A re-approval's `sha` differs from `base_sha`. |
 | `gate_frozen` | v1.4. What the approval froze, `{files, globs}`: the recorded gate files (scripts and own files) and the globs whose new matches count too. A change of the milestone may not edit them (`change.touches-gate`, found at `change check` when its `paths:` cover one). Absent before approval. |
 | `base_sha` | The milestone's start, HEAD at its first approval: what every gate run gets as `APE_MILESTONE_BASE`. |
 | `spent_usd` | The spend of runs started since it was approved. |
-| `budget_enforced` | `limits.budget: enforce` is set. |
-| `stops` | Sessions `ape task` stopped at the enforced budget: `{reason, at, run, skill, spent_usd, budget_usd, session_usd}`. |
+| `spent_tokens`, `spent_tokens_non_cache`, `spent_wall_secs` | v1.4.2: the same runs' `tokens_total`, the part of it that is not cache reads, and their summed session time. |
+| `budget_enforced` | `limits.budget: enforce` is set and the milestone has a budget line. |
+| `stops` | Sessions `ape task` stopped at an enforced budget: `{reason, at, run, skill, spent_usd, budget_usd, session_usd}`, and since v1.4.2 `unit` (`usd`, `tokens`, `wall`) with `spent_tokens`, `budget_tokens`, `session_tokens`, `spent_wall_secs`, `budget_wall_secs`, `session_wall_secs`. |
 | `consecutive_blocks`, `consecutive_blocks_cap` | The milestone's changes blocked in a row, and `limits.consecutive_blocks`. |
 | `diagnostics` | The limit that stops work on it, in the shape of a failure's diagnostics: `[{code: "milestone.blocks-exceeded", action: "stop", …}]` at the cap, else `[]`. |
 

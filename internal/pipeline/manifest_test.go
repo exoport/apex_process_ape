@@ -90,6 +90,9 @@ func TestManifestWriter_FullLifecycle(t *testing.T) {
 	if final.Totals.CostUSD != 1.42 || final.Totals.TokensInput != 84012 {
 		t.Errorf("totals.metrics mismatch: %+v", final.Totals)
 	}
+	if final.Totals.TokensTotal != 84012+8910 {
+		t.Errorf("totals.tokens_total = %d, want the four kinds together (%d)", final.Totals.TokensTotal, 84012+8910)
+	}
 	if len(final.Stages) != 1 || len(final.Stages[0].Steps) != 1 {
 		t.Fatalf("stage/step counts wrong: %+v", final.Stages)
 	}

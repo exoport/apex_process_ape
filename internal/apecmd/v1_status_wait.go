@@ -49,6 +49,9 @@ usage.wait), until one of the comma-separated conditions holds:
   done     every milestone of the roadmap is done (a roadmap with none is not)
   blocked  a change is blocked
   event    any event is logged after --since
+  conductor the project's orchestrator terminal needs its conductor (v1.4.2):
+           orchestrator-dead, orchestrator-idle (idle with a conductor message pending)
+           or run-lost is logged after --since
 
 Level first: when a condition already holds, the call returns at once. Then the events: an
 event after --since that makes a condition hold returns it — person on a person or block
@@ -61,9 +64,14 @@ _apex/state/events.jsonl, one line per event: {seq, at, event, milestone, change
 reason, action} (skill too, for an ape task run), seq strictly increasing; it rolls at 10 MB
 into events.1.jsonl (one kept), seq carrying on. The events: person (action is the phrase
 the person types), gate-green, milestone-done, run-end (exit is the run's exit code),
-run-lost, stop and block. _apex/config.yaml's notify: runs after each line is written, with
-APE_EVENT, APE_SEQ, APE_MILESTONE, APE_CHANGE, APE_RUN, APE_EXIT, APE_SKILL, APE_REASON and
-APE_ACTION in its environment.
+run-lost, stop and block, and since v1.4.2 delegated (a conductor's act under standing
+orders), orders (orders accepted or revoked), orchestrator-dead, orchestrator-idle,
+question and question-answered (ape question), and conductor-stalled (a delivery the
+conductor's watcher typed went unacknowledged).
+_apex/config.yaml's notify: runs after each line is written, with
+APE_EVENT, APE_SEQ, APE_MILESTONE, APE_CHANGE, APE_RUN, APE_EXIT, APE_SKILL, APE_REASON,
+APE_ACTION and APE_ORDERS (a delegated act's or an orders change's: <person>@<commit>) in its
+environment.
 
 In a project with a coordination: block (v1.5, in development), each logged event is also
 published on NATS (kind project, message id <project>/<checkout-id>/<seq>), and a wait with

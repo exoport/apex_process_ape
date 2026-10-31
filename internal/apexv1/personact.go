@@ -98,6 +98,7 @@ var PersonActs = []PersonActSpec{
 	{ActAcceptRed, `ape milestone close <M> --accept-red "<reason>"`, "accept red on <M>", true},
 	{ActAllowPendingHuman, "ape change archive <change-id> --allow-pending-human", "allow pending human on <change-id>", true},
 	{ActDecisionAccept, "ape decision accept <ADR-NNNN>", "accept <ADR-NNNN>", false},
+	{ActQuestionAnswer, `ape question answer <Q-id> --text "<answer>"`, "answer <Q-id>: <answer>", false},
 }
 
 // PersonActGrammar is the phrase grammar, one line per guarded act.
@@ -165,7 +166,7 @@ func (c PersonCall) Phrase() string {
 	switch c.Act {
 	case ActMilestoneApprove, ActTweakApprove:
 		return "approve " + c.Target
-	case ActAnswer:
+	case ActAnswer, ActQuestionAnswer:
 		return "answer " + c.Target + ": " + c.Text
 	case ActAcceptTask:
 		return "accept " + c.Task + " of " + c.Target
@@ -185,11 +186,14 @@ func (c PersonCall) Phrase() string {
 // answer's text is matched apart.
 func (c PersonCall) words() []string {
 	ph := c.Phrase()
-	if c.Act == ActAnswer {
+	if c.answerLike() {
 		ph = "answer " + c.Target
 	}
 	return strings.Fields(strings.ToLower(ph))
 }
+
+// answerLike: an act whose phrase carries the person's own text.
+func (c PersonCall) answerLike() bool { return c.Act == ActAnswer || c.Act == ActQuestionAnswer }
 
 // targetKey names the act and target a prompt may grant once.
 func (c PersonCall) targetKey() string { return c.Act + "\x00" + c.Target + "\x00" + c.Task }
@@ -280,21 +284,32 @@ type PromptRecord struct {
 const (
 	promptTyped        = "typed"
 	promptNotification = "notification"
+	// promptDelivery: a message ape typed into a session it owns or a
+	// conductor's pane (DeliveryTag; D659 A8, D664). It never grants, and,
+	// unlike a notification, never falls back to the person's latest typed
+	// prompt either: it is the conductor's or ape's, never the person's.
+	promptDelivery = "delivery"
 )
 
 // notification reports whether r is a prompt Claude Code generated.
-func (r *PromptRecord) notification() bool { return r.Kind == promptNotification }
+func (r *PromptRecord) notification() bool {
+	return r.Kind == promptNotification || r.Kind == promptDelivery
+}
+
+func (r *PromptRecord) delivery() bool { return r.Kind == promptDelivery }
 
 // harnessTagPrefixes open a prompt Claude Code generates, never one a
 // person types (D238; measured on claude 2.1.294–2.1.304), or one ape typed
-// into a session it owns: a v1.5 conductor delivery (OQ25). ape types a
-// delivery into the PTY, so the transcript calls it the person's; the
-// record's kind is what keeps its text — an event's, other people's
-// words — from ever granting a person act.
+// into a session it owns: a conductor message (v1.4.2, D659 A8; v1.5's
+// deliveries, OQ25, use the same form). ape types it into the PTY, so the
+// transcript calls it the person's; the record's kind is what keeps its
+// text — the conductor's, an event's — from ever granting a person act.
 var harnessTagPrefixes = []string{"<task-notification>", "<system-reminder>", "<local-command-", DeliveryTag}
 
-// DeliveryTag opens every delivery ape types into a conductor's session
-// (v1.5, OQ25): `<ape-delivery seq="…" nonce="…">…`.
+// DeliveryTag opens every message ape types into a session it owns on a
+// conductor's behalf (v1.4.2: into a project's orchestrator; v1.5: a
+// delivery into the conductor's own session, OQ25):
+// `<ape-delivery seq="…" nonce="…">…</ape-delivery>`.
 const DeliveryTag = "<ape-delivery "
 
 // promptKindOf is the kind `ape hook user-prompt` records for prompt: a
@@ -304,6 +319,11 @@ const DeliveryTag = "<ape-delivery "
 // prompt a turn is judged on, even where the transcript cannot be read.
 func promptKindOf(prompt string) string {
 	s := strings.TrimSpace(prompt)
+	// Anywhere in the prompt, not only first (D664+): a delivery typed
+	// after the person's half-typed input is submitted with it.
+	if strings.Contains(s, DeliveryTag) {
+		return promptDelivery
+	}
 	for _, tag := range harnessTagPrefixes {
 		if strings.HasPrefix(s, tag) {
 			return promptNotification
@@ -438,6 +458,23 @@ func lastRecord(recs []PromptRecord, promptID string) *PromptRecord {
 		}
 	}
 	return nil
+}
+
+// turnOpener says what opened a turn when it was not the person — opener,
+// judged then on the person's latest typed prompt — or why the turn grants
+// nothing at all (denied).
+func turnOpener(rec *PromptRecord, seen bool, kind string) (opener, denied string) {
+	switch {
+	case rec != nil && rec.delivery():
+		return "", "this turn was opened by a message ape typed in (<ape-delivery …>: a conductor's or ape's, never the person's words), and such a turn grants no person act, not even on the person's earlier words — a conductor acts only through `ape conductor act`"
+	case seen && kind != "" && kind != originHuman:
+		return `a notification (its transcript message's origin.kind is "` + kind + `")`, ""
+	case rec != nil && rec.notification():
+		return "a notification (a prompt Claude Code generated, recorded as kind notification)", ""
+	case rec == nil:
+		return "", "no prompt of this turn is recorded — is `" + HookCmdUserPrompt + "` the project's UserPromptSubmit hook? (`ape project init` merges it into .claude/settings.json)"
+	}
+	return "", ""
 }
 
 // latestTyped is the person's latest typed prompt among recs (D238): not
@@ -758,14 +795,9 @@ func (p *Project) grantVerdict(ctx context.Context, payload HookPayload, c Perso
 	}
 	origins := transcriptOrigins(transcript, ids)
 	kind, seen := origins[payload.PromptID]
-	var opener string // what opened the turn, when it was not the person
-	switch {
-	case seen && kind != "" && kind != originHuman:
-		opener = `a notification (its transcript message's origin.kind is "` + kind + `")`
-	case rec != nil && rec.notification():
-		opener = "a notification (a prompt Claude Code generated, recorded as kind notification)"
-	case rec == nil:
-		return personActDenied(c, "no prompt of this turn is recorded — is `"+HookCmdUserPrompt+"` the project's UserPromptSubmit hook? (`ape project init` merges it into .claude/settings.json)")
+	opener, denied := turnOpener(rec, seen, kind)
+	if denied != "" {
+		return personActDenied(c, denied)
 	}
 	why := "the person's message that opened this turn does not ask for it"
 	if opener != "" {
@@ -936,7 +968,7 @@ next:
 		first, last := toks[i], toks[i+len(want)-1]
 		start := strings.LastIndexAny(text[:first.start], sentenceEnds) + 1
 		end := len(text)
-		if c.Act != ActAnswer {
+		if !c.answerLike() {
 			if j := strings.IndexAny(text[last.end:], sentenceEnds); j >= 0 {
 				end = last.end + j
 			}
@@ -949,7 +981,7 @@ next:
 				continue next
 			}
 		}
-		if c.Act != ActAnswer {
+		if !c.answerLike() {
 			after := 0
 			for _, t := range toks[i+len(want):] {
 				if t.end > end || after == 3 {

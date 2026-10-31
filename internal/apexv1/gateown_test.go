@@ -23,7 +23,7 @@ func TestGateOwnFiles_DriftOnTheGatesOwnFilesOnly(t *testing.T) {
 			"docs/a.md":               "a\n",
 		})
 		m := p.roadmap().Find("M1")
-		a := p.newApproval(m, "ann")
+		a := p.newApproval(m, "ann", nil)
 		require.Equal(t, []string{"scripts/g.sh"}, sortedKeys(keysOf(a.GateFiles)), "gate_files: the scripts, as before")
 		require.Equal(t, []string{"scripts/checks/g.checks", "scripts/lib/gate.sh"}, sortedKeys(keysOf(a.GateOwnFiles)))
 		require.Empty(t, p.gateDrift(m, a))
@@ -46,7 +46,7 @@ func TestGateOwnFiles_DriftOnTheGatesOwnFilesOnly(t *testing.T) {
 			"development/gates/M2-next/gate.sh": "#!/bin/sh\nexit 1\n",
 		})
 		m := p.roadmap().Find("M1")
-		a := p.newApproval(m, "ann")
+		a := p.newApproval(m, "ann", nil)
 		require.Equal(t, []string{"development/gates/M1-skel/checks", "development/gates/M1-skel/stub/x", "development/gates/lib/common.sh"}, sortedKeys(keysOf(a.GateOwnFiles)),
 			"its folder and lib/, not another milestone's, and not the script gate_files holds")
 		require.NoError(t, os.Remove(filepath.Join(p.Root, "development", "gates", "M1-skel", "stub", "x")))
@@ -59,7 +59,7 @@ func TestGateOwnFiles_DriftOnTheGatesOwnFilesOnly(t *testing.T) {
 	t.Run("an approval recorded before rc.7o", func(t *testing.T) {
 		p := selfCheckProject(t, "./scripts/g.sh", map[string]string{"scripts/g.sh": "#!/bin/sh\nrun_checks scripts/checks/g.checks\n", "scripts/checks/g.checks": "true\n"})
 		m := p.roadmap().Find("M1")
-		a := p.newApproval(m, "ann")
+		a := p.newApproval(m, "ann", nil)
 		a.GateOwnFiles = nil
 		write(t, p, "scripts/checks/g.checks", "false\n")
 		require.Empty(t, p.gateDrift(m, a), "not drift: never recorded")
@@ -194,7 +194,7 @@ func TestGateOwnFiles_IgnoredScratchIsNotDrift(t *testing.T) {
 	}
 	t.Run("the field case: the gate's own output under an ignored .work/", func(t *testing.T) {
 		p, m := setup(t)
-		a := p.newApproval(m, "ann")
+		a := p.newApproval(m, "ann", nil)
 		require.Equal(t, []string{
 			dir + ".work/env", dir + ".work/helper", dir + ".work/lib.sh", dir + ".work/run", dir + "checks", "development/gates/lib/check.sh",
 		}, sortedKeys(keysOf(a.GateOwnFiles)), "the scratch is not recorded; what can run, and what is tracked, is")
@@ -207,7 +207,7 @@ func TestGateOwnFiles_IgnoredScratchIsNotDrift(t *testing.T) {
 	})
 	t.Run("an approval recorded before v1.4 that froze the scratch", func(t *testing.T) {
 		p, m := setup(t)
-		a := p.newApproval(m, "ann")
+		a := p.newApproval(m, "ann", nil)
 		a.ScratchExcluded = false
 		a.GateOwnFiles[dir+".work/io/err"] = "66bb1ab403006ec3c01ed55317731f8a3f7d2a22eae18c0187a48f2a2e67bef0"
 		a.GateOwnFiles[dir+".work/j/example.journal"] = "0"
@@ -218,7 +218,7 @@ func TestGateOwnFiles_IgnoredScratchIsNotDrift(t *testing.T) {
 	})
 	t.Run("a tracked file under the gate folder stays frozen", func(t *testing.T) {
 		p, m := setup(t)
-		a := p.newApproval(m, "ann")
+		a := p.newApproval(m, "ann", nil)
 		plain(t, p, dir+"checks", "weakened\n")
 		plain(t, p, "development/gates/lib/check.sh", "W=/tmp\n")
 		require.Equal(t, []string{dir + "checks changed", "development/gates/lib/check.sh changed"}, p.gateDrift(m, a))
@@ -227,7 +227,7 @@ func TestGateOwnFiles_IgnoredScratchIsNotDrift(t *testing.T) {
 		p, m := setup(t)
 		run(t, p.Root, "add", "-f", dir+".work/io/err")
 		run(t, p.Root, "commit", "-q", "-m", "track it")
-		a := p.newApproval(m, "ann")
+		a := p.newApproval(m, "ann", nil)
 		require.Contains(t, a.GateOwnFiles, dir+".work/io/err")
 		plain(t, p, dir+".work/io/err", "")
 		require.Equal(t, []string{dir + ".work/io/err changed"}, p.gateDrift(m, a))
@@ -235,7 +235,7 @@ func TestGateOwnFiles_IgnoredScratchIsNotDrift(t *testing.T) {
 	t.Run("an ignored file the gate runs or sources stays frozen", func(t *testing.T) {
 		for _, f := range []string{".work/env", ".work/helper", ".work/run", ".work/lib.sh"} {
 			p, m := setup(t)
-			a := p.newApproval(m, "ann")
+			a := p.newApproval(m, "ann", nil)
 			plain(t, p, dir+f, "exit 0\n")
 			require.Equal(t, []string{dir + f + " changed"}, p.gateDrift(m, a), f+": its x bit or #! line removed in the same edit")
 		}
@@ -247,7 +247,7 @@ func TestGateOwnFiles_IgnoredScratchIsNotDrift(t *testing.T) {
 			plain(t, p, dir+f, "x\n")
 		}
 		plain(t, p, dir+".work/x.golden", "x\n")
-		a := p.newApproval(m, "ann")
+		a := p.newApproval(m, "ann", nil)
 		for _, f := range tools {
 			require.Contains(t, a.GateOwnFiles, dir+f)
 		}
@@ -259,7 +259,7 @@ func TestGateOwnFiles_IgnoredScratchIsNotDrift(t *testing.T) {
 		p, m := setup(t)
 		write(t, p, dir+"gate.sh", "#!/bin/bash\n# ape: gate-files "+dir+".work/expected\nexit 1\n")
 		plain(t, p, dir+".work/expected", "ok\n")
-		a := p.newApproval(m, "ann")
+		a := p.newApproval(m, "ann", nil)
 		require.Contains(t, a.GateOwnFiles, dir+".work/expected")
 		plain(t, p, dir+".work/expected", "anything\n")
 		require.Equal(t, []string{dir + ".work/expected changed"}, p.gateDrift(m, a))
@@ -269,13 +269,54 @@ func TestGateOwnFiles_IgnoredScratchIsNotDrift(t *testing.T) {
 		write(t, p, dir+"gate.sh", "#!/bin/bash\nfor c in "+dir+"*.checks; do :; done\nexit 1\n")
 		plain(t, p, dir+"a.checks", "a\n")
 		commitAll(t, p, "checks")
-		a := p.newApproval(m, "ann")
+		a := p.newApproval(m, "ann", nil)
 		require.Equal(t, []string{dir + "*.checks"}, a.GateGlobs)
 		require.NoError(t, os.WriteFile(filepath.Join(p.Root, ".gitignore"), []byte("development/gates/*/.work/\n*.local.checks\n"), 0o644))
 		commitAll(t, p, "ignore local checks")
-		a = p.newApproval(m, "ann")
+		a = p.newApproval(m, "ann", nil)
 		plain(t, p, dir+"mine.local.checks", "x\n")
 		plain(t, p, dir+"b.checks", "b\n")
 		require.Equal(t, []string{dir + "b.checks is new (it matches " + dir + "*.checks)", dir + "mine.local.checks is new (it matches " + dir + "*.checks)"}, p.gateDrift(m, a))
 	})
+}
+
+// 1.4.2 D4 (FINDING-D1-1): taskforge's gate rebuilt its binary into an
+// ignored .work/ on every run; the binary is executable, so approval froze
+// it, the green run rebuilt it, and close refused milestone.gate-changed,
+// a dead end only a person's --accept-green left. Now an ignored file the
+// approval's own self-check run created or rewrote is recorded as scratch:
+// no drift when a later run rebuilds it. Controls: an ignored executable
+// the run did not write stays frozen, and so does a tracked gate file.
+func TestApprove_SelfCheckOutputIsScratch(t *testing.T) {
+	const dir = "development/gates/M1-users/"
+	p := selfCheckProject(t, "./"+dir+"gate.sh", map[string]string{
+		".gitignore": "development/gates/*/.work/\n",
+		dir + "gate.sh": "#!/bin/sh\nhere=$(dirname \"$0\")\nmkdir -p \"$here/.work\"\n" +
+			"{ echo '#!/bin/sh'; cat src.txt; } >\"$here/.work/taskforge\" && chmod +x \"$here/.work/taskforge\"\n" +
+			"\"$here/.work/taskforge\"\ntest -f done.txt\n",
+		"src.txt":          "echo v1\n",
+		dir + "checks":     "a\n",
+		dir + ".work/tool": "#!/bin/sh\ntrue\n",
+	})
+	require.NoError(t, os.Chmod(filepath.Join(p.Root, dir+".work/tool"), 0o755))
+	m, err := p.ApproveMilestone(ctx(), "M1", "ann", nil)
+	require.NoError(t, err)
+	recs, err := p.LoadMilestoneRecords()
+	require.NoError(t, err)
+	a := recs["M1"].Approval
+	require.Equal(t, []string{dir + ".work/taskforge"}, a.GateScratch, "the self-check run's own build output")
+	require.Equal(t, []string{dir + ".work/taskforge"}, a.SelfCheck.Wrote)
+	require.NotContains(t, a.GateOwnFiles, dir+".work/taskforge")
+	require.Contains(t, a.GateOwnFiles, dir+".work/tool", "the control: an ignored executable the run did not write stays frozen")
+
+	write(t, p, "src.txt", "echo v2\n")
+	write(t, p, "done.txt", "")
+	r := RunCheck(ctx(), p.Root, "./"+dir+"gate.sh", "", 0)
+	require.Equal(t, 0, r.Exit, r.Tail)
+	require.Empty(t, p.gateDrift(m, a), "the green run rebuilt its binary: no drift")
+	require.False(t, p.gateScriptUnrecorded(m, a))
+
+	write(t, p, dir+".work/tool", "#!/bin/sh\nexit 0\n")
+	write(t, p, dir+"checks", "weakened\n")
+	require.Equal(t, []string{dir + ".work/tool changed", dir + "checks changed"}, p.gateDrift(m, a), "what the run did not write is compared as before")
 }

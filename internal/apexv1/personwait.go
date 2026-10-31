@@ -88,6 +88,12 @@ func (p *Project) PersonActionsOf(ctx context.Context, r *StatusReport) []Person
 			})
 		}
 	}
+	for _, q := range p.OpenQuestions() {
+		out = append(out, PersonAction{
+			Kind: ActQuestionAnswer, Ref: q.ID, Milestone: q.Milestone, Change: q.Change, Action: "answer " + q.ID + ": <answer>",
+			Reason: "question " + q.ID + ": " + q.Text,
+		})
+	}
 	for i := range r.Changes {
 		c := &r.Changes[i]
 		delegable := map[string]bool{}

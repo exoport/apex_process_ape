@@ -673,13 +673,17 @@ func (p *Project) configKeyFindings() []Finding {
 				if f := v.Content[j]; !slices.Contains(known, f.Value) {
 					out = append(out, Finding{File: configYAML, Line: f.Line, Message: "limits." + f.Value +
 						" is not a key of limits:, so it limits nothing — the keys are " + strings.Join(known, ", ") + ": fix the name, or drop it"})
-				} else if u := v.Content[j+1]; f.Value == "usage" && u.Kind == yaml.MappingNode {
-					// W4: and a key of limits.usage: ape does not know.
+				} else if u := v.Content[j+1]; u.Kind == yaml.MappingNode && (f.Value == "usage" || f.Value == "session") {
+					// W4, v1.4.2 D1 L3: and a key of limits.usage: or
+					// limits.session: ape does not know.
 					uknown := yamlKeys(UsageLimits{})
+					if f.Value == "session" {
+						uknown = yamlKeys(SessionLimits{})
+					}
 					for n := 0; n+1 < len(u.Content); n += 2 {
 						if g := u.Content[n]; !slices.Contains(uknown, g.Value) {
-							out = append(out, Finding{File: configYAML, Line: g.Line, Message: "limits.usage." + g.Value +
-								" is not a key of limits: usage, so it limits nothing — the keys are " + strings.Join(uknown, ", ") + ": fix the name, or drop it"})
+							out = append(out, Finding{File: configYAML, Line: g.Line, Message: "limits." + f.Value + "." + g.Value +
+								" is not a key of limits: " + f.Value + ", so it limits nothing — the keys are " + strings.Join(uknown, ", ") + ": fix the name, or drop it"})
 						}
 					}
 				}

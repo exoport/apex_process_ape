@@ -94,6 +94,24 @@ type Totals struct {
 	CacheCreation5mTokens int `json:"cache_creation_5m_tokens"`
 	CacheCreation1hTokens int `json:"cache_creation_1h_tokens"`
 	NumTurns              int `json:"num_turns"`
+	// DurationSecs is the runs' summed wall time where totals fold whole
+	// runs (the rollup's buckets, v1.4.2 D1 L4); 0 for a turn.
+	DurationSecs float64 `json:"duration_seconds,omitempty"`
+}
+
+// TokensTotal is the four kinds together: input, output, cache read and
+// cache creation (v1.4.2 D1 tokens_total).
+func (t *Totals) TokensTotal() int {
+	return t.InputTokens + t.OutputTokens + t.CacheReadTokens + t.CacheCreationTokens
+}
+
+// NonCacheShare is the part of TokensTotal that is not cache reads, 0..1;
+// 0 with no tokens.
+func (t *Totals) NonCacheShare() float64 {
+	if n := t.TokensTotal(); n > 0 {
+		return float64(n-t.CacheReadTokens) / float64(n)
+	}
+	return 0
 }
 
 // Add folds one turn's usage + cost into the running totals.

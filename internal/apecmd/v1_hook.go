@@ -392,6 +392,9 @@ prompt_id, kind} — the prompt at most 64 KiB — to _apex/state/prompts/<sessi
 (ignored, never committed): what ` + "`ape hook pre-tool`" + ` grants a person act on (its --help
 has the phrase grammar). A prompt Claude Code generated (a <task-notification>, a
 <system-reminder>, tags only) is recorded as kind notification and never grants (D238).
+A prompt carrying ape's delivery mark (` + apexv1.DeliveryTag + `…>) anywhere — a message the
+conductor's watcher or the orchestrator terminal typed — is recorded as kind delivery and
+never grants either, nor lets an earlier typed prompt grant in its turn (v1.4.2).
 Records nothing in a session ape launched (APE_SESSION: ape types those prompts itself)
 or outside a v1 project. Never blocks the prompt: it prints nothing and exits 0, an error
 noted on stderr. ` + "`ape project init`" + ` registers it; missing, ` + "`ape project check`" + ` lists the notice

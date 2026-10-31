@@ -19,9 +19,10 @@ import (
 func TestRunCheck_OwnTmpdir(t *testing.T) {
 	needSh(t)
 	dir := t.TempDir()
-	r := RunCheck(ctx(), dir, `echo "$TMPDIR"; head -c 2048 /dev/zero > "$TMPDIR/blob"`, "", 0)
-	require.Equal(t, 0, r.Exit, r.Tail)
+	r := RunCheck(ctx(), dir, `test "$APE_GATE_SCRATCH" = "$TMPDIR" || exit 9; echo "$TMPDIR"; head -c 2048 /dev/zero > "$TMPDIR/blob"`, "", 0)
+	require.Equal(t, 0, r.Exit, "APE_GATE_SCRATCH names the TMPDIR (1.4.2 A1): %v", r.Tail)
 	require.Len(t, r.Tail, 1)
+	require.Equal(t, r.Tail[0], r.Tmp, "the result records the path")
 	tmp := r.Tail[0]
 	require.True(t, strings.HasPrefix(tmp, checkTmpRoot+string(os.PathSeparator)), tmp)
 	require.LessOrEqual(t, len(tmp), maxCheckTmp, "short enough for a test's unix socket under it (T5)")

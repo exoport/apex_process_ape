@@ -21,6 +21,14 @@ type RunCost struct {
 	// Depth the run's nesting depth; both absent on older runs.
 	ParentRun string `json:"parent_run,omitempty"`
 	Depth     int    `json:"depth,omitempty"`
+	// TokensTotal is the four kinds together (v1.4.2 D1: input, output,
+	// cache read, cache creation), read from the kinds so a manifest
+	// written before tokens_total counts too; DurationSecs the run's wall.
+	TokensTotal  int     `json:"tokens_total"`
+	DurationSecs float64 `json:"duration_seconds"`
+	// TokensCacheRead is the cache-read share of TokensTotal: the rest is
+	// the non-cache tokens, new work rather than context re-read (D656 Q-L1).
+	TokensCacheRead int `json:"tokens_cache_read"`
 }
 
 // RunCosts lists every pipeline and task run's cost under the project's
@@ -36,6 +44,8 @@ func RunCosts(projectRoot string) ([]RunCost, error) {
 			out = append(out, RunCost{
 				Kind: kind, Name: name, RunID: m.RunID, StartedAt: day, CostUSD: m.Totals.CostUSD, Args: m.firstArgs(),
 				ParentRun: m.ParentRun, Depth: m.Depth,
+				TokensTotal:  m.Totals.TokensInput + m.Totals.TokensOutput + m.Totals.TokensCacheRead + m.Totals.TokensCacheCreation,
+				DurationSecs: m.DurationSecs, TokensCacheRead: m.Totals.TokensCacheRead,
 			})
 		})
 		if err != nil {

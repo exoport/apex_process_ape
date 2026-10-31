@@ -76,6 +76,7 @@ leaves an existing `models:` alone, warning for each default skill it lacks.
 | [`tools`](#tools) | `{design: [...], review: [...], advise: [...]}` | none | yes |
 | [`library`](#library) | `true` or `false` | `false` (absent: not a library) | no |
 | [`coordination`](#coordination) | `{ensemble, home, url}` | absent: in no ensemble | yes |
+| [`conductor`](#conductor) | `{idle_alert: <duration>, ack_alert: <duration>}` | `30m`, `15m` | no |
 
 ## `project_name`
 
@@ -154,18 +155,47 @@ limits:
     share: auto            # or a fraction
     max_age: 10m           # an older reading is unknown
     off: false             # true: no guard
+  session:                 # caps on each ape task session (v1.4.2); both off by default
+    tokens: 20M            # stop at this many tokens (termination max_tokens)
+    wall: 3h               # stop at this wall time (termination max_duration)
 ```
 
 | Key | Type | Default | Effect |
 | --- | ---- | ------- | ------ |
-| `budget` | `enforce` or `off` | `off` | With `enforce` and a `Budget:` line on the current approved milestone in `roadmap.md`, `ape task` refuses a session once the milestone's spend is at its budget (`milestone.budget-exceeded`, exit 1), and stops a running one when it gets there (termination `budget`, recorded in `_apex/state/limit-stops.json`). A person raises `Budget:` |
+| `budget` | `enforce` or `off` | `off` | With `enforce` and a budget line on the current approved milestone in `roadmap.md` — `Budget-tokens:` (tokens), `Budget-wall:` (session time) or the legacy `Budget:` (USD) — `ape task` refuses a session once the milestone's use is at a budget (`milestone.budget-exceeded`, exit 1), and stops a running one when it gets there (termination `budget` with its `unit`, recorded in `_apex/state/limit-stops.json`). A person raises the line. See [Milestone budgets](#milestone-budgets) |
 | `attempts` | integer ≥ 1 | 5 | The red verify that reaches it blocks the change. A re-plan resets this count |
 | `attempts_total` | integer ≥ 1 | 15 | Red verifies across the change's re-starts, since a person last answered it |
 | `replans` | integer ≥ 0 | 3 | Re-plans since a person last answered the change. The re-start past it blocks the change |
 | `consecutive_blocks` | integer ≥ 1 | 2 | Changes of a milestone blocked in a row. Past it no change of the milestone is planned or started, and `ape task apex-loop` is refused (`milestone.blocks-exceeded`) until a person re-approves the milestone |
 | `context_relay` | number, above 0 and at most 0.95 | 0.6 | The loop session's context fill at which its next child launch is refused and ape relays the loop to a fresh session (`session.relay`). Under 100,000 tokens of the loop's window it is the notice `limits.context-relay-low`: a fresh apex-loop session starts at about 46,000 tokens, so it would relay at once |
 | `relays` | integer ≥ 0 | 5 | Relays per loop run. The relay past it stops the run (`limits.relays`, exit 1, action person) |
+| `session` | mapping `{tokens, wall}` | off | v1.4.2: caps on each `ape task` session of the project, with or without a milestone budget. `tokens` is a token count (`20M`, `500k`): the session's `tokens_total` (all four kinds, sub-agents included); `wall` a duration (`3h`, `90m`) since it started. At a cap ape stops the session: termination `max_tokens` or `max_duration`, a person's call. The stop is the session's: nothing is recorded against the milestone. `ape task --max-tokens` overrides `tokens` for one session |
 | `usage` | mapping | see below | The usage guard: what `ape task` does before it starts a session, given the plan's usage as the sessions ape launches last read it ([`ape usage`](cli.md#ape-usage)) |
+
+#### Milestone budgets
+
+A milestone's budget lines sit in `roadmap.md`, beside `Gate:`. With `limits.budget: enforce` ape
+enforces each line the current approved milestone has:
+
+```markdown
+## M2 — Users and workspaces
+Status: approved (by dana 2026-10-31T09:00:00Z)
+Gate: ./development/gates/M2-users/gate.sh
+Budget-tokens: 60M
+Budget-wall: 4h
+Goal: …
+```
+
+| Line | Value | Measures |
+| --- | --- | --- |
+| `Budget-tokens:` | a token count: `60M`, `500k`, `1.5G`, `2000000` | `tokens_total` of the milestone's runs since its approval: input, output, cache read and cache creation, sub-agents included |
+| `Budget-wall:` | a duration: `4h`, `90m`, `2h30m` | the summed wall time of those runs: session time, not the calendar time since the approval (nights and waits do not count) |
+| `Budget:` | USD, e.g. `30` | legacy: the same tokens priced by ape's price table, so a price change or an offer moves it. It still works; new roadmaps lead with tokens and wall |
+
+Cache reads are most of `tokens_total` (about 95% in the v1.4.1 evaluation): they count, so the
+figure matches what the eval reports. `ape status` shows the non-cache share beside it. A line ape
+cannot read is the `project check` finding `roadmap.bad-budget`. A tweak's runs count toward no
+milestone.
 
 #### `limits.usage`
 
@@ -613,6 +643,18 @@ coordination:
   unanswered past the pause age, the conductor's ape pauses the milestone (OQ24): `ape change new`
   and `ape change start` in it refuse with `coord.milestone-paused` (action `person`). Other
   milestones go on, and the conductor's answer resumes it.
+
+## `conductor`
+
+v1.4.2. Tunes the orchestrator terminal a person's conductor drives (`ape conductor start`):
+`idle_alert` is how long the orchestrator may sit idle, with a conductor message pending, before
+ape logs `orchestrator-idle`. It takes a Go duration and defaults to `30m`. `--idle-alert` on
+`ape conductor start` overrides it. `ack_alert` is how long a delivery the conductor's watcher
+(`ape conductor watcher`) typed may go unacknowledged before ape logs `conductor-stalled`, so your
+`notify:` command reaches you (default `15m`; `--ack-alert` overrides it). Not guarded: neither
+loosens anything ape enforces.
+[What your conductor may do for you](../explanation/person-acts.md#what-your-conductor-may-do-for-you-v142)
+covers the standing orders.
 
 ## Commands that act on the config
 

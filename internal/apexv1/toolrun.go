@@ -153,3 +153,43 @@ func (p *Project) SaveToolRun(r *ToolRun) error {
 func (p *Project) ClearToolRun(id, name string) {
 	_ = os.Remove(p.ToolRunPath(id, name))
 }
+
+// ReviewReportRel is where a review tool's report belongs: the change's
+// assets/review-<name>.md, the one report path a review session may leave
+// and apex-review commits with review.md (D74 Q23).
+func (p *Project) ReviewReportRel(id, name string) string {
+	return p.Rel(filepath.Join(p.ChangeDir(id), "assets", "review-"+name+".md"))
+}
+
+// FileReviewReport moves a review tool's report that its session wrote
+// beside the change (development/changes/<id>/review-<name>.md) or at the
+// project root (review-<name>.md) into assets/review-<name>.md, where the
+// review session may find it (FINDING-D2-2, 1.4.2 A7): left there, the
+// review session's post-run assertion read it as a file the review left,
+// and voided the review. Only an untracked file moves, and never over a
+// report already in assets/. Returns the path moved from, "" when nothing
+// moved.
+func (p *Project) FileReviewReport(ctx context.Context, id, name string) (string, error) {
+	dst := filepath.Join(p.Root, filepath.FromSlash(p.ReviewReportRel(id, name)))
+	if _, err := os.Stat(dst); err == nil {
+		return "", nil
+	}
+	base := "review-" + name + ".md"
+	for _, src := range []string{filepath.Join(p.ChangeDir(id), base), filepath.Join(p.Root, base)} {
+		if _, err := os.Stat(src); err != nil {
+			continue
+		}
+		rel := p.Rel(src)
+		if out, _ := git(ctx, p.Root, "ls-files", "--", rel); strings.TrimSpace(out) != "" {
+			continue // tracked: someone's file, not this session's report
+		}
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return "", err
+		}
+		if err := os.Rename(src, dst); err != nil {
+			return "", err
+		}
+		return rel, nil
+	}
+	return "", nil
+}

@@ -101,8 +101,9 @@ never the `Status:` line alone. The record holds:
 | `gate_own_files` | The gate's own files beside its scripts, each with its SHA-256 (below). |
 | `gate_globs` | The globs that named some of the own files (below): a file one matches later is a change to the gate. |
 | `gate_scratch_excluded` | v1.4: `true` when the approval left the gate's scratch (ignored files it cannot run) out of `gate_own_files` (below). |
+| `gate_scratch` | v1.4.2: the ignored files in the gate's folders that the approval's own run created or rewrote, such as a binary the gate builds (below). They are scratch, never drift. |
 | `base_sha` | HEAD at the first approval, the milestone's start. A re-approval keeps it. It is `APE_MILESTONE_BASE` for every gate run. |
-| `self_check` | The approval's red run: `at`, `sha`, `exit`, `secs`, `log`, `output_sha256`. |
+| `self_check` | The approval's red run: `at`, `sha`, `exit`, `secs`, `log`, `output_sha256`, and `wrote` (the ignored files it created or rewrote, v1.4.2). |
 
 `ape milestone approve <M> --json` prints the milestone and this `self_check` beside it, so
 `"exit": 1` there shows the gate was recorded red without opening `milestones.json`. After a
@@ -158,7 +159,16 @@ output under its own folder (`development/gates/M1-skel/.work/io/err`, with
 the gate. An ignored file stays frozen when it can change what the gate does: a recorded script
 sources it, a `# ape: gate-files` line declares it, or it is a script (an executable bit, a `#!`
 line, or a script's extension such as `.sh`, `.py` or `.js`). A tracked file is frozen wherever it
-is, ignore rules or not. The approval says so with `gate_scratch_excluded: true`, and drift then
+is, ignore rules or not.
+
+A gate that builds a program into an ignored folder (`.work/taskforge`) writes an executable, which
+the rule above would freeze, and every later run rebuilds it. Since v1.4.2 approve looks at the
+ignored files in the gate's folders before and after its own run of the gate. Every file that run
+created or rewrote is the gate's output: the approval lists it in `gate_scratch`, leaves it out of
+`gate_own_files`, and drift never compares it. A file the gate sources or declares stays frozen
+even then. An ignored file the run did not write is judged as above.
+
+The approval says so with `gate_scratch_excluded: true`, and drift then
 compares every file it recorded; an approval made before v1.4 may hold scratch files, and drift
 skips those. A file a recorded glob matches later is new gate input even when git ignores it.
 

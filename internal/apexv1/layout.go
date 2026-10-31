@@ -95,7 +95,8 @@ type Config struct {
 	// Notify is a shell command ape runs, best effort, on every event it
 	// logs in _apex/state/events.jsonl (H20, W3; events.go), after the
 	// line is written, with APE_EVENT, APE_SEQ, APE_MILESTONE, APE_CHANGE,
-	// APE_RUN, APE_EXIT, APE_SKILL, APE_REASON and APE_ACTION in its
+	// APE_RUN, APE_EXIT, APE_SKILL, APE_REASON, APE_ACTION and (v1.4.2, a
+	// delegated act or an orders change) APE_ORDERS in its
 	// environment. Its failure never changes the outcome.
 	Notify string `yaml:"notify"`
 	// Tools are the skills the design and review steps may call (D59 Q4,
@@ -124,6 +125,12 @@ type Config struct {
 	// OQ3, OQ4; internal/coord/member): absent, the project coordinates
 	// with nobody. Guarded (config.changed).
 	Coordination *CoordinationConfig `yaml:"coordination"`
+	// Conductor tunes the orchestrator terminal a person's conductor
+	// drives (v1.4.2, D660.2): idle_alert, how long the orchestrator may
+	// sit idle with a conductor message pending before ape logs
+	// orchestrator-idle (a Go duration; default 30m). Not guarded: it
+	// loosens nothing ape enforces.
+	Conductor ConductorConfig `yaml:"conductor"`
 }
 
 // CoordinationConfig is the coordination: block. The credential is never
@@ -137,6 +144,14 @@ type CoordinationConfig struct {
 	Home string `yaml:"home"`
 	// URL is the NATS server URL, or a comma-separated list of them.
 	URL string `yaml:"url"`
+}
+
+// ConductorConfig is the conductor: block.
+type ConductorConfig struct {
+	IdleAlert string `yaml:"idle_alert"`
+	// AckAlert: how long a delivery the watcher typed may go
+	// unacknowledged before conductor-stalled (D664; default 15m).
+	AckAlert string `yaml:"ack_alert"`
 }
 
 // SkillModel is one models.<skill> entry.

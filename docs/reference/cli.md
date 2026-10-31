@@ -36,7 +36,7 @@ Subcommands:
 - `aboard` — A shared visual board for a human and one or more agent sessions
 - `change` — The unit of change: new, check, approve (tweaks), start, verify, review, accept, block, answer, archive, tool
 - `chat` — Bridged claude REPL with hooks captured to a runlog
-- `conductor` — APEX v1.5 (in development): the conductor's deliveries
+- `conductor` — A person's delegated conductor: act under standing orders, keep its decision log
 - `config` — Resolve the project's APEX configuration
 - `coordinator` — APEX v1.5 (in development): run an ensemble's coordinator until stopped
 - `costs` — Show this project's Claude cost rollup
@@ -51,9 +51,11 @@ Subcommands:
 - `milestone` — Add, approve, gate and close roadmap milestones
 - `nats` — APEX v1.5 (in development): declare the coordination layout, open a new epoch, replay this checkout's records
 - `next` — Record a finding for later in development/next.md (Next)
+- `orders` — A person's standing orders for their conductor: show, accept, revoke
 - `plugins` — Install the plugins _apex/config.yaml lists, and report what they and the tools slot bring
 - `project` — Create and check an APEX v1 project layout
 - `prompt` — Drive an unattended Claude session from a prompt or a handoff file
+- `question` — Questions for the person: ask (any session), answer (a person, or their conductor under orders), list
 - `rollback` — Rollback ape to the previous version
 - `run` — Wait for, or inspect, a run started with --detach
 - `sandbox` — Provision and operate hardware-isolated Kata VM workspaces (via aped)
@@ -2180,11 +2182,14 @@ check: …`), given with --task; a review tool, for a change whose review_tools:
   - the session writes what its skill writes (a mock-up, a report under assets/): no
     read-only rule and no verdict; its exit is the result (non-zero or lost:
     tool.failed, action retry)
+  - a review tool's report belongs at assets/review-<name>.md; one its session left
+    untracked beside the change or at the project root is moved there when it ends
+    (else the review session would read it as a file the review left, and void itself)
   - --wait (default 9m, at most 9m30s, usage.wait) bounds one call; exit 75 means
     still running: call it again — it attaches to the running session for that
     change and tool
   - JSON: {id, tool, slot, skill, task, args, running, detached_id, log, stdout,
-    task_exit, launch}; stdout holds the session's `ape task --output-format json`
+    task_exit, launch, report, moved_from}; stdout holds the session's `ape task --output-format json`
     envelope
 
 Exit codes: 0 the session ended 0 · 1 tool.unknown, tool.args, tool.failed, a change not
@@ -2443,28 +2448,74 @@ Flags:
 
 ## ape conductor
 
-APEX v1.5 (in development): the conductor's deliveries
+A person's delegated conductor: act under standing orders, keep its decision log
 
 ```
 ape conductor
 ```
 
+The delegated conductor (v1.4.2): a person's own Claude Code session that drives the
+projects' orchestrators and, under the person's standing orders (`ape orders --help`),
+performs some of the person's acts for them.
+
+  act      perform a person act under the orders, with its reason and evidence
+  note     add a hold for the person, an open question, or resolve one
+  log      read the decision log (what was done, what is open)
+  start    the project's orchestrator terminal (Claude Code with /apex-orchestrator)
+  send     queue a message for the orchestrator (typed, marked, when it is idle)
+  read     the orchestrator's replies
+  status   the terminal (alive, idle, pending) and the open holds and questions
+  stop     the terminal
+  watch    show the terminal's screen, read-only
+  watcher  follow the projects' events and wake the conductor (its tmux pane, else notify)
+  ack      acknowledge a delivery the watcher typed
+
+Every delegated act runs the notifier (event "delegated"), and is recorded with
+by: "conductor under orders <person>@<commit> (<reason>)", in the act's own record and in
+the person's decision log, _apex/state/conductor-<person>.md.
+
+A remote project is driven over ssh: every verb takes --project <dir>, so
+`ssh host 'ape conductor act … --project /path'` runs it there (ape ≥ 1.4.2 on that host).
+
 Subcommands:
 
-- `ack` — Acknowledge one delivered event, by the token its delivery names
+- `ack` — Acknowledge a delivery the watcher typed (its id, <project>.<seq>), or a v1.5 delivered event (its token)
+- `act` — Perform a person act under the person's standing orders
+- `log` — Read the person's decision log: the acts done under the orders, the holds and questions
+- `note` — Add a hold for the person or an open question to the decision log, or resolve one
+- `read` — Print the orchestrator's messages after the n-th, from its transcript
+- `send` — Queue a message for the project's orchestrator; ape types it, marked, once it is idle
+- `start` — Start the project's orchestrator terminal: Claude Code running /apex-orchestrator, owned by ape
+- `status` — The orchestrator terminal (alive, idle, pending messages) and the decision log's open holds and questions
+- `stop` — Stop the project's orchestrator terminal
+- `watch` — Show the orchestrator terminal's screen, read-only
+- `watcher` — Follow the projects' events and wake the conductor: typed into its tmux pane, else notify-only
 
 ## ape conductor ack
 
-Acknowledge one delivered event, by the token its delivery names
+Acknowledge a delivery the watcher typed (its id, <project>.<seq>), or a v1.5 delivered event (its token)
 
 ```
-ape conductor ack <token> [flags]
+ape conductor ack <id> [flags]
 ```
 
-Acknowledge an event the conductor's ape typed into the session (proposal §3.1, OQ22).
-Each delivery ends "When you have handled this event, run: ape conductor ack <token>";
-the token is the event's JetStream ack subject. An unacknowledged event is delivered
-again; acknowledgements are what keep the conductor's lease renewed.
+Acknowledge a delivery the conductor's watcher typed into its pane: the conductor has read
+the event (it reads `ape status` for it; the delivery is never the person's words). A
+delivery not acknowledged within the ack alert notifies the person.
+
+APEX v1.5 (in development): a delivery of an ensemble's event ends "When you have handled
+this event, run: ape conductor ack <token>"; the token is the event's JetStream ack subject
+($JS.ACK.…, proposal §3.1, OQ22). Such a token — or any id given with --nats-url or
+--nats-creds — is acknowledged over NATS instead: an unacknowledged event is delivered
+again, and acknowledgements keep the conductor's lease renewed.
+
+Exit codes: 0 acknowledged · 1 a NATS acknowledgement failed · 2 usage.
+
+Examples:
+
+```
+  ape conductor ack notes.42
+```
 
 Flags:
 
@@ -2473,6 +2524,381 @@ Flags:
 | `--cwd` | string | `—` | the project whose coordination: block and hot/ape-nats.creds to use (default: the current directory) |
 | `--nats-creds` | string | `—` | NATS credentials file, instead of the project's hot/ape-nats.creds (env APE_NATS_CREDS) |
 | `--nats-url` | string | `—` | NATS URL, instead of the project's (env APE_NATS_URL) |
+
+## ape conductor act
+
+Perform a person act under the person's standing orders
+
+```
+ape conductor act <act> <target> [<task>] --reason "…" [--evidence <path>]… [--text "…"] [flags]
+```
+
+Perform one of the person's acts under their standing orders, checked first:
+  1. --reason is given: what the act rests on, quoting the evidence (orders.no-reason, exit 2);
+  2. the act is delegable at all (never: accept-config, accept-red, allow-pending-human, push,
+     tag, release, orders: orders.non-delegable);
+  3. the orders exist on the base branch, are accepted and not revoked (orders.missing,
+     orders.unaccepted, orders.revoked);
+  4. the act is named in the orders' acts: (orders.not-named) — every act, D664+;
+  5. the orders' conditions hold (orders.condition);
+  6. no category of the orders' escalate: list holds for it — touches-gate, changes-config,
+     tokens-over — or it goes to the person (orders.escalate);
+  7. each --evidence path exists in the project; a milestone approve names the log of the
+     milestone's latest gate run when it has one (orders.evidence-missing);
+  8. ape re-runs the mechanical check behind the act itself, at HEAD, whatever the conductor
+     was told (D662.2): a milestone approve runs `ape milestone gate-test` on the milestone's
+     gate folder (stub green, plain red), a tweak approve the change's check; not as it must be
+     is orders.check-red, and the self-test's logs join the evidence.
+Then the act runs as the person's own command does. --json reports {act, target, by, orders,
+evidence: [{path, sha256}], checks, seq}.
+
+The acts and their targets, everyday (tier 1) then weightier (tier 2):
+  answer <change-id> --text "<answer>"      change answer (a blocked change)
+  question-answer <Q-id> --text "<answer>"  question answer (an orchestrator's question)
+  tweak-approve <tweak-id>                  change approve (a milestone-less change)
+  milestone-approve <M>                     milestone approve
+  accept-task <change-id> <T<n>>            change accept (only where the project names a
+                                            human-review delegate)
+  decision-accept <ADR-id>                  decision accept
+  prepare-release <version>                 record the release preparation; ape checks the
+                                            changelog at HEAD (docs.changelog, else
+                                            CHANGELOG.md) has a section for the version (## v1.2.0,
+                                            ## 1.2.0 or ## [1.2.0]) and hands back the pushes and
+                                            the tag — the base branch alone, the tag, its push —
+                                            which stay the person's
+  push-branch <branch>                      ape pushes the work branch (never main, master, the
+                                            base or default branch, or a tag; no tags follow)
+  open-pr <branch> --text "<title>"         gh pr create for the branch (body: --reason);
+                                            without gh, refused with the push URL
+Exit codes: 0 done · 1 refused by a check or by the act itself (the code says which) · 2 usage
+(no reason, an unknown act, a missing target).
+
+Examples:
+
+```
+  ape conductor act tweak-approve fix-typo --reason "brief asks for it; change check clean" --evidence development/briefs/fix-typo.md
+  ape conductor act milestone-approve M2 --reason "gate self-test red on the 3 new scenarios, as planned" --evidence _apex/state/logs/gate-M2.log
+  ape conductor act answer add-export --text "CSV, UTF-8" --reason "the brief names CSV" --evidence development/briefs/export.md
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--evidence` | stringArray | `[]` | a path in the project the act rests on (repeatable) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+| `--orders` | string | `—` | whose standing orders (default: git config user.email) |
+| `--project` | string | `—` | the project's directory (the same as --cwd); on another host: ssh host 'ape conductor … --project /path' |
+| `--reason` | string | `—` | what the act rests on, quoting the evidence (required) |
+| `--text` | string | `—` | answer's answer |
+
+## ape conductor log
+
+Read the person's decision log: the acts done under the orders, the holds and questions
+
+```
+ape conductor log [--open] [flags]
+```
+
+Print the person's decision log, newest first: every delegated act with its reason, orders
+and evidence, every hold and question, and their resolutions. --open prints only the holds
+and questions not resolved yet, what a resumed conductor reads first. --json prints
+{person, path, entries} (with --open, entries are the open ones).
+
+Exit codes: 0 printed (an absent log is empty) · 2 usage.
+
+Examples:
+
+```
+  ape conductor log --open
+  ape conductor log --json
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+| `--open` | bool | `false` | only the holds and questions not resolved |
+| `--orders` | string | `—` | whose standing orders (default: git config user.email) |
+| `--project` | string | `—` | the project's directory (the same as --cwd); on another host: ssh host 'ape conductor … --project /path' |
+
+## ape conductor note
+
+Add a hold for the person or an open question to the decision log, or resolve one
+
+```
+ape conductor note --hold "…" | --question "…" | --resolved <n> "…" [flags]
+```
+
+Add to the person's decision log (_apex/state/conductor-<person>.md, written only by ape):
+  --hold "…"          something waiting for the person
+  --question "…"      a question open with the person or an orchestrator
+  --resolved <n> "…"  close hold or question <n>, saying how
+A conductor that resumes reads what is open with `ape conductor log --open`.
+
+Exit codes: 0 noted (prints the entry's number) · 2 usage (no text, or <n> is not open).
+
+Examples:
+
+```
+  ape conductor note --hold "M3 waits for the pricing call"
+  ape conductor note --resolved 4 "EUR, per Dana"
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--hold` | string | `—` | a hold for the person |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+| `--orders` | string | `—` | whose standing orders (default: git config user.email) |
+| `--project` | string | `—` | the project's directory (the same as --cwd); on another host: ssh host 'ape conductor … --project /path' |
+| `--question` | string | `—` | an open question |
+| `--resolved` | int | `0` | the hold or question this resolves (its number); the text is the argument |
+
+## ape conductor read
+
+Print the orchestrator's messages after the n-th, from its transcript
+
+```
+ape conductor read [--since <n>] [flags]
+```
+
+Print the orchestrator's assistant messages after the n-th (default 0: all), numbered from 1,
+from its session transcript. Pass the last n you read as --since next time.
+--json prints [{n, at, text}].
+
+Exit codes: 0 printed · 1 no terminal ran here.
+
+Examples:
+
+```
+  ape conductor read --since 12 --json
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+| `--orders` | string | `—` | whose standing orders (default: git config user.email) |
+| `--project` | string | `—` | the project's directory (the same as --cwd); on another host: ssh host 'ape conductor … --project /path' |
+| `--since` | int | `0` | print the messages after this one |
+
+## ape conductor send
+
+Queue a message for the project's orchestrator; ape types it, marked, once it is idle
+
+```
+ape conductor send "<message>" [flags]
+```
+
+Queue one message for the orchestrator terminal (`ape conductor start`). The supervisor
+types it when the orchestrator is idle, on one line, marked as a conductor message
+(<ape-delivery seq=… nonce=…> … </ape-delivery>): ape's hooks record it as no person's words,
+so it never grants a person act, and apex-orchestrator reads it as its person's delegate.
+At most 600 characters; for more, write a file in the project and name its path.
+
+Exit codes: 0 queued (prints its seq) · 1 no terminal runs here · 2 usage (empty, too long).
+
+Examples:
+
+```
+  ape conductor send "M2's plan is approved: start it"
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+| `--orders` | string | `—` | whose standing orders (default: git config user.email) |
+| `--project` | string | `—` | the project's directory (the same as --cwd); on another host: ssh host 'ape conductor … --project /path' |
+
+## ape conductor start
+
+Start the project's orchestrator terminal: Claude Code running /apex-orchestrator, owned by ape
+
+```
+ape conductor start [--project <dir>] [--model <m>] [--idle-alert 30m] [flags]
+```
+
+Start the project's orchestrator terminal in the background: a supervisor process (it
+outlives this command and the shell that ran it) owns a terminal running Claude Code in the
+project, as a person would start it (bypass permissions on, no ape session marker, so the
+orchestrator starts its loops as from a person's session), and types /apex-orchestrator once
+it is ready. Then it types the conductor's messages (`ape conductor send`), each marked
+and on one line, only while the orchestrator is idle.
+
+It logs the terminal's liveness as project events, which `ape status --wait --until conductor`
+wakes on:
+  orchestrator-dead   the terminal's session ended
+  orchestrator-idle   idle past --idle-alert (default: conductor.idle_alert in
+                      _apex/config.yaml, else 30m) with a conductor message pending
+One terminal per project: a second start while one runs is refused (exit 1).
+On another host: ssh host 'ape conductor start --project /path'.
+
+Exit codes: 0 started (prints the supervisor's pid) · 1 one already runs, or it did not start ·
+2 usage.
+
+Examples:
+
+```
+  ape conductor start
+  ssh build-host 'ape conductor start --project /srv/projects/notes'
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--idle-alert` | string | `—` | how long idle with a message pending before orchestrator-idle (default conductor.idle_alert, else 30m) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+| `--model` | string | `—` | the orchestrator's model (default: Claude Code's) |
+| `--orders` | string | `—` | whose standing orders (default: git config user.email) |
+| `--project` | string | `—` | the project's directory (the same as --cwd); on another host: ssh host 'ape conductor … --project /path' |
+
+## ape conductor status
+
+The orchestrator terminal (alive, idle, pending messages) and the decision log's open holds and questions
+
+```
+ape conductor status [flags]
+```
+
+Print the project's orchestrator terminal — alive, idle and since when, the messages pending
+(queued, or typed with no reply since), the newest reply — and the person's decision log's
+open holds and questions (`ape conductor log --open`). --json prints {terminal, open}.
+
+Exit codes: 0 printed (no terminal is "terminal": null) · 2 usage.
+
+Examples:
+
+```
+  ape conductor status --json
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+| `--orders` | string | `—` | whose standing orders (default: git config user.email) |
+| `--project` | string | `—` | the project's directory (the same as --cwd); on another host: ssh host 'ape conductor … --project /path' |
+
+## ape conductor stop
+
+Stop the project's orchestrator terminal
+
+```
+ape conductor stop [flags]
+```
+
+Stop the orchestrator terminal: its supervisor ends the Claude Code session and records the
+end. Messages still queued stay queued for the next start.
+
+Exit codes: 0 stopped, or none ran · 1 the supervisor could not be signalled.
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+| `--orders` | string | `—` | whose standing orders (default: git config user.email) |
+| `--project` | string | `—` | the project's directory (the same as --cwd); on another host: ssh host 'ape conductor … --project /path' |
+
+## ape conductor watch
+
+Show the orchestrator terminal's screen, read-only
+
+```
+ape conductor watch [--follow] [flags]
+```
+
+Print the orchestrator terminal's last screen, as the supervisor captured it. Read-only: nothing
+typed here reaches the orchestrator (the conductor sends through `ape conductor send`).
+--follow reprints it every 2 seconds until interrupted.
+
+Exit codes: 0 printed · 1 no terminal ran here.
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--follow` | bool | `false` | reprint every 2 seconds |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+| `--orders` | string | `—` | whose standing orders (default: git config user.email) |
+| `--project` | string | `—` | the project's directory (the same as --cwd); on another host: ssh host 'ape conductor … --project /path' |
+
+## ape conductor watcher
+
+Follow the projects' events and wake the conductor: typed into its tmux pane, else notify-only
+
+```
+ape conductor watcher --project <dir>… [--pane <tmux pane>] [--ack-alert 15m] | --repin [flags]
+```
+
+Run the conductor's watcher until interrupted (another terminal, or in the background). It
+follows each --project's events — block, person (a question included), question,
+orchestrator-dead, orchestrator-idle, run-lost, delegated, orders — and turns each into a
+delivery, id <project>.<seq>.
+
+When your conductor (your own Claude Code session) runs in a tmux pane — --pane <target>, or
+the one tmux pane running claude when there is exactly one — the watcher types each delivery
+into it, marked (<ape-delivery …>, never your words: a prompt carrying one grants no person
+act), only when all of these hold:
+  - the pane's foreground process is claude and a Claude Code session registered on this
+    machine (<config>/sessions/<pid>.json) — a stale or wrong pane, a shell, gets nothing;
+  - it is the session the watcher pinned: the session id is recorded at the first look.
+    When another session takes the pane (a /clear starts one too), the watcher PAUSES: it
+    logs conductor-stalled in each project (you are notified) and types nothing until
+    `ape conductor watcher --repin`, run from inside that new session, pins it (or you
+    restart the watcher). A --repin from a session the pane does not run pins nothing;
+  - no turn is running ("esc to interrupt" absent) and the input row is empty — never after
+    your half-typed line;
+  - the screen did not change between two looks (one --poll apart).
+The conductor acknowledges each: `ape conductor ack <id>`. An event not acknowledged within
+--ack-alert of it (default conductor.ack_alert of the first project, else 15m) logs
+conductor-stalled in its project, once, so that project's notify: command reaches you —
+whether it was typed or not (a busy pane, text in the input row, a paused watcher).
+
+--repin: run from the conductor's own Claude Code session after a /clear or a resume; it
+names the session it runs under (found through its process ancestry) to the running
+watcher, and exits.
+
+Without a pane the watcher only records: each of those events already runs the project's
+notify: command (notify-only). State and acknowledgements are kept in
+$XDG_STATE_HOME/ape/conductor (else ~/.local/state/ape/conductor).
+
+Exit codes: 0 stopped (Ctrl-C), or --repin recorded · 1 --repin outside a Claude Code
+session · 2 usage.
+
+Examples:
+
+```
+  ape conductor watcher --project ~/src/notes --project ~/src/billing --pane %3
+  ape conductor watcher --repin
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--ack-alert` | string | `—` | how long a delivery may go unacknowledged before conductor-stalled (default conductor.ack_alert, else 15m) |
+| `--pane` | string | `—` | the conductor's tmux pane (-t target); default the one pane running claude |
+| `--poll` | duration | `2s` | how often it looks |
+| `--project` | stringArray | `[]` | a project to follow (repeatable; default the current directory's) |
+| `--repin` | bool | `false` | from the conductor's own session: pin the running watcher to it (after a /clear or a resume), then exit |
 
 ## ape config
 
@@ -3895,6 +4321,7 @@ words. Each line is the command, then what the person types (the phrase grammar)
   ape milestone close <M> --accept-red "<reason>"         accept red on <M>
   ape change archive <change-id> --allow-pending-human    allow pending human on <change-id>
   ape decision accept <ADR-NNNN>                          accept <ADR-NNNN>
+  ape question answer <Q-id> --text "<answer>"            answer <Q-id>: <answer>
 A Bash command that runs one is allowed only when the prompt that opened this turn — the
 tool call's prompt_id is the prompt's — is recorded by `ape hook user-prompt`, the
 session's transcript holds the person's user message with that promptId and the same
@@ -4037,6 +4464,9 @@ prompt_id, kind} — the prompt at most 64 KiB — to _apex/state/prompts/<sessi
 (ignored, never committed): what `ape hook pre-tool` grants a person act on (its --help
 has the phrase grammar). A prompt Claude Code generated (a <task-notification>, a
 <system-reminder>, tags only) is recorded as kind notification and never grants (D238).
+A prompt carrying ape's delivery mark (<ape-delivery …>) anywhere — a message the
+conductor's watcher or the orchestrator terminal typed — is recorded as kind delivery and
+never grants either, nor lets an earlier typed prompt grant in its turn (v1.4.2).
 Records nothing in a session ape launched (APE_SESSION: ape types those prompts itself)
 or outside a v1 project. Never blocks the prompt: it prints nothing and exits 0, an error
 noted on stderr. `ape project init` registers it; missing, `ape project check` lists the notice
@@ -4053,6 +4483,7 @@ grant is decided): each line is the command, then what the person types for it.
   ape milestone close <M> --accept-red "<reason>"         accept red on <M>
   ape change archive <change-id> --allow-pending-human    allow pending human on <change-id>
   ape decision accept <ADR-NNNN>                          accept <ADR-NNNN>
+  ape question answer <Q-id> --text "<answer>"            answer <Q-id>: <answer>
 Run the command as a literal line (no $ or backquote, one act per command) and without
 --by: ape records by: <git config user.name> with the person's quoted words.
 
@@ -4228,7 +4659,10 @@ recorded even with no match yet). A file git ignores is the gate's scratch, not 
 (v1.4, D581: a gate's output under its own .work/), unless a recorded script sources it, a
 declaration names it, or it is a script — an executable bit, a #! line, or a script's
 extension (.sh .py .js …); a tracked file is frozen wherever it is (gate_scratch_excluded:
-true; an approval before v1.4 holds its scratch, which drift skips). The gate differs from the
+true; an approval before v1.4 holds its scratch, which drift skips). An ignored file the
+approval's own red run created or rewrote is scratch even when it is executable — the gate's
+build output, such as .work/<binary> (1.4.2, gate_scratch) — unless the gate sources or
+declares it. The gate differs from the
 approved one when its command changed, or a recorded gate file it still runs, or a recorded
 own file, is gone or changed (compared file by file), or a file a recorded glob matches is
 not recorded (a new check list); any other gate file or own file created since
@@ -4730,11 +5164,14 @@ Flags:
 Append a milestone (Status: proposed) to roadmap.md
 
 ```
-ape milestone new "<title>" --gate "<cmd>" [--budget N] [flags]
+ape milestone new "<title>" --gate "<cmd>" [--budget-tokens 60M] [--budget-wall 4h] [--budget N] [flags]
 ```
 
 Append "## M<n> — <title>" to development/roadmap.md with Status: proposed, the gate
-command, the budget (USD list-price equivalent, when given) and a Goal: line. The id is
+command, the budget lines given — Budget-tokens: (a token count: 60M, 500k), Budget-wall:
+(the milestone's summed session time: 4h, 90m), Budget: (legacy, USD list-price
+equivalent) — and a Goal: line. ape enforces them under limits.budget: enforce
+(`ape task --help`). The id is
 the next free M<n>. Write the Goal paragraph and the Out of scope bullets afterwards
 (or pass --goal); the Status: line is ape's. Committed as "apex: <M> proposed".
 The gate's scripts must exist, and the gate must run red, before a person approves it
@@ -4747,14 +5184,16 @@ Exit codes: 0 ok (prints the id) · 1 no roadmap.md, or HEAD on a change branch 
 Examples:
 
 ```
-  ape milestone new "Walking skeleton" --gate "./scripts/e2e.sh m1" --budget 30
+  ape milestone new "Walking skeleton" --gate "./scripts/e2e.sh m1" --budget-tokens 60M --budget-wall 4h
 ```
 
 Flags:
 
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
-| `--budget` | float64 | `0` | budget in USD list-price equivalent |
+| `--budget` | float64 | `0` | legacy: budget in USD list-price equivalent |
+| `--budget-tokens` | string | `—` | the milestone's token budget: tokens_total of its runs (60M, 500k) |
+| `--budget-wall` | string | `—` | the milestone's wall budget: its runs' summed session time (4h, 90m) |
 | `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
 | `--gate` | string | `—` | the one command that is red until the milestone is done (required) |
 | `--goal` | string | `—` | the Goal: paragraph (else a placeholder to fill in) |
@@ -4965,6 +5404,168 @@ Flags:
 | `--check` | bool | `false` | write nothing: exit 0 when Next is in next.md already, 1 when a move is due |
 | `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
 | `--json` | bool | `false` | machine output (JSON on stdout) |
+
+## ape orders
+
+A person's standing orders for their conductor: show, accept, revoke
+
+```
+ape orders
+```
+
+Standing orders (v1.4.2) are a person's delegation to their conductor: a committed file
+per person, _apex/standing-orders/<person>.md, where <person> is their git user.email
+in slug form (dana@example.com → dana-example-com). Its frontmatter is what ape checks:
+
+  ---
+  person: dana@example.com
+  acts: [answer, tweak-approve, milestone-approve]   # see the tiers below
+  conditions:
+    tweak-approve: {types: [fix, docs]}             # only tweaks of these types
+    milestone-approve: {max_changes: 6, gate: red}  # at most 6 changes; the last gate run red
+    answer: {question_only: true}                   # only a change blocked on a question
+  ---
+  Free text the conductor reads: how to answer, what to bring back to me.
+
+Every act runs only when the orders name it under acts:. The acts:
+  everyday       answer (change answer), question-answer (ape question answer),
+                 tweak-approve (change approve)
+  weightier      milestone-approve, accept-task (a human-review task naming a delegate),
+                 decision-accept, prepare-release, push-branch, open-pr (a work branch,
+                 never main, the base branch or a tag)
+  never          accept-config, accept-red, allow-pending-human, push (to main, the base
+                 branch or a tag), tag, release, and the orders themselves
+
+The orders count only once the person accepts them, from a terminal: `ape orders accept`
+writes "accepted" (who, when, and the sha256 of what was accepted) into the file on the base
+branch. Any later edit, the person's own included, leaves them unaccepted until accepted
+again. `ape orders revoke` writes "revoked": no delegated act runs under them from then
+on. Both commit on the base branch wherever HEAD is, so they count at once. Neither runs in a
+model session, with or without the person's words (exit 2, session.person-only).
+
+The header is read strictly: an unknown key or act, a never-delegated act, an act listed twice,
+a condition on an act the orders cannot use, a malformed condition, or a tweak type the project
+does not have is orders.invalid, naming the line. Nothing in it is ever ignored.
+
+A conductor acts under them only through `ape conductor act`, which checks the orders, the
+act's tier, the conditions and the evidence, and re-runs the act's mechanical check, before it
+runs the act.
+
+Subcommands:
+
+- `accept` — Accept your standing orders as they are on the base branch (a person, from a terminal)
+- `revoke` — Revoke your standing orders: no delegated act runs under them from now on (a person, from a terminal)
+- `show` — Print a person's standing orders as ape reads them on the base branch, and their state
+
+## ape orders accept
+
+Accept your standing orders as they are on the base branch (a person, from a terminal)
+
+```
+ape orders accept --by <email> [flags]
+```
+
+Accept your standing orders as they are on the base branch (a person, from a terminal).
+
+--by is the orders' person (their git user.email, or its slug form); another person's orders
+are refused (session.by-mismatch). ape commits "apex: orders accepted by <person>" on the base
+branch, wherever HEAD is (a change branch included), and it counts at once.
+
+Refused in any model session (exit 2, session.person-only): the orders themselves are never
+delegated, and no grant from the person's words covers them.
+
+
+--from <draft> accepts a draft instead (your conductor drafts your orders with you and writes
+them outside _apex/standing-orders/, which it cannot write): ape parses it strictly and shows
+what it will enforce — each act with its tier, each condition — and what it reads as free text
+only, then the diff against your current orders, and asks y/N. On y it writes the file and its
+acceptance in one commit on the base branch; on anything else nothing is written
+(orders.declined). A draft whose header ape cannot fully read is refused, naming the line
+(orders.invalid): nothing in it is ever ignored.
+
+Exit codes: 0 done (prints the state) · 1 no orders, a file that does not parse, declined, or git
+failed · 2 usage, a model session, or --by not the orders' person.
+
+Examples:
+
+```
+  ape orders accept --by dana@example.com
+  ape orders accept --by dana@example.com --from _output/standing-orders-draft.md
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--by` | string | `—` | the orders' person: you (required) |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--from` | string | `—` | a draft to accept: shows the parsed orders and the diff, then asks y/N |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+
+## ape orders revoke
+
+Revoke your standing orders: no delegated act runs under them from now on (a person, from a terminal)
+
+```
+ape orders revoke --by <email> [flags]
+```
+
+Revoke your standing orders: no delegated act runs under them from now on (a person, from a terminal).
+
+--by is the orders' person (their git user.email, or its slug form); another person's orders
+are refused (session.by-mismatch). ape commits "apex: orders revoked by <person>" on the base
+branch, wherever HEAD is (a change branch included), and it counts at once.
+
+Refused in any model session (exit 2, session.person-only): the orders themselves are never
+delegated, and no grant from the person's words covers them.
+
+
+Exit codes: 0 done (prints the state) · 1 no orders, a file that does not parse, declined, or git
+failed · 2 usage, a model session, or --by not the orders' person.
+
+Examples:
+
+```
+  ape orders revoke --by dana@example.com
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--by` | string | `—` | the orders' person: you (required) |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+
+## ape orders show
+
+Print a person's standing orders as ape reads them on the base branch, and their state
+
+```
+ape orders show [--person <email>] [flags]
+```
+
+Print the orders of --person (default: git config user.email) as ape reads them on the
+base branch: their state (accepted, unaccepted or revoked), the acts with their tiers, the
+conditions, the marks, and the text. --json prints the same, for the conductor.
+
+Exit codes: 0 printed (whatever the state) · 1 no orders (orders.missing) or a file that does
+not parse (orders.invalid) · 2 usage.
+
+Examples:
+
+```
+  ape orders show
+  ape orders show --person dana@example.com --json
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+| `--person` | string | `—` | whose orders (default: git config user.email) |
 
 ## ape plugins
 
@@ -6625,6 +7226,114 @@ Flags:
 | `--ultracode` | bool | `false` | Prepend the ultracode keyword (session runs workflows by default) |
 | `--workflow` | bool | `false` | Append a directive to run the task through a Claude Code workflow |
 
+## ape question
+
+Questions for the person: ask (any session), answer (a person, or their conductor under orders), list
+
+```
+ape question
+```
+
+Questions as acts (v1.4.2): an orchestrator asks the person a design question through ape
+instead of in its chat, so it is recorded and reaches them.
+
+  ask      record a question (any session may ask): the person event and the notifier carry it
+  answer   it: a person's act — or their conductor's, under standing orders that name
+           question-answer`ape conductor act question-answer Q<n> --text …`)
+  list     the questions, open or all
+
+An open question is a person action: `ape status` lists it ("answer Q<n>: <answer>"), and
+`ape status --wait --until person` wakes on it. The questions are kept in
+_apex/state/questions.json (local).
+
+Subcommands:
+
+- `answer` — Answer a question (a person's act)
+- `ask` — Record a question for the person; prints its id (Q<n>)
+- `list` — List the questions (open, or all)
+
+## ape question answer
+
+Answer a question (a person's act)
+
+```
+ape question answer <Q-id> --text "<answer>" --by <who> [flags]
+```
+
+Answer a recorded question. A person's act: refused in a model session unless, in the
+person's own Claude Code session, the person typed "answer Q<n>: <answer>" in this turn (E2;
+--by is then git config user.name, recorded with the prompt). A conductor answers under the
+person's standing orders with `ape conductor act question-answer Q<n> --text …`.
+
+Exit codes: 0 answered · 1 no such question (question.not-found), or answered already
+(question.answered) · 2 usage, or a model session.
+
+Examples:
+
+```
+  ape question answer Q3 --text "EUR" --by dana
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--by` | string | `—` | who answers (required from a terminal) |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+| `--text` | string | `—` | the answer (required) |
+
+## ape question ask
+
+Record a question for the person; prints its id (Q<n>)
+
+```
+ape question ask "<question>" [--milestone M] [--change <id>] [--option "…"]… [flags]
+```
+
+Record a question for the person, with the milestone or change it is about and the options
+you see. Any session may ask: asking is no person act. ape logs the question event, so the
+project's notify: command runs, and the question is a person action until it is answered.
+
+Exit codes: 0 recorded (prints the id) · 2 usage (no text).
+
+Examples:
+
+```
+  ape question ask "Invoices in EUR or the customer's currency?" --milestone M3 --option EUR --option "customer's"
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--change` | string | `—` | the change it is about |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+| `--milestone` | string | `—` | the milestone it is about |
+| `--option` | stringArray | `[]` | an option you see (repeatable) |
+
+## ape question list
+
+List the questions (open, or all)
+
+```
+ape question list [--open] [flags]
+```
+
+List the project's questions, oldest first: id, what it is about, the text, and the answer
+when there is one. --open lists only those not answered. --json prints the list.
+
+Exit codes: 0 printed.
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+| `--open` | bool | `false` | only the open questions |
+
 ## ape rollback
 
 Rollback ape to the previous version
@@ -8134,6 +8843,9 @@ Show where the project stands, from the records ape keeps:
     branch) — development/next.md's items, then any the roadmap still holds (a project
     not yet moved by `ape next move`, D217), each once. Not the same field as
     "next", the step above
+  - Open questions (JSON "questions": [{id, at, milestone, change, text, options}], [] when
+    none; a section in the human output): asked with `ape question ask` and not answered,
+    each a person action (v1.4.2)
   - JSON "docs": {changelog, user_docs} from _apex/config.yaml docs: ({} when unset), for
     the skills that keep a changelog and user docs current
   - JSON "config": {commit_types, release_scheme, release_docs, commit_subject} — the
@@ -8197,6 +8909,9 @@ usage.wait), until one of the comma-separated conditions holds:
   done     every milestone of the roadmap is done (a roadmap with none is not)
   blocked  a change is blocked
   event    any event is logged after --since
+  conductor the project's orchestrator terminal needs its conductor (v1.4.2):
+           orchestrator-dead, orchestrator-idle (idle with a conductor message pending)
+           or run-lost is logged after --since
 
 Level first: when a condition already holds, the call returns at once. Then the events: an
 event after --since that makes a condition hold returns it — person on a person or block
@@ -8209,9 +8924,14 @@ _apex/state/events.jsonl, one line per event: {seq, at, event, milestone, change
 reason, action} (skill too, for an ape task run), seq strictly increasing; it rolls at 10 MB
 into events.1.jsonl (one kept), seq carrying on. The events: person (action is the phrase
 the person types), gate-green, milestone-done, run-end (exit is the run's exit code),
-run-lost, stop and block. _apex/config.yaml's notify: runs after each line is written, with
-APE_EVENT, APE_SEQ, APE_MILESTONE, APE_CHANGE, APE_RUN, APE_EXIT, APE_SKILL, APE_REASON and
-APE_ACTION in its environment.
+run-lost, stop and block, and since v1.4.2 delegated (a conductor's act under standing
+orders), orders (orders accepted or revoked), orchestrator-dead, orchestrator-idle,
+question and question-answered (ape question), and conductor-stalled (a delivery the
+conductor's watcher typed went unacknowledged).
+_apex/config.yaml's notify: runs after each line is written, with
+APE_EVENT, APE_SEQ, APE_MILESTONE, APE_CHANGE, APE_RUN, APE_EXIT, APE_SKILL, APE_REASON,
+APE_ACTION and APE_ORDERS (a delegated act's or an orders change's: <person>@<commit>) in its
+environment.
 
 In a project with a coordination: block (v1.5, in development), each logged event is also
 published on NATS (kind project, message id <project>/<checkout-id>/<seq>), and a wait with
@@ -8338,22 +9058,32 @@ command that updates ape — the same floor `ape framework update` refuses an
 install by (exit 11). A dev build or a pseudo-version cannot be compared:
 a warning, and the session runs.
 
-In an APEX v1 project ape also enforces the milestone budget, when
+In an APEX v1 project ape also enforces the milestone budgets, when
 _apex/config.yaml says so (it is off by default):
   limits:
     budget: enforce   # or off
-With enforce, and a Budget: line on the current milestone (the first not
-done, and only when approved), a session that would start with the
-milestone's spend already at its budget is refused (exit 1, code
-milestone.budget-exceeded); a running session is stopped when the
-milestone's spend — its runs since approval, plus this session's live cost
-read from its transcripts, sub-agents included, every 30 s (sooner in its
-first half minute) — reaches it.
+With enforce, and a budget line on the current milestone (the first not
+done, and only when approved) — Budget-tokens: (tokens_total), Budget-wall:
+(the summed session time of its runs) or the legacy Budget: (USD) — a session
+that would start with the milestone's use already at a budget is refused
+(exit 1, code milestone.budget-exceeded); a running session is stopped when
+the milestone's use — its runs since approval, plus this session's live
+cost and tokens read from its transcripts, sub-agents included, and its
+wall time, every 30 s (sooner in its first half minute) — reaches it.
 The stop ends the run (exit 1) with termination kind "budget" in the run
-manifest (spent_usd, budget_usd, session_cost_usd) and is recorded under
+manifest (unit usd|tokens|wall, with spent_*, budget_* and session_* for
+it) and is recorded under
 the milestone's stops in _apex/state/limit-stops.json (ignored by git:
-nothing is committed, whichever branch the session was on); `ape status` shows it. Raising the Budget:
-line (a person's call) lets sessions start again. An unparseable
+nothing is committed, whichever branch the session was on); `ape status` shows it. Raising the budget
+line (a person's call) lets sessions start again.
+
+Each session can be capped too (v1.4.2), with or without a milestone
+budget: limits.session: {tokens: 20M, wall: 3h} in _apex/config.yaml, and
+--max-tokens for one session (over limits.session.tokens). At a cap the
+session ends with termination max_tokens (session_tokens, max_tokens) or
+max_duration (elapsed_seconds, max_seconds), exit 1, a person's call; the
+stop is the session's, not the milestone's. Unlike --max-duration, the wall
+cap does not reset at a sub-agent boundary. An unparseable
 _apex/config.yaml in a v1 project refuses every session (exit 2) rather
 than run it with no limits.
 
@@ -8598,6 +9328,7 @@ Flags:
 | `--leftovers` | string | `kill` | What to do, once the session has ended, with the processes it left running (a server its Bash tool backgrounded), found by the session's APE_SESSION marker: kill stops each one's tree, report leaves them running. Either way they are listed under session_leftovers in the run record (Linux only; ape's own detached workers are never touched) |
 | `--manifest-dir` | string | `—` | Override the run-artifact base dir (default: <project>/_output/ape/tasks; _apex/state/runs/tasks in an APEX v1 project) |
 | `--max-duration` | duration | `0s` | Wall-clock ceiling regardless of progress (e.g. 8h); off by default (D159: a run showing progress stops only on the idle timeout, ape's limits or a person). The clock resets on each sub-agent boundary, so a sequential batch skill is bounded per item. |
+| `--max-tokens` | string | `—` | In an APEX v1 project: stop the session at this many tokens (tokens_total, sub-agents included: 20M, 500k), termination max_tokens; over limits.session.tokens; off by default (v1.4.2) |
 | `--model` | string | `—` | Claude model (APEX v1 unset: models.<skill> in _apex/config.yaml, else the parent session's, else claude's default). A bare family (fable, haiku, mythos, opus, sonnet) resolves to its current generation; sonnet-5 / claude-sonnet-5 / opus[1m] pin explicitly |
 | `--nats-creds` | string | `—` | NATS .creds file; its user identity is baked into every subject (env APE_NATS_CREDS). |
 | `--nats-url` | string | `—` | NATS server URL for progress events + transcript upload (env APE_NATS_URL). Empty disables both. |

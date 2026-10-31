@@ -264,6 +264,11 @@ func (p *Project) protectedReason(abs string) string {
 	if abs == filepath.Join(root, filepath.FromSlash(NATSCredsRel)) || abs == filepath.Join(p.Root, filepath.FromSlash(NATSCredsRel)) {
 		return credsReason
 	}
+	for _, r := range []string{root, p.Root} {
+		if rel, err := filepath.Rel(filepath.Join(r, filepath.FromSlash(OrdersDirRel)), abs); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return OrdersDirRel + "/" + filepath.ToSlash(rel) + " holds a person's standing orders: the person edits them and accepts them from a terminal (`ape orders accept`); a delegated conductor never changes its own orders"
+		}
+	}
 	for _, name := range []string{"settings.json", "settings.local.json"} {
 		if abs == filepath.Join(root, ".claude", name) || abs == filepath.Join(p.Root, ".claude", name) {
 			return ".claude/" + name + " holds ape's hooks and the session's environment: a person edits it, and `ape project init` restores the hooks"

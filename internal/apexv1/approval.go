@@ -58,6 +58,11 @@ type MilestoneApproval struct {
 	// D581, gateScratch), so drift compares every file it holds. False on
 	// approvals before v1.4, whose scratch drift skips.
 	ScratchExcluded bool `json:"gate_scratch_excluded,omitempty"`
+	// GateScratch are the ignored files of the gate's folders that its
+	// self-check run at this approval created or rewrote (1.4.2 D4): the
+	// gate's own output, left out of GateOwnFiles even when executable, and
+	// never drift — unless the gate sources or declares one.
+	GateScratch []string `json:"gate_scratch,omitempty"`
 	// SelfCheck is the gate's run at approval (D70 B): red, its exit,
 	// duration and log. Absent on approvals before rc.3.
 	SelfCheck *GateSelfCheck `json:"self_check,omitempty"`
@@ -145,13 +150,19 @@ func gateFilesDigest(files map[string]string) string {
 }
 
 // newApproval records a person approving m's gate now.
-func (p *Project) newApproval(m *Milestone, by string) *MilestoneApproval {
+func (p *Project) newApproval(m *Milestone, by string, wrote []string) *MilestoneApproval {
 	files := p.gateFiles(m.Gate)
 	a := &MilestoneApproval{By: by, At: Stamp(), GateCmd: m.Gate, GateFilesSHA256: gateFilesDigest(files), ScratchExcluded: true}
 	if len(files) > 0 {
 		a.GateFiles = files
 	}
 	own := p.gateOwnScan(m)
+	for _, f := range wrote {
+		if !own.keep[f] {
+			delete(own.files, f)
+			a.GateScratch = append(a.GateScratch, f)
+		}
+	}
 	if len(own.files) > 0 {
 		a.GateOwnFiles = own.files
 	}

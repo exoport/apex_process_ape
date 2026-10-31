@@ -16,16 +16,31 @@ import (
 //	done     every roadmap milestone is done          · edge: milestone-done, then the level
 //	blocked  a change is blocked                      · edge: block
 //	event    an event after --since                   · edge: any event
+//	conductor the orchestrator terminal needs its conductor (v1.4.2,
+//	         D660.2)                                   · edge: orchestrator-dead,
+//	         orchestrator-idle, run-lost
 const (
 	UntilPerson  = "person"
 	UntilStopped = "stopped"
 	UntilDone    = "done"
 	UntilBlocked = "blocked"
 	UntilEvent   = "event"
+	// UntilConductor: the conductor's own wait (v1.4.2).
+	UntilConductor = "conductor"
+)
+
+// The orchestrator terminal's liveness events (v1.4.2, D660.2), logged by
+// its supervisor (internal/conductorterm).
+const (
+	EventOrchestratorDead = "orchestrator-dead"
+	EventOrchestratorIdle = "orchestrator-idle"
+	// EventConductorStalled: a delivery the conductor's watcher typed went
+	// unacknowledged past conductor.ack_alert (D664): for the person.
+	EventConductorStalled = "conductor-stalled"
 )
 
 // UntilConditions are the conditions, in the order help lists them.
-var UntilConditions = []string{UntilPerson, UntilStopped, UntilDone, UntilBlocked, UntilEvent}
+var UntilConditions = []string{UntilPerson, UntilStopped, UntilDone, UntilBlocked, UntilEvent, UntilConductor}
 
 // ParseUntil reads --until's comma-separated conditions (any of them is
 // enough), each once, in the order given.
@@ -110,6 +125,8 @@ func EventMeets(cond string, ev Event) bool {
 		return ev.Event == EventBlock
 	case UntilEvent:
 		return true
+	case UntilConductor:
+		return ev.Event == EventOrchestratorDead || ev.Event == EventOrchestratorIdle || ev.Event == EventRunLost
 	}
 	return false
 }

@@ -35,6 +35,15 @@ type MilestoneStatus struct {
 	// approved (all runs when it is not approved yet); a session stopped
 	// at the budget counts at the cost ape measured when it stopped it.
 	SpentUSD float64 `json:"spent_usd"`
+	// SpentTokens, SpentTokensNonCache and SpentWallSecs are the same
+	// runs' tokens (tokens_total), the part of them that is not cache
+	// reads, and their summed session time (v1.4.2 D1 L4); BudgetTokens
+	// and BudgetWallSecs the milestone's Budget-tokens: and Budget-wall:.
+	SpentTokens         int64    `json:"spent_tokens"`
+	SpentTokensNonCache int64    `json:"spent_tokens_non_cache"`
+	SpentWallSecs       float64  `json:"spent_wall_secs"`
+	BudgetTokens        *int64   `json:"budget_tokens,omitempty"`
+	BudgetWallSecs      *float64 `json:"budget_wall_secs,omitempty"`
 	// BudgetEnforced: limits.budget is enforce and the milestone has a
 	// Budget:, so ape task stops at it (backlog 30).
 	BudgetEnforced bool `json:"budget_enforced"`
@@ -392,6 +401,10 @@ type StatusReport struct {
 	// out of scope, one line each without the list marker, from the base
 	// branch's roadmap.md. Always present ([] when none).
 	RoadmapNext []string `json:"roadmap_next"`
+	// Questions are the open questions (v1.4.2, D666+ F3): asked with
+	// `ape question ask`, not answered yet — each a person action. Always
+	// present ([] when none).
+	Questions []Question `json:"questions"`
 	// Docs is _apex/config.yaml's docs: block (H21), always present ({}
 	// when unset): the changelog and user docs a user-visible change
 	// updates, for apex-change and apex-review to read.
@@ -448,9 +461,9 @@ type StatusConfig struct {
 
 // Status builds the report.
 //
-//nolint:gocyclo // one section per part of the report, each guarded by what it reads
+//nolint:gocyclo,maintidx // one section per part of the report, each guarded by what it reads
 func (p *Project) Status() *StatusReport {
-	r := &StatusReport{Root: p.Root, Initialized: p.IsV1(), Changes: []ChangeStatus{}, Milestones: []MilestoneLine{}, Tweaks: []string{}, Advise: []AdviseFile{}, OutsideFlow: []OutsideFlow{}, RoadmapNext: []string{}}
+	r := &StatusReport{Root: p.Root, Initialized: p.IsV1(), Changes: []ChangeStatus{}, Milestones: []MilestoneLine{}, Tweaks: []string{}, Advise: []AdviseFile{}, OutsideFlow: []OutsideFlow{}, RoadmapNext: []string{}, Questions: []Question{}}
 	cfg, cfgErr := LoadConfig(p.Root)
 	if cfgErr == nil && cfg.ProjectName != "" {
 		r.Project = cfg.ProjectName
@@ -464,7 +477,8 @@ func (p *Project) Status() *StatusReport {
 		r.delegate = cfg.HumanReview.Skill()
 	}
 	runs, _ := cost.RunCosts(p.Root)
-	for _, run := range runs {
+	for i := range runs {
+		run := &runs[i]
 		r.Spend.TotalUSD += run.CostUSD
 		r.Spend.Runs++
 	}
@@ -599,6 +613,7 @@ func (p *Project) Status() *StatusReport {
 	r.BaseUpstream = p.upstreamOf(ctx, base)
 	r.OutsideFlow = p.outsideFlow(ctx, base)
 	r.RoadmapNext = p.roadmapNext(ctx, base)
+	r.Questions = p.OpenQuestions()
 	if j := p.LoadArchiveJournal(); j != nil {
 		r.ArchiveJournal, r.ArchiveRunning = j, j.Running()
 	}
@@ -688,8 +703,10 @@ func (p *Project) milestoneStatus(m *Milestone, runs []cost.RunCost, tweaks map[
 	if ms.Stops == nil {
 		ms.Stops = []LimitStop{}
 	}
-	ms.SpentUSD = round2(milestoneSpend(m, runs, ms.Stops, tweaks))
-	ms.BudgetEnforced = p.limits().BudgetEnforced() && m.Budget != nil
+	use := milestoneUse(m, runs, ms.Stops, tweaks)
+	ms.SpentUSD, ms.SpentTokens, ms.SpentTokensNonCache, ms.SpentWallSecs = round2(use.USD), use.Tokens, use.NonCache(), math.Round(use.WallSecs)
+	ms.BudgetTokens, ms.BudgetWallSecs = m.BudgetTokens, m.BudgetWallSecs
+	ms.BudgetEnforced = p.limits().BudgetEnforced() && (m.Budget != nil || m.BudgetTokens != nil || m.BudgetWallSecs != nil)
 	ctx := context.Background()
 	ms.ConsecutiveBlocks, ms.ConsecutiveBlocksCap = p.consecutiveBlocks(ctx, m.ID), p.limits().ConsecutiveBlocksCap()
 	ms.Diagnostics = Diagnostics(p.blocksExceeded(ctx, m.ID))
@@ -1071,13 +1088,7 @@ func (m *MilestoneStatus) briefLines() []string {
 	default:
 		gate += fmt.Sprintf(" — last red (%s) at %s (%s)", m.GateLast.Why(), m.GateLast.At, short(m.GateLast.SHA))
 	}
-	spend := fmt.Sprintf("  spent $%.2f", m.SpentUSD)
-	if m.Budget != nil {
-		spend += fmt.Sprintf(" of $%.2f budget", *m.Budget)
-		if m.BudgetEnforced {
-			spend += " (enforced)"
-		}
-	}
+	spend := "  " + m.SpendLine()
 	lines := []string{fmt.Sprintf("Milestone %s — %s: %s", m.ID, m.Title, m.StatusText), gate, spend}
 	if m.ConsecutiveBlocks > 0 {
 		lines = append(lines, fmt.Sprintf("  %d of %d changes blocked in a row (limits.consecutive_blocks)", m.ConsecutiveBlocks, m.ConsecutiveBlocksCap))
@@ -1129,4 +1140,33 @@ func approvalSelfCheck(rec *MilestoneRecord) *GateSummary {
 	}
 	sc := rec.Approval.SelfCheck
 	return &GateSummary{SHA: sc.SHA, Exit: sc.Exit, At: sc.At, Log: sc.Log, AcceptGreen: rec.Approval.AcceptGreen}
+}
+
+// SpendLine is the milestone's use against its budgets, one line (v1.4.2
+// D1 L4): tokens with their non-cache share, session time, and USD.
+func (m *MilestoneStatus) SpendLine() string {
+	tokens := FormatTokens(m.SpentTokens) + " tokens"
+	if m.SpentTokens > 0 {
+		tokens += fmt.Sprintf(" (%.0f%% non-cache)", 100*float64(m.SpentTokensNonCache)/float64(m.SpentTokens))
+	}
+	if m.BudgetTokens != nil {
+		tokens += " of " + FormatTokens(*m.BudgetTokens)
+	}
+	wall := formatSecs(m.SpentWallSecs) + " session time"
+	if m.BudgetWallSecs != nil {
+		wall += " of " + formatSecs(*m.BudgetWallSecs)
+	}
+	usd := fmt.Sprintf("$%.2f", m.SpentUSD)
+	if m.Budget != nil {
+		usd += fmt.Sprintf(" of $%.2f", *m.Budget)
+	}
+	line := "spent " + tokens + " · " + wall + " · " + usd
+	if m.Budget != nil || m.BudgetTokens != nil || m.BudgetWallSecs != nil {
+		if m.BudgetEnforced {
+			line += " (budget enforced)"
+		} else {
+			line += " (budget not enforced: limits.budget)"
+		}
+	}
+	return line
 }

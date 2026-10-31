@@ -1,5 +1,97 @@
 # CHANGELOG
 
+## v1.4.2 (unreleased — draft)
+
+APEX v1.4.2, on v1.4.1: **the delegated conductor** (D658–D661). A person's own Claude Code
+session can drive the projects' orchestrators and perform some of the person's acts under their
+standing orders, checked by ape. This patch release adds verbs, keys and events (D659 B1 amends
+the patch rule for it):
+
+- **Standing orders**, `_apex/standing-orders/<person>.md`: who, which acts, which conditions, as
+  frontmatter, and free text for the conductor. `ape orders show|accept|revoke`; accept and revoke
+  are a person's, from a terminal, and run the notifier. The edit tools are denied the folder.
+  The header is read strictly: anything ape cannot fully read is `orders.invalid`, naming the line,
+  never ignored. `ape orders accept --from <draft>` takes the draft the conductor wrote with the
+  person. It shows what ape will enforce (every delegable act, named or not, and the escalate:
+  list), what is free text, and the diff against the orders in force, then asks y/N.
+- **`ape conductor act <act> <target>`**, the only route by which a model session performs a person
+  act. ape checks a required `--reason`, the act's tier (never: accept-config, accept-red,
+  allow-pending-human, push, tag, release, the orders), the orders' state, their conditions, and
+  the `--evidence` paths. It then re-runs the act's mechanical check itself, the gate self-test or
+  the change check (`orders.check-red`), and runs the act as the person's command does. The act is recorded
+  `by: conductor under orders <person>@<commit> (<reason>)` and logged as event `delegated`. New
+  codes `orders.*`.
+- **The decision log**, `_apex/state/conductor-<person>.md`: every delegated act with its reason
+  and evidence digests, plus the holds and questions noted with `ape conductor note
+  --hold|--question|--resolved`. Read it with `ape conductor log [--open]`.
+- **The orchestrator terminal**: `ape conductor start|send|read|status|stop|watch`.
+  - A supervisor owns a terminal running Claude Code with /apex-orchestrator in the project, and
+    types the conductor's messages into it, marked (`<ape-delivery …>`, never a person's words),
+    only while the orchestrator is idle.
+  - It logs `orchestrator-dead`, and `orchestrator-idle` (idle with a message pending, past
+    `conductor.idle_alert`, default 30m).
+  - `ape status --wait --until conductor` wakes on either, and on `run-lost`.
+  - Every verb takes `--project`, so a remote project is driven over ssh.
+- **Every act runs only when the orders name it** under `acts:`. A header line can also
+  `escalate:` categories that always go to the person: `touches-gate`, `changes-config`,
+  `{tokens-over: N}` (`orders.escalate`).
+- **Questions as acts**: `ape question ask|answer|list`. An orchestrator asks; an open question
+  is a person action (`answer Q<n>: <answer>`, also by E2's typed phrase), listed by `ape status`
+  (`questions` in its JSON); a conductor answers under orders naming `question-answer`.
+- **More delegable acts**, each only when named: `prepare-release <version>` (the changelog at HEAD,
+  `docs.changelog` or `CHANGELOG.md`, must have a section for it: `## v1.2.0`, `## 1.2.0` or
+  `## [1.2.0]`; the base-branch push, the tag and its push are handed back to the person), `push-branch <branch>`
+  (ape pushes a work branch itself, never `main`, the base or default branch, or a tag, and no tag
+  follows it), `open-pr <branch>` (through `gh`; without it, refused with the push URL).
+- **The conductor's watcher**, `ape conductor watcher`, follows the projects' events and types
+  each into the conductor's tmux pane. It is marked, and only typed when the pane runs a registered
+  Claude Code session, is idle with an empty input row, and is steady. `ape conductor ack <id>`
+  acknowledges a delivery; one unacknowledged past `conductor.ack_alert` (15m) logs
+  `conductor-stalled`, so the person is notified. Without tmux the watcher is notify-only.
+  The watcher records the pane's Claude Code session id when it starts. If another session takes
+  the pane (after a `/clear`, say), it pauses: it logs `conductor-stalled` in each project and types
+  nothing until `ape conductor watcher --repin`, run from inside the new session, pins it. An event
+  unacknowledged past the alert notifies the person whether or not it was typed.
+- A prompt carrying ape's delivery mark anywhere is recorded `delivery` and never grants a person
+  act, not even on the person's earlier typed words.
+- Events `delegated`, `orders`, `orchestrator-dead`, `orchestrator-idle`, `question`,
+  `question-answered`, `conductor-stalled`; the notifier's `APE_ORDERS`.
+- **Limits in tokens and wall time** (D1, D655.4, D656). A token count is `tokens_total`: input,
+  output, cache read and cache creation, sub-agents included. It is in every run's manifest totals
+  and in the cost rollup, and reports show the non-cache share beside it.
+  - **Milestone budgets:** `Budget-tokens: 60M` and `Budget-wall: 4h` lines in `roadmap.md` (and
+    `ape milestone new --budget-tokens --budget-wall`). They are enforced as `Budget:` is, under
+    `limits.budget: enforce`: a session is refused at a budget, and a running one is stopped
+    there (termination `budget`, with `unit` and the token or wall figures). A milestone's wall
+    is the summed session time of its runs, not the calendar. `Budget:` (USD) stays as the legacy
+    form, derived from the price table.
+  - **Session caps:** `limits.session: {tokens, wall}` and `ape task --max-tokens`. They end a
+    session with termination `max_tokens` or `max_duration`, a person's call, and never count
+    against the milestone.
+  - **Reports:** `ape status` shows the milestone's tokens (with the non-cache share), session
+    time and USD against its budgets, and its JSON gains `spent_tokens`,
+    `spent_tokens_non_cache`, `spent_wall_secs`, `budget_tokens` and `budget_wall_secs`.
+    `ape costs` gains TOKENS, NON-CACHE and WALL columns, and the `ape task` summary line prints
+    the run's tokens.
+
+Fixes from the v1.4.1 evaluation (D659 D2–D4):
+
+- **A gate's own build output is no longer frozen.** An ignored file in the gate's folders that
+  approve's own run of the gate created or rewrote, such as a binary it builds into `.work/`, is
+  recorded as `gate_scratch` and never counts as drift. Before, an executable there was frozen,
+  the next green run rebuilt it, and the close refused `milestone.gate-changed` with no way out
+  but a person's `--accept-green` (FINDING-D1-1).
+- **A review tool's report is filed where the review can keep it.** A report its session left
+  untracked beside the change or at the project root moves to `assets/review-<name>.md` when the
+  session ends. Before, the review session read it as a file the review left, and voided itself
+  (FINDING-D2-2). `ape change tool --json` gains `report` and `moved_from`.
+- **`APE_GATE_SCRATCH`** names each check's own `TMPDIR` (verify, the gate, approve's run, the
+  regression command), and the check's result records it as `tmp`.
+- **The kill guard** also refuses `kill` of the pids `pgrep`/`pidof` finds: `kill $(pgrep -f …)`,
+  `` kill `pidof …` ``, `pgrep … | xargs kill`, and the same through a variable or `sh -c`.
+- The `check.grep-test-output` notice is pinned by a test on the exact check the evaluation saw
+  exit 141 under `pipefail`.
+
 ## v1.4.1 (2026-10-31)
 
 APEX v1.4.1, on v1.4.0: a session that lost its Claude Code login now ends in minutes instead of an

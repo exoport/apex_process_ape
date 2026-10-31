@@ -60,7 +60,9 @@ type manifestForRollup struct {
 	// TreeCostUSD is what the run's own manifest recorded (an orchestrator
 	// run's, once it ended); nil when it recorded none.
 	TreeCostUSD *float64 `yaml:"tree_cost_usd"`
-	Totals      struct {
+	// DurationSecs is the run's wall time (v1.4.2 limits).
+	DurationSecs float64 `yaml:"duration_seconds"`
+	Totals       struct {
 		CostUSD             float64                     `yaml:"cost_usd"`
 		TokensInput         int                         `yaml:"tokens_input"`
 		TokensOutput        int                         `yaml:"tokens_output"`
@@ -109,6 +111,7 @@ func walkManifestTree(root string, fold func(name, runID string, day time.Time, 
 			CacheReadTokens:     m.Totals.TokensCacheRead,
 			CacheCreationTokens: m.Totals.TokensCacheCreation,
 			NumTurns:            m.Totals.NumTurns,
+			DurationSecs:        m.DurationSecs,
 		}
 		fold(name, m.RunID, day, totals, perModelTotals(m.Totals.ModelUsage))
 	})

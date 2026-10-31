@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // GateRun is one run of a milestone gate.
@@ -287,8 +288,22 @@ func (p *Project) loadRoadmapDoc() (string, *Roadmap, error) {
 	return doc, ParseRoadmap(p.Rel(p.RoadmapMD()), doc), nil
 }
 
+// MilestoneBudgets are a new milestone's budget lines (v1.4.2 D1 L2):
+// Tokens a token count (ParseTokens), Wall a duration, USD the legacy
+// Budget:. Empty is no line.
+type MilestoneBudgets struct {
+	Tokens string
+	Wall   string
+	USD    *float64
+}
+
 // NewMilestone appends a milestone to roadmap.md and returns its id.
 func (p *Project) NewMilestone(ctx context.Context, title, gate string, budget *float64, goal string) (string, error) {
+	return p.NewMilestoneWith(ctx, title, gate, goal, MilestoneBudgets{USD: budget})
+}
+
+// NewMilestoneWith is NewMilestone with every budget line.
+func (p *Project) NewMilestoneWith(ctx context.Context, title, gate, goal string, b MilestoneBudgets) (string, error) {
 	if err := p.recoverArchive(ctx); err != nil {
 		return "", err
 	}
@@ -302,6 +317,16 @@ func (p *Project) NewMilestone(ctx context.Context, title, gate string, budget *
 	if strings.Contains(gate, "\n") || strings.Contains(title, "\n") {
 		return "", &UsageError{Code: "usage.one-line", Msg: "title and gate are one line each"}
 	}
+	if b.Tokens = strings.TrimSpace(b.Tokens); b.Tokens != "" {
+		if _, err := ParseTokens(b.Tokens); err != nil {
+			return "", &UsageError{Code: "usage.budget", Msg: "--budget-tokens: " + err.Error()}
+		}
+	}
+	if b.Wall = strings.TrimSpace(b.Wall); b.Wall != "" {
+		if d, err := time.ParseDuration(b.Wall); err != nil || d <= 0 {
+			return "", &UsageError{Code: "usage.budget", Msg: fmt.Sprintf("--budget-wall: %q is not a duration above 0 (4h, 90m)", b.Wall)}
+		}
+	}
 	if err := p.refuseOnChangeBranch(ctx, "a new milestone"); err != nil {
 		return "", err
 	}
@@ -311,7 +336,7 @@ func (p *Project) NewMilestone(ctx context.Context, title, gate string, budget *
 	}
 	id := rm.NextID()
 	own := p.milestoneOwn(ctx)
-	if err := writeFileAtomic(p.RoadmapMD(), AppendMilestone(doc, id, title, gate, budget, goal, nil)); err != nil {
+	if err := writeFileAtomic(p.RoadmapMD(), appendMilestoneBudgets(AppendMilestone(doc, id, title, gate, b.USD, goal, nil), b)); err != nil {
 		return "", err
 	}
 	if _, err := p.commitMilestone(ctx, own, id, MilestoneProposed); err != nil {
@@ -437,7 +462,7 @@ func (p *Project) approveMilestone(ctx context.Context, id, by, acceptGreen stri
 		rec = &MilestoneRecord{}
 		recs[id] = rec
 	}
-	rec.Approval = p.newApproval(m, strings.TrimSpace(by))
+	rec.Approval = p.newApproval(m, strings.TrimSpace(by), selfCheck.Wrote)
 	rec.Approval.SelfCheck = selfCheck
 	rec.Approval.BaseSHA = base
 	if selfCheck.Exit == 0 {

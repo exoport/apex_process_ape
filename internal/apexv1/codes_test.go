@@ -144,6 +144,14 @@ func TestDiagnosticCodes_PublishedListMatchesTheCode(t *testing.T) {
 		"CodeCheckGrepTestOutput": CodeCheckGrepTestOutput, "CodeSessionAuthLost": CodeSessionAuthLost,
 		// v1.5 (in development).
 		"CodeCoordNATSUnreachable": CodeCoordNATSUnreachable, "CodeCoordMembership": CodeCoordMembership, "CodeCoordMilestonePaused": CodeCoordMilestonePaused,
+		// v1.4.2: standing orders and the delegated conductor.
+		"CodeOrdersMissing": CodeOrdersMissing, "CodeOrdersInvalid": CodeOrdersInvalid, "CodeOrdersUnaccepted": CodeOrdersUnaccepted,
+		"CodeOrdersRevoked": CodeOrdersRevoked, "CodeOrdersNonDelegable": CodeOrdersNonDelegable, "CodeOrdersNotNamed": CodeOrdersNotNamed,
+		"CodeConductorRunning": CodeConductorRunning, "CodeConductorNotRunning": CodeConductorNotRunning,
+		"CodeOrdersEscalate": CodeOrdersEscalate, "CodeOrdersRefused": CodeOrdersRefused,
+		"CodeQuestionNotFound": CodeQuestionNotFound, "CodeQuestionAnswered": CodeQuestionAnswered,
+		"CodeOrdersCheckRed": CodeOrdersCheckRed, "CodeOrdersDeclined": CodeOrdersDeclined,
+		"CodeOrdersCondition": CodeOrdersCondition, "CodeOrdersNoReason": CodeOrdersNoReason, "CodeOrdersEvidence": CodeOrdersEvidence,
 	}
 	for _, glob := range []string{"*.go", filepath.Join("..", "apecmd", "v1_*.go"), filepath.Join("..", "coord", "member", "*.go")} {
 		files, err := filepath.Glob(glob)

@@ -207,6 +207,7 @@ func sumTotals(a, b Totals) Totals {
 		CacheCreation5mTokens: a.CacheCreation5mTokens + b.CacheCreation5mTokens,
 		CacheCreation1hTokens: a.CacheCreation1hTokens + b.CacheCreation1hTokens,
 		NumTurns:              a.NumTurns + b.NumTurns,
+		DurationSecs:          a.DurationSecs + b.DurationSecs,
 	}
 }
 

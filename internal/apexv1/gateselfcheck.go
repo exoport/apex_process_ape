@@ -39,6 +39,9 @@ type GateSelfCheck struct {
 	// Log is the project-relative path of its full output (ignored).
 	Log          string `json:"log"`
 	OutputSHA256 string `json:"output_sha256"`
+	// Wrote are the ignored files of the gate's folders this run created
+	// or rewrote (1.4.2 D4): the approval records them as scratch.
+	Wrote []string `json:"wrote,omitempty"`
 }
 
 // ApprovalSelfCheck is the self-check milestones.json records with id's
@@ -95,12 +98,16 @@ func (p *Project) gateSelfCheck(ctx context.Context, m *Milestone, base string, 
 	logPath := filepath.Join(p.LogsDir(), "gate-"+m.ID+"-approve.log")
 	p.ensureState()
 	pc := PlannedCheck{Ref: "gate-" + m.ID + "-approve", Kind: KindGate, Cmd: m.Gate, Env: gateEnv(m.ID, base)}
+	before := p.gateIgnoredStamps(ctx, m)
 	r := p.runWithRetries(ctx, &pc, logPath, lim, nil, 0, p.isWorkTree(ctx))
 	close(done)
 	if err := interrupted(ctx, m.ID+"'s gate self-check"); err != nil {
 		return nil, err // D58 2.2: an interrupted run judges nothing
 	}
-	sc := &GateSelfCheck{At: Stamp(), SHA: sha, Exit: r.Exit, Secs: r.Secs, Log: r.Log, OutputSHA256: r.OutputSHA256}
+	sc := &GateSelfCheck{
+		At: Stamp(), SHA: sha, Exit: r.Exit, Secs: r.Secs, Log: r.Log, OutputSHA256: r.OutputSHA256,
+		Wrote: gateWrote(before, p.gateIgnoredStamps(ctx, m)),
+	}
 	last := ""
 	if len(r.Tail) > 0 {
 		last = ". Last output (" + r.Log + "): " + strings.Join(lastN(r.Tail, 5), " | ")

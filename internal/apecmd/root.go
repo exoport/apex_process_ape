@@ -97,6 +97,9 @@ func rootSubcommands() []*cobra.Command {
 		newMilestoneCmd(),
 		newChangeCmd(),
 		newDecisionCmd(),
+		newOrdersCmd(),
+		newQuestionCmd(),
+		newConductorCmd(),
 		newNextCmd(),
 		newPluginsCmd(),
 		newHookCmd(),
@@ -127,7 +130,6 @@ func rootSubcommands() []*cobra.Command {
 		newCoordinatorCmd(),
 		newSupervisorCmd(),
 		newHealthCmd(),
-		newConductorCmd(),
 		newGenDocsCmd(),
 		// A whole command tree from a separate module, mounted rather than
 		// ported — see aboard.go for what the two hosts share and what
