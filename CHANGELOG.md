@@ -20,8 +20,10 @@ consecutive-block limit, and nine expert-advice runs for `for: plan` (below). ap
 
 **Known issue:** `check.grep-test-output`'s fix text suggests capturing the output with a bash
 here-string (`grep -q … <<<"$out"`), which `sh -c` (dash) cannot parse; ape runs checks under `sh`.
-Use `out=$(go test -v ./pkg) && printf '%s\n' "$out" | grep -q …`, or run the test by name and use
-its exit. Fixed in the next release.
+Use `out=$(go test -v ./pkg) && printf '%s\n' "$out" | grep … >/dev/null`, without `-q`: under
+`set -o pipefail`, `grep -q` stops at its first match, and once the output is larger than a pipe
+buffer the check exits 141 on a pass. Or run the test by name and use its exit. Fixed in the next
+release.
 
 - **A session that lost its login ends in minutes** (D603): `auth_lost` (manifest termination, `ape
   task`/`ape prompt` exit 15, `ape status` "stopped: auth-lost", `session.auth-lost` from `ape
