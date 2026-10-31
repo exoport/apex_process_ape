@@ -92,6 +92,12 @@ func (p *Project) eventsLockPath() string { return filepath.Join(p.StateDir(), "
 // creating _apex/state/ in it).
 func (p *Project) eventsOn() bool { return p.IsV1() && !IsV0Project(p.Root) }
 
+// EventSink, when set, gets each event Emit logged, after its line is
+// written: in a project of an ensemble it is published on NATS (v1.5,
+// internal/coord/member.Publish). Best effort, like the notifier: it
+// never changes an outcome, and an event it could not publish is replayed.
+var EventSink func(ctx context.Context, p *Project, ev Event)
+
 // Emit appends ev to the event log, then runs the project's notifier with
 // it; it returns ev as logged (its seq and at). warn gets the one line a
 // failure is worth (nil: stderr). A log that cannot be written is that
@@ -111,6 +117,9 @@ func (p *Project) Emit(ctx context.Context, ev Event, warn io.Writer) Event {
 			fmt.Fprintf(warn, "events (%s): %v — not logged\n", ev.Event, err)
 		} else {
 			ev = logged[0]
+			if EventSink != nil {
+				EventSink(ctx, p, ev)
+			}
 		}
 	}
 	p.runNotifier(ctx, ev, warn)

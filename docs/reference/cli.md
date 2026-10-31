@@ -8211,6 +8211,11 @@ run-lost, stop and block. _apex/config.yaml's notify: runs after each line is wr
 APE_EVENT, APE_SEQ, APE_MILESTONE, APE_CHANGE, APE_RUN, APE_EXIT, APE_SKILL, APE_REASON and
 APE_ACTION in its environment.
 
+In a project with a coordination: block (v1.5, in development), each logged event is also
+published on NATS (kind project, message id <project>/<checkout-id>/<seq>), and a wait with
+NATS reachable wakes on each published event, and once after a reconnect, instead of reading
+the log every second; it still judges every level every 15 s.
+
 Every exit prints "seq: <n>" last (JSON "seq", and wait.last_seq): the --since to pass next.
 It is the returned event's seq when an event made the condition hold — the events after it
 are the next call's — else the newest seq logged. Exit 0: a condition holds; the status is

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/exoport/apex_process_ape/internal/apexv1"
+	"github.com/exoport/apex_process_ape/internal/coord/member"
 	"github.com/spf13/cobra"
 )
 
@@ -63,6 +64,11 @@ the person types), gate-green, milestone-done, run-end (exit is the run's exit c
 run-lost, stop and block. _apex/config.yaml's notify: runs after each line is written, with
 APE_EVENT, APE_SEQ, APE_MILESTONE, APE_CHANGE, APE_RUN, APE_EXIT, APE_SKILL, APE_REASON and
 APE_ACTION in its environment.
+
+In a project with a coordination: block (v1.5, in development), each logged event is also
+published on NATS (kind project, message id <project>/<checkout-id>/<seq>), and a wait with
+NATS reachable wakes on each published event, and once after a reconnect, instead of reading
+the log every second; it still judges every level every 15 s.
 
 Every exit prints "seq: <n>" last (JSON "seq", and wait.last_seq): the --since to pass next.
 It is the returned event's seq when an event made the condition hold — the events after it
@@ -283,11 +289,21 @@ func runStatusWait(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, o *statusW
 	if done, err := scan(p.EventsSince(cursor)); done {
 		return err
 	}
+	// v1.5 (plan step 4): a member project with NATS reachable wakes on
+	// each published event and once after a reconnect, with no 1 s tick;
+	// the level recheck stays.
+	wake, stopWatch, live := member.Watch(ctx, p)
+	defer stopWatch()
+	poll := statusWaitPoll
+	if live {
+		poll = statusWaitLevelEvery
+	}
 	for time.Now().Before(deadline) {
 		select {
 		case <-ctx.Done():
 			return finish("", waitTimeout, nil, cursor)
-		case <-time.After(min(statusWaitPoll, time.Until(deadline))):
+		case <-wake:
+		case <-time.After(min(poll, time.Until(deadline))):
 		}
 		if done, err := readNew(); done {
 			return err

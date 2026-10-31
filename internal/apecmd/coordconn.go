@@ -70,3 +70,6 @@ func defaultCoordID(kind string) string {
 	host, _ := os.Hostname()
 	return kind + "-" + natsconn.SubjectToken(host) + "-" + strconv.Itoa(os.Getpid())
 }
+
+// A member project's events are also published on NATS (v1.5).
+func init() { apexv1.EventSink = member.Publish }
