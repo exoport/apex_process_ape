@@ -17,6 +17,12 @@ v1.4.2 release.
   `chore(ape): update ape to vX.Y.Z` commit that `ape update --pin` and
   `ape framework update --update-ape` make. It is exempt only when it touches nothing outside
   `.bingo/`, just as the framework's install commit is exempt only when it touches install files.
+- **`ape framework update` brings ape's Claude Code hooks up to date**, as `ape project init`
+  does, in the update's own commit. A pre-tool hook registered without `"onFailure": "block"`
+  gains it, Monitor joins the pre-tool matcher, and a missing or altered hook is restored. Every
+  other key and hook in `.claude/settings.json` is kept, and a `hook` line is printed for each
+  change. Before, only the v0 lift did this, so an updated v1 project kept an older init's
+  fail-open hook.
 
 ## v1.4.2 (2026-10-31)
 

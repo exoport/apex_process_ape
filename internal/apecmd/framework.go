@@ -347,6 +347,13 @@ Framework-Commit, Framework-Migrations and Generator trailers; an update
 that changed nothing commits nothing. A migration that commits on its own
 (the v1.0.0 lift) lands its commit first.
 
+In an APEX v1 project the update also brings ape's Claude Code hooks in
+.claude/settings.json up to date, as 'ape project init' does: a pre-tool
+hook registered without "onFailure": "block" gains it, Monitor joins the
+pre-tool matcher, a missing or altered hook is restored, and every other key
+and hook is kept. It prints a 'hook' line for each, and the update's commit
+carries settings.json (1.4.3).
+
 A 'blocking: true' derivable migration — the lift, above all — is one the
 install is not valid without. When one fails or is not attempted (an
 earlier entry failed, its check could not run, it cannot be run), the
@@ -584,6 +591,18 @@ func migrateAndCommitUpdate(cmd *cobra.Command, w io.Writer, projectRoot string,
 	if p, ok := v1ProjectAt(projectRoot); ok {
 		if _, err := syncPluginsReport(cmd.Context(), w, p, false); err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "WARNING: plugins: %v\n", err)
+		}
+		// 1.4.3 PDFA-2: ape's Claude Code hooks brought up to date as
+		// `ape project init` does (onFailure, Monitor in the matcher, a
+		// missing or altered hook restored; every other key kept), in
+		// this update's commit: the hooks are ape's half of the contract
+		// the installed skills rely on, and they move together.
+		added, err := apexv1.MergeHooks(p.SettingsJSON())
+		if err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "WARNING: hooks: %v — `ape project init` merges them\n", err)
+		}
+		for _, h := range added {
+			fmt.Fprintln(w, "hook     "+h)
 		}
 	}
 	if !commit {
