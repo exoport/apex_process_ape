@@ -75,6 +75,7 @@ leaves an existing `models:` alone, warning for each default skill it lacks.
 | [`plugins`](#marketplaces-and-plugins) | list | none | yes |
 | [`tools`](#tools) | `{design: [...], review: [...], advise: [...]}` | none | yes |
 | [`library`](#library) | `true` or `false` | `false` (absent: not a library) | no |
+| [`coordination`](#coordination) | `{ensemble, home, url}` | absent: in no ensemble | yes |
 
 ## `project_name`
 
@@ -583,6 +584,30 @@ With `library: true`:
   what its module does not provide.
 
 See [How to publish a library](../how-to/publish-a-library.md).
+
+## `coordination`
+
+APEX v1.5 (in development; [coordination reference](coordination.md)). The project's membership in
+an ensemble: projects that run milestones in parallel and coordinate over NATS. Absent, the project
+coordinates with nobody and nothing below applies. Guarded.
+
+```yaml
+coordination:
+  ensemble: shop                          # the ensemble's name; its subject token is its slug
+  home: git@example.com:shop/home.git     # the repository holding the ensemble's roadmap and contracts
+  url: nats://nats.example.com:4222       # the NATS server, or a comma-separated list
+```
+
+- **The credential is not in the config.** ape connects with `hot/ape-nats.creds`, a credential
+  scoped to the ensemble. No session reads or writes it: the edit tools are denied the file, and a
+  Bash or Monitor command that names it, names `hot` as a folder, or holds a pattern matching it is
+  denied ([security model](../explanation/security-model.md)).
+- **An ensemble named as a member project is refused.** Both are compared as subject tokens
+  (lowercase, `.`, `*`, `>` and spaces as `-`), so `notes.svc` clashes with the project `Notes Svc`.
+- **NATS is required to start and to integrate.** When it is unreachable, starting a milestone or a
+  change, claiming, and integrating refuse with `coord.nats-unreachable` (action `retry`). Work
+  already in flight continues. `ape status` shows `coordination: paused — NATS unreachable since
+  14:02 (in-flight work continues; new claims and merges wait)` until ape connects again.
 
 ## Commands that act on the config
 

@@ -146,6 +146,7 @@ func Run(ctx context.Context, nc *nats.Conn, cfg Config) error {
 
 	wctx, stopWatch := context.WithCancel(ctx)
 	defer stopWatch()
+	c.watchLink(wctx)
 	go func() {
 		_ = ss.WatchExpiries(wctx, cfg.ID, func(r slots.Reclaimed) {
 			c.publish(wctx, "slot-reclaimed", r.Key, r)
@@ -257,12 +258,17 @@ func (c *Coordinator) status(r micro.Request) {
 }
 
 func (c *Coordinator) publish(ctx context.Context, event, id string, payload any) {
+	_ = c.publishID(ctx, event, id, c.cfg.ID+"/"+event+"/"+id+"/"+time.Now().UTC().Format(time.RFC3339Nano), payload)
+}
+
+func (c *Coordinator) publishID(ctx context.Context, event, id, msgID string, payload any) error {
 	data, err := json.Marshal(payload)
 	if err != nil {
-		return
+		return err
 	}
 	subj := events.Subject(Owner, c.cfg.Ensemble, events.KindCoord, id, event)
-	_, _ = events.Publish(ctx, c.js, subj, c.cfg.ID+"/"+event+"/"+id+"/"+time.Now().UTC().Format(time.RFC3339Nano), data)
+	_, err = events.Publish(ctx, c.js, subj, msgID, data)
+	return err
 }
 
 // watchLeaseExpiries publishes lease-expired for every lease of the
@@ -309,4 +315,64 @@ func (c *Coordinator) ours(key string) bool {
 		}
 	}
 	return false
+}
+
+// publishRetry spaces the outage events' publish attempts.
+const publishRetry = 250 * time.Millisecond
+
+// watchLink publishes nats-paused and nats-resumed once the link is back
+// after an outage (§4.5): nothing can be published while it is down, so
+// both go out on the reconnect, the first carrying since when.
+func (c *Coordinator) watchLink(ctx context.Context) {
+	var mu sync.Mutex
+	var down time.Time
+	c.nc.SetDisconnectErrHandler(func(*nats.Conn, error) {
+		mu.Lock()
+		if down.IsZero() {
+			down = time.Now().UTC()
+		}
+		mu.Unlock()
+	})
+	c.nc.SetReconnectHandler(func(*nats.Conn) {
+		mu.Lock()
+		since := down
+		down = time.Time{}
+		mu.Unlock()
+		if since.IsZero() || ctx.Err() != nil {
+			return
+		}
+		go func() {
+			// Right after a reconnect the stream may still be electing a
+			// leader: retry each until it is stored, under one message id
+			// so a retry that did land is not stored twice.
+			pctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			defer cancel()
+			s := since.Format(time.RFC3339Nano)
+			at := time.Now().UTC().Format(time.RFC3339Nano)
+			for _, e := range []struct {
+				event   string
+				payload map[string]string
+			}{
+				{"nats-paused", map[string]string{"since": s}},
+				{"nats-resumed", map[string]string{"since": s, "at": at}},
+			} {
+				msgID := c.cfg.ID + "/" + e.event + "/" + s
+				for !c.publishTry(pctx, e.event, msgID, e.payload) {
+					select {
+					case <-pctx.Done():
+						return
+					case <-time.After(publishRetry):
+					}
+				}
+			}
+		}()
+	})
+}
+
+// publishTry is one attempt, bounded: a JetStream publish waits for its
+// ack, and during a leader election that wait has no end of its own.
+func (c *Coordinator) publishTry(ctx context.Context, event, msgID string, payload any) bool {
+	actx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	return c.publishID(actx, event, c.cfg.ID, msgID, payload) == nil
 }

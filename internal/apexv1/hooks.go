@@ -133,7 +133,7 @@ func PreTool(payload HookPayload) PreToolDecision {
 			cwd, _ = os.Getwd()
 		}
 		command := bashCommand(payload.ToolInput)
-		for _, guard := range []func(command, cwd string) PreToolDecision{RecordGuard, TagGuard, PushGuard, KillGuard, SubjectGuard, GateGuard} {
+		for _, guard := range []func(command, cwd string) PreToolDecision{RecordGuard, CredsGuard, TagGuard, PushGuard, KillGuard, SubjectGuard, GateGuard} {
 			if d := guard(command, cwd); d.Deny {
 				return d
 			}
@@ -260,6 +260,9 @@ func (p *Project) protectedReason(abs string) string {
 	root := p.Root
 	if resolvedRoot, err := filepath.EvalSymlinks(p.Root); err == nil {
 		root = resolvedRoot
+	}
+	if abs == filepath.Join(root, filepath.FromSlash(NATSCredsRel)) || abs == filepath.Join(p.Root, filepath.FromSlash(NATSCredsRel)) {
+		return credsReason
 	}
 	for _, name := range []string{"settings.json", "settings.local.json"} {
 		if abs == filepath.Join(root, ".claude", name) || abs == filepath.Join(p.Root, ".claude", name) {

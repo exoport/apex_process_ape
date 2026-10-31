@@ -1,6 +1,7 @@
 package apecmd
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/exoport/apex_process_ape/internal/apexv1"
+	"github.com/exoport/apex_process_ape/internal/coord/member"
 	"github.com/exoport/apex_process_ape/internal/statusboard"
 	"github.com/spf13/cobra"
 )
@@ -497,8 +499,8 @@ func newProjectCheckCmd() *cobra.Command {
                            _apex/config.yaml — limits, checks, retries, requires, timeouts,
                            caps, regression, commit (types included), evidence,
                            marketplaces, plugins, tools, human_review, release (D120),
-                           secrets (D155) — and is not ape's (config.changed, D50) — a
-                           person reverts it or accepts it: ` + "`ape project accept-config`" + `
+                           secrets (D155), coordination (v1.5) — and is not ape's
+                           (config.changed, D50) — a person reverts it or accepts it: ` + "`ape project accept-config`" + `
   hot/                     the project's secrets (D155): when hot/ exists, git ignores a new
                            file in it (hot/.gitignore "*", which init and the lift write, or
                            any ignore rule), and git tracks nothing under it — else
@@ -1190,6 +1192,7 @@ with --since <seq> · 2 usage (usage.until, usage.wait). --board exits 0 whateve
 			_ = detachedRuns(cmd.Context(), p.Root)
 			r := p.Status()
 			p.AttachAdvise(cmd.Context(), r)
+			r.Coordination = coordinationLine(p)
 			if board {
 				o := refreshBoardNow(cmd.Context(), p, r, cmd.ErrOrStderr())
 				return v1Emit(cmd.OutOrStdout(), &f, statusWithBoard{StatusReport: r, Board: &o}, func(w io.Writer) {
@@ -1290,6 +1293,9 @@ func statusLong(r *apexv1.StatusReport) string {
 		}
 	}
 	b.WriteString(fullSkippedLines(r))
+	if r.Coordination != "" {
+		b.WriteString("\n" + r.Coordination + "\n")
+	}
 	if len(r.Advise) > 0 {
 		b.WriteString("\nAdvise for planning (tools.advise for: plan; ape status --json: advise):\n")
 		printAdvise(&b, r.Advise)
@@ -1331,4 +1337,17 @@ func statusLong(r *apexv1.StatusReport) string {
 	}
 	fmt.Fprintf(&b, "\nSpend note: %s\n", r.Spend.Note)
 	return b.String()
+}
+
+// coordinationLine is ape status's coordination line (v1.5, §4.5): "" for
+// a project in no ensemble; a block that cannot be used says so.
+func coordinationLine(p *apexv1.Project) string {
+	m, err := member.Load(p)
+	switch {
+	case errors.Is(err, member.ErrNotMember):
+		return ""
+	case err != nil:
+		return "coordination: not usable — " + err.Error() + " (" + apexv1.CodeCoordMembership + ")"
+	}
+	return member.StatusLine(&m, member.ReadLink(p.Root))
 }

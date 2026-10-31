@@ -36,12 +36,14 @@ var guardedConfigKeys = []string{
 	"commit", "evidence", "marketplaces", "plugins", "tools", "human_review", "release",
 	// rc.6 (rc6-g): what the commit secret scan lets through (D155).
 	"secrets",
+	// v1.5 (OQ3, OQ4): the project's ensemble membership.
+	"coordination",
 }
 
 func init() {
 	findingRules = append(findingRules, rule("", `^guarded config keys`, "config.changed"))
 	DiagnosticCodes = append(DiagnosticCodes,
-		CodeDoc{"config.changed", 1, ActionPerson, "a commit since the v1 epoch changed a guarded block of _apex/config.yaml — limits, checks, retries, requires, timeouts, caps, regression, commit (commit.types included, D120), evidence, marketplaces, plugins, tools, human_review, release (D120) or secrets (D155) — and is not ape's (`apex: …`), and no person accepted it since (`ape project accept-config --by <who>`); a revert also clears it (D50, D69, D75, D120, D155)"},
+		CodeDoc{"config.changed", 1, ActionPerson, "a commit since the v1 epoch changed a guarded block of _apex/config.yaml — limits, checks, retries, requires, timeouts, caps, regression, commit (commit.types included, D120), evidence, marketplaces, plugins, tools, human_review, release (D120), secrets (D155) or coordination (v1.5) — and is not ape's (`apex: …`), and no person accepted it since (`ape project accept-config --by <who>`); a revert also clears it (D50, D69, D75, D120, D155)"},
 	)
 }
 

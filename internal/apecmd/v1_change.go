@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/exoport/apex_process_ape/internal/apexv1"
+	"github.com/exoport/apex_process_ape/internal/coord/member"
 	"github.com/spf13/cobra"
 )
 
@@ -127,6 +128,10 @@ func splitList(s string) []string {
 // provenanceVerbs are the change verbs that check provenance first (H14).
 var provenanceVerbs = map[string]bool{"start": true, "verify": true, "archive": true}
 
+// coordVerbs need NATS in a project of an ensemble (v1.5, OQ5): start
+// claims, archive integrates. verify and review are in-flight work.
+var coordVerbs = map[string]bool{"start": true, "archive": true}
+
 // v1ChangeLeaf builds a `ape change <verb> <id>` leaf around run.
 func v1ChangeLeaf(use, short, long, example string, f *v1Flags, run func(cmd *cobra.Command, p *apexv1.Project, id string) error) *cobra.Command {
 	cmd := &cobra.Command{
@@ -147,6 +152,11 @@ func v1ChangeLeaf(use, short, long, example string, f *v1Flags, run func(cmd *co
 			// v1 epoch that wrote a spec or a state.json around ape.
 			if provenanceVerbs[cmd.Name()] {
 				if err := p.Provenance(cmd.Context()); err != nil {
+					return v1Fail(cmd, f, err, nil)
+				}
+			}
+			if coordVerbs[cmd.Name()] {
+				if err := member.Gate(cmd.Context(), p, "change "+cmd.Name(), time.Now()); err != nil {
 					return v1Fail(cmd, f, err, nil)
 				}
 			}

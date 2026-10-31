@@ -72,7 +72,7 @@ func TestDiagnosticCodes_PublishedListMatchesTheCode(t *testing.T) {
 	}
 	used := map[string]bool{}
 	codeRe := regexp.MustCompile(`Code:\s+"([a-z0-9.-]+)"`)
-	constRe := regexp.MustCompile(`Code:\s+(Code[A-Za-z]+)`)
+	constRe := regexp.MustCompile(`Code:\s+(?:apexv1\.)?(Code[A-Za-z]+)`)
 	consts := map[string]string{
 		"CodeWrongStatus": CodeWrongStatus, "CodeCommitFailed": CodeCommitFailed,
 		"CodeMilestoneNotFound": CodeMilestoneNotFound, "CodeMilestoneNotApproved": CodeMilestoneNotApproved,
@@ -142,8 +142,10 @@ func TestDiagnosticCodes_PublishedListMatchesTheCode(t *testing.T) {
 		"CodeTagMismatch": CodeTagMismatch,
 		// v1.4.1.
 		"CodeCheckGrepTestOutput": CodeCheckGrepTestOutput, "CodeSessionAuthLost": CodeSessionAuthLost,
+		// v1.5 (in development).
+		"CodeCoordNATSUnreachable": CodeCoordNATSUnreachable, "CodeCoordMembership": CodeCoordMembership,
 	}
-	for _, glob := range []string{"*.go", filepath.Join("..", "apecmd", "v1_*.go")} {
+	for _, glob := range []string{"*.go", filepath.Join("..", "apecmd", "v1_*.go"), filepath.Join("..", "coord", "member", "*.go")} {
 		files, err := filepath.Glob(glob)
 		require.NoError(t, err)
 		for _, f := range files {

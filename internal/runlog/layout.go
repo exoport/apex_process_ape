@@ -279,6 +279,13 @@ func TimestampStatePath(projectRoot string) string {
 	return filepath.Join(ApeRoot(projectRoot), "timestamp.state")
 }
 
+// CoordLinkPath records a project's NATS outage (v1.5, §4.5): since when
+// its ape last found NATS unreachable, cleared on the next connect. `ape
+// status` reads it for the coordination line.
+func CoordLinkPath(projectRoot string) string {
+	return filepath.Join(ApeRoot(projectRoot), "coord-link.json")
+}
+
 // PipelineRunDir is where one pipeline run's artifacts live.
 func PipelineRunDir(projectRoot, pipelineName, runID string) string {
 	return filepath.Join(PipelinesRoot(projectRoot), RunGroupDir(pipelineName), runID)

@@ -122,6 +122,12 @@ func rootSubcommands() []*cobra.Command {
 		newSandboxAgentCmd(),
 		newSandboxConnectCmd(),
 		newServiceCmd(),
+		// APEX v1.5 (in development): the coordination verbs.
+		newNatsCmd(),
+		newCoordinatorCmd(),
+		newSupervisorCmd(),
+		newHealthCmd(),
+		newConductorCmd(),
 		newGenDocsCmd(),
 		// A whole command tree from a separate module, mounted rather than
 		// ported — see aboard.go for what the two hosts share and what

@@ -103,3 +103,10 @@ func encodeAccount(t *testing.T, accountPub string, operator nkeys.KeyPair) stri
 	}
 	return ajwt
 }
+
+// NewAccountKey is a fresh account key the operator server does not
+// trust: credentials it signs are refused (a negative control).
+func NewAccountKey(t *testing.T) KeyPair {
+	t.Helper()
+	return KeyPair{kp: createAccount(t)}
+}

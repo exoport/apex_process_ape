@@ -36,16 +36,20 @@ Subcommands:
 - `aboard` — A shared visual board for a human and one or more agent sessions
 - `change` — The unit of change: new, check, approve (tweaks), start, verify, review, accept, block, answer, archive, tool
 - `chat` — Bridged claude REPL with hooks captured to a runlog
+- `conductor` — APEX v1.5 (in development): the conductor's deliveries
 - `config` — Resolve the project's APEX configuration
+- `coordinator` — APEX v1.5 (in development): run an ensemble's coordinator until stopped
 - `costs` — Show this project's Claude cost rollup
 - `decision` — Record architecture decisions (ADR-NNNN) in development/decisions/
 - `doctor` — Probe the local environment for prerequisites
 - `event` — Publish a session progress event over NATS
 - `framework` — Install and inspect APEX framework assets in a project
+- `health` — APEX v1.5 (in development): report a coordinator that did not answer
 - `hook` — Claude Code and git hooks for APEX v1 projects (installed by `ape project init`)
 - `log` — Publish a structured log record over NATS
 - `metrics` — Scan and publish this session's usage metrics over NATS
 - `milestone` — Add, approve, gate and close roadmap milestones
+- `nats` — APEX v1.5 (in development): declare the coordination layout, open a new epoch, replay this checkout's records
 - `next` — Record a finding for later in development/next.md (Next)
 - `plugins` — Install the plugins _apex/config.yaml lists, and report what they and the tools slot bring
 - `project` — Create and check an APEX v1 project layout
@@ -57,6 +61,7 @@ Subcommands:
 - `service` — Run a NATS-micro job daemon that accepts task/prompt/script jobs over request/reply
 - `sessions` — List, prune, or open the URL of live ape sessions
 - `status` — Show the current milestone, active changes, blocks, pending human review and spend
+- `supervisor` — APEX v1.5 (in development): run a supervisor, which keeps each ensemble's coordinator running
 - `task` — Run a single framework skill through the interactive PTY runner
 - `transcript` — Work with Claude session transcripts
 - `update` — Update ape to the latest version
@@ -2434,6 +2439,39 @@ Flags:
 | `--model` | string | `—` | Initial claude model. A bare family (fable, haiku, mythos, opus, sonnet) resolves to its current generation; sonnet-5 / claude-sonnet-5 / opus[1m] pin explicitly. Empty falls back to claude's default. |
 | `--output-style` | string | `—` | Output style pinned on the spawned session (default "Default"). Pass "inherit" to keep whatever style the machine is configured with. |
 
+## ape conductor
+
+APEX v1.5 (in development): the conductor's deliveries
+
+```
+ape conductor
+```
+
+Subcommands:
+
+- `ack` — Acknowledge one delivered event, by the token its delivery names
+
+## ape conductor ack
+
+Acknowledge one delivered event, by the token its delivery names
+
+```
+ape conductor ack <token> [flags]
+```
+
+Acknowledge an event the conductor's ape typed into the session (proposal §3.1, OQ22).
+Each delivery ends "When you have handled this event, run: ape conductor ack <token>";
+the token is the event's JetStream ack subject. An unacknowledged event is delivered
+again; acknowledgements are what keep the conductor's lease renewed.
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | the project whose coordination: block and hot/ape-nats.creds to use (default: the current directory) |
+| `--nats-creds` | string | `—` | NATS credentials file, instead of the project's hot/ape-nats.creds (env APE_NATS_CREDS) |
+| `--nats-url` | string | `—` | NATS URL, instead of the project's (env APE_NATS_URL) |
+
 ## ape config
 
 Resolve the project's APEX configuration
@@ -2578,6 +2616,32 @@ Flags:
 | ---- | ---- | ------- | ----------- |
 | `--cwd` | string | `—` | Project root to resolve from (default: current working dir) |
 | `--output-format` | string | `human` | Output format: human\|json\|yaml |
+
+## ape coordinator
+
+APEX v1.5 (in development): run an ensemble's coordinator until stopped
+
+```
+ape coordinator --ensemble <name> [--id <id>] [--project <slug>]... [flags]
+```
+
+Run the coordinator of one ensemble (stage 0; proposal §3.1): it claims the lease
+coord.<ensemble> (exit 1 if another coordinator holds it), serves slot requests on
+ape.coord.<ensemble>.<verb> as a NATS-micro service, records slots it granted that
+expired (slot-reclaimed), and publishes lease-expired for the ensemble's leases,
+those of the --project members' milestones included. The supervisor starts it; a
+person may too. SIGINT/SIGTERM releases the lease and exits 0.
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | the project whose coordination: block and hot/ape-nats.creds to use (default: the current directory) |
+| `--ensemble` | string | `—` | the ensemble (default: the project's) |
+| `--id` | string | `—` | this coordinator's id, the lease holder (default: <host>-<pid>) |
+| `--nats-creds` | string | `—` | NATS credentials file, instead of the project's hot/ape-nats.creds (env APE_NATS_CREDS) |
+| `--nats-url` | string | `—` | NATS URL, instead of the project's (env APE_NATS_URL) |
+| `--project` | stringSlice | `[]` | a member project whose milestone leases it watches (repeatable) |
 
 ## ape costs
 
@@ -3594,6 +3658,43 @@ Global flags:
 | ---- | ---- | ------- | ----------- |
 | `--cwd` | string | `—` | Project root directory (default: current working dir) |
 | `--repo` | string | `—` | Path to a checked-out apex_process_framework repo (default: $APEX_FRAMEWORK_REPO) |
+
+## ape health
+
+APEX v1.5 (in development): report a coordinator that did not answer
+
+```
+ape health
+```
+
+Subcommands:
+
+- `report` — Tell the supervisor a request to the coordinator timed out, and print its verdict
+
+## ape health report
+
+Tell the supervisor a request to the coordinator timed out, and print its verdict
+
+```
+ape health report [--ensemble <name>] --subject <subject> --what <text> [flags]
+```
+
+Send ape.sup.health.report (proposal §3.3): this ape's request on --subject timed out.
+The supervisor verifies before it acts and answers one of: replaced (the coordinator was
+stale and is restarted), unconfirmed (the coordinator looks healthy: suspect this ape's
+own link), gave-up (stale, but the restart budget is spent; a person decides). Exit 0 on
+any verdict, 1 when no supervisor answered.
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | the project whose coordination: block and hot/ape-nats.creds to use (default: the current directory) |
+| `--ensemble` | string | `—` | the ensemble (default: the project's) |
+| `--nats-creds` | string | `—` | NATS credentials file, instead of the project's hot/ape-nats.creds (env APE_NATS_CREDS) |
+| `--nats-url` | string | `—` | NATS URL, instead of the project's (env APE_NATS_URL) |
+| `--subject` | string | `—` | the subject whose request timed out |
+| `--what` | string | `—` | what this ape was doing |
 
 ## ape hook
 
@@ -4657,6 +4758,72 @@ Flags:
 | `--goal` | string | `—` | the Goal: paragraph (else a placeholder to fill in) |
 | `--json` | bool | `false` | machine output (JSON on stdout) |
 
+## ape nats
+
+APEX v1.5 (in development): declare the coordination layout, open a new epoch, replay this checkout's records
+
+```
+ape nats
+```
+
+APEX v1.5's rebuild (stage 0; docs/reference/coordination.md): after a NATS cluster
+loses its data, the supervisor runs `ape nats declare --new-epoch`, every member
+checkout runs `ape nats replay`, and each lease is re-claimed by its last holder's
+token. Both connect with --nats-url/--nats-creds, or with the project's coordination:
+block and hot/ape-nats.creds.
+
+Subcommands:
+
+- `declare` — Declare every bucket, stream and object store of the layout (idempotent); with --new-epoch, open the next epoch
+- `replay` — Write this checkout's own events, run manifests and attempt counts back to NATS (idempotent)
+
+## ape nats declare
+
+Declare every bucket, stream and object store of the layout (idempotent); with --new-epoch, open the next epoch
+
+```
+ape nats declare [--replicas 3] [--new-epoch --epoch-file <path> [--window 2m]] [flags]
+```
+
+Declare every KV bucket, stream and object store of the coordination layout, creating
+what is missing and leaving what exists (§4.4 step 1). With --new-epoch, also write the
+epoch after the higher of --epoch-file (the supervisor's local copy) and the cluster's,
+to both, and open the re-claim window for --window: leases are re-claimed by the
+highest revision of the previous epoch until it closes.
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | the project whose coordination: block and hot/ape-nats.creds to use (default: the current directory) |
+| `--epoch-file` | string | `—` | the supervisor's local copy of the epoch (with --new-epoch) |
+| `--nats-creds` | string | `—` | NATS credentials file, instead of the project's hot/ape-nats.creds (env APE_NATS_CREDS) |
+| `--nats-url` | string | `—` | NATS URL, instead of the project's (env APE_NATS_URL) |
+| `--new-epoch` | bool | `false` | open the next epoch after declaring (the supervisor's step after a rebuild) |
+| `--replicas` | int | `3` | replicas of every bucket and stream |
+| `--window` | duration | `2m0s` | how long the re-claim window stays open (with --new-epoch) |
+
+## ape nats replay
+
+Write this checkout's own events, run manifests and attempt counts back to NATS (idempotent)
+
+```
+ape nats replay [flags]
+```
+
+Write back what this checkout alone wrote (§4.4 step 2): its events.jsonl lines, by
+message id <project>/<checkout-id>/<seq>, so a second replay, or one racing a live
+publish, stores each once; its run manifests and attempt counts, by their ids. Run in
+a project with a coordination: block; the <user> token is the credential's.
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | the project whose coordination: block and hot/ape-nats.creds to use (default: the current directory) |
+| `--nats-creds` | string | `—` | NATS credentials file, instead of the project's hot/ape-nats.creds (env APE_NATS_CREDS) |
+| `--nats-url` | string | `—` | NATS URL, instead of the project's (env APE_NATS_URL) |
+
 ## ape next
 
 Record a finding for later in development/next.md (Next)
@@ -5200,8 +5367,8 @@ Validate the whole project and list every failure, not just the first.
                            _apex/config.yaml — limits, checks, retries, requires, timeouts,
                            caps, regression, commit (types included), evidence,
                            marketplaces, plugins, tools, human_review, release (D120),
-                           secrets (D155) — and is not ape's (config.changed, D50) — a
-                           person reverts it or accepts it: `ape project accept-config`
+                           secrets (D155), coordination (v1.5) — and is not ape's
+                           (config.changed, D50) — a person reverts it or accepts it: `ape project accept-config`
   hot/                     the project's secrets (D155): when hot/ exists, git ignores a new
                            file in it (hot/.gitignore "*", which init and the lift write, or
                            any ignore rule), and git tracks nothing under it — else
@@ -8079,6 +8246,33 @@ Flags:
 | `--since` | int64 | `0` | with --until: the seq the last wait printed; the events after it count, so none is missed between two calls |
 | `--until` | string | `—` | wait until one of these holds: person, stopped, done, blocked, event (comma = any); returns at once when one already does |
 | `--wait` | duration | `9m0s` | with --until: how long this call waits (at most 9m30s); exit 75 when it runs out — run it again with --since <seq> |
+
+## ape supervisor
+
+APEX v1.5 (in development): run a supervisor, which keeps each ensemble's coordinator running
+
+```
+ape supervisor [--id <id>] [--heartbeat 1m] [flags]
+```
+
+Run a supervisor (stage 0; proposal §3.3). Two or more may run: one holds sup.leader
+and serves ape.sup.ensure, ape.sup.health.report and ape.sup.status; the others wait to
+take over. On ensure it starts `ape coordinator --ensemble <name>` as a child process
+with this command's connection flags. A health report is verified before anything is
+killed: the coordinator's lease must be stale AND its ping unanswered; otherwise the
+reporter is told its own link looks unhealthy (health-unconfirmed). At most 3 starts per
+ensemble in 15 minutes. --no-verify kills on any report (the drills' control only).
+SIGINT/SIGTERM stops its coordinators and exits 0.
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | the project whose coordination: block and hot/ape-nats.creds to use (default: the current directory) |
+| `--heartbeat` | duration | `1m0s` | how often each held conductor lease gets a heartbeat event (0: none) |
+| `--id` | string | `—` | this supervisor's id (default: sup-<host>-<pid>) |
+| `--nats-creds` | string | `—` | NATS credentials file, instead of the project's hot/ape-nats.creds (env APE_NATS_CREDS) |
+| `--nats-url` | string | `—` | NATS URL, instead of the project's (env APE_NATS_URL) |
 
 ## ape task
 

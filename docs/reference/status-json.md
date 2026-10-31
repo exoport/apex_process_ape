@@ -74,6 +74,7 @@ A fresh project with one approved milestone gives, in part:
 | `docs` | object | `docs:` from `_apex/config.yaml`: `changelog`, `user_docs`, `tested`. `{}` when unset. |
 | `base_upstream` | object or null | `{branch, upstream, ahead, behind}`: the base branch against its upstream, from the local remote-tracking ref (ape never fetches). `null` with no upstream. |
 | `outside_flow` | array | Commits on the base branch since the last archive squash (else the v1 epoch) that touch paths outside `development/` and `_apex/`, carry no `Change:` trailer and have no `apex:` subject: `{sha, subject, files}`, newest first. Shown, never failed. |
+| `coordination` | string | v1.5 (in development): the project's coordination line, present only for a project with a [`coordination:`](config-yaml.md#coordination) block — `coordination: ensemble <ens> (home <repo>)`, or while NATS is unreachable `coordination: paused — NATS unreachable since <HH:MM> (in-flight work continues; new claims and merges wait)`. |
 | `archive_journal` | object | Present while an archive is in flight or after one crashed: `{id, base, base_sha, branch, branch_tip, step, written, pid, at}`. |
 | `archive_running` | bool | Present and true when that archive's process is alive. |
 | `latest_run` | object | The newest `ape task` run (below). Absent before the first. |

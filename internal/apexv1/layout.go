@@ -120,6 +120,23 @@ type Config struct {
 	// only suggest it (SuggestLibrary), never write it. Not guarded: it
 	// loosens nothing.
 	Library bool `yaml:"library"`
+	// Coordination is the project's membership in an ensemble (v1.5,
+	// OQ3, OQ4; internal/coord/member): absent, the project coordinates
+	// with nobody. Guarded (config.changed).
+	Coordination *CoordinationConfig `yaml:"coordination"`
+}
+
+// CoordinationConfig is the coordination: block. The credential is never
+// named here: it is NATSCredsRel, denied to every session tool.
+type CoordinationConfig struct {
+	// Ensemble names the ensemble; its subject token is SubjectToken's
+	// slug of it (R8).
+	Ensemble string `yaml:"ensemble"`
+	// Home is the repository holding the ensemble's roadmap and
+	// contracts under development/ensemble/ (OQ3).
+	Home string `yaml:"home"`
+	// URL is the NATS server URL, or a comma-separated list of them.
+	URL string `yaml:"url"`
 }
 
 // SkillModel is one models.<skill> entry.

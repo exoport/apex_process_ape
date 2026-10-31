@@ -406,6 +406,10 @@ type StatusReport struct {
 	// and no `apex:` subject: work that bypassed the change flow (H7).
 	// Shown, never failed.
 	OutsideFlow []OutsideFlow `json:"outside_flow"`
+	// Coordination is the project's coordination line (v1.5, §4.5:
+	// internal/coord/member.StatusLine); absent for a project in no
+	// ensemble. ape status sets it; the reader here cannot.
+	Coordination string `json:"coordination,omitempty"`
 	// ArchiveJournal is an archive in flight, or one that crashed (H28):
 	// the next writing command rolls a crashed one back. Status only
 	// reports it. ArchiveRunning: its process is still alive.
