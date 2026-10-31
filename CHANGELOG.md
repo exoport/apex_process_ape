@@ -8,7 +8,20 @@ test output in a way that misjudges the tests gets a notice; an expert's advice 
 planning session (`for: plan`); and a new page states ape's security model and its known limits.
 The framework's v1.4.1 payload declares `min_ape_version: "1.4.1"`. Measured on Claude Code 2.1.312.
 
-<!-- EVALUATION: filled from the D2 and R read-outs before the release commit (D651). -->
+Evaluated on Claude Code 2.1.312 with the release build, bin-v141rc3 (b0df794), and the framework's
+v1.4.1-rc.1 payload (digest 0270c5f2): three projects (new, existing, and one whose tests run
+against Docker containers) built in full. Greenfield passed its gates 7/7 and e2e 8/8, brownfield
+7/7 and 18/18, and notes-svc 37/37. In every project no process a check started was left running,
+no loop was wrongly reported lost, and no release was prepared unasked. Before that, the same ape
+(rc1, which differs from the release only in this notice's text and the aboard bump) ran six
+full-length ledger and taskforge projects on v1.4.0's payload with no run stopped by the
+consecutive-block limit, and nine expert-advice runs for `for: plan` (below). ape's harness gates and
+`make check-framework` against the payload pass on Claude Code 2.1.312.
+
+**Known issue:** `check.grep-test-output`'s fix text suggests capturing the output with a bash
+here-string (`grep -q … <<<"$out"`), which `sh -c` (dash) cannot parse; ape runs checks under `sh`.
+Use `out=$(go test -v ./pkg) && printf '%s\n' "$out" | grep -q …`, or run the test by name and use
+its exit. Fixed in the next release.
 
 - **A session that lost its login ends in minutes** (D603): `auth_lost` (manifest termination, `ape
   task`/`ape prompt` exit 15, `ape status` "stopped: auth-lost", `session.auth-lost` from `ape
