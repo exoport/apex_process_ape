@@ -1,5 +1,35 @@
 # CHANGELOG
 
+## v1.4.2 (unreleased — draft)
+
+APEX v1.4.2, on v1.4.1: **the delegated conductor** (D658–D661). A person's own Claude Code
+session can drive the projects' orchestrators and perform some of the person's acts under their
+standing orders, checked by ape. This patch release adds verbs, keys and events (D659 B1 amends
+the patch rule for it):
+
+- **Standing orders**, `_apex/standing-orders/<person>.md`: who, which acts, which conditions, as
+  frontmatter, and free text for the conductor. `ape orders show|accept|revoke`; accept and revoke
+  are a person's, from a terminal, and run the notifier. The edit tools are denied the folder.
+- **`ape conductor act <act> <target>`**, the only route by which a model session performs a person
+  act. ape checks a required `--reason`, the act's tier (never: accept-config, accept-red,
+  allow-pending-human, push, tag, release, the orders), the orders' state, their conditions, and
+  the `--evidence` paths, then runs the act as the person's command does. The act is recorded
+  `by: conductor under orders <person>@<commit> (<reason>)` and logged as event `delegated`. New
+  codes `orders.*`.
+- **The decision log**, `_apex/state/conductor-<person>.md`: every delegated act with its reason
+  and evidence digests, plus the holds and questions noted with `ape conductor note
+  --hold|--question|--resolved`. Read it with `ape conductor log [--open]`.
+- **The orchestrator terminal**: `ape conductor start|send|read|status|stop|watch`.
+  - A supervisor owns a terminal running Claude Code with /apex-orchestrator in the project, and
+    types the conductor's messages into it, marked (`<ape-delivery …>`, never a person's words),
+    only while the orchestrator is idle.
+  - It logs `orchestrator-dead`, and `orchestrator-idle` (idle with a message pending, past
+    `conductor.idle_alert`, default 30m).
+  - `ape status --wait --until conductor` wakes on either, and on `run-lost`.
+  - Every verb takes `--project`, so a remote project is driven over ssh.
+- Events `delegated`, `orders`, `orchestrator-dead` and `orchestrator-idle`; the notifier's
+  `APE_ORDERS`.
+
 ## v1.4.1 (2026-10-31)
 
 APEX v1.4.1, on v1.4.0: a session that lost its Claude Code login now ends in minutes instead of an

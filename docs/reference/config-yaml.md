@@ -75,6 +75,7 @@ leaves an existing `models:` alone, warning for each default skill it lacks.
 | [`plugins`](#marketplaces-and-plugins) | list | none | yes |
 | [`tools`](#tools) | `{design: [...], review: [...], advise: [...]}` | none | yes |
 | [`library`](#library) | `true` or `false` | `false` (absent: not a library) | no |
+| [`conductor`](#conductor) | `{idle_alert: <duration>}` | `30m` | no |
 
 ## `project_name`
 
@@ -583,6 +584,15 @@ With `library: true`:
   what its module does not provide.
 
 See [How to publish a library](../how-to/publish-a-library.md).
+
+## `conductor`
+
+v1.4.2. Tunes the orchestrator terminal a person's conductor drives (`ape conductor start`):
+`idle_alert` is how long the orchestrator may sit idle, with a conductor message pending, before
+ape logs `orchestrator-idle`. It takes a Go duration and defaults to `30m`. `--idle-alert` on
+`ape conductor start` overrides it. Not guarded: it loosens nothing ape enforces.
+[What your conductor may do for you](../explanation/person-acts.md#what-your-conductor-may-do-for-you-v142)
+covers the standing orders.
 
 ## Commands that act on the config
 

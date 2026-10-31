@@ -99,3 +99,18 @@ func stopDetached(ctx context.Context, h *detachedHandle) error {
 func forwardTerm(p *os.Process) {
 	_ = p.Kill()
 }
+
+// pidAlive reports whether pid is a running process (the conductor's
+// supervisor, v1.4.2).
+func pidAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	ph, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid)) //nolint:gosec // a pid ape recorded
+	if err != nil {
+		return errors.Is(err, windows.ERROR_ACCESS_DENIED)
+	}
+	defer func() { _ = windows.CloseHandle(ph) }()
+	var code uint32
+	return windows.GetExitCodeProcess(ph, &code) == nil && code == 259 // STILL_ACTIVE
+}

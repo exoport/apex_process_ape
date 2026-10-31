@@ -238,3 +238,66 @@ A project can hand human-review tasks to a skill through the `human_review:` blo
 run's id, never as a person. Without the block, only a person accepts a task, with one default-on
 exception: the docs check of a milestone's docs change.
 [The orchestrator and the loop](orchestrator-and-loop.md#human-review-and-delegates) explains it.
+
+## What your conductor may do for you (v1.4.2)
+
+You can delegate some of your acts to your **conductor**, your own Claude Code session that drives
+the projects' orchestrators for you. The delegation is **standing orders**: a committed file per
+person, `_apex/standing-orders/<you>.md`, where `<you>` is your git `user.email` in slug form.
+Its frontmatter is what ape checks, and its body is what the conductor reads:
+
+```yaml
+---
+person: dana@example.com
+acts: [answer, tweak-approve, milestone-approve]
+conditions:
+  tweak-approve: {types: [fix, docs]}
+  milestone-approve: {max_changes: 6}
+---
+Answer questions the way the brief leans; bring anything about pricing back to me.
+```
+
+| Tier | Acts | Under your orders |
+| --- | --- | --- |
+| 1 | answer a blocked change, approve a tweak | always, once accepted |
+| 2 | approve a milestone, accept a human-review task (where the project names a delegate), accept a decision | only when named under `acts:` |
+| never | accept the config, accept red, allow a pending human-review task, push, tag, release, the orders themselves | refused, `orders.non-delegable` |
+
+The conditions are the ones ape can check: a tweak's type, a milestone's change count and the
+state of its last gate run, and an answer only for a change blocked on a question rather than on a
+limit. Anything else belongs in the body, for the conductor's judgment.
+
+**The orders count only once you accept them, from a terminal.** `ape orders accept --by <you>`
+records who accepted, when, and the sha256 of what you accepted, in the file on the base branch.
+Any later edit, your own included, leaves the orders unaccepted until you accept them again.
+`ape orders revoke --by <you>` takes effect at the conductor's next act, wherever the project's
+HEAD is. Neither command runs in a model session, with or without your words. Accepting and
+revoking both run your `notify:` command.
+
+**A conductor acts only through `ape conductor act`.** Before running an act, ape checks five
+things:
+- the act has a `--reason` that quotes what it rests on;
+- the act's tier;
+- that the orders are accepted and not revoked;
+- the orders' conditions;
+- the evidence: each `--evidence` path must exist, and a milestone approve must name its latest
+  gate run.
+
+Only then does ape run the act, on the same code path your own command takes. It records
+`by: conductor under orders <you>@<commit> (<reason>)`, logs a `delegated` event (so your
+`notify:` command runs on every delegated act), and appends the act to your decision log,
+`_apex/state/conductor-<you>.md`. A model running the act's own command, `ape milestone approve`
+for example, is still refused (`session.person-only`).
+
+**The conductor drives each project's orchestrator in a terminal ape owns** (`ape conductor
+start`). Its messages are typed in marked (`<ape-delivery …>`). ape's hooks record a marked
+message as nobody's words, so it never grants an act. The orchestrator reads it as your
+delegate's instruction, not as you speaking. When the orchestrator dies, or sits idle with a
+message pending, ape logs `orchestrator-dead` or `orchestrator-idle`, and `ape status --wait
+--until conductor` wakes the conductor.
+
+The limit: a conductor steered by what it reads could misuse valid orders within their scope. The
+tiers, the conditions and the notifications narrow what that could do, but do not prevent it. The
+[security model](security-model.md) states it. A script that unsets the session's environment
+can still run a person-act command directly (a documented limit). Notifications on every
+delegated act and on every orders change are what reach you in that case.

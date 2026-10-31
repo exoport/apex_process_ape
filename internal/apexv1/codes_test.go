@@ -72,7 +72,7 @@ func TestDiagnosticCodes_PublishedListMatchesTheCode(t *testing.T) {
 	}
 	used := map[string]bool{}
 	codeRe := regexp.MustCompile(`Code:\s+"([a-z0-9.-]+)"`)
-	constRe := regexp.MustCompile(`Code:\s+(Code[A-Za-z]+)`)
+	constRe := regexp.MustCompile(`Code:\s+(?:apexv1\.)?(Code[A-Za-z]+)`)
 	consts := map[string]string{
 		"CodeWrongStatus": CodeWrongStatus, "CodeCommitFailed": CodeCommitFailed,
 		"CodeMilestoneNotFound": CodeMilestoneNotFound, "CodeMilestoneNotApproved": CodeMilestoneNotApproved,
@@ -142,6 +142,11 @@ func TestDiagnosticCodes_PublishedListMatchesTheCode(t *testing.T) {
 		"CodeTagMismatch": CodeTagMismatch,
 		// v1.4.1.
 		"CodeCheckGrepTestOutput": CodeCheckGrepTestOutput, "CodeSessionAuthLost": CodeSessionAuthLost,
+		// v1.4.2: standing orders and the delegated conductor.
+		"CodeOrdersMissing": CodeOrdersMissing, "CodeOrdersInvalid": CodeOrdersInvalid, "CodeOrdersUnaccepted": CodeOrdersUnaccepted,
+		"CodeOrdersRevoked": CodeOrdersRevoked, "CodeOrdersNonDelegable": CodeOrdersNonDelegable, "CodeOrdersNotNamed": CodeOrdersNotNamed,
+		"CodeConductorRunning": CodeConductorRunning, "CodeConductorNotRunning": CodeConductorNotRunning,
+		"CodeOrdersCondition": CodeOrdersCondition, "CodeOrdersNoReason": CodeOrdersNoReason, "CodeOrdersEvidence": CodeOrdersEvidence,
 	}
 	for _, glob := range []string{"*.go", filepath.Join("..", "apecmd", "v1_*.go")} {
 		files, err := filepath.Glob(glob)

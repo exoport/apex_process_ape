@@ -279,6 +279,13 @@ func TimestampStatePath(projectRoot string) string {
 	return filepath.Join(ApeRoot(projectRoot), "timestamp.state")
 }
 
+// ConductorDir holds a project's orchestrator terminal (v1.4.2): the
+// supervisor's state, the conductor's queued messages, the last pane and
+// the supervisor's log.
+func ConductorDir(projectRoot string) string {
+	return filepath.Join(ApeRoot(projectRoot), "conductor")
+}
+
 // PipelineRunDir is where one pipeline run's artifacts live.
 func PipelineRunDir(projectRoot, pipelineName, runID string) string {
 	return filepath.Join(PipelinesRoot(projectRoot), RunGroupDir(pipelineName), runID)

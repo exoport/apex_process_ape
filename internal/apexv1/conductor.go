@@ -1,0 +1,301 @@
+package apexv1
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+)
+
+// The delegated conductor (v1.4.2, D659 A2–A7, D660): a person's
+// conductor performs a person act only through `ape conductor act`, which
+// checks the person's standing orders (orders.go), the act's tier, the
+// conditions the orders set and the evidence the act rests on, then runs
+// the act on the same code path a person's command takes, recording
+// `by: conductor under orders <person>@<commit> (<reason>)`, an event
+// (`delegated`, so the notifier runs on every act) and a line in the
+// person's decision log. Every other route from a model session stays
+// refused (session.person-only).
+
+// EventDelegated: a conductor performed a person act under standing
+// orders (v1.4.2). action is the act and its target, reason the
+// conductor's reason, orders the orders it acted under.
+const EventDelegated = "delegated"
+
+// DelegatedAct is one `ape conductor act` request.
+type DelegatedAct struct {
+	// Act is the orders' name for it (OrderAnswer, …).
+	Act string
+	// Person whose orders it acts under (email or slug).
+	Person string
+	// Target: the change (answer, accept-task), the tweak, the milestone,
+	// or the decision; Task is accept-task's T<n>.
+	Target, Task string
+	// Text is answer's answer.
+	Text string
+	// Reason quotes what the act rests on (D660.1); Evidence names it.
+	Reason   string
+	Evidence []string
+}
+
+// EvidenceRef is an evidence path as the act read it.
+type EvidenceRef struct {
+	Path   string `json:"path"`
+	SHA256 string `json:"sha256"`
+}
+
+// DelegatedResult is what `ape conductor act` did.
+type DelegatedResult struct {
+	Act      string        `json:"act"`
+	Target   string        `json:"target"`
+	By       string        `json:"by"`
+	Orders   string        `json:"orders"`
+	Evidence []EvidenceRef `json:"evidence"`
+	Seq      int64         `json:"seq"`
+}
+
+// limitBlockPrefixes open the reasons ape's own limits block a change
+// with (attempts, attempts_total, replans): a block that is no question.
+var limitBlockPrefixes = []string{"attempts exceeded", "attempts_total exceeded", "replans exceeded"}
+
+// BlockedOnLimit reports whether a blocked change's reason is one of ape's
+// limits rather than a question for a person.
+func BlockedOnLimit(reason string) bool {
+	for _, p := range limitBlockPrefixes {
+		if strings.HasPrefix(reason, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// CheckDelegated runs every check of a delegated act and returns the
+// orders it would act under and the evidence it read. Nothing is written.
+func (p *Project) CheckDelegated(ctx context.Context, a DelegatedAct) (*Orders, []EvidenceRef, error) {
+	if strings.TrimSpace(a.Reason) == "" {
+		return nil, nil, &UsageError{Code: CodeOrdersNoReason, Msg: "--reason is required: what the act rests on, quoting the evidence you read (ape status, the gate run, the review verdict, the brief)"}
+	}
+	tier := OrderTierOf(a.Act)
+	switch tier {
+	case TierDelegable, TierNamed:
+	case 0:
+		return nil, nil, &UsageError{Code: "usage.act", Msg: fmt.Sprintf("%q is no act (acts: %s)", a.Act, strings.Join(OrderActs(), ", "))}
+	case TierNever:
+		return nil, nil, &FailError{Code: CodeOrdersNonDelegable, Msg: a.Act + " is never delegated: only the person does it"}
+	}
+	o, err := p.LoadOrders(ctx, a.Person)
+	if err != nil {
+		return nil, nil, err
+	}
+	switch o.State {
+	case OrdersRevoked:
+		return nil, nil, &FailError{Code: CodeOrdersRevoked, Msg: fmt.Sprintf("%s revoked these orders (%s)", o.Person, o.Revoked.At)}
+	case OrdersUnaccepted:
+		return nil, nil, &FailError{Code: CodeOrdersUnaccepted, Msg: fmt.Sprintf("%s's orders (%s on %s) changed since they were accepted, or were never accepted: the person runs `ape orders accept --by %s` from a terminal", o.Person, o.Path, o.Branch, o.Person)}
+	}
+	if tier == TierNamed && !o.Names(a.Act) {
+		return nil, nil, &FailError{Code: CodeOrdersNotNamed, Msg: fmt.Sprintf("%s is delegated only when the orders name it, and %s's do not (acts: %s)", a.Act, o.Person, strings.Join(o.Acts, ", "))}
+	}
+	if err := p.checkConditions(ctx, o, a); err != nil {
+		return nil, nil, err
+	}
+	ev, err := p.checkEvidence(a)
+	if err != nil {
+		return nil, nil, err
+	}
+	return o, ev, nil
+}
+
+// checkConditions checks what the orders set for the act, and what the
+// act needs of its target.
+func (p *Project) checkConditions(ctx context.Context, o *Orders, a DelegatedAct) error {
+	cond := func(msg string) error { return &FailError{Code: CodeOrdersCondition, Msg: msg} }
+	switch a.Act {
+	case OrderTweakApprove:
+		if c := o.Conditions.TweakApprove; c != nil && len(c.Types) > 0 {
+			ci, err := p.requireChange(ctx, a.Target)
+			if err != nil {
+				return err
+			}
+			if typ := ci.Doc.Meta.Type; !slices.Contains(c.Types, typ) {
+				return cond(fmt.Sprintf("tweak %s is of type %q, and the orders approve tweaks of types %s only", a.Target, typ, strings.Join(c.Types, ", ")))
+			}
+		}
+	case OrderMilestoneApprove:
+		if c := o.Conditions.MilestoneApprove; c != nil {
+			return p.checkMilestoneConditions(ctx, a.Target, c.MaxChanges, c.Gate)
+		}
+	case OrderAnswer:
+		if c := o.Conditions.Answer; c != nil && c.QuestionOnly {
+			ci, err := p.requireChange(ctx, a.Target)
+			if err != nil {
+				return err
+			}
+			if r := ci.State.BlockedReason; r != nil && BlockedOnLimit(*r) {
+				return cond(fmt.Sprintf("change %s is blocked on a limit (%s), and the orders answer only questions", a.Target, *r))
+			}
+		}
+	case OrderAcceptTask:
+		cfg, err := LoadConfig(p.Root)
+		if err != nil {
+			return err
+		}
+		if !cfg.HumanReview.Delegates() {
+			return cond("a human-review task is delegated only where the project names a delegate for it (_apex/config.yaml human_review:), and this one names none")
+		}
+	}
+	return nil
+}
+
+// checkMilestoneConditions: a milestone approve's change count and the
+// state of its last gate run.
+func (p *Project) checkMilestoneConditions(ctx context.Context, m string, maxChanges *int, gate string) error {
+	if maxChanges != nil {
+		if n := p.milestoneChangeCount(ctx, m); n > *maxChanges {
+			return &FailError{Code: CodeOrdersCondition, Msg: fmt.Sprintf("%s has %d changes, and the orders approve milestones of at most %d", m, n, *maxChanges)}
+		}
+	}
+	if gate == "" {
+		return nil
+	}
+	state := "none"
+	if last := p.LastGateRun(m); last != nil {
+		state = "red"
+		if last.Exit == 0 {
+			state = "green"
+		}
+	}
+	if state != gate {
+		return &FailError{Code: CodeOrdersCondition, Msg: fmt.Sprintf("%s's last gate run is %s, and the orders approve only on a %s one", m, state, gate)}
+	}
+	return nil
+}
+
+// milestoneChangeCount is how many changes, active or archived, name m.
+func (p *Project) milestoneChangeCount(ctx context.Context, m string) int {
+	n := 0
+	for _, ci := range append(p.changes(ctx), p.archivedChanges()...) {
+		if ci.Doc != nil && ci.Doc.Meta.Milestone == m {
+			n++
+		}
+	}
+	return n
+}
+
+// checkEvidence reads each evidence path (D660.1): it must exist in the
+// project; a milestone approve must name the milestone's latest gate run's
+// log when one is recorded.
+func (p *Project) checkEvidence(a DelegatedAct) ([]EvidenceRef, error) {
+	var out []EvidenceRef
+	for _, e := range a.Evidence {
+		abs := e
+		if !filepath.IsAbs(abs) {
+			abs = filepath.Join(p.Root, filepath.FromSlash(e))
+		}
+		rel, err := filepath.Rel(p.Root, filepath.Clean(abs))
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return nil, &FailError{Code: CodeOrdersEvidence, Msg: e + " is outside the project: evidence is a path in it"}
+		}
+		data, err := os.ReadFile(abs)
+		if err != nil {
+			return nil, &FailError{Code: CodeOrdersEvidence, Msg: "evidence " + e + " cannot be read: " + err.Error()}
+		}
+		h := sha256.Sum256(data)
+		out = append(out, EvidenceRef{Path: filepath.ToSlash(rel), SHA256: hex.EncodeToString(h[:])})
+	}
+	if want := p.latestGateLog(a); want != "" && !slices.ContainsFunc(out, func(r EvidenceRef) bool { return r.Path == want }) {
+		return nil, &FailError{Code: CodeOrdersEvidence, Msg: fmt.Sprintf("approving %s rests on its latest gate run: name its log as evidence (--evidence %s)", a.Target, want)}
+	}
+	return out, nil
+}
+
+// latestGateLog is the project-relative log of a milestone approve's
+// latest gate run, "" for another act or a milestone with none.
+func (p *Project) latestGateLog(a DelegatedAct) string {
+	if a.Act != OrderMilestoneApprove {
+		return ""
+	}
+	last := p.LastGateRun(a.Target)
+	if last == nil || last.Log == "" {
+		return ""
+	}
+	want := last.Log
+	if filepath.IsAbs(want) {
+		if r, err := filepath.Rel(p.Root, want); err == nil {
+			want = r
+		}
+	}
+	return filepath.ToSlash(filepath.Clean(want))
+}
+
+// RunDelegated checks a delegated act and, when every check holds, runs it
+// as the person's command does, under a person act ape built from the
+// orders (never from a file a model could write). It records the act's
+// event and its line in the person's decision log.
+func (p *Project) RunDelegated(ctx context.Context, a DelegatedAct, progress io.Writer) (*DelegatedResult, error) {
+	o, ev, err := p.CheckDelegated(ctx, a)
+	if err != nil {
+		return nil, err
+	}
+	commit, _ := git(ctx, p.Root, "log", "-1", "--format=%h", o.Branch, "--", o.Path)
+	ordersRef := o.Slug + "@" + commit
+	reason := strings.Join(strings.Fields(a.Reason), " ")
+	by := "conductor under orders " + ordersRef + " (" + truncateRunes(reason, byReasonRunes) + ")"
+	target := a.Target
+	if a.Task != "" {
+		target += " " + a.Task
+	}
+	act := orderActs[a.Act].Act
+	ctx = WithPersonAct(ctx, &PersonAct{Act: act, Target: target, By: by, granted: true})
+	milestone, change := "", a.Target
+	switch a.Act {
+	case OrderAnswer:
+		_, err = p.AnswerChange(ctx, a.Target, a.Text, by)
+	case OrderTweakApprove:
+		_, err = p.ApproveTweak(ctx, a.Target, by)
+	case OrderMilestoneApprove:
+		milestone, change = a.Target, ""
+		_, err = p.ApproveMilestone(ctx, a.Target, by, progress)
+	case OrderAcceptTask:
+		evidence := make([]string, 0, len(ev))
+		for _, e := range ev {
+			evidence = append(evidence, e.Path)
+		}
+		_, err = p.Accept(ctx, a.Target, a.Task, by, evidence...)
+	case OrderDecisionAccept:
+		change = ""
+		_, err = p.AcceptDecision(ctx, a.Target, by)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if milestone == "" && change != "" {
+		milestone = p.ChangeMilestone(ctx, change)
+	}
+	logged := p.Emit(ctx, Event{Event: EventDelegated, Milestone: milestone, Change: change, Action: a.Act + " " + target, Reason: reason, Orders: ordersRef}, progress)
+	res := &DelegatedResult{Act: a.Act, Target: target, By: by, Orders: ordersRef, Evidence: ev, Seq: logged.Seq}
+	if res.Evidence == nil {
+		res.Evidence = []EvidenceRef{}
+	}
+	if _, lerr := p.logDecision(o.Slug, DecisionEntry{Kind: DecisionAct, Text: a.Act + " " + target, Reason: reason, Orders: ordersRef, Evidence: ev}); lerr != nil && progress != nil {
+		fmt.Fprintf(progress, "decision log (%s): %v — the act is done and its event logged\n", o.Slug, lerr)
+	}
+	return res, nil
+}
+
+// byReasonRunes bounds the reason quoted in by: (the whole reason is in
+// the event and the decision log).
+const byReasonRunes = 160
+
+func truncateRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n-1]) + "…"
+}

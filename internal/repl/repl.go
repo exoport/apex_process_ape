@@ -1086,6 +1086,13 @@ func replReady(snap string) bool {
 	return emptyPromptRe.MatchString(snap)
 }
 
+// PaneIdle reports whether a pane shows the REPL waiting for input with
+// no turn running: the ready signals, and no "esc to interrupt" line
+// (v1.4.2: the conductor's orchestrator terminal types only then).
+func PaneIdle(pane string) bool {
+	return replReady(pane) && !strings.Contains(pane, "esc to interrupt")
+}
+
 // NotReadyError is returned by WaitForReady when the REPL did not become
 // ready: ctx expired, or a blocking modal could not be dismissed. Pane
 // carries the last captured snapshot so an unrecognized blocking modal is

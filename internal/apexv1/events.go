@@ -51,7 +51,7 @@ const (
 )
 
 // EventNames are every event, in the order the docs list them.
-var EventNames = []string{EventPerson, EventGateGreen, EventMilestoneDone, EventRunEnd, EventRunLost, EventStop, EventBlock}
+var EventNames = []string{EventPerson, EventGateGreen, EventMilestoneDone, EventRunEnd, EventRunLost, EventStop, EventBlock, EventDelegated, EventOrders, EventOrchestratorDead, EventOrchestratorIdle}
 
 // EventsRollBytes is the size at which events.jsonl is rolled (10 MB).
 var EventsRollBytes int64 = 10 << 20
@@ -68,6 +68,9 @@ type Event struct {
 	Reason    string `json:"reason"`
 	Action    string `json:"action"`
 	Skill     string `json:"skill,omitempty"`
+	// Orders are the standing orders a delegated act ran under (v1.4.2):
+	// <person>@<commit>.
+	Orders string `json:"orders,omitempty"`
 }
 
 // EventsPath is _apex/state/events.jsonl.
@@ -292,5 +295,6 @@ func eventEnv(ev Event) []string {
 		"APE_EVENT=" + ev.Event, "APE_CHANGE=" + ev.Change, "APE_REASON=" + ev.Reason,
 		"APE_MILESTONE=" + ev.Milestone, "APE_RUN=" + ev.Run, "APE_EXIT=" + exit,
 		"APE_ACTION=" + ev.Action, "APE_SKILL=" + ev.Skill, "APE_SEQ=" + seq,
+		"APE_ORDERS=" + ev.Orders,
 	}
 }
