@@ -57,6 +57,7 @@ v1.2, v1.3 and v1.4 keep that promise and add to it: the repository's `CHANGELOG
 - [How to publish run progress to NATS](how-to/publish-progress-to-nats.md)
 - [How to report from a Claude session](how-to/report-from-a-session.md)
 - [How to upload run transcripts as content-addressed blobs](how-to/upload-transcripts.md)
+- [How to run the coordination drills (APEX v1.5, not released)](how-to/run-the-coordination-drills.md) — `make check-coord`, `check-coord-cluster`, `check-coord-live`
 
 **Sandbox workspaces**
 

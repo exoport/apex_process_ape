@@ -6,6 +6,8 @@
 > are generated from `internal/coord/layout`; a test keeps them equal to it
 > (`go test ./internal/coord/layout -update` rewrites them).
 
+The drills that exercise it are in [How to run the coordination drills](../how-to/run-the-coordination-drills.md).
+
 It extends [events.md](events.md), ape's additive-only subject taxonomy, and invents no parallel tree. The design
 is the v1.5 proposal (sections 3 and 4).
 

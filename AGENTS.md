@@ -128,6 +128,10 @@ make update-claude-surface # record that review (rewrites internal/claudesurface
 make check-task-subagents # LOCAL ONLY: `ape task` on a stand-in skill that fans out to two foreground
                    #   sub-agents, as the framework's batch skills do — results inline, concurrent,
                    #   APE_SESSION/fork gate/ape pin seen inside, manifest and hooks account for both
+make check-coord   # v1.5 stage 0: the Tier-1 coordination drills with their controls (also in make test)
+make check-coord-cluster # LOCAL ONLY: the drills that need three real nats-server processes (deploy/natslocal)
+make check-coord-live # LOCAL ONLY: Read/Grep/Glob honour init's permissions.deny for hot/ape-nats.creds, with
+                   #   a control (two Haiku sessions through ape task; a usage-guard refusal is PENDING, never raised)
 make check-agents-md # LOCAL ONLY: the installed claude still loads this repo's AGENTS.md (asked from
                    #   the repo root with every tool off; an empty dir is the negative control)
 make check-harness # check-prices + check-output-styles + check-hooks + check-claude + check-task-subagents

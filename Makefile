@@ -446,11 +446,13 @@ check-coord-live:  ## v1.5 stage 0: LOCAL ONLY. Claude Code's Read, Grep and Glo
 .PHONY: check-coord-cluster
 check-coord-cluster:  ## v1.5 stage 0: the coordination drills that need a real three-node cluster (drill 3, wipe and rebuild), on deploy/natslocal.
 	@# LOCAL ONLY: needs nats-server v2.14.5 (NATS_SERVER= to point at it). The
-	@# cluster is always taken down, pass or fail.
+	@# cluster is always taken down, pass or fail. -p 1: every test here stops,
+	@# wipes or restarts nodes of the one cluster, so two packages at once
+	@# break each other.
 	@d=$$(mktemp -d "$${TMPDIR:-/tmp}/ape-natslocal.XXXX"); \
 	export NATSLOCAL_DIR=$$d NATSLOCAL_SCRIPT=$(CURDIR)/deploy/natslocal/natslocal.sh; \
 	$$NATSLOCAL_SCRIPT up && NATSLOCAL_URLS=$$($$NATSLOCAL_SCRIPT urls) \
-	  go test ./internal/coord/... ./internal/natstest/ -run 'TestLive_' -v -count=1 -timeout 10m; rc=$$?; \
+	  go test -p 1 ./internal/coord/... ./internal/natstest/ -run 'TestLive_' -v -count=1 -timeout 10m; rc=$$?; \
 	$$NATSLOCAL_SCRIPT down; exit $$rc
 
 .PHONY: check-agents-md
