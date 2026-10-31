@@ -2,6 +2,7 @@ package conductorwatch
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -41,32 +42,42 @@ func (t *Tmux) Type(ctx context.Context, text string) error {
 	return err
 }
 
-// Conductor reports whether the pane's foreground process is Claude Code
-// and that session is registered on this machine (its pid, the pane's or
-// a child's, has <config>/sessions/<pid>.json): a stale or wrong pane — a
-// shell, where a typed line runs as a command — gets nothing (D664+).
-func (t *Tmux) Conductor(ctx context.Context) (ok bool, why string) {
+// Session is the Claude Code session id of the pane's foreground process,
+// when that is claude and registered on this machine (its pid, the pane's
+// or a child's, has <config>/sessions/<pid>.json naming its sessionId): a
+// stale or wrong pane — a shell, where a typed line runs as a command —
+// gets nothing (D664+), and the id tells one session from the next in the
+// same pane (D665+).
+func (t *Tmux) Session(ctx context.Context) (id, why string) {
 	out, err := t.tmux(ctx, "display-message", "-p", "-t", t.Target, "#{pane_pid} #{pane_current_command}")
 	if err != nil {
-		return false, "tmux has no pane " + t.Target
+		return "", "tmux has no pane " + t.Target
 	}
 	f := strings.Fields(out)
 	if len(f) < 2 {
-		return false, "tmux reported nothing for " + t.Target
+		return "", "tmux reported nothing for " + t.Target
 	}
 	if f[1] != "claude" {
-		return false, "the pane runs " + f[1] + ", not Claude Code"
+		return "", "the pane runs " + f[1] + ", not Claude Code"
 	}
 	pids := []string{f[0]}
 	if kids, err := exec.CommandContext(ctx, "pgrep", "-P", f[0]).Output(); err == nil { //nolint:gosec // a pid tmux reported
 		pids = append(pids, strings.Fields(string(kids))...)
 	}
 	for _, pid := range pids {
-		if _, err := os.Stat(filepath.Join(t.configDir(), "sessions", pid+".json")); err == nil {
-			return true, ""
+		data, err := os.ReadFile(filepath.Join(t.configDir(), "sessions", pid+".json"))
+		if err != nil {
+			continue
 		}
+		var reg struct {
+			SessionID string `json:"sessionId"`
+		}
+		if json.Unmarshal(data, &reg) != nil || reg.SessionID == "" {
+			return "", "the pane's Claude Code registration (" + pid + ".json) names no sessionId"
+		}
+		return reg.SessionID, ""
 	}
-	return false, "the pane's Claude Code is no session registered under " + filepath.Join(t.configDir(), "sessions")
+	return "", "the pane's Claude Code is no session registered under " + filepath.Join(t.configDir(), "sessions")
 }
 
 func (t *Tmux) configDir() string {

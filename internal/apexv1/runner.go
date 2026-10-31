@@ -26,6 +26,13 @@ import (
 // rule — ape only exports it).
 const EnvApeGate = "APE_GATE"
 
+// EnvGateScratch names a check's own TMPDIR (1.4.2, D659 A1): every check
+// ape runs — verify, the gate, approve's self-check, the regression
+// command — gets a directory of its own, removed when it ends, and this
+// variable says which, so a gate script's scratch (its mktemp dirs) is
+// provably that run's. The check's result records it (tmp).
+const EnvGateScratch = "APE_GATE_SCRATCH"
+
 // Reaping says what reaped a check (CheckResult.Reaping, v1.4): its
 // systemd scope, or its process group (on Windows its job object).
 const (
@@ -295,6 +302,7 @@ func runCheck(ctx context.Context, dir, cmd, logPath, logNote string, lim TierTi
 		ScopeUnit:    g.scopeUnit(),
 		MemoryPeak:   peak,
 		TmpBytes:     fin.TmpBytes,
+		Tmp:          fin.Tmp,
 		Compose:      fin.Compose,
 		Containers:   fin.Containers,
 		Observed:     observed,

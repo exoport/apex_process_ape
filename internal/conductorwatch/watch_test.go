@@ -2,6 +2,7 @@ package conductorwatch
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,7 +22,9 @@ type fakePane struct {
 	mu        sync.Mutex
 	screen    string
 	conductor bool
-	typed     []string
+	// session is the registered session's id; "" is "s1".
+	session string
+	typed   []string
 }
 
 func (f *fakePane) Capture(context.Context) (string, error) {
@@ -37,13 +40,16 @@ func (f *fakePane) Type(_ context.Context, text string) error {
 	return nil
 }
 
-func (f *fakePane) Conductor(context.Context) (ok bool, why string) {
+func (f *fakePane) Session(context.Context) (id, why string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if !f.conductor {
-		return false, "the pane runs bash, not Claude Code"
+		return "", "the pane runs bash, not Claude Code"
 	}
-	return true, ""
+	if f.session == "" {
+		return "s1", ""
+	}
+	return f.session, ""
 }
 
 const (
@@ -153,6 +159,52 @@ func TestWatcher_NotifyOnly(t *testing.T) {
 	require.Empty(t, s.Deliveries[0].DeliveredAt)
 }
 
+// D665+ (research finding 3): the pane's session id is recorded at the
+// watcher's first look; when another Claude Code session takes the pane,
+// nothing more is typed, each project logs conductor-stalled once, and the
+// watcher asks to be restarted with --pane. The arrival control: the same
+// session gets the delivery.
+func TestWatcher_PaneSessionReplaced(t *testing.T) {
+	for _, replaced := range []bool{false, true} {
+		p := project(t)
+		pane := &fakePane{screen: idleScreen, conductor: true, session: "conductor-1"}
+		var logged strings.Builder
+		w := New(Config{
+			Projects: []string{p.Root}, StateDir: t.TempDir(), Pane: pane, Nonce: "n0",
+			Log: func(format string, a ...any) { fmt.Fprintf(&logged, format, a...) },
+		})
+		ctx := context.Background()
+		require.NoError(t, w.Tick(ctx), "start: the session is recorded")
+		if replaced {
+			pane.session = "someone-else"
+		}
+		p.Emit(ctx, apexv1.Event{Event: apexv1.EventBlock, Change: "add-export", Reason: "which format?"}, nil)
+		for range 3 {
+			require.NoError(t, w.Tick(ctx))
+		}
+		stalled := 0
+		for _, e := range p.EventsSince(0) {
+			if e.Event == EventStalled {
+				stalled++
+				require.Contains(t, e.Reason, "someone-else")
+				require.Contains(t, e.Action, "--pane")
+			}
+		}
+		if !replaced {
+			require.Len(t, pane.typed, 1, "the control: the recorded session gets the delivery")
+			require.Zero(t, stalled)
+			continue
+		}
+		require.Empty(t, pane.typed, "another session in the pane: nothing typed")
+		require.Equal(t, 1, stalled, "the person is notified, once")
+		require.Contains(t, logged.String(), "restart it with --pane")
+		pane.session = "conductor-1"
+		require.NoError(t, w.Tick(ctx))
+		require.NoError(t, w.Tick(ctx))
+		require.Empty(t, pane.typed, "stopped for good: a restart with --pane records the pane again")
+	}
+}
+
 // The real tmux: a shell pane is not the conductor (the negative control),
 // whatever its screen shows. Skipped where tmux is not installed.
 func TestTmux_ShellPaneIsNotTheConductor(t *testing.T) {
@@ -169,8 +221,8 @@ func TestTmux_ShellPaneIsNotTheConductor(t *testing.T) {
 	run("new-session", "-d", "-s", "w", "sh")
 	t.Cleanup(func() { _ = exec.Command("tmux", "-S", sock, "kill-server").Run() })
 	tm := &Tmux{Target: "w", ConfigDir: t.TempDir(), socket: sock}
-	ok, why := tm.Conductor(context.Background())
-	require.False(t, ok)
+	id, why := tm.Session(context.Background())
+	require.Empty(t, id)
 	require.Contains(t, why, "not Claude Code")
 }
 
@@ -206,11 +258,16 @@ func TestTmux_RegisteredClaudePaneIsTheConductor(t *testing.T) {
 		pid = f[0]
 		return true
 	}, 5*time.Second, 50*time.Millisecond, "the pane runs claude")
-	ok, why := tm.Conductor(context.Background())
-	require.False(t, ok, "not registered yet")
+	id, why := tm.Session(context.Background())
+	require.Empty(t, id, "not registered yet")
 	require.Contains(t, why, "no session registered")
 	require.NoError(t, os.MkdirAll(filepath.Join(cfg, "sessions"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(cfg, "sessions", pid+".json"), []byte("{}"), 0o600))
-	ok, why = tm.Conductor(context.Background())
-	require.True(t, ok, why)
+	reg := filepath.Join(cfg, "sessions", pid+".json")
+	require.NoError(t, os.WriteFile(reg, []byte("{}"), 0o600))
+	id, why = tm.Session(context.Background())
+	require.Empty(t, id, "registered without a sessionId")
+	require.Contains(t, why, "no sessionId")
+	require.NoError(t, os.WriteFile(reg, []byte(`{"pid":`+pid+`,"sessionId":"ea461431-cb9b"}`), 0o600))
+	id, why = tm.Session(context.Background())
+	require.Equal(t, "ea461431-cb9b", id, why)
 }

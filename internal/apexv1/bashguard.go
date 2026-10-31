@@ -88,6 +88,30 @@ const killGuardReason = "%s stops processes by name or pattern, which can stop p
 	"(another session's, an eval runner's, the person's own) — stop the process you started by its PID (kill <pid>). " +
 	"A session the person started with " + EnvAllowKill + "=1 may use pkill/killall."
 
+// pidLookups find processes by name or pattern; a kill of what they find
+// is a kill by name (v1.4.2 A8).
+var pidLookups = map[string]bool{"pgrep": true, "pidof": true}
+
+// killOfLookup names a command line that kills the pids a name lookup
+// finds — `kill $(pgrep -f x)`, `pgrep -f x | xargs kill`, `pid=$(pidof
+// x); kill $pid` — "" when it holds no kill or no lookup.
+func killOfLookup(command, cwd string) string {
+	var kill, lookup string
+	scanCmds(command, cwd, 0, func(words []string, _ string) string {
+		switch base := filepath.Base(words[0]); {
+		case base == "kill" && kill == "":
+			kill = strings.Join(words, " ")
+		case pidLookups[base] && lookup == "":
+			lookup = strings.Join(words, " ")
+		}
+		return ""
+	})
+	if kill == "" || lookup == "" {
+		return ""
+	}
+	return "`" + kill + "` of the pids `" + lookup + "` finds"
+}
+
 // KillGuard decides a Bash command; Deny is set for pkill, killall,
 // killall5 or skill in any form.
 func KillGuard(command, cwd string) PreToolDecision {
@@ -100,6 +124,9 @@ func KillGuard(command, cwd string) PreToolDecision {
 		}
 		return "`" + strings.Join(words, " ") + "`"
 	})
+	if what == "" {
+		what = killOfLookup(command, cwd)
+	}
 	if what == "" {
 		return PreToolDecision{}
 	}

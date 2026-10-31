@@ -96,7 +96,9 @@ type CheckResult struct {
 	// TmpBytes is what its own TMPDIR held when it ended (v1.4); Compose
 	// the COMPOSE_PROJECT_NAME it ran under; Containers what it created
 	// (checkinfra.go).
-	TmpBytes   int64          `json:"tmp_bytes,omitempty"`
+	TmpBytes int64 `json:"tmp_bytes,omitempty"`
+	// Tmp is that TMPDIR's path, gone since (APE_GATE_SCRATCH, 1.4.2 A1).
+	Tmp        string         `json:"tmp,omitempty"`
 	Compose    string         `json:"compose_project,omitempty"`
 	Containers []ContainerUse `json:"containers,omitempty"`
 	// Observed is what the check was seen doing while it ran (v1.4, D623:

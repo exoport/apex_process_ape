@@ -11,7 +11,12 @@
 //     person act. It types only when the pane still runs the registered
 //     Claude Code session, the session is idle (no turn running) and its
 //     input row is empty — never after half-typed input — and the screen
-//     did not change since the last look.
+//     did not change since the last look. The pane's Claude Code session
+//     id is recorded at the first look that finds it (the watcher's
+//     start) and required before every delivery: when another session
+//     takes the pane, the watcher stops typing, logs conductor-stalled in
+//     each project (the notifier reaches the person) and asks to be
+//     restarted with --pane (D665+).
 //   - The conductor acknowledges a delivery (`ape conductor ack <id>`). A
 //     delivery not acknowledged within the ack alert (default 15 min) logs
 //     conductor-stalled in its project, once, so the project's notifier
@@ -78,9 +83,10 @@ type Pane interface {
 	Capture(ctx context.Context) (string, error)
 	// Type types text and presses Enter.
 	Type(ctx context.Context, text string) error
-	// Conductor reports whether the pane's foreground process is a Claude
-	// Code session registered on this machine; why names what failed.
-	Conductor(ctx context.Context) (ok bool, why string)
+	// Session is the Claude Code session id of the pane's foreground
+	// process when that is a session registered on this machine; "" and
+	// why it is not otherwise.
+	Session(ctx context.Context) (id, why string)
 }
 
 // Config is one watcher.
@@ -175,6 +181,10 @@ func Mark(d Delivery, nonce string) string {
 type Watcher struct {
 	c        Config
 	lastPane string
+	// session is the pane's Claude Code session id, recorded at the first
+	// look that found one; lost is set once another session took the pane.
+	session string
+	lost    bool
 }
 
 // New is a watcher for c.
@@ -244,7 +254,7 @@ func (w *Watcher) Tick(ctx context.Context) error {
 			}
 		}
 	}
-	w.deliver(ctx, s, now)
+	w.deliver(ctx, s, now, projects)
 	for i := range s.Deliveries {
 		d := &s.Deliveries[i]
 		if d.DeliveredAt == "" || d.AckedAt != "" || d.AlertedAt != "" {
@@ -269,15 +279,24 @@ func (w *Watcher) Tick(ctx context.Context) error {
 // deliver types the oldest undelivered delivery when the pane runs the
 // conductor, idle, with an empty input row, and unchanged since the last
 // look (D664+).
-func (w *Watcher) deliver(ctx context.Context, s *State, now time.Time) {
-	if w.c.Pane == nil {
+func (w *Watcher) deliver(ctx context.Context, s *State, now time.Time, projects map[string]*apexv1.Project) {
+	if w.c.Pane == nil || w.lost {
+		return
+	}
+	id, why := w.c.Pane.Session(ctx)
+	if id != "" && w.session == "" {
+		w.session = id
+		w.c.Log("watcher: the pane runs Claude Code session %s: deliveries go to it alone\n", id)
+	}
+	if id != "" && id != w.session {
+		w.paneLost(ctx, id, projects)
 		return
 	}
 	i := slices.IndexFunc(s.Deliveries, func(d Delivery) bool { return d.DeliveredAt == "" && d.AckedAt == "" })
 	if i < 0 {
 		return
 	}
-	if ok, why := w.c.Pane.Conductor(ctx); !ok {
+	if id == "" {
 		w.c.Log("watcher: not typing into the pane: %s — notify-only until it is the conductor's session\n", why)
 		w.lastPane = ""
 		return
@@ -297,6 +316,22 @@ func (w *Watcher) deliver(ctx context.Context, s *State, now time.Time) {
 	}
 	s.Deliveries[i].DeliveredAt = now.UTC().Format(time.RFC3339)
 	w.lastPane = ""
+}
+
+// paneLost stops typing for good: the pane runs another Claude Code
+// session than the one recorded at start, which may be anyone's (D665+).
+// Each project logs conductor-stalled once, so its notifier reaches the
+// person; the watcher goes on recording, notify-only, until it is
+// restarted with --pane.
+func (w *Watcher) paneLost(ctx context.Context, id string, projects map[string]*apexv1.Project) {
+	w.lost = true
+	reason := fmt.Sprintf("the conductor's pane now runs Claude Code session %s, not %s, the conductor's at the watcher's start: the watcher stopped typing (notify-only) — restart it with --pane <the conductor's pane>", id, w.session)
+	w.c.Log("watcher: %s\n", reason)
+	for _, root := range w.c.Projects {
+		if p := projects[root]; p != nil {
+			p.Emit(ctx, apexv1.Event{Event: EventStalled, Action: "ape conductor watcher --pane <pane>", Reason: reason}, nil)
+		}
+	}
 }
 
 // Idle is the conductor pane's idle rule (D664, D664+): no turn running

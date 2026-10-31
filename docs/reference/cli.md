@@ -2178,11 +2178,14 @@ check: …`), given with --task; a review tool, for a change whose review_tools:
   - the session writes what its skill writes (a mock-up, a report under assets/): no
     read-only rule and no verdict; its exit is the result (non-zero or lost:
     tool.failed, action retry)
+  - a review tool's report belongs at assets/review-<name>.md; one its session left
+    untracked beside the change or at the project root is moved there when it ends
+    (else the review session would read it as a file the review left, and void itself)
   - --wait (default 9m, at most 9m30s, usage.wait) bounds one call; exit 75 means
     still running: call it again — it attaches to the running session for that
     change and tool
   - JSON: {id, tool, slot, skill, task, args, running, detached_id, log, stdout,
-    task_exit, launch}; stdout holds the session's `ape task --output-format json`
+    task_exit, launch, report, moved_from}; stdout holds the session's `ape task --output-format json`
     envelope
 
 Exit codes: 0 the session ended 0 · 1 tool.unknown, tool.args, tool.failed, a change not
@@ -2838,6 +2841,9 @@ into it, marked (<ape-delivery …>, never your words: a prompt carrying one gra
 act), only when all of these hold:
   - the pane's foreground process is claude and a Claude Code session registered on this
     machine (<config>/sessions/<pid>.json) — a stale or wrong pane, a shell, gets nothing;
+  - it is the same session as at the watcher's start: the session id is recorded at the
+    first look, and when another session takes the pane the watcher stops typing, logs
+    conductor-stalled in each project (you are notified) and asks to be restarted with --pane;
   - no turn is running ("esc to interrupt" absent) and the input row is empty — never after
     your half-typed line;
   - the screen did not change between two looks (one --poll apart).
@@ -4559,7 +4565,10 @@ recorded even with no match yet). A file git ignores is the gate's scratch, not 
 (v1.4, D581: a gate's output under its own .work/), unless a recorded script sources it, a
 declaration names it, or it is a script — an executable bit, a #! line, or a script's
 extension (.sh .py .js …); a tracked file is frozen wherever it is (gate_scratch_excluded:
-true; an approval before v1.4 holds its scratch, which drift skips). The gate differs from the
+true; an approval before v1.4 holds its scratch, which drift skips). An ignored file the
+approval's own red run created or rewrote is scratch even when it is executable — the gate's
+build output, such as .work/<binary> (1.4.2, gate_scratch) — unless the gate sources or
+declares it. The gate differs from the
 approved one when its command changed, or a recorded gate file it still runs, or a recorded
 own file, is gone or changed (compared file by file), or a file a recorded glob matches is
 not recorded (a new check list); any other gate file or own file created since

@@ -366,7 +366,9 @@ Windows), `scope_unit` and the scope's `memory_peak` in bytes. Starting a scope 
 What else a check gets in v1.4:
 
 - **Its own `TMPDIR`**, `<TMPDIR>/ape-<uid>/<pid>-<id>` (mode 0700; under `/tmp` when ape's own TMPDIR would make it longer than 60 bytes), removed when it ends (`tmp_bytes`
-  records what it held). It is short so a unix socket a test binds under it fits.
+  records what it held, `tmp` its path). It is short so a unix socket a test binds under it fits. Since
+  v1.4.2, `APE_GATE_SCRATCH` names the same directory, so a gate script's scratch (its `mktemp` dirs)
+  is provably that run's.
 - **A process outside the check that holds that `TMPDIR`** (in its command line, working directory
   or environment) is the check's too: ended and named in `leftovers` ("it held the check's
   TMPDIR"). Snap's Chromium, which moves itself out of the check's scope and keeps using the

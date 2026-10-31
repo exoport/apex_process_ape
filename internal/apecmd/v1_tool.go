@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/exoport/apex_process_ape/internal/apexv1"
@@ -32,6 +33,10 @@ type toolRunResult struct {
 	// filled where `ape run wait --json` fills them (rc3-b).
 	Result          string `json:"result,omitempty"`
 	ResultTruncated bool   `json:"result_truncated,omitempty"`
+	// Report is a review tool's report, filed under assets/ (A7); MovedFrom
+	// where its session wrote it, when ape moved it there.
+	Report    string `json:"report,omitempty"`
+	MovedFrom string `json:"moved_from,omitempty"`
 }
 
 func newChangeToolCmd() *cobra.Command {
@@ -65,11 +70,14 @@ Code session: ape starts `+"`ape task <skill> --args \"<args filled>\"`"+` detac
   - the session writes what its skill writes (a mock-up, a report under assets/): no
     read-only rule and no verdict; its exit is the result (non-zero or lost:
     tool.failed, action retry)
+  - a review tool's report belongs at assets/review-<name>.md; one its session left
+    untracked beside the change or at the project root is moved there when it ends
+    (else the review session would read it as a file the review left, and void itself)
   - --wait (default 9m, at most 9m30s, usage.wait) bounds one call; exit 75 means
     still running: call it again — it attaches to the running session for that
     change and tool
   - JSON: {id, tool, slot, skill, task, args, running, detached_id, log, stdout,
-    task_exit, launch}; stdout holds the session's `+"`ape task --output-format json`"+`
+    task_exit, launch, report, moved_from}; stdout holds the session's `+"`ape task --output-format json`"+`
     envelope
 
 Exit codes: 0 the session ended 0 · 1 tool.unknown, tool.args, tool.failed, a change not
@@ -129,8 +137,23 @@ func runToolSession(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, id, name,
 		return v1Fail(cmd, f, &apexv1.FailError{Code: "tool.failed", Msg: "tool " + name + " (" + run.Skill + ") for " + id + " did not finish: " + why +
 			" (log " + res.Log + ") — run `ape change tool " + id + " " + name + "` again"}, res)
 	}
+	if run.Slot == "review" {
+		// A report written beside the change or at the root would void the
+		// review session that reads it (A7): file it under assets/.
+		from, err := p.FileReviewReport(ctx, id, name)
+		if err != nil {
+			return v1Fail(cmd, f, err, res)
+		}
+		res.MovedFrom = from
+		if _, err := os.Stat(filepath.Join(p.Root, filepath.FromSlash(p.ReviewReportRel(id, name)))); err == nil {
+			res.Report = p.ReviewReportRel(id, name)
+		}
+	}
 	return v1Emit(cmd.OutOrStdout(), f, res, func(w io.Writer) {
 		fmt.Fprintf(w, "tool %s (%s) for %s: done (run %s)\n", name, run.Skill, id, run.DetachedID)
+		if res.MovedFrom != "" {
+			fmt.Fprintf(w, "its report %s was moved to %s, where the review reads it\n", res.MovedFrom, res.Report)
+		}
 	})
 }
 

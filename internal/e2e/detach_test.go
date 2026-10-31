@@ -74,7 +74,15 @@ func TestDetach_WaitReturnsTheRunsOwnExitCode(t *testing.T) {
 
 	wait := exec.Command(ape, "run", "wait", id, "--cwd", project, "--timeout", "30s")
 	wout, werr := wait.CombinedOutput()
-	require.Equal(t, foreground, exitStatus(werr), "run wait exits with the run's own code: %s", wout)
+	if got := exitStatus(werr); got != foreground {
+		// v1.4.2 D3: the one CI failure of this test (run 41193971562) left
+		// nothing to read. Say what run wait printed and what the run's own
+		// record holds, so the next failure names its cause: 76 is a
+		// supervisor judged lost, 2 an unreadable handle, 75 still running.
+		st, _ := exec.Command(ape, "run", "status", id, "--json", "--cwd", project).CombinedOutput()
+		log, _ := os.ReadFile(filepath.Join(project, "_output", "ape", "detached", id+".log"))
+		t.Fatalf("run wait exited %d, the foreground run %d\nrun wait printed:\n%s\nrun status --json:\n%s\nthe run's log:\n%s", got, foreground, wout, st, log)
+	}
 
 	status, err := exec.Command(ape, "run", "status", id, "--cwd", project).Output()
 	require.NoError(t, err)

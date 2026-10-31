@@ -132,7 +132,10 @@ recorded even with no match yet). A file git ignores is the gate's scratch, not 
 (v1.4, D581: a gate's output under its own .work/), unless a recorded script sources it, a
 declaration names it, or it is a script — an executable bit, a #! line, or a script's
 extension (.sh .py .js …); a tracked file is frozen wherever it is (gate_scratch_excluded:
-true; an approval before v1.4 holds its scratch, which drift skips). The gate differs from the
+true; an approval before v1.4 holds its scratch, which drift skips). An ignored file the
+approval's own red run created or rewrote is scratch even when it is executable — the gate's
+build output, such as .work/<binary> (1.4.2, gate_scratch) — unless the gate sources or
+declares it. The gate differs from the
 approved one when its command changed, or a recorded gate file it still runs, or a recorded
 own file, is gone or changed (compared file by file), or a file a recorded glob matches is
 not recorded (a new check list); any other gate file or own file created since

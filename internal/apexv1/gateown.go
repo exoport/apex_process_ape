@@ -2,6 +2,7 @@ package apexv1
 
 import (
 	"context"
+	"fmt"
 	"io/fs"
 	"maps"
 	"os"
@@ -556,6 +557,9 @@ func (p *Project) gateOwnDrift(m *Milestone, a *MilestoneApproval) []string {
 		scratch = p.gateScratch(names, p.gateOwnScan(m).keep)
 	}
 	var out []string
+	for _, n := range a.GateScratch {
+		scratch[n] = true
+	}
 	for _, n := range names {
 		if scratch[n] {
 			continue
@@ -572,7 +576,7 @@ func (p *Project) gateOwnDrift(m *Milestone, a *MilestoneApproval) []string {
 		for _, f := range globFiles(p, g) {
 			_, own := a.GateOwnFiles[f]
 			_, script := a.GateFiles[f]
-			if !own && !script && !seen[f] {
+			if !own && !script && !seen[f] && !slices.Contains(a.GateScratch, f) {
 				seen[f] = true
 				out = append(out, f+" is new (it matches "+g+")")
 			}
@@ -586,7 +590,7 @@ func (p *Project) gateOwnDrift(m *Milestone, a *MilestoneApproval) []string {
 func (p *Project) gateOwnUnrecorded(m *Milestone, a *MilestoneApproval) bool {
 	own := p.gateOwnScan(m)
 	for n := range own.files {
-		if _, ok := a.GateOwnFiles[n]; !ok {
+		if _, ok := a.GateOwnFiles[n]; !ok && !slices.Contains(a.GateScratch, n) {
 			return true
 		}
 	}
@@ -761,4 +765,54 @@ func scriptWordPath(script, word string) (string, bool) {
 		w = path.Join(path.Dir(script), w[loc[1]:])
 	}
 	return repoPath(w)
+}
+
+// gateIgnoredStamps are the files git ignores in m's gate folders (and
+// gates/lib), each with its size, modification time and content's
+// SHA-256: what approve compares around its self-check run (gateWrote).
+func (p *Project) gateIgnoredStamps(ctx context.Context, m *Milestone) map[string]string {
+	var names []string
+	folders := p.milestoneGateFolders(m.ID)
+	if lib := filepath.Join(p.GatesDir(), "lib"); dirExists(lib) {
+		folders = append(folders, lib)
+	}
+	for _, dir := range folders {
+		_ = filepath.WalkDir(dir, func(abs string, d fs.DirEntry, err error) error {
+			if err == nil && d.Type().IsRegular() {
+				names = append(names, p.Rel(abs))
+			}
+			return nil
+		})
+	}
+	out := map[string]string{}
+	if len(names) == 0 {
+		return out
+	}
+	for _, f := range gitIgnored(ctx, p.Root, false, names...) {
+		st, err := os.Stat(filepath.Join(p.Root, filepath.FromSlash(f)))
+		if err != nil {
+			continue
+		}
+		sum, _ := p.fileSHA256(f)
+		out[f] = fmt.Sprintf("%d %d %s", st.Size(), st.ModTime().UnixNano(), sum)
+	}
+	return out
+}
+
+// gateWrote are the ignored files of the gate folders that the run
+// between before and after (gateIgnoredStamps) created or rewrote, sorted
+// (1.4.2 D4, FINDING-D1-1): the gate's own build output, which approval
+// records as scratch rather than freezing — a gate that rebuilds
+// .work/<binary> on each run, an executable git ignores, had it frozen
+// and refused its own close as milestone.gate-changed, with no way out
+// but a person's --accept-green.
+func gateWrote(before, after map[string]string) []string {
+	var out []string
+	for f, stamp := range after {
+		if before[f] != stamp {
+			out = append(out, f)
+		}
+	}
+	sort.Strings(out)
+	return out
 }

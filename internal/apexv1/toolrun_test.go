@@ -2,6 +2,8 @@ package apexv1
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -64,4 +66,42 @@ func TestPrepareTool(t *testing.T) {
 	require.ErrorContains(t, err, "has no task T9")
 	_, err = p.PrepareTool(ctx(), "no-such", "copy-pass", "")
 	require.ErrorContains(t, err, "no change no-such")
+}
+
+// A7 (FINDING-D2-2): a review tool's report left beside the change or at
+// the project root is filed under assets/review-<name>.md, where the review
+// session may leave it; a tracked file and an existing report stay put.
+func TestFileReviewReport(t *testing.T) {
+	files := baseFiles()
+	files["_apex/config.yaml"] = toolRunConfig
+	files["review-tracked.md"] = "someone's\n"
+	p := fixture(t, files)
+	addChange(t, p, "add-wave", changeDoc("add-wave", "greeting", addedWave, "- T1 add wave — check: ./wave.sh\n"))
+	commitAll(t, p, "plan: add-wave")
+	dir := p.ChangeDir("add-wave")
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "review-security.md"), []byte("ok\n"), 0o644))
+	from, err := p.FileReviewReport(ctx(), "add-wave", "security")
+	require.NoError(t, err)
+	require.Equal(t, "development/changes/add-wave/review-security.md", from)
+	require.FileExists(t, filepath.Join(dir, "assets", "review-security.md"))
+	require.True(t, p.reviewMayTouch("add-wave", p.ReviewReportRel("add-wave", "security")))
+
+	require.NoError(t, os.WriteFile(filepath.Join(p.Root, "review-perf.md"), []byte("ok\n"), 0o644))
+	from, err = p.FileReviewReport(ctx(), "add-wave", "perf")
+	require.NoError(t, err)
+	require.Equal(t, "review-perf.md", from, "the project root too")
+	require.NoFileExists(t, filepath.Join(p.Root, "review-perf.md"))
+
+	from, err = p.FileReviewReport(ctx(), "add-wave", "tracked")
+	require.NoError(t, err)
+	require.Empty(t, from, "a tracked file is not the session's report")
+	require.FileExists(t, filepath.Join(p.Root, "review-tracked.md"))
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "review-security.md"), []byte("second\n"), 0o644))
+	from, err = p.FileReviewReport(ctx(), "add-wave", "security")
+	require.NoError(t, err)
+	require.Empty(t, from, "never over a report already in assets/")
+	data, _ := os.ReadFile(filepath.Join(dir, "assets", "review-security.md"))
+	require.Equal(t, "ok\n", string(data))
 }

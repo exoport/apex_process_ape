@@ -157,7 +157,7 @@ func (ci *checkInfra) discard() {
 func (ci *checkInfra) env() []string {
 	var out []string
 	if ci.tmp != "" {
-		out = append(out, "TMPDIR="+ci.tmp)
+		out = append(out, "TMPDIR="+ci.tmp, EnvGateScratch+"="+ci.tmp)
 	}
 	return append(out, "COMPOSE_PROJECT_NAME="+ci.compose)
 }
@@ -174,7 +174,7 @@ func (ci *checkInfra) finish(ctx context.Context, r *CheckResult, inCheck func(p
 		r.Containers = ci.containers(ctx)
 	}
 	if ci.tmp != "" {
-		r.TmpBytes = dirBytes(ci.tmp)
+		r.Tmp, r.TmpBytes = ci.tmp, dirBytes(ci.tmp)
 		_ = os.RemoveAll(ci.tmp)
 	}
 }

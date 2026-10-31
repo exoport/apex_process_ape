@@ -190,3 +190,30 @@ func TestTestGrepShapes_CaptureFormSurvivesPipefail(t *testing.T) {
 	assert.Equal(t, 141, run(`out=$(go test -v ./pkg) && printf '%s\n' "$out" | grep -q …`, "-x 1"),
 		"grep -q under pipefail on 2 MB should die of SIGPIPE; the test proves nothing if it does not")
 }
+
+// 1.4.2 A6 (FINDING-D2-1): the notice fires on the check eval's AR:2 cell
+// planned, verbatim, through `ape change check`'s notices — the route an
+// orchestrator reads before it starts. On rc1 that check drew no notice and
+// exited 141 on every pass. The control: the fixed form draws none.
+func TestTestGrepNotice_FiresOnD21Check(t *testing.T) {
+	const seen = `set -o pipefail; go test -race -count=1 -v -run ^TestServiceDeclaresBoard$ ./cmd/jobqueue | grep -q -- "--- PASS: TestServiceDeclaresBoard "`
+	const fixed = `set -o pipefail; go test -race -count=1 -v -run ^TestServiceDeclaresBoard$ ./cmd/jobqueue | grep -- "--- PASS: TestServiceDeclaresBoard "`
+	for check, want := range map[string]bool{seen: true, fixed: false} {
+		p := fixture(t, baseFiles())
+		addChange(t, p, "add-running-board", changeDoc("add-running-board", "greeting", addedWave, "- T4 the board is declared — check: "+check+"\n"))
+		commitAll(t, p, "plan: add-running-board")
+		var got []Diagnostic
+		for _, d := range p.ChangeNotices(ctx(), "add-running-board") {
+			if d.Code == "check.grep-test-output" {
+				got = append(got, d)
+			}
+		}
+		if !want {
+			require.Empty(t, got, "the control: grep without -q under pipefail")
+			continue
+		}
+		require.Len(t, got, 1, check)
+		require.Contains(t, got[0].Message+got[0].Fix, "141")
+		require.Contains(t, got[0].Message, "T4")
+	}
+}

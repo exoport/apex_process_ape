@@ -625,6 +625,9 @@ into it, marked (<ape-delivery …>, never your words: a prompt carrying one gra
 act), only when all of these hold:
   - the pane's foreground process is claude and a Claude Code session registered on this
     machine (<config>/sessions/<pid>.json) — a stale or wrong pane, a shell, gets nothing;
+  - it is the same session as at the watcher's start: the session id is recorded at the
+    first look, and when another session takes the pane the watcher stops typing, logs
+    conductor-stalled in each project (you are notified) and asks to be restarted with --pane;
   - no turn is running ("esc to interrupt" absent) and the input row is empty — never after
     your half-typed line;
   - the screen did not change between two looks (one --poll apart).

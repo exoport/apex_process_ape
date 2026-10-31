@@ -14,7 +14,7 @@ import (
 // ownOf is the own files and globs newApproval records for M1 of p.
 func ownOf(t *testing.T, p *Project) (own, globs []string) {
 	t.Helper()
-	a := p.newApproval(p.roadmap().Find("M1"), "ann")
+	a := p.newApproval(p.roadmap().Find("M1"), "ann", nil)
 	return sortedKeys(keysOf(a.GateOwnFiles)), a.GateGlobs
 }
 
@@ -143,7 +143,7 @@ func TestGateOwnFiles_GlobFrozenAndNewMatchRefused(t *testing.T) {
 		"scripts/checks/notes.md":   "not a list\n",
 	})
 	m := p.roadmap().Find("M1")
-	a := p.newApproval(m, "ann")
+	a := p.newApproval(m, "ann", nil)
 	require.Equal(t, []string{"scripts/checks/one.checks", "scripts/checks/two.checks"}, sortedKeys(keysOf(a.GateOwnFiles)))
 	require.Equal(t, []string{"scripts/checks/*.checks"}, a.GateGlobs)
 	require.Empty(t, p.gateDrift(m, a))
@@ -159,7 +159,7 @@ func TestGateOwnFiles_GlobFrozenAndNewMatchRefused(t *testing.T) {
 		require.Empty(t, globs)
 	})
 	t.Run("an approval before v1.2 has no globs and loads as before", func(t *testing.T) {
-		a := p.newApproval(m, "ann")
+		a := p.newApproval(m, "ann", nil)
 		a.GateGlobs = nil
 		write(t, p, "scripts/checks/four.checks", "d\n")
 		require.Empty(t, p.gateDrift(m, a), "never recorded: not drift")
@@ -200,7 +200,7 @@ func TestGateOwnFiles_Declared(t *testing.T) {
 	require.Equal(t, []string{"docs/gate-input.txt"}, own, "declared: frozen wherever it lives; nothing outside the repo")
 	require.Equal(t, []string{"checks/*.list"}, globs, "a declared glob is recorded with no match yet")
 	m := p.roadmap().Find("M1")
-	a := p.newApproval(m, "ann")
+	a := p.newApproval(m, "ann", nil)
 	write(t, p, "checks/a.list", "x\n")
 	require.Equal(t, []string{"checks/a.list is new (it matches checks/*.list)"}, p.gateDrift(m, a))
 

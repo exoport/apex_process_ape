@@ -47,12 +47,33 @@ the patch rule for it):
   Claude Code session, is idle with an empty input row, and is steady. `ape conductor ack <id>`
   acknowledges a delivery; one unacknowledged past `conductor.ack_alert` (15m) logs
   `conductor-stalled`, so the person is notified. Without tmux the watcher is notify-only.
+  The watcher records the pane's Claude Code session id when it starts. If another session takes
+  the pane, it stops typing, logs `conductor-stalled` in each project and asks to be restarted with
+  `--pane`.
 - A prompt carrying ape's delivery mark anywhere is recorded `delivery` and never grants a person
   act, not even on the person's earlier typed words.
 - Events `delegated`, `orders`, `orchestrator-dead`, `orchestrator-idle`, `question`,
   `question-answered`, `conductor-stalled`; the notifier's `APE_ORDERS`.
 - `tokens_total` in a run's manifest totals, and tokens and wall time in the cost rollup
   (limits, D1).
+
+Fixes from the v1.4.1 evaluation (D659 D2–D4):
+
+- **A gate's own build output is no longer frozen.** An ignored file in the gate's folders that
+  approve's own run of the gate created or rewrote, such as a binary it builds into `.work/`, is
+  recorded as `gate_scratch` and never counts as drift. Before, an executable there was frozen,
+  the next green run rebuilt it, and the close refused `milestone.gate-changed` with no way out
+  but a person's `--accept-green` (FINDING-D1-1).
+- **A review tool's report is filed where the review can keep it.** A report its session left
+  untracked beside the change or at the project root moves to `assets/review-<name>.md` when the
+  session ends. Before, the review session read it as a file the review left, and voided itself
+  (FINDING-D2-2). `ape change tool --json` gains `report` and `moved_from`.
+- **`APE_GATE_SCRATCH`** names each check's own `TMPDIR` (verify, the gate, approve's run, the
+  regression command), and the check's result records it as `tmp`.
+- **The kill guard** also refuses `kill` of the pids `pgrep`/`pidof` finds: `kill $(pgrep -f …)`,
+  `` kill `pidof …` ``, `pgrep … | xargs kill`, and the same through a variable or `sh -c`.
+- The `check.grep-test-output` notice is pinned by a test on the exact check the evaluation saw
+  exit 141 under `pipefail`.
 
 ## v1.4.1 (2026-10-31)
 
