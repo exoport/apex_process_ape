@@ -10,10 +10,15 @@ the patch rule for it):
 - **Standing orders**, `_apex/standing-orders/<person>.md`: who, which acts, which conditions, as
   frontmatter, and free text for the conductor. `ape orders show|accept|revoke`; accept and revoke
   are a person's, from a terminal, and run the notifier. The edit tools are denied the folder.
+  The header is read strictly: anything ape cannot fully read is `orders.invalid`, naming the line,
+  never ignored. `ape orders accept --from <draft>` takes the draft the conductor wrote with the
+  person. It shows what ape will enforce, what is free text, and the diff against the orders in
+  force, then asks y/N.
 - **`ape conductor act <act> <target>`**, the only route by which a model session performs a person
   act. ape checks a required `--reason`, the act's tier (never: accept-config, accept-red,
   allow-pending-human, push, tag, release, the orders), the orders' state, their conditions, and
-  the `--evidence` paths, then runs the act as the person's command does. The act is recorded
+  the `--evidence` paths. It then re-runs the act's mechanical check itself, the gate self-test or
+  the change check (`orders.check-red`), and runs the act as the person's command does. The act is recorded
   `by: conductor under orders <person>@<commit> (<reason>)` and logged as event `delegated`. New
   codes `orders.*`.
 - **The decision log**, `_apex/state/conductor-<person>.md`: every delegated act with its reason

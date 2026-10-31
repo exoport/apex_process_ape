@@ -148,3 +148,37 @@ func TestPreTool_StandingOrdersArePersons(t *testing.T) {
 	}
 	require.False(t, PreTool(editPayload(t, p.Root, "Write", "_apex/standing.md")).Deny)
 }
+
+// D662+: the header parse is strict — every refusal names the file line,
+// and nothing is ignored.
+func TestParseOrders_Strict(t *testing.T) {
+	for name, tc := range map[string]struct{ doc, want string }{
+		"unknown key":          {"---\nperson: d@x\nacts: [answer]\nmax_acts: 3\n---\n", "orders line 4: \"max_acts\" is not a key"},
+		"unknown act":          {"---\nperson: d@x\nacts:\n  - answer\n  - deploy\n---\n", "orders line 5: \"deploy\" is not an act"},
+		"never delegated":      {"---\nperson: d@x\nacts: [answer, accept-red]\n---\n", "orders line 3: accept-red is never delegated"},
+		"twice":                {"---\nperson: d@x\nacts: [answer, answer]\n---\n", "orders line 3: answer is listed twice"},
+		"condition not named":  {"---\nperson: d@x\nacts: [answer]\nconditions:\n  milestone-approve: {max_changes: 3}\n---\n", "orders line 5: milestone-approve has conditions but is not in acts:"},
+		"condition never":      {"---\nperson: d@x\nacts: [answer]\nconditions:\n  push: {when: never}\n---\n", "orders line 5: push is never delegated"},
+		"unknown field":        {"---\nperson: d@x\nacts: [answer]\nconditions:\n  answer: {question_only: true, polite: true}\n---\n", "orders line 5: answer:"},
+		"malformed max":        {"---\nperson: d@x\nacts: [milestone-approve]\nconditions:\n  milestone-approve: {max_changes: six}\n---\n", "orders line 5: milestone-approve:"},
+		"bad gate":             {"---\nperson: d@x\nacts: [milestone-approve]\nconditions:\n  milestone-approve: {gate: amber}\n---\n", `gate: is red or green, not "amber"`},
+		"empty types":          {"---\nperson: d@x\nacts: [answer]\nconditions:\n  tweak-approve: {types: []}\n---\n", "types: names at least one"},
+		"no condition for act": {"---\nperson: d@x\nacts: [decision-accept]\nconditions:\n  decision-accept: {only: ADR}\n---\n", "ape checks no condition for this act"},
+	} {
+		_, err := ParseOrders([]byte(tc.doc))
+		require.Error(t, err, name)
+		require.Equal(t, CodeOrdersInvalid, Diagnostics(err)[0].Code, name)
+		require.ErrorContains(t, err, tc.want, name)
+	}
+	_, err := ParseOrders([]byte(danaOrders))
+	require.NoError(t, err, "the well-formed example parses")
+}
+
+// D662+: a tweak type the project does not have is refused at load, with
+// its line.
+func TestLoadOrders_TweakTypesAreTheProjects(t *testing.T) {
+	p := ordersProject(t, strings.Replace(danaOrders, "types: [fix, docs]", "types: [fix, hotfix]", 1))
+	_, err := p.LoadOrders(ctx(), "dana@example.com")
+	require.Equal(t, CodeOrdersInvalid, Diagnostics(err)[0].Code)
+	require.ErrorContains(t, err, `orders line 6: tweak-approve: "hotfix" is not one of the project's change types`)
+}

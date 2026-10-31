@@ -1,10 +1,12 @@
 package apexv1
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path"
 	"regexp"
@@ -67,6 +69,7 @@ func init() {
 		CodeDoc{CodeConductorNotRunning, 1, ActionStop, "`ape conductor send|read|watch`: no orchestrator terminal runs (or ran) in this project: `ape conductor start`"},
 		CodeDoc{"usage.message", 2, ActionStop, "`ape conductor send`: the message is empty or over 600 characters; for more, write a file in the project and name its path"},
 		CodeDoc{"usage.idle-alert", 2, ActionStop, "the orchestrator terminal's idle alert (--idle-alert, conductor.idle_alert) is not a positive Go duration (e.g. 30m)"},
+		CodeDoc{"usage.from", 2, ActionStop, "`ape orders accept --from <draft>`: the draft cannot be read"},
 		CodeDoc{"usage.kind", 2, ActionStop, "`ape conductor note` takes exactly one of --hold, --question, --resolved <n>"},
 		CodeDoc{"usage.act", 2, ActionStop, "`ape conductor act` names no act ape knows (answer, tweak-approve, milestone-approve, accept-task, decision-accept; the never-delegated acts are refused by name)"},
 		CodeDoc{"usage.resolves", 2, ActionStop, "`ape conductor note --resolved <n>` names no open hold or question of the person's decision log (`ape conductor log --open`)"},
@@ -141,19 +144,31 @@ func OrderTierOf(act string) OrderTier { return orderActs[act].Tier }
 //
 
 type OrderConditions struct {
-	TweakApprove *struct {
-		Types []string `json:"types" yaml:"types"`
-	} `json:"tweak-approve,omitempty" yaml:"tweak-approve,omitempty"`
-	MilestoneApprove *struct {
-		MaxChanges *int `json:"max_changes,omitempty" yaml:"max_changes"`
-		// Gate is "red" or "green": the milestone's last recorded gate run.
-		Gate string `json:"gate,omitempty" yaml:"gate"`
-	} `json:"milestone-approve,omitempty" yaml:"milestone-approve,omitempty"`
-	Answer *struct {
-		// QuestionOnly: answer only a change blocked on a question, never
-		// one blocked on a limit.
-		QuestionOnly bool `json:"question_only" yaml:"question_only"`
-	} `json:"answer,omitempty" yaml:"answer,omitempty"`
+	TweakApprove     *TweakCondition     `json:"tweak-approve,omitempty"     yaml:"tweak-approve,omitempty"`
+	MilestoneApprove *MilestoneCondition `json:"milestone-approve,omitempty" yaml:"milestone-approve,omitempty"`
+	Answer           *AnswerCondition    `json:"answer,omitempty"            yaml:"answer,omitempty"`
+}
+
+// TweakCondition: approve only tweaks of these change types.
+type TweakCondition struct {
+	Types []string `json:"types" yaml:"types"`
+}
+
+// MilestoneCondition: approve only a milestone of at most MaxChanges
+// changes, and/or whose last gate run is Gate (red or green).
+//
+
+type MilestoneCondition struct {
+	MaxChanges *int   `json:"max_changes,omitempty" yaml:"max_changes"`
+	Gate       string `json:"gate,omitempty"        yaml:"gate"`
+}
+
+// AnswerCondition: answer only a change blocked on a question, never one
+// blocked on a limit.
+//
+
+type AnswerCondition struct {
+	QuestionOnly bool `json:"question_only" yaml:"question_only"`
 }
 
 // OrdersMark is ape's record of an acceptance or a revocation.
@@ -182,6 +197,8 @@ type Orders struct {
 	// State: accepted, unaccepted (never accepted, or changed since) or
 	// revoked.
 	State string `json:"state" yaml:"-"`
+	// typesLine is the file line of tweak-approve's types (strict errors).
+	typesLine int
 }
 
 // The orders' states.
@@ -203,24 +220,29 @@ func PersonSlug(person string) string {
 // OrdersRel is a person's orders file, project-relative.
 func OrdersRel(person string) string { return path.Join(OrdersDirRel, PersonSlug(person)+".md") }
 
-// ParseOrders reads an orders file's content.
+// ParseOrders reads an orders file's content, strictly (D662+): an
+// unknown key, an unknown act, a never-delegated act, an act listed
+// twice, a condition on an act the orders cannot use, or a malformed
+// condition is orders.invalid naming the file's line. Nothing is ever
+// ignored: an ignored condition would widen the conductor's authority.
 func ParseOrders(data []byte) (*Orders, error) {
 	fm, body, err := frontmatter.Split(data)
 	if err != nil || len(fm) == 0 {
-		return nil, &FailError{Code: CodeOrdersInvalid, Msg: "the orders have no frontmatter (--- person:, acts:, conditions: ---)"}
+		return nil, ordersInvalid(1, "the orders have no frontmatter (--- person:, acts:, conditions: ---)")
 	}
-	var o Orders
-	if err := yaml.Unmarshal(fm, &o); err != nil {
-		return nil, &FailError{Code: CodeOrdersInvalid, Msg: "the orders' frontmatter does not parse: " + err.Error()}
+	var doc yaml.Node
+	if err := yaml.Unmarshal(fm, &doc); err != nil {
+		return nil, ordersInvalid(1, "the frontmatter does not parse: "+err.Error())
 	}
-	o.Body = string(body)
+	if len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
+		return nil, ordersInvalid(1, "the frontmatter is not a mapping of person:, acts:, conditions:")
+	}
+	o := &Orders{Body: string(body)}
+	if err := o.parseHeader(doc.Content[0]); err != nil {
+		return nil, err
+	}
 	if strings.TrimSpace(o.Person) == "" {
-		return nil, &FailError{Code: CodeOrdersInvalid, Msg: "the orders name no person: (their git user.email)"}
-	}
-	for _, a := range o.Acts {
-		if OrderTierOf(a) == 0 {
-			return nil, &FailError{Code: CodeOrdersInvalid, Msg: fmt.Sprintf("the orders name an act ape does not know: %q (acts: %s)", a, strings.Join(OrderActs(), ", "))}
-		}
+		return nil, ordersInvalid(1, "the orders name no person: (their git user.email)")
 	}
 	sum, err := o.digest()
 	if err != nil {
@@ -235,7 +257,151 @@ func ParseOrders(data []byte) (*Orders, error) {
 	default:
 		o.State = OrdersUnaccepted
 	}
-	return &o, nil
+	return o, nil
+}
+
+// ordersInvalid is orders.invalid at a frontmatter line, given as the
+// file's line (the frontmatter starts on line 2).
+func ordersInvalid(fileLine int, msg string) error {
+	return &FailError{Code: CodeOrdersInvalid, Msg: fmt.Sprintf("orders line %d: %s", fileLine, msg)}
+}
+
+// line is a frontmatter node's line in the file.
+func line(n *yaml.Node) int { return n.Line + 1 }
+
+// parseHeader reads the frontmatter's mapping, refusing anything it does
+// not know.
+func (o *Orders) parseHeader(m *yaml.Node) error {
+	var conds *yaml.Node
+	seen := map[string]bool{}
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		k, v := m.Content[i], m.Content[i+1]
+		if seen[k.Value] {
+			return ordersInvalid(line(k), k.Value+": is given twice")
+		}
+		seen[k.Value] = true
+		switch k.Value {
+		case "person":
+			if v.Kind != yaml.ScalarNode {
+				return ordersInvalid(line(v), "person: is one email")
+			}
+			o.Person = strings.TrimSpace(v.Value)
+		case "acts":
+			if err := o.parseActs(v); err != nil {
+				return err
+			}
+		case "conditions":
+			conds = v
+		case "accepted", "revoked":
+			var mk OrdersMark
+			if err := decodeStrict(v, &mk); err != nil {
+				return ordersInvalid(line(v), k.Value+": "+err.Error())
+			}
+			if k.Value == "accepted" {
+				o.Accepted = &mk
+			} else {
+				o.Revoked = &mk
+			}
+		default:
+			return ordersInvalid(line(k), fmt.Sprintf("%q is not a key of the orders (person, acts, conditions; ape writes accepted, revoked)", k.Value))
+		}
+	}
+	if conds != nil {
+		return o.parseConditions(conds)
+	}
+	return nil
+}
+
+func (o *Orders) parseActs(v *yaml.Node) error {
+	if v.Kind != yaml.SequenceNode {
+		return ordersInvalid(line(v), "acts: is a list, e.g. [answer, tweak-approve]")
+	}
+	for _, a := range v.Content {
+		act := strings.TrimSpace(a.Value)
+		switch tier := OrderTierOf(act); {
+		case a.Kind != yaml.ScalarNode || tier == 0:
+			return ordersInvalid(line(a), fmt.Sprintf("%q is not an act (acts: %s)", act, strings.Join(OrderActs(), ", ")))
+		case tier == TierNever:
+			return ordersInvalid(line(a), act+" is never delegated: only the person does it, so it cannot be in acts:")
+		case slices.Contains(o.Acts, act):
+			return ordersInvalid(line(a), act+" is listed twice")
+		}
+		o.Acts = append(o.Acts, act)
+	}
+	return nil
+}
+
+// parseConditions reads conditions:, each for an act the orders can use
+// (tier 1, or named), each field known and well formed.
+func (o *Orders) parseConditions(v *yaml.Node) error {
+	if v.Kind != yaml.MappingNode {
+		return ordersInvalid(line(v), "conditions: is a mapping of act → its conditions")
+	}
+	for i := 0; i+1 < len(v.Content); i += 2 {
+		k, c := v.Content[i], v.Content[i+1]
+		act := k.Value
+		switch OrderTierOf(act) {
+		case TierDelegable:
+		case 0:
+			return ordersInvalid(line(k), fmt.Sprintf("%q is not an act, so it can have no conditions", act))
+		case TierNever:
+			return ordersInvalid(line(k), act+" is never delegated, so it can have no conditions")
+		case TierNamed:
+			if !o.Names(act) {
+				return ordersInvalid(line(k), act+" has conditions but is not in acts:, so the orders cannot use it — name it, or drop its conditions")
+			}
+		}
+		var err error
+		switch act {
+		case OrderTweakApprove:
+			var t TweakCondition
+			o.typesLine = line(k)
+			if err = decodeStrict(c, &t); err == nil && len(t.Types) == 0 {
+				err = errors.New("types: names at least one change type")
+			}
+			o.Conditions.TweakApprove = &t
+		case OrderMilestoneApprove:
+			var t MilestoneCondition
+			err = decodeStrict(c, &t)
+			switch {
+			case err != nil:
+			case t.MaxChanges != nil && *t.MaxChanges < 1:
+				err = errors.New("max_changes: is a count of at least 1")
+			case t.Gate != "" && t.Gate != "red" && t.Gate != "green":
+				err = fmt.Errorf("gate: is red or green, not %q", t.Gate)
+			case t.MaxChanges == nil && t.Gate == "":
+				err = errors.New("names no condition (max_changes, gate)")
+			}
+			o.Conditions.MilestoneApprove = &t
+		case OrderAnswer:
+			var t struct {
+				QuestionOnly *bool `yaml:"question_only"`
+			}
+			if err = decodeStrict(c, &t); err == nil && t.QuestionOnly == nil {
+				err = errors.New("names no condition (question_only)")
+			}
+			if err == nil {
+				o.Conditions.Answer = &AnswerCondition{QuestionOnly: *t.QuestionOnly}
+			}
+		default:
+			err = errors.New("ape checks no condition for this act: put what you want of it in the text, for the conductor")
+		}
+		if err != nil {
+			return ordersInvalid(line(k), act+": "+err.Error())
+		}
+	}
+	return nil
+}
+
+// decodeStrict decodes a node, refusing a field v does not have.
+func decodeStrict(n *yaml.Node, v any) error {
+	out, err := yaml.Marshal(n)
+	if err != nil {
+		return err
+	}
+	dec := yaml.NewDecoder(bytes.NewReader(out))
+	dec.KnownFields(true)
+	return dec.Decode(v)
 }
 
 // digest is the sha256 of what a person accepts.
@@ -274,6 +440,9 @@ func (p *Project) LoadOrders(ctx context.Context, person string) (*Orders, error
 	o.Slug, o.Path, o.Branch = PersonSlug(person), rel, base
 	if PersonSlug(o.Person) != o.Slug {
 		return nil, &FailError{Code: CodeOrdersInvalid, Msg: fmt.Sprintf("%s names person %q, whose file would be %s", rel, o.Person, OrdersRel(o.Person))}
+	}
+	if err := p.checkTweakTypes(o); err != nil {
+		return nil, err
 	}
 	return o, nil
 }
@@ -396,4 +565,95 @@ func withMarks(data []byte, accepted, revoked *OrdersMark) ([]byte, error) {
 func GitUserEmail(ctx context.Context, root string) string {
 	email, _ := git(ctx, root, "config", "user.email")
 	return strings.TrimSpace(email)
+}
+
+// CodeOrdersDeclined: the person answered no at `ape orders accept --from`.
+const CodeOrdersDeclined = "orders.declined"
+
+func init() {
+	DiagnosticCodes = append(DiagnosticCodes,
+		CodeDoc{CodeOrdersDeclined, 1, ActionPerson, "`ape orders accept --from <draft>`: the person did not confirm the parsed orders (y/N), so nothing was written"},
+	)
+}
+
+// OrdersDraft is a draft read for `ape orders accept --from`: what ape will
+// enforce, what it reads as text only, and how it differs from the orders
+// in force.
+type OrdersDraft struct {
+	Orders  *Orders `json:"orders"`
+	Current *Orders `json:"current,omitempty"`
+	// Diff is the unified diff from the orders on the base branch (empty
+	// for new orders).
+	Diff string `json:"diff"`
+	data []byte
+}
+
+// ReadOrdersDraft parses a draft strictly and diffs it against person's
+// orders on the base branch. The draft must be person's (--by).
+func (p *Project) ReadOrdersDraft(ctx context.Context, by string, data []byte) (*OrdersDraft, error) {
+	o, err := ParseOrders(data)
+	if err != nil {
+		return nil, err
+	}
+	if PersonSlug(o.Person) != PersonSlug(by) {
+		return nil, &UsageError{Code: CodeByMismatch, Msg: fmt.Sprintf("the draft's person is %s, not --by %s: only a person accepts their own orders", o.Person, by)}
+	}
+	base, err := p.baseBranch(ctx)
+	if err != nil {
+		return nil, err
+	}
+	o.Slug, o.Path, o.Branch = PersonSlug(by), OrdersRel(by), base
+	if err := p.checkTweakTypes(o); err != nil {
+		return nil, err
+	}
+	d := &OrdersDraft{Orders: o, data: data}
+	cur, _ := p.readOnBranch(ctx, base, o.Path)
+	if cur != nil {
+		if c, err := ParseOrders(cur); err == nil {
+			d.Current = c
+		}
+	}
+	if cur != nil {
+		d.Diff = unifiedDiff("current/"+o.Path, "draft/"+o.Path, string(cur), string(data))
+	}
+	return d, nil
+}
+
+// AcceptOrdersFrom writes a confirmed draft as person's orders, accepted,
+// in one commit on the base branch. A person's act, from a terminal only.
+func (p *Project) AcceptOrdersFrom(ctx context.Context, d *OrdersDraft, by string) (*Orders, error) {
+	if err := RequirePersonFlag("ape orders accept --from"); err != nil {
+		return nil, err
+	}
+	o := d.Orders
+	mark := OrdersMark{By: strings.TrimSpace(by), At: Stamp(), SHA256: o.SHA256}
+	text, err := withMarks(d.data, &mark, nil)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := p.commitOnBranch(ctx, o.Branch, map[string][]byte{o.Path: text}, "apex: orders accepted by "+o.Slug); err != nil {
+		return nil, err
+	}
+	o.Accepted, o.Revoked, o.State = &mark, nil, OrdersAccepted
+	p.Emit(ctx, Event{Event: EventOrders, Action: "accepted " + o.Slug, Reason: "by " + by + " from a draft", Orders: o.Slug}, nil)
+	return o, nil
+}
+
+// checkTweakTypes refuses a tweak type the project does not have.
+func (p *Project) checkTweakTypes(o *Orders) error {
+	c := o.Conditions.TweakApprove
+	if c == nil {
+		return nil
+	}
+	cfg, err := LoadConfig(p.Root)
+	if err != nil {
+		return err
+	}
+	known := cfg.Commit.TypeList()
+	for _, t := range c.Types {
+		if !slices.Contains(known, t) {
+			return ordersInvalid(o.typesLine, fmt.Sprintf("tweak-approve: %q is not one of the project's change types (%s)", t, strings.Join(known, ", ")))
+		}
+	}
+	return nil
 }

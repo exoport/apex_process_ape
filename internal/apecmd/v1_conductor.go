@@ -85,8 +85,13 @@ func newConductorActCmd() *cobra.Command {
   4. a tier-2 act is named in the orders' acts: (orders.not-named);
   5. the orders' conditions hold (orders.condition);
   6. each --evidence path exists in the project; a milestone approve names the log of the
-     milestone's latest gate run when it has one (orders.evidence-missing).
-Then the act runs as the person's own command does.
+     milestone's latest gate run when it has one (orders.evidence-missing);
+  7. ape re-runs the mechanical check behind the act itself, at HEAD, whatever the conductor
+     was told (D662.2): a milestone approve runs ` + "`ape milestone gate-test`" + ` on the milestone's
+     gate folder (stub green, plain red), a tweak approve the change's check; not as it must be
+     is orders.check-red, and the self-test's logs join the evidence.
+Then the act runs as the person's own command does. --json reports {act, target, by, orders,
+evidence: [{path, sha256}], checks, seq}.
 
 The acts and their targets:
   answer <change-id> --text "<answer>"      change answer (a blocked change)

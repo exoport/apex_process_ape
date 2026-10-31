@@ -153,3 +153,41 @@ func TestDecisionLog_Notes(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(md), "hold: do not approve M3")
 }
+
+// D662.2: ape re-runs the mechanical check behind the act, whatever the
+// conductor was told: a tweak whose change check is red, a gate folder
+// whose plain run is green — refused, nothing done; a gate folder as it
+// must be lets the approve run, its self-test logs in the evidence.
+func TestConductorAct_Rechecks(t *testing.T) {
+	p := conductorProject(t)
+	asPerson(t)
+	write(t, p, "development/changes/fix-hug/change.md", strings.Replace(strings.Replace(tweakDoc("fix-hug"), "type: feat", "type: fix", 1), "## Tasks\n- T1", "## Tasks\n- X1", 1))
+	commitAll(t, p, "break fix-hug")
+	asClaudeCode(t)
+	_, err := p.RunDelegated(ctx(), act(OrderTweakApprove, "fix-hug"), nil)
+	require.Equal(t, CodeOrdersCheckRed, codeOf(t, err))
+	require.ErrorContains(t, err, "ape change check fix-hug is red")
+
+	asPerson(t)
+	gate := filepath.Join(p.GatesDir(), "M1-skeleton", "gate.sh")
+	require.NoError(t, os.MkdirAll(filepath.Dir(gate), 0o755))
+	require.NoError(t, os.WriteFile(gate, []byte("#!/bin/sh\nexit 0\n"), 0o755))
+	commitAll(t, p, "a gate that passes before any work")
+	asClaudeCode(t)
+	_, err = p.RunDelegated(ctx(), act(OrderMilestoneApprove, "M1"), nil)
+	require.Equal(t, CodeOrdersCheckRed, codeOf(t, err), "the orchestrator may have said 'all good'; ape ran it")
+	require.ErrorContains(t, err, "ape milestone gate-test")
+	require.Equal(t, MilestoneProposed, p.roadmap().Find("M1").Status)
+
+	asPerson(t)
+	require.NoError(t, os.WriteFile(gate, []byte("#!/bin/sh\nexit 1\n"), 0o755))
+	commitAll(t, p, "the gate is red until the work is done")
+	asClaudeCode(t)
+	res, err := p.RunDelegated(ctx(), act(OrderMilestoneApprove, "M1"), nil)
+	require.NoError(t, err)
+	require.Len(t, res.Checks, 1)
+	require.Contains(t, res.Checks[0], "ape milestone gate-test")
+	require.Contains(t, res.Checks[0], "plain exit 1 pass")
+	require.NotEmpty(t, res.Evidence, "the self-test's log is evidence")
+	require.Equal(t, MilestoneApproved, p.roadmap().Find("M1").Status)
+}

@@ -22,6 +22,16 @@ import (
 // person's decision log. Every other route from a model session stays
 // refused (session.person-only).
 
+// CodeOrdersCheckRed: the mechanical check behind a delegated act, re-run
+// by ape at act time (D662.2), is red: the act does not run.
+const CodeOrdersCheckRed = "orders.check-red"
+
+func init() {
+	DiagnosticCodes = append(DiagnosticCodes,
+		CodeDoc{CodeOrdersCheckRed, 1, ActionPerson, "`ape conductor act` (D662.2): ape re-ran the mechanical check behind the act before acting — a milestone approve's gate self-test (`ape milestone gate-test` on its gate folder), a tweak approve's change check — and it is not as it must be, so the act did not run; the conductor relays it, whatever the orchestrator reported"},
+	)
+}
+
 // EventDelegated: a conductor performed a person act under standing
 // orders (v1.4.2). action is the act and its target, reason the
 // conductor's reason, orders the orders it acted under.
@@ -56,7 +66,9 @@ type DelegatedResult struct {
 	By       string        `json:"by"`
 	Orders   string        `json:"orders"`
 	Evidence []EvidenceRef `json:"evidence"`
-	Seq      int64         `json:"seq"`
+	// Checks are the mechanical checks ape re-ran before acting (D662.2).
+	Checks []string `json:"checks"`
+	Seq    int64    `json:"seq"`
 }
 
 // limitBlockPrefixes open the reasons ape's own limits block a change
@@ -242,6 +254,11 @@ func (p *Project) RunDelegated(ctx context.Context, a DelegatedAct, progress io.
 	if err != nil {
 		return nil, err
 	}
+	checks, more, err := p.recheck(ctx, a, progress)
+	if err != nil {
+		return nil, err
+	}
+	ev = append(ev, more...)
 	commit, _ := git(ctx, p.Root, "log", "-1", "--format=%h", o.Branch, "--", o.Path)
 	ordersRef := o.Slug + "@" + commit
 	reason := strings.Join(strings.Fields(a.Reason), " ")
@@ -278,7 +295,7 @@ func (p *Project) RunDelegated(ctx context.Context, a DelegatedAct, progress io.
 		milestone = p.ChangeMilestone(ctx, change)
 	}
 	logged := p.Emit(ctx, Event{Event: EventDelegated, Milestone: milestone, Change: change, Action: a.Act + " " + target, Reason: reason, Orders: ordersRef}, progress)
-	res := &DelegatedResult{Act: a.Act, Target: target, By: by, Orders: ordersRef, Evidence: ev, Seq: logged.Seq}
+	res := &DelegatedResult{Act: a.Act, Target: target, By: by, Orders: ordersRef, Evidence: ev, Checks: checks, Seq: logged.Seq}
 	if res.Evidence == nil {
 		res.Evidence = []EvidenceRef{}
 	}
@@ -291,6 +308,51 @@ func (p *Project) RunDelegated(ctx context.Context, a DelegatedAct, progress io.
 // byReasonRunes bounds the reason quoted in by: (the whole reason is in
 // the event and the decision log).
 const byReasonRunes = 160
+
+// recheck re-runs the mechanical check behind the act, at HEAD, before it
+// runs (D662.2): the claim the conductor acts on is checked by ape, not
+// taken from a report. It returns what ran and the logs it read as
+// evidence; a check not as it must be is orders.check-red.
+func (p *Project) recheck(ctx context.Context, a DelegatedAct, progress io.Writer) ([]string, []EvidenceRef, error) {
+	red := func(msg string) error { return &FailError{Code: CodeOrdersCheckRed, Msg: msg} }
+	switch a.Act {
+	case OrderMilestoneApprove:
+		folders, _ := filepath.Glob(filepath.Join(p.GatesDir(), a.Target+"-*"))
+		if len(folders) == 0 {
+			// A gate command with no folder: approve's own self-check runs it.
+			return []string{"approve's gate self-check (" + a.Target + " has no gate folder)"}, nil, nil
+		}
+		res, err := p.GateTest(ctx, folders[0], "", progress)
+		if err != nil {
+			return nil, nil, red(fmt.Sprintf("ape milestone gate-test %s: %v", p.Rel(folders[0]), err))
+		}
+		var ev []EvidenceRef
+		var verdicts []string
+		for i := range res.Runs {
+			r := &res.Runs[i]
+			verdicts = append(verdicts, fmt.Sprintf("%s exit %d %s", r.Mode, r.Exit, r.Verdict))
+			if data, err := os.ReadFile(filepath.Join(p.Root, filepath.FromSlash(r.Log))); err == nil {
+				h := sha256.Sum256(data)
+				ev = append(ev, EvidenceRef{Path: r.Log, SHA256: hex.EncodeToString(h[:])})
+			}
+		}
+		check := "ape milestone gate-test " + res.Folder + ": " + strings.Join(verdicts, ", ")
+		if !res.OK {
+			return nil, nil, red(check + " — the gate is not as approval needs it (stub green, plain red)")
+		}
+		return []string{check}, ev, nil
+	case OrderTweakApprove:
+		if fs := p.CheckChangeAnywhere(ctx, a.Target); len(fs) > 0 {
+			msgs := make([]string, 0, len(fs))
+			for _, f := range fs {
+				msgs = append(msgs, f.Message)
+			}
+			return nil, nil, red("ape change check " + a.Target + " is red: " + strings.Join(limit(msgs, 3), "; "))
+		}
+		return []string{"ape change check " + a.Target + ": clean"}, nil, nil
+	}
+	return []string{}, nil, nil
+}
 
 func truncateRunes(s string, n int) string {
 	r := []rune(s)

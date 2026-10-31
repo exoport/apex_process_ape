@@ -1,8 +1,10 @@
 package apecmd
 
 import (
+	"bufio"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -42,8 +44,13 @@ again. ` + "`ape orders revoke`" + ` writes "revoked": no delegated act runs und
 on. Both commit on the base branch wherever HEAD is, so they count at once. Neither runs in a
 model session, with or without the person's words (exit 2, session.person-only).
 
+The header is read strictly: an unknown key or act, a never-delegated act, an act listed twice,
+a condition on an act the orders cannot use, a malformed condition, or a tweak type the project
+does not have is orders.invalid, naming the line. Nothing in it is ever ignored.
+
 A conductor acts under them only through ` + "`ape conductor act`" + `, which checks the orders, the
-act's tier, the conditions and the evidence before it runs the act.`,
+act's tier, the conditions and the evidence, and re-runs the act's mechanical check, before it
+runs the act.`,
 	}
 	cmd.AddCommand(newOrdersShowCmd(), newOrdersMarkCmd("accept"), newOrdersMarkCmd("revoke"))
 	return cmd
@@ -104,7 +111,7 @@ not parse (orders.invalid) · 2 usage.`,
 
 func newOrdersMarkCmd(verb string) *cobra.Command {
 	var f v1Flags
-	var by string
+	var by, from string
 	short := map[string]string{
 		"accept": "Accept your standing orders as they are on the base branch (a person, from a terminal)",
 		"revoke": "Revoke your standing orders: no delegated act runs under them from now on (a person, from a terminal)",
@@ -121,9 +128,18 @@ branch, wherever HEAD is (a change branch included), and it counts at once.
 Refused in any model session (exit 2, session.person-only): the orders themselves are never
 delegated, and no grant from the person's words covers them.
 
-Exit codes: 0 done (prints the state) · 1 no orders, a file that does not parse, or git failed ·
-2 usage, a model session, or --by not the orders' person.`,
-		Example: "  ape orders " + verb + " --by dana@example.com",
+` + map[string]string{"accept": `
+--from <draft> accepts a draft instead (your conductor drafts your orders with you and writes
+them outside _apex/standing-orders/, which it cannot write): ape parses it strictly and shows
+what it will enforce — each act with its tier, each condition — and what it reads as free text
+only, then the diff against your current orders, and asks y/N. On y it writes the file and its
+acceptance in one commit on the base branch; on anything else nothing is written
+(orders.declined). A draft whose header ape cannot fully read is refused, naming the line
+(orders.invalid): nothing in it is ever ignored.
+`, "revoke": ""}[verb] + `
+Exit codes: 0 done (prints the state) · 1 no orders, a file that does not parse, declined, or git
+failed · 2 usage, a model session, or --by not the orders' person.`,
+		Example: "  ape orders " + verb + " --by dana@example.com" + map[string]string{"accept": "\n  ape orders accept --by dana@example.com --from _output/standing-orders-draft.md", "revoke": ""}[verb],
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			p, err := v1Project(&f)
@@ -132,6 +148,9 @@ Exit codes: 0 done (prints the state) · 1 no orders, a file that does not parse
 			}
 			if err := v1RefuseV0(cmd, &f, p); err != nil {
 				return err
+			}
+			if from != "" {
+				return acceptOrdersFrom(cmd, &f, p, by, from)
 			}
 			mark := p.AcceptOrders
 			if verb == "revoke" {
@@ -148,7 +167,89 @@ Exit codes: 0 done (prints the state) · 1 no orders, a file that does not parse
 	}
 	addV1Flags(cmd, &f)
 	cmd.Flags().StringVar(&by, "by", "", "the orders' person: you (required)")
+	if verb == "accept" {
+		cmd.Flags().StringVar(&from, "from", "", "a draft to accept: shows the parsed orders and the diff, then asks y/N")
+	}
 	return cmd
+}
+
+// acceptOrdersFrom is `ape orders accept --from <draft>` (D662.1).
+func acceptOrdersFrom(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, by, from string) error {
+	if err := apexv1.RequirePersonFlag("ape orders accept --from"); err != nil {
+		return v1Fail(cmd, f, err, nil)
+	}
+	data, err := os.ReadFile(from)
+	if err != nil {
+		return v1Fail(cmd, f, &apexv1.UsageError{Code: "usage.from", Msg: "--from " + from + ": " + err.Error()}, nil)
+	}
+	d, err := p.ReadOrdersDraft(cmd.Context(), by, data)
+	if err != nil {
+		return v1Fail(cmd, f, err, nil)
+	}
+	w := cmd.ErrOrStderr()
+	printOrdersTable(w, d.Orders, from)
+	if d.Diff == "" {
+		fmt.Fprintln(w, "\nNo orders in force yet: these would be your first.")
+	} else {
+		fmt.Fprintf(w, "\nChanges from the orders in force:\n%s", d.Diff)
+	}
+	fmt.Fprint(w, "\nAccept these orders? [y/N] ")
+	answer, _ := bufio.NewReader(cmd.InOrStdin()).ReadString('\n')
+	if a := strings.ToLower(strings.TrimSpace(answer)); a != "y" && a != "yes" {
+		return v1Fail(cmd, f, &apexv1.FailError{Code: apexv1.CodeOrdersDeclined, Msg: "not accepted: nothing was written"}, nil)
+	}
+	o, err := p.AcceptOrdersFrom(cmd.Context(), d, by)
+	if err != nil {
+		return v1Fail(cmd, f, err, nil)
+	}
+	return v1Emit(cmd.OutOrStdout(), f, map[string]any{"ok": true, "orders": o}, func(w io.Writer) {
+		fmt.Fprintf(w, "orders of %s: %s (%s)\n", o.Person, o.State, o.Path)
+	})
+}
+
+// printOrdersTable is what the person approves at accept --from: what ape
+// enforces, and what it only passes to the conductor.
+func printOrdersTable(w io.Writer, o *apexv1.Orders, from string) {
+	fmt.Fprintf(w, "Standing orders of %s, from %s — what ape will enforce:\n\n", o.Person, from)
+	fmt.Fprintln(w, "  act                  tier  delegated")
+	for _, a := range []string{apexv1.OrderAnswer, apexv1.OrderTweakApprove, apexv1.OrderMilestoneApprove, apexv1.OrderAcceptTask, apexv1.OrderDecisionAccept} {
+		state := "no (not named)"
+		switch {
+		case apexv1.OrderTierOf(a) == apexv1.TierDelegable:
+			state = "yes (tier 1: under any accepted orders)"
+		case o.Names(a):
+			state = "yes (named)"
+		}
+		fmt.Fprintf(w, "  %-20s %-5d %s\n", a, apexv1.OrderTierOf(a), state)
+	}
+	fmt.Fprintln(w, "  never: accept-config, accept-red, allow-pending-human, push, tag, release, the orders")
+	fmt.Fprintln(w, "\nConditions:")
+	n := 0
+	if c := o.Conditions.TweakApprove; c != nil {
+		fmt.Fprintf(w, "  tweak-approve: only tweaks of type %s\n", strings.Join(c.Types, ", "))
+		n++
+	}
+	if c := o.Conditions.MilestoneApprove; c != nil {
+		if c.MaxChanges != nil {
+			fmt.Fprintf(w, "  milestone-approve: at most %d changes\n", *c.MaxChanges)
+		}
+		if c.Gate != "" {
+			fmt.Fprintf(w, "  milestone-approve: only when its last gate run is %s\n", c.Gate)
+		}
+		n++
+	}
+	if c := o.Conditions.Answer; c != nil && c.QuestionOnly {
+		fmt.Fprintln(w, "  answer: only a change blocked on a question, never on a limit")
+		n++
+	}
+	if n == 0 {
+		fmt.Fprintln(w, "  none")
+	}
+	lines := len(strings.Split(strings.TrimSpace(o.Body), "\n"))
+	if strings.TrimSpace(o.Body) == "" {
+		lines = 0
+	}
+	fmt.Fprintf(w, "\nFree text: %d line(s) the conductor reads as advice; ape enforces none of it.\n", lines)
 }
 
 // ordersPerson is --person, or the project's git user.email.

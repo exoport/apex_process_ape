@@ -267,6 +267,14 @@ The conditions are the ones ape can check: a tweak's type, a milestone's change 
 state of its last gate run, and an answer only for a change blocked on a question rather than on a
 limit. Anything else belongs in the body, for the conductor's judgment.
 
+**Draft them with your conductor, accept them yourself.** Your conductor can draft the orders with
+you and write the draft anywhere but `_apex/standing-orders/`, which it cannot write.
+`ape orders accept --by <you> --from <draft>` shows what ape will enforce (each act with its tier,
+each condition), what it reads as free text only, and the diff against your orders in force, then
+asks y/N. ape reads the header strictly: an unknown key or act, a never-delegated act, or a
+malformed condition is refused, naming the line, because an ignored condition would widen what
+your conductor may do.
+
 **The orders count only once you accept them, from a terminal.** `ape orders accept --by <you>`
 records who accepted, when, and the sha256 of what you accepted, in the file on the base branch.
 Any later edit, your own included, leaves the orders unaccepted until you accept them again.
@@ -282,6 +290,10 @@ things:
 - the orders' conditions;
 - the evidence: each `--evidence` path must exist, and a milestone approve must name its latest
   gate run.
+
+Last, ape re-runs the mechanical check behind the act itself, whatever the conductor was told: a
+milestone approve runs the gate self-test on the milestone's gate folder, and a tweak approve runs
+the change's check. A red check refuses the act (`orders.check-red`).
 
 Only then does ape run the act, on the same code path your own command takes. It records
 `by: conductor under orders <you>@<commit> (<reason>)`, logs a `delegated` event (so your

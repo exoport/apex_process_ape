@@ -146,6 +146,7 @@ func TestDiagnosticCodes_PublishedListMatchesTheCode(t *testing.T) {
 		"CodeOrdersMissing": CodeOrdersMissing, "CodeOrdersInvalid": CodeOrdersInvalid, "CodeOrdersUnaccepted": CodeOrdersUnaccepted,
 		"CodeOrdersRevoked": CodeOrdersRevoked, "CodeOrdersNonDelegable": CodeOrdersNonDelegable, "CodeOrdersNotNamed": CodeOrdersNotNamed,
 		"CodeConductorRunning": CodeConductorRunning, "CodeConductorNotRunning": CodeConductorNotRunning,
+		"CodeOrdersCheckRed": CodeOrdersCheckRed, "CodeOrdersDeclined": CodeOrdersDeclined,
 		"CodeOrdersCondition": CodeOrdersCondition, "CodeOrdersNoReason": CodeOrdersNoReason, "CodeOrdersEvidence": CodeOrdersEvidence,
 	}
 	for _, glob := range []string{"*.go", filepath.Join("..", "apecmd", "v1_*.go")} {

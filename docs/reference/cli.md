@@ -2496,8 +2496,13 @@ Perform one of the person's acts under their standing orders, checked first:
   4. a tier-2 act is named in the orders' acts: (orders.not-named);
   5. the orders' conditions hold (orders.condition);
   6. each --evidence path exists in the project; a milestone approve names the log of the
-     milestone's latest gate run when it has one (orders.evidence-missing).
-Then the act runs as the person's own command does.
+     milestone's latest gate run when it has one (orders.evidence-missing);
+  7. ape re-runs the mechanical check behind the act itself, at HEAD, whatever the conductor
+     was told (D662.2): a milestone approve runs `ape milestone gate-test` on the milestone's
+     gate folder (stub green, plain red), a tweak approve the change's check; not as it must be
+     is orders.check-red, and the self-test's logs join the evidence.
+Then the act runs as the person's own command does. --json reports {act, target, by, orders,
+evidence: [{path, sha256}], checks, seq}.
 
 The acts and their targets:
   answer <change-id> --text "<answer>"      change answer (a blocked change)
@@ -5176,8 +5181,13 @@ again. `ape orders revoke` writes "revoked": no delegated act runs under them fr
 on. Both commit on the base branch wherever HEAD is, so they count at once. Neither runs in a
 model session, with or without the person's words (exit 2, session.person-only).
 
+The header is read strictly: an unknown key or act, a never-delegated act, an act listed twice,
+a condition on an act the orders cannot use, a malformed condition, or a tweak type the project
+does not have is orders.invalid, naming the line. Nothing in it is ever ignored.
+
 A conductor acts under them only through `ape conductor act`, which checks the orders, the
-act's tier, the conditions and the evidence before it runs the act.
+act's tier, the conditions and the evidence, and re-runs the act's mechanical check, before it
+runs the act.
 
 Subcommands:
 
@@ -5202,13 +5212,23 @@ branch, wherever HEAD is (a change branch included), and it counts at once.
 Refused in any model session (exit 2, session.person-only): the orders themselves are never
 delegated, and no grant from the person's words covers them.
 
-Exit codes: 0 done (prints the state) · 1 no orders, a file that does not parse, or git failed ·
-2 usage, a model session, or --by not the orders' person.
+
+--from <draft> accepts a draft instead (your conductor drafts your orders with you and writes
+them outside _apex/standing-orders/, which it cannot write): ape parses it strictly and shows
+what it will enforce — each act with its tier, each condition — and what it reads as free text
+only, then the diff against your current orders, and asks y/N. On y it writes the file and its
+acceptance in one commit on the base branch; on anything else nothing is written
+(orders.declined). A draft whose header ape cannot fully read is refused, naming the line
+(orders.invalid): nothing in it is ever ignored.
+
+Exit codes: 0 done (prints the state) · 1 no orders, a file that does not parse, declined, or git
+failed · 2 usage, a model session, or --by not the orders' person.
 
 Examples:
 
 ```
   ape orders accept --by dana@example.com
+  ape orders accept --by dana@example.com --from _output/standing-orders-draft.md
 ```
 
 Flags:
@@ -5217,6 +5237,7 @@ Flags:
 | ---- | ---- | ------- | ----------- |
 | `--by` | string | `—` | the orders' person: you (required) |
 | `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--from` | string | `—` | a draft to accept: shows the parsed orders and the diff, then asks y/N |
 | `--json` | bool | `false` | machine output (JSON on stdout) |
 
 ## ape orders revoke
@@ -5236,8 +5257,9 @@ branch, wherever HEAD is (a change branch included), and it counts at once.
 Refused in any model session (exit 2, session.person-only): the orders themselves are never
 delegated, and no grant from the person's words covers them.
 
-Exit codes: 0 done (prints the state) · 1 no orders, a file that does not parse, or git failed ·
-2 usage, a model session, or --by not the orders' person.
+
+Exit codes: 0 done (prints the state) · 1 no orders, a file that does not parse, declined, or git
+failed · 2 usage, a model session, or --by not the orders' person.
 
 Examples:
 
