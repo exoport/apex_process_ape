@@ -29,7 +29,7 @@ The framework's v1.4.1 payload declares `min_ape_version: "1.4.1"`. Measured on 
   files together by `caps.advise_session`. An entry without `for:` is unchanged.
   Measured on an expert-advice project (three runs per arm): with the planning session reading the
   expert's advice, runs handled 2, 4 and 4 of the four planted defects, against 4, 4 and 2 without
-  it. It matches the default; it does not beat it. It added no blocks and cost about the same.
+  it. It matches the default; it does not beat it. It added no blocks.
 - **Gate scratch and the gate guard** (D582, D634): `.go`, `.mk`, `.ps1` and Makefiles count as gate
   scripts; on Windows the gate guard reads Git Bash `/c/…` and Cygwin `/cygdrive/c/…` paths.
 - **`ape aboard` is aboard v0.4.2:** a board's server now closes before it removes its instance
