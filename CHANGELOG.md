@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## v1.4.1 (unreleased — draft)
+## v1.4.1 (2026-10-31)
 
 APEX v1.4.1, on v1.4.0: a session that lost its Claude Code login now ends in minutes instead of an
 hour; the sandbox's credential sync can no longer spread a logged-out credential; a check that greps
@@ -42,9 +42,10 @@ and for pipefail, a text-only change R did not reach.
   An entry whose `for:` names `plan` is listed at the top of `ape status --json` (`advise`), where
   the framework's apex-plan reads it before it plans a milestone; `ape project check` caps those
   files together by `caps.advise_session`. An entry without `for:` is unchanged.
-  Measured on an expert-advice project (three runs per arm): with the planning session reading the
-  expert's advice, runs handled 2, 4 and 4 of the four planted defects, against 4, 4 and 2 without
-  it. It matches the default; it does not beat it. It added no blocks.
+  Measured on an expert-advice project: with the planning session reading the expert's advice, three
+  runs handled 2, 4 and 4 of the four planted defects, against 4 and 2 in the two counted runs
+  without it. At these sample sizes that is no measured gain. It added no blocks, and its cost
+  stayed within the bound set before the runs (1.5 times the median cost without it).
 - **Gate scratch and the gate guard** (D582, D634): `.go`, `.mk`, `.ps1` and Makefiles count as gate
   scripts; on Windows the gate guard reads Git Bash `/c/…` and Cygwin `/cygdrive/c/…` paths.
 - **`ape aboard` is aboard v0.4.2:** a board's server now closes before it removes its instance
