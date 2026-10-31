@@ -93,6 +93,11 @@ Fixes from the v1.4.1 evaluation (D659 D2–D4):
 - The `check.grep-test-output` notice is pinned by a test on the exact check the evaluation saw
   exit 141 under `pipefail`.
 
+**Known issue (Windows only):** `ape conductor send`, `stop` or `status` can fail once when it
+overlaps the supervisor's rewrite of the orchestrator terminal's record: `send` refuses with
+`conductor.not-running`, and `stop` reports that no terminal runs and stops nothing. Running it again
+works. Fixed in a later release.
+
 ## v1.4.1 (2026-10-31)
 
 APEX v1.4.1, on v1.4.0: a session that lost its Claude Code login now ends in minutes instead of an
