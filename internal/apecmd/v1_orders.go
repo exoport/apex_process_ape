@@ -124,7 +124,7 @@ func newOrdersMarkCmd(verb string) *cobra.Command {
 		Long: short + `.
 
 --by is the orders' person (their git user.email, or its slug form); another person's orders
-are refused (session.by-mismatch). ape commits "apex: orders ` + verb + `ed by <person>" on the base
+are refused (session.by-mismatch). ape commits "apex: orders ` + map[string]string{"accept": "accepted", "revoke": "revoked"}[verb] + ` by <person>" on the base
 branch, wherever HEAD is (a change branch included), and it counts at once.
 
 Refused in any model session (exit 2, session.person-only): the orders themselves are never
@@ -214,14 +214,31 @@ func acceptOrdersFrom(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, by, fro
 func printOrdersTable(w io.Writer, o *apexv1.Orders, from string) {
 	fmt.Fprintf(w, "Standing orders of %s, from %s — what ape will enforce:\n\n", o.Person, from)
 	fmt.Fprintln(w, "  act                  tier  delegated")
-	for _, a := range []string{apexv1.OrderAnswer, apexv1.OrderTweakApprove, apexv1.OrderMilestoneApprove, apexv1.OrderAcceptTask, apexv1.OrderDecisionAccept} {
+	for _, a := range apexv1.DelegableActs() {
 		state := "no (not named)"
 		if o.Names(a) {
 			state = "yes (named)"
 		}
 		fmt.Fprintf(w, "  %-20s %-5d %s\n", a, apexv1.OrderTierOf(a), state)
 	}
-	fmt.Fprintln(w, "  never: accept-config, accept-red, allow-pending-human, push, tag, release, the orders")
+	fmt.Fprintln(w, "  never: "+strings.Join(apexv1.NeverActs(), ", "))
+	fmt.Fprintln(w, "\nEscalate (always to you, even for a named act):")
+	var esc []string
+	if o.Escalate.TouchesGate {
+		esc = append(esc, apexv1.EscalateTouchesGate+": a change that touches its milestone's gate")
+	}
+	if o.Escalate.ChangesConfig {
+		esc = append(esc, apexv1.EscalateChangesConfig+": a change that edits a guarded block of _apex/config.yaml")
+	}
+	if o.Escalate.TokensOver > 0 {
+		esc = append(esc, fmt.Sprintf("%s: a milestone past %d tokens since its approval", apexv1.EscalateTokensOver, o.Escalate.TokensOver))
+	}
+	if len(esc) == 0 {
+		esc = []string{"none"}
+	}
+	for _, e := range esc {
+		fmt.Fprintln(w, "  "+e)
+	}
 	fmt.Fprintln(w, "\nConditions:")
 	n := 0
 	if c := o.Conditions.TweakApprove; c != nil {

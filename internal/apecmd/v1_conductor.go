@@ -86,37 +86,37 @@ func newConductorActCmd() *cobra.Command {
      tag, release, orders: orders.non-delegable);
   3. the orders exist on the base branch, are accepted and not revoked (orders.missing,
      orders.unaccepted, orders.revoked);
-  4. the act is named in the orders' acts: (orders.not-named), and no escalate: category
-     holds for it (orders.escalate);
+  4. the act is named in the orders' acts: (orders.not-named) — every act, D664+;
   5. the orders' conditions hold (orders.condition);
-  6. each --evidence path exists in the project; a milestone approve names the log of the
+  6. no category of the orders' escalate: list holds for it — touches-gate, changes-config,
+     tokens-over — or it goes to the person (orders.escalate);
+  7. each --evidence path exists in the project; a milestone approve names the log of the
      milestone's latest gate run when it has one (orders.evidence-missing);
-  7. ape re-runs the mechanical check behind the act itself, at HEAD, whatever the conductor
+  8. ape re-runs the mechanical check behind the act itself, at HEAD, whatever the conductor
      was told (D662.2): a milestone approve runs ` + "`ape milestone gate-test`" + ` on the milestone's
      gate folder (stub green, plain red), a tweak approve the change's check; not as it must be
      is orders.check-red, and the self-test's logs join the evidence.
 Then the act runs as the person's own command does. --json reports {act, target, by, orders,
 evidence: [{path, sha256}], checks, seq}.
 
-The acts and their targets:
+The acts and their targets, everyday (tier 1) then weightier (tier 2):
   answer <change-id> --text "<answer>"      change answer (a blocked change)
+  question-answer <Q-id> --text "<answer>"  question answer (an orchestrator's question)
   tweak-approve <tweak-id>                  change approve (a milestone-less change)
   milestone-approve <M>                     milestone approve
   accept-task <change-id> <T<n>>            change accept (only where the project names a
                                             human-review delegate)
   decision-accept <ADR-id>                  decision accept
-  question-answer <Q-id> --text "<answer>"  question answer (an orchestrator's question)
   prepare-release <version>                 record the release preparation; ape checks the
-                                            CHANGELOG at HEAD names the version and hands back
-                                            the tag and push commands, which stay the person's
+                                            changelog at HEAD (docs.changelog, else
+                                            CHANGELOG.md) has a section for the version (## v1.2.0,
+                                            ## 1.2.0 or ## [1.2.0]) and hands back the pushes and
+                                            the tag — the base branch alone, the tag, its push —
+                                            which stay the person's
   push-branch <branch>                      ape pushes the work branch (never main, master, the
                                             base or default branch, or a tag; no tags follow)
   open-pr <branch> --text "<title>"         gh pr create for the branch (body: --reason);
                                             without gh, refused with the push URL
-Every act runs only when the orders name it under acts: (every act, D664+); before the
-checks above, the orders' escalate: list (touches-gate, changes-config, tokens-over) sends
-an act in one of its categories to the person (orders.escalate).
-
 Exit codes: 0 done · 1 refused by a check or by the act itself (the code says which) · 2 usage
 (no reason, an unknown act, a missing target).`,
 		Example: "  ape conductor act tweak-approve fix-typo --reason \"brief asks for it; change check clean\" --evidence development/briefs/fix-typo.md\n" +
@@ -611,8 +611,9 @@ func newConductorWatcherCmd() *cobra.Command {
 	var projects []string
 	var pane, ackAlert string
 	var poll time.Duration
+	var repin bool
 	cmd := &cobra.Command{
-		Use:   "watcher --project <dir>… [--pane <tmux pane>] [--ack-alert 15m]",
+		Use:   "watcher --project <dir>… [--pane <tmux pane>] [--ack-alert 15m] | --repin",
 		Short: "Follow the projects' events and wake the conductor: typed into its tmux pane, else notify-only",
 		Long: `Run the conductor's watcher until interrupted (another terminal, or in the background). It
 follows each --project's events — block, person (a question included), question,
@@ -625,24 +626,44 @@ into it, marked (<ape-delivery …>, never your words: a prompt carrying one gra
 act), only when all of these hold:
   - the pane's foreground process is claude and a Claude Code session registered on this
     machine (<config>/sessions/<pid>.json) — a stale or wrong pane, a shell, gets nothing;
-  - it is the same session as at the watcher's start: the session id is recorded at the
-    first look, and when another session takes the pane the watcher stops typing, logs
-    conductor-stalled in each project (you are notified) and asks to be restarted with --pane;
+  - it is the session the watcher pinned: the session id is recorded at the first look.
+    When another session takes the pane (a /clear starts one too), the watcher PAUSES: it
+    logs conductor-stalled in each project (you are notified) and types nothing until
+    ` + "`ape conductor watcher --repin`" + `, run from inside that new session, pins it (or you
+    restart the watcher). A --repin from a session the pane does not run pins nothing;
   - no turn is running ("esc to interrupt" absent) and the input row is empty — never after
     your half-typed line;
   - the screen did not change between two looks (one --poll apart).
-The conductor acknowledges each: ` + "`ape conductor ack <id>`" + `. A delivery not acknowledged within
---ack-alert (default conductor.ack_alert of the first project, else 15m) logs
-conductor-stalled in its project, once, so that project's notify: command reaches you.
+The conductor acknowledges each: ` + "`ape conductor ack <id>`" + `. An event not acknowledged within
+--ack-alert of it (default conductor.ack_alert of the first project, else 15m) logs
+conductor-stalled in its project, once, so that project's notify: command reaches you —
+whether it was typed or not (a busy pane, text in the input row, a paused watcher).
+
+--repin: run from the conductor's own Claude Code session after a /clear or a resume; it
+names the session it runs under (found through its process ancestry) to the running
+watcher, and exits.
 
 Without a pane the watcher only records: each of those events already runs the project's
 notify: command (notify-only). State and acknowledgements are kept in
 $XDG_STATE_HOME/ape/conductor (else ~/.local/state/ape/conductor).
 
-Exit codes: 0 stopped (Ctrl-C) · 2 usage.`,
-		Example: "  ape conductor watcher --project ~/src/notes --project ~/src/billing --pane %3",
+Exit codes: 0 stopped (Ctrl-C), or --repin recorded · 1 --repin outside a Claude Code
+session · 2 usage.`,
+		Example: "  ape conductor watcher --project ~/src/notes --project ~/src/billing --pane %3\n  ape conductor watcher --repin",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if repin {
+				id := conductorwatch.CallerSession(conductorwatch.ClaudeConfigDir())
+				if id == "" {
+					return errors.New("--repin runs from inside the conductor's Claude Code session: no registered session (" +
+						filepath.Join(conductorwatch.ClaudeConfigDir(), "sessions") + "/<pid>.json) is among this process's ancestors")
+				}
+				if err := conductorwatch.RequestRepin(conductorwatch.StateDir(), id, time.Now()); err != nil {
+					return err
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "repin requested for Claude Code session %s: the running watcher pins it at its next look, if its pane runs this session\n", id)
+				return nil
+			}
 			if len(projects) == 0 {
 				wd, err := os.Getwd()
 				if err != nil {
@@ -686,6 +707,7 @@ Exit codes: 0 stopped (Ctrl-C) · 2 usage.`,
 	cmd.Flags().StringVar(&pane, "pane", "", "the conductor's tmux pane (-t target); default the one pane running claude")
 	cmd.Flags().StringVar(&ackAlert, "ack-alert", "", "how long a delivery may go unacknowledged before conductor-stalled (default conductor.ack_alert, else 15m)")
 	cmd.Flags().DurationVar(&poll, "poll", 2*time.Second, "how often it looks")
+	cmd.Flags().BoolVar(&repin, "repin", false, "from the conductor's own session: pin the running watcher to it (after a /clear or a resume), then exit")
 	return cmd
 }
 

@@ -163,9 +163,10 @@ evidence, and the questions and holds it is keeping for you. Your orders hold un
 **Waking the conductor.** `ape conductor watcher` follows your projects' events. If your conductor runs in a tmux
 pane, the watcher types each event into that pane, marked as `ape`'s, and only when the pane still runs the conductor's
 Claude Code session, the session is idle and its input line is empty. If you are typing there, it waits. The
-watcher records which Claude Code session the pane runs when it starts. If another session takes the pane later, the
-watcher stops typing for good and notifies you; you restart it with `--pane`. If no acknowledgement comes within 15
-minutes, you are notified. Without tmux you are only notified. A marked message is
+watcher records which Claude Code session the pane runs when it starts. If another session takes the pane later (a
+`/clear` starts one too), the watcher pauses and notifies you. It types nothing until `ape conductor watcher --repin`,
+run from inside that new session, pins it, or until you restart the watcher. A `--repin` from a session the pane does
+not run pins nothing. If an event is not acknowledged within 15 minutes, you are notified, whether or not it was typed. Without tmux you are only notified. A marked message is
 never your words: a prompt that carries one anywhere cannot grant an act, whatever else it says.
 
 For a project on another machine, the conductor runs the same commands there over ssh. You accept or revoke that

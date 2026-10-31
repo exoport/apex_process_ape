@@ -12,8 +12,8 @@ the patch rule for it):
   are a person's, from a terminal, and run the notifier. The edit tools are denied the folder.
   The header is read strictly: anything ape cannot fully read is `orders.invalid`, naming the line,
   never ignored. `ape orders accept --from <draft>` takes the draft the conductor wrote with the
-  person. It shows what ape will enforce, what is free text, and the diff against the orders in
-  force, then asks y/N.
+  person. It shows what ape will enforce (every delegable act, named or not, and the escalate:
+  list), what is free text, and the diff against the orders in force, then asks y/N.
 - **`ape conductor act <act> <target>`**, the only route by which a model session performs a person
   act. ape checks a required `--reason`, the act's tier (never: accept-config, accept-red,
   allow-pending-human, push, tag, release, the orders), the orders' state, their conditions, and
@@ -36,10 +36,11 @@ the patch rule for it):
   `escalate:` categories that always go to the person: `touches-gate`, `changes-config`,
   `{tokens-over: N}` (`orders.escalate`).
 - **Questions as acts**: `ape question ask|answer|list`. An orchestrator asks; an open question
-  is a person action (`answer Q<n>: <answer>`, also by E2's typed phrase); a conductor answers
-  under orders naming `question-answer`.
-- **More delegable acts**, each only when named: `prepare-release <version>` (the CHANGELOG at HEAD
-  must name it; the tag and push commands are handed back to the person), `push-branch <branch>`
+  is a person action (`answer Q<n>: <answer>`, also by E2's typed phrase), listed by `ape status`
+  (`questions` in its JSON); a conductor answers under orders naming `question-answer`.
+- **More delegable acts**, each only when named: `prepare-release <version>` (the changelog at HEAD,
+  `docs.changelog` or `CHANGELOG.md`, must have a section for it: `## v1.2.0`, `## 1.2.0` or
+  `## [1.2.0]`; the base-branch push, the tag and its push are handed back to the person), `push-branch <branch>`
   (ape pushes a work branch itself, never `main`, the base or default branch, or a tag, and no tag
   follows it), `open-pr <branch>` (through `gh`; without it, refused with the push URL).
 - **The conductor's watcher**, `ape conductor watcher`, follows the projects' events and types
@@ -48,8 +49,9 @@ the patch rule for it):
   acknowledges a delivery; one unacknowledged past `conductor.ack_alert` (15m) logs
   `conductor-stalled`, so the person is notified. Without tmux the watcher is notify-only.
   The watcher records the pane's Claude Code session id when it starts. If another session takes
-  the pane, it stops typing, logs `conductor-stalled` in each project and asks to be restarted with
-  `--pane`.
+  the pane (after a `/clear`, say), it pauses: it logs `conductor-stalled` in each project and types
+  nothing until `ape conductor watcher --repin`, run from inside the new session, pins it. An event
+  unacknowledged past the alert notifies the person whether or not it was typed.
 - A prompt carrying ape's delivery mark anywhere is recorded `delivery` and never grants a person
   act, not even on the person's earlier typed words.
 - Events `delegated`, `orders`, `orchestrator-dead`, `orchestrator-idle`, `question`,

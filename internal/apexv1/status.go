@@ -392,6 +392,10 @@ type StatusReport struct {
 	// out of scope, one line each without the list marker, from the base
 	// branch's roadmap.md. Always present ([] when none).
 	RoadmapNext []string `json:"roadmap_next"`
+	// Questions are the open questions (v1.4.2, D666+ F3): asked with
+	// `ape question ask`, not answered yet — each a person action. Always
+	// present ([] when none).
+	Questions []Question `json:"questions"`
 	// Docs is _apex/config.yaml's docs: block (H21), always present ({}
 	// when unset): the changelog and user docs a user-visible change
 	// updates, for apex-change and apex-review to read.
@@ -444,9 +448,9 @@ type StatusConfig struct {
 
 // Status builds the report.
 //
-//nolint:gocyclo // one section per part of the report, each guarded by what it reads
+//nolint:gocyclo,maintidx // one section per part of the report, each guarded by what it reads
 func (p *Project) Status() *StatusReport {
-	r := &StatusReport{Root: p.Root, Initialized: p.IsV1(), Changes: []ChangeStatus{}, Milestones: []MilestoneLine{}, Tweaks: []string{}, Advise: []AdviseFile{}, OutsideFlow: []OutsideFlow{}, RoadmapNext: []string{}}
+	r := &StatusReport{Root: p.Root, Initialized: p.IsV1(), Changes: []ChangeStatus{}, Milestones: []MilestoneLine{}, Tweaks: []string{}, Advise: []AdviseFile{}, OutsideFlow: []OutsideFlow{}, RoadmapNext: []string{}, Questions: []Question{}}
 	cfg, cfgErr := LoadConfig(p.Root)
 	if cfgErr == nil && cfg.ProjectName != "" {
 		r.Project = cfg.ProjectName
@@ -596,6 +600,7 @@ func (p *Project) Status() *StatusReport {
 	r.BaseUpstream = p.upstreamOf(ctx, base)
 	r.OutsideFlow = p.outsideFlow(ctx, base)
 	r.RoadmapNext = p.roadmapNext(ctx, base)
+	r.Questions = p.OpenQuestions()
 	if j := p.LoadArchiveJournal(); j != nil {
 		r.ArchiveJournal, r.ArchiveRunning = j, j.Running()
 	}

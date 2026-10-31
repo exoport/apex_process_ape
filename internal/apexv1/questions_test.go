@@ -31,6 +31,8 @@ func TestQuestions(t *testing.T) {
 		found = found || (a.Kind == ActQuestionAnswer && a.Ref == "Q1")
 	}
 	require.True(t, found, "an open question is a person action")
+	require.Len(t, r.Questions, 1, "ape status lists it (D666+ F3)")
+	require.Equal(t, "Q1", r.Questions[0].ID)
 
 	_, err = p.AnswerQuestion(ctx(), "Q1", "EUR", "x")
 	require.Equal(t, CodePersonOnly, Diagnostics(err)[0].Code, "a model session does not answer")
@@ -49,6 +51,7 @@ func TestQuestions(t *testing.T) {
 	_, err = p.AnswerQuestion(ctx(), "Q9", "x", "Ann Person")
 	require.Equal(t, CodeQuestionNotFound, Diagnostics(err)[0].Code)
 	require.Empty(t, p.OpenQuestions())
+	require.Empty(t, p.Status().Questions, "answered: no longer listed")
 }
 
 // D663: the conductor answers a question under orders naming it; the
@@ -81,7 +84,10 @@ func TestConductorAct_D663(t *testing.T) {
 	require.Equal(t, CodeOrdersRefused, codeOf(t, err), "a version the changelog does not name")
 	res, err = p.RunDelegated(ctx(), act(OrderPrepareRelease, "v1.2.0"), nil)
 	require.NoError(t, err)
-	require.Equal(t, []string{`git tag -a v1.2.0 -m "v1.2.0"`, "git push origin refs/tags/v1.2.0"}, res.Next, "the tag and push stay the person's")
+	require.Equal(t, []string{
+		"git push --no-follow-tags origin refs/heads/main:refs/heads/main",
+		`git tag -a v1.2.0 -m "v1.2.0"`, "git push origin refs/tags/v1.2.0",
+	}, res.Next, "the pushes and the tag stay the person's: the base branch first, alone (D666+ F4)")
 
 	for _, b := range []string{"main", "master", "refs/tags/v1.2.0", "no-such-branch"} {
 		_, err = p.RunDelegated(ctx(), act(OrderPushBranch, b), nil)
@@ -132,4 +138,35 @@ func TestConductorAct_EscalateTokensOver(t *testing.T) {
 	_, err = p.RunDelegated(ctx(), act(OrderMilestoneApprove, "M1"), nil)
 	require.Equal(t, CodeOrdersEscalate, codeOf(t, err))
 	require.ErrorContains(t, err, "M1 has used 1400 tokens since its approval, over 1000")
+}
+
+// D666+ F2: prepare-release reads the configured changelog, and Keep a
+// Changelog's "## [1.2.0]" names a version as "## v1.2.0" and "## 1.2.0" do.
+func TestPrepareRelease_Changelog(t *testing.T) {
+	for doc, want := range map[string]bool{
+		"## v1.2.0 (2026-10-31)\n":                  true,
+		"## 1.2.0\n":                                true,
+		"## [1.2.0] - 2026-10-31\n":                 true,
+		"## [v1.2.0]\n":                             true,
+		"## [1.2.0](https://example.com/compare)\n": true,
+		"## [1.2.0]\r\n":                            true,
+		"## v1.2.01\n":                              false,
+		"## [1.2.0-rc.1]\n":                         false,
+		"### v1.2.0\n":                              false,
+		"see ## v1.2.0\n":                           false,
+	} {
+		require.Equal(t, want, changelogNames("# Changelog\n\n"+doc, "v1.2.0"), doc)
+	}
+
+	files := baseFiles()
+	files["_apex/config.yaml"] = "docs:\n  changelog: docs/CHANGES.md\n"
+	files["docs/CHANGES.md"] = "# Changes\n\n## [1.2.0] - 2026-10-31\n"
+	files["CHANGELOG.md"] = "# CHANGELOG\n\n## v9.9.9\n"
+	p := fixture(t, files)
+	checks, _, err := p.recheck(ctx(), DelegatedAct{Act: OrderPrepareRelease, Target: "v1.2.0"}, nil)
+	require.NoError(t, err)
+	require.Equal(t, []string{"docs/CHANGES.md at HEAD names v1.2.0"}, checks)
+	_, _, err = p.recheck(ctx(), DelegatedAct{Act: OrderPrepareRelease, Target: "v9.9.9"}, nil)
+	require.Equal(t, CodeOrdersRefused, codeOf(t, err), "the configured changelog, not CHANGELOG.md")
+	require.ErrorContains(t, err, "docs/CHANGES.md at HEAD names no section for v9.9.9")
 }

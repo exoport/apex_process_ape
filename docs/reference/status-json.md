@@ -71,6 +71,7 @@ A fresh project with one approved milestone gives, in part:
 | `next` | string | What comes next, derived from the state alone. |
 | `next_why` | string | Its reason, one line. |
 | `roadmap_next` | array of strings | The Next findings (`development/next.md`, then any the roadmap still holds), as the base branch has them. Not the same as `next`. |
+| `questions` | array | v1.4.2: the open questions (`ape question ask`, not answered yet), oldest first: `{id, at, milestone, change, text, options}`. Each is a person action. `[]` when none. |
 | `docs` | object | `docs:` from `_apex/config.yaml`: `changelog`, `user_docs`, `tested`. `{}` when unset. |
 | `base_upstream` | object or null | `{branch, upstream, ahead, behind}`: the base branch against its upstream, from the local remote-tracking ref (ape never fetches). `null` with no upstream. |
 | `outside_flow` | array | Commits on the base branch since the last archive squash (else the v1 epoch) that touch paths outside `development/` and `_apex/`, carry no `Change:` trailer and have no `apex:` subject: `{sha, subject, files}`, newest first. Shown, never failed. |

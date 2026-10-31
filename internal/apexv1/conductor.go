@@ -40,7 +40,7 @@ const CodeOrdersCheckRed = "orders.check-red"
 func init() {
 	DiagnosticCodes = append(DiagnosticCodes,
 		CodeDoc{CodeOrdersEscalate, 1, ActionPerson, "`ape conductor act` (D663 2c): the act falls in a category the person's orders always send to them (escalate: touches-gate, changes-config, tokens-over), named in the message, even though the orders name the act: the conductor relays it"},
-		CodeDoc{CodeOrdersRefused, 1, ActionPerson, "`ape conductor act` refuses this whatever the orders say: push-branch to main, the base branch, the remote's default branch or a tag, a branch that does not exist here; open-pr without the gh CLI (the message names the push URL); prepare-release for a version the CHANGELOG at HEAD does not name"},
+		CodeDoc{CodeOrdersRefused, 1, ActionPerson, "`ape conductor act` refuses this whatever the orders say: push-branch to main, the base branch, the remote's default branch or a tag, a branch that does not exist here; open-pr without the gh CLI (the message names the push URL); prepare-release for a version the changelog at HEAD (docs.changelog, else CHANGELOG.md) does not name"},
 		CodeDoc{CodeOrdersCheckRed, 1, ActionPerson, "`ape conductor act` (D662.2): ape re-ran the mechanical check behind the act before acting — a milestone approve's gate self-test (`ape milestone gate-test` on its gate folder), a tweak approve's change check — and it is not as it must be, so the act did not run; the conductor relays it, whatever the orchestrator reported"},
 	)
 }
@@ -405,7 +405,17 @@ func (p *Project) RunDelegated(ctx context.Context, a DelegatedAct, progress io.
 		}
 	case OrderPrepareRelease:
 		change = ""
-		next = []string{"git tag -a " + a.Target + ` -m "` + a.Target + `"`, "git push origin refs/tags/" + a.Target}
+		// D666+ F4: the base branch the release commit is on goes first,
+		// alone (an explicit refspec, no tag following it), then the tag.
+		base, berr := p.baseBranch(ctx)
+		if berr != nil || base == "" {
+			base = "main"
+		}
+		next = []string{
+			"git push --no-follow-tags origin refs/heads/" + base + ":refs/heads/" + base,
+			"git tag -a " + a.Target + ` -m "` + a.Target + `"`,
+			"git push origin refs/tags/" + a.Target,
+		}
 	case OrderPushBranch:
 		change = ""
 		next, err = p.pushBranch(ctx, a.Target)
@@ -476,23 +486,34 @@ func (p *Project) recheck(ctx context.Context, a DelegatedAct, progress io.Write
 		}
 		return []string{"ape change check " + a.Target + ": clean"}, nil, nil
 	case OrderPrepareRelease:
-		heading := "## " + a.Target
-		bare := "## " + strings.TrimPrefix(a.Target, "v")
-		data, err := os.ReadFile(filepath.Join(p.Root, "CHANGELOG.md"))
-		has := func(h string) bool {
-			for l := range strings.SplitSeq(string(data), "\n") {
-				if l == h || strings.HasPrefix(l, h+" ") {
-					return true
-				}
-			}
-			return false
+		// D666+ F2: the configured changelog (docs.changelog, else
+		// CHANGELOG.md), and any of its version heading forms.
+		path := p.releaseChangelog()
+		data, err := os.ReadFile(filepath.Join(p.Root, filepath.FromSlash(path)))
+		if err != nil || !changelogNames(string(data), a.Target) {
+			return nil, nil, &FailError{Code: CodeOrdersRefused, Msg: path + " at HEAD names no section for " + a.Target +
+				" (## " + a.Target + ", ## " + strings.TrimPrefix(a.Target, "v") + " or ## [" + strings.TrimPrefix(a.Target, "v") + "]): a release is prepared for a version the changelog already names (D663+ Q-D663-2)"}
 		}
-		if err != nil || (!has(heading) && !has(bare)) {
-			return nil, nil, &FailError{Code: CodeOrdersRefused, Msg: "CHANGELOG.md at HEAD names no " + heading + " section: a release is prepared for a version the changelog already names (D663+ Q-D663-2)"}
-		}
-		return []string{"CHANGELOG.md at HEAD names " + a.Target}, nil, nil
+		return []string{path + " at HEAD names " + a.Target}, nil, nil
 	}
 	return []string{}, nil, nil
+}
+
+// changelogNames reports a version heading for version in a changelog:
+// "## v1.2.0", "## 1.2.0" or Keep a Changelog's "## [1.2.0]", "## [v1.2.0]",
+// alone or followed by a space (a date, a link, "(unreleased)").
+func changelogNames(doc, version string) bool {
+	bare := strings.TrimPrefix(version, "v")
+	forms := []string{"## " + bare, "## [" + bare + "]", "## v" + bare, "## [v" + bare + "]"}
+	for l := range strings.SplitSeq(doc, "\n") {
+		l = strings.TrimRight(l, "\r")
+		for _, h := range forms {
+			if l == h || strings.HasPrefix(l, h+" ") || (strings.HasPrefix(h, "## [") && strings.HasPrefix(l, h+"(")) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func truncateRunes(s string, n int) string {

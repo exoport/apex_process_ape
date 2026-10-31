@@ -1115,6 +1115,9 @@ func newStatusCmd() *cobra.Command {
     branch) — development/next.md's items, then any the roadmap still holds (a project
     not yet moved by ` + "`ape next move`" + `, D217), each once. Not the same field as
     "next", the step above
+  - Open questions (JSON "questions": [{id, at, milestone, change, text, options}], [] when
+    none; a section in the human output): asked with ` + "`ape question ask`" + ` and not answered,
+    each a person action (v1.4.2)
   - JSON "docs": {changelog, user_docs} from _apex/config.yaml docs: ({} when unset), for
     the skills that keep a changelog and user docs current
   - JSON "config": {commit_types, release_scheme, release_docs, commit_subject} — the
@@ -1290,6 +1293,19 @@ func statusLong(r *apexv1.StatusReport) string {
 		}
 	}
 	b.WriteString(fullSkippedLines(r))
+	if len(r.Questions) > 0 {
+		fmt.Fprintf(&b, "\nOpen questions for the person (%d; each answered with \"answer Q<n>: <answer>\", or `ape question answer`):\n", len(r.Questions))
+		for _, q := range r.Questions {
+			about := strings.TrimSpace(q.Milestone + " " + q.Change)
+			if about != "" {
+				about = " [" + about + "]"
+			}
+			fmt.Fprintf(&b, "  %s%s %s\n", q.ID, about, q.Text)
+			if len(q.Options) > 0 {
+				fmt.Fprintf(&b, "     options: %s\n", strings.Join(q.Options, " · "))
+			}
+		}
+	}
 	if len(r.Advise) > 0 {
 		b.WriteString("\nAdvise for planning (tools.advise for: plan; ape status --json: advise):\n")
 		printAdvise(&b, r.Advise)

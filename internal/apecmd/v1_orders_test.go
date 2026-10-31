@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -73,6 +75,13 @@ func TestV1Commands_OrdersAcceptFrom(t *testing.T) {
 	require.Contains(t, stderr, "at most 4 changes")
 	require.Contains(t, stderr, "Free text: 1 line(s)")
 	require.Contains(t, stderr, "these would be your first")
+	// FINDING-V142-1: every act orders may name is in the table the person
+	// approves, named or not, and every never-delegated one under never:.
+	for _, a := range apexv1.DelegableActs() {
+		require.Regexp(t, `(?m)^  `+regexp.QuoteMeta(a)+` +[12] +(yes|no) `, stderr, a)
+	}
+	require.Contains(t, stderr, "  never: "+strings.Join(apexv1.NeverActs(), ", "))
+	require.Contains(t, stderr, "Escalate (always to you, even for a named act):\n  none")
 	require.Equal(t, head, v1Git(t, root, "rev-parse", "HEAD"), "nothing written")
 
 	out, _, err := v1ExecIn(t, newOrdersCmd, "y\n", "accept", "--by", "dana@example.com", "--from", draft, "--cwd", root)
@@ -98,4 +107,25 @@ func TestV1Commands_OrdersAcceptFrom(t *testing.T) {
 	t.Setenv("CLAUDECODE", "1")
 	_, _, err = v1ExecIn(t, newOrdersCmd, "y\n", "accept", "--by", "dana@example.com", "--from", draft, "--cwd", root)
 	require.Equal(t, ExitUsage, exitCodeOf(t, err), "never from a model session")
+}
+
+// D666+ F3: `ape status` lists the open questions, human and --json, as
+// `ape question --help` says; an answered one is gone.
+func TestV1Commands_StatusListsOpenQuestions(t *testing.T) {
+	root := v1Repo(t)
+	_, _, err := v1Exec(t, newQuestionCmd, "ask", "EUR or the customer's currency?", "--milestone", "M1", "--option", "EUR", "--option", "customer's", "--cwd", root)
+	require.NoError(t, err)
+	out, _, err := v1Exec(t, newStatusCmd, "--cwd", root)
+	require.NoError(t, err)
+	require.Contains(t, out, "Open questions for the person (1;")
+	require.Contains(t, out, "  Q1 [M1] EUR or the customer's currency?")
+	require.Contains(t, out, "options: EUR · customer's")
+	out, _, err = v1Exec(t, newStatusCmd, "--json", "--cwd", root)
+	require.NoError(t, err)
+	var rep struct {
+		Questions []apexv1.Question `json:"questions"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &rep))
+	require.Len(t, rep.Questions, 1)
+	require.Equal(t, "Q1", rep.Questions[0].ID)
 }

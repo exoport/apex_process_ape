@@ -84,6 +84,12 @@ func (t *Tmux) configDir() string {
 	if t.ConfigDir != "" {
 		return t.ConfigDir
 	}
+	return ClaudeConfigDir()
+}
+
+// ClaudeConfigDir is Claude Code's config dir: $CLAUDE_CONFIG_DIR, else
+// ~/.claude.
+func ClaudeConfigDir() string {
 	if d := os.Getenv("CLAUDE_CONFIG_DIR"); d != "" {
 		return d
 	}

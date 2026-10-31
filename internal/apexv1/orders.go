@@ -72,7 +72,7 @@ func init() {
 		CodeDoc{"usage.idle-alert", 2, ActionStop, "the orchestrator terminal's idle alert (--idle-alert, conductor.idle_alert) is not a positive Go duration (e.g. 30m)"},
 		CodeDoc{"usage.from", 2, ActionStop, "`ape orders accept --from <draft>`: the draft cannot be read"},
 		CodeDoc{"usage.kind", 2, ActionStop, "`ape conductor note` takes exactly one of --hold, --question, --resolved <n>"},
-		CodeDoc{"usage.act", 2, ActionStop, "`ape conductor act` names no act ape knows (answer, tweak-approve, milestone-approve, accept-task, decision-accept; the never-delegated acts are refused by name)"},
+		CodeDoc{"usage.act", 2, ActionStop, "`ape conductor act` names no act ape knows (" + strings.Join(DelegableActs(), ", ") + "; the never-delegated acts are refused by name)"},
 		CodeDoc{"usage.resolves", 2, ActionStop, "`ape conductor note --resolved <n>` names no open hold or question of the person's decision log (`ape conductor log --open`)"},
 		CodeDoc{"usage.person", 2, ActionStop, "`ape orders show` names no --person and git config user.email is unset: name whose orders"},
 		CodeDoc{CodeOrdersEvidence, 1, ActionStop, "an --evidence path of `ape conductor act` does not exist in the project, or a milestone approve does not name the milestone's latest gate run (D660): the conductor reads the evidence first"},
@@ -137,6 +137,26 @@ var orderActs = map[string]struct {
 	OrderTag:              {TierNever, ""},
 	OrderRelease:          {TierNever, ""},
 	OrderOrders:           {TierNever, ""},
+}
+
+// actOrder is every act in the order ape lists them — the accept table,
+// `ape conductor act --help`, usage.act — tier by tier: one list, so a new
+// act cannot be enforced and missing from what the person approves
+// (FINDING-V142-1). TestActOrder holds it to orderActs.
+var actOrder = []string{
+	OrderAnswer, OrderQuestionAnswer, OrderTweakApprove,
+	OrderMilestoneApprove, OrderAcceptTask, OrderDecisionAccept, OrderPrepareRelease, OrderPushBranch, OrderOpenPR,
+	OrderAcceptConfig, OrderAcceptRed, OrderAllowPending, OrderPush, OrderTag, OrderRelease, OrderOrders,
+}
+
+// DelegableActs are the acts orders may name, in actOrder's order.
+func DelegableActs() []string {
+	return slices.DeleteFunc(slices.Clone(actOrder), func(a string) bool { return orderActs[a].Tier == TierNever })
+}
+
+// NeverActs are the acts never delegated, in actOrder's order.
+func NeverActs() []string {
+	return slices.DeleteFunc(slices.Clone(actOrder), func(a string) bool { return orderActs[a].Tier != TierNever })
 }
 
 // OrderActs are the act names, sorted.

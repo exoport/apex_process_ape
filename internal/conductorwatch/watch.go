@@ -14,13 +14,17 @@
 //     did not change since the last look. The pane's Claude Code session
 //     id is recorded at the first look that finds it (the watcher's
 //     start) and required before every delivery: when another session
-//     takes the pane, the watcher stops typing, logs conductor-stalled in
-//     each project (the notifier reaches the person) and asks to be
-//     restarted with --pane (D665+).
+//     takes the pane (a /clear starts one too), the watcher pauses — it
+//     logs conductor-stalled in each project (the notifier reaches the
+//     person) and types nothing — until `ape conductor watcher --repin`
+//     run from that new session pins it, or the watcher is restarted
+//     (D665+, D666+ F5).
 //   - The conductor acknowledges a delivery (`ape conductor ack <id>`). A
-//     delivery not acknowledged within the ack alert (default 15 min) logs
-//     conductor-stalled in its project, once, so the project's notifier
-//     reaches the person.
+//     delivery not acknowledged within the ack alert (default 15 min) of
+//     the event logs conductor-stalled in its project, once, so the
+//     project's notifier reaches the person — typed or not: a busy pane, a
+//     placeholder in the input row or a paused watcher delays the typing,
+//     never the alert (D666+ F1).
 //   - Without a pane the watcher only records: the project's notifier
 //     already runs on each of those events (notify-only).
 package conductorwatch
@@ -182,9 +186,12 @@ type Watcher struct {
 	c        Config
 	lastPane string
 	// session is the pane's Claude Code session id, recorded at the first
-	// look that found one; lost is set once another session took the pane.
+	// look that found one; paused is the other session that took the pane
+	// since, until a --repin from it (repin.go) pins it.
 	session string
-	lost    bool
+	paused  string
+	// why is the last reason nothing was typed, for the alert.
+	why string
 }
 
 // New is a watcher for c.
@@ -257,21 +264,26 @@ func (w *Watcher) Tick(ctx context.Context) error {
 	w.deliver(ctx, s, now, projects)
 	for i := range s.Deliveries {
 		d := &s.Deliveries[i]
-		if d.DeliveredAt == "" || d.AckedAt != "" || d.AlertedAt != "" {
+		if d.AckedAt != "" || d.AlertedAt != "" {
 			continue
 		}
-		at, err := time.Parse(time.RFC3339, d.DeliveredAt)
+		at, err := time.Parse(time.RFC3339, d.At)
 		if err != nil || now.Sub(at) < w.c.AckAlert {
 			continue
 		}
+		reason := fmt.Sprintf("the conductor has not acknowledged %s (%s) since %s", d.ID, d.Event, d.At)
+		if d.DeliveredAt == "" {
+			why := w.why
+			if why == "" {
+				why = "no conductor pane (notify-only)"
+			}
+			reason += "; it was never typed into the conductor's pane: " + why
+		}
 		if p := projects[d.Project]; p != nil {
-			p.Emit(ctx, apexv1.Event{
-				Event: EventStalled, Action: "ape conductor ack " + d.ID,
-				Reason: fmt.Sprintf("the conductor has not acknowledged %s (%s) since %s", d.ID, d.Event, d.DeliveredAt),
-			}, nil)
+			p.Emit(ctx, apexv1.Event{Event: EventStalled, Action: "ape conductor ack " + d.ID, Reason: reason}, nil)
 		}
 		d.AlertedAt = now.UTC().Format(time.RFC3339)
-		w.c.Log("watcher: %s unacknowledged since %s: the person is notified\n", d.ID, d.DeliveredAt)
+		w.c.Log("watcher: %s: the person is notified\n", reason)
 	}
 	return saveState(w.c.StateDir, s)
 }
@@ -280,7 +292,7 @@ func (w *Watcher) Tick(ctx context.Context) error {
 // conductor, idle, with an empty input row, and unchanged since the last
 // look (D664+).
 func (w *Watcher) deliver(ctx context.Context, s *State, now time.Time, projects map[string]*apexv1.Project) {
-	if w.c.Pane == nil || w.lost {
+	if w.c.Pane == nil {
 		return
 	}
 	id, why := w.c.Pane.Session(ctx)
@@ -288,8 +300,11 @@ func (w *Watcher) deliver(ctx context.Context, s *State, now time.Time, projects
 		w.session = id
 		w.c.Log("watcher: the pane runs Claude Code session %s: deliveries go to it alone\n", id)
 	}
+	w.checkRepin(id)
 	if id != "" && id != w.session {
-		w.paneLost(ctx, id, projects)
+		w.pause(ctx, id, projects)
+		w.why = "the watcher is paused: the pane runs another Claude Code session (" + id + ") than the pinned one; `ape conductor watcher --repin` from it resumes"
+		w.lastPane = ""
 		return
 	}
 	i := slices.IndexFunc(s.Deliveries, func(d Delivery) bool { return d.DeliveredAt == "" && d.AckedAt == "" })
@@ -297,7 +312,10 @@ func (w *Watcher) deliver(ctx context.Context, s *State, now time.Time, projects
 		return
 	}
 	if id == "" {
-		w.c.Log("watcher: not typing into the pane: %s — notify-only until it is the conductor's session\n", why)
+		if w.why != why {
+			w.c.Log("watcher: not typing into the pane: %s — notify-only until it is the conductor's session\n", why)
+		}
+		w.why = why
 		w.lastPane = ""
 		return
 	}
@@ -308,6 +326,7 @@ func (w *Watcher) deliver(ctx context.Context, s *State, now time.Time, projects
 	steady := pane == w.lastPane
 	w.lastPane = pane
 	if !steady || !Idle(pane) {
+		w.why = "the pane was busy, changing, or had text in its input row"
 		return
 	}
 	if err := w.c.Pane.Type(ctx, Mark(s.Deliveries[i], w.c.Nonce)); err != nil {
@@ -318,18 +337,21 @@ func (w *Watcher) deliver(ctx context.Context, s *State, now time.Time, projects
 	w.lastPane = ""
 }
 
-// paneLost stops typing for good: the pane runs another Claude Code
-// session than the one recorded at start, which may be anyone's (D665+).
-// Each project logs conductor-stalled once, so its notifier reaches the
-// person; the watcher goes on recording, notify-only, until it is
-// restarted with --pane.
-func (w *Watcher) paneLost(ctx context.Context, id string, projects map[string]*apexv1.Project) {
-	w.lost = true
-	reason := fmt.Sprintf("the conductor's pane now runs Claude Code session %s, not %s, the conductor's at the watcher's start: the watcher stopped typing (notify-only) — restart it with --pane <the conductor's pane>", id, w.session)
+// pause stops typing: the pane runs another Claude Code session than the
+// pinned one (D665+), which may be anyone's — or the conductor's own after
+// a /clear. Each project logs conductor-stalled once per new session, so
+// its notifier reaches the person; the watcher goes on recording, typing
+// nothing, until a --repin from that session pins it (D666+ F5).
+func (w *Watcher) pause(ctx context.Context, id string, projects map[string]*apexv1.Project) {
+	if w.paused == id {
+		return
+	}
+	w.paused = id
+	reason := fmt.Sprintf("the conductor's pane now runs Claude Code session %s, not %s, the pinned one: the watcher is paused and types nothing — from the new session run `ape conductor watcher --repin` (or restart the watcher)", id, w.session)
 	w.c.Log("watcher: %s\n", reason)
 	for _, root := range w.c.Projects {
 		if p := projects[root]; p != nil {
-			p.Emit(ctx, apexv1.Event{Event: EventStalled, Action: "ape conductor watcher --pane <pane>", Reason: reason}, nil)
+			p.Emit(ctx, apexv1.Event{Event: EventStalled, Action: "ape conductor watcher --repin", Reason: reason}, nil)
 		}
 	}
 }

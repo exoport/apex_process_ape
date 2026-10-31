@@ -183,3 +183,14 @@ func TestLoadOrders_TweakTypesAreTheProjects(t *testing.T) {
 	require.Equal(t, CodeOrdersInvalid, Diagnostics(err)[0].Code)
 	require.ErrorContains(t, err, `orders line 6: tweak-approve: "hotfix" is not one of the project's change types`)
 }
+
+// FINDING-V142-1: actOrder lists every act ape knows, once — the accept
+// table, usage.act and the help read it, so none can drift from orderActs.
+func TestActOrder(t *testing.T) {
+	require.ElementsMatch(t, OrderActs(), actOrder)
+	require.Len(t, actOrder, len(orderActs))
+	require.Equal(t, len(actOrder), len(DelegableActs())+len(NeverActs()))
+	for _, a := range []string{OrderQuestionAnswer, OrderPrepareRelease, OrderPushBranch, OrderOpenPR} {
+		require.Contains(t, DelegableActs(), a)
+	}
+}

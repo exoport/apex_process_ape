@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -146,8 +147,9 @@ func TestWatcher(t *testing.T) {
 	require.Equal(t, 1, stalled, "an acknowledged delivery does not alert")
 }
 
-// Without a pane the watcher only records (notify-only): nothing is typed
-// and nothing alerts — the project's notifier already ran on the event.
+// Without a pane the watcher only records (notify-only): nothing is typed;
+// the project's notifier already ran on the event, and the ack alert
+// still applies (TestWatcher_AlertsWhetherTypedOrNot).
 func TestWatcher_NotifyOnly(t *testing.T) {
 	p := project(t)
 	w := New(Config{Projects: []string{p.Root}, StateDir: t.TempDir()})
@@ -159,11 +161,13 @@ func TestWatcher_NotifyOnly(t *testing.T) {
 	require.Empty(t, s.Deliveries[0].DeliveredAt)
 }
 
-// D665+ (research finding 3): the pane's session id is recorded at the
-// watcher's first look; when another Claude Code session takes the pane,
-// nothing more is typed, each project logs conductor-stalled once, and the
-// watcher asks to be restarted with --pane. The arrival control: the same
-// session gets the delivery.
+// D665+ (research finding 3) and D666+ F5: the pane's session id is
+// recorded at the watcher's first look; when another Claude Code session
+// takes the pane (a /clear), the watcher pauses — nothing typed, each
+// project logs conductor-stalled once — until a --repin from that session,
+// with the pane running it, pins it. A --repin from a session the pane
+// does not run pins nothing. The arrival control: the pinned session gets
+// the delivery.
 func TestWatcher_PaneSessionReplaced(t *testing.T) {
 	for _, replaced := range []bool{false, true} {
 		p := project(t)
@@ -176,33 +180,89 @@ func TestWatcher_PaneSessionReplaced(t *testing.T) {
 		ctx := context.Background()
 		require.NoError(t, w.Tick(ctx), "start: the session is recorded")
 		if replaced {
-			pane.session = "someone-else"
+			pane.session = "after-clear"
 		}
 		p.Emit(ctx, apexv1.Event{Event: apexv1.EventBlock, Change: "add-export", Reason: "which format?"}, nil)
 		for range 3 {
 			require.NoError(t, w.Tick(ctx))
 		}
-		stalled := 0
-		for _, e := range p.EventsSince(0) {
-			if e.Event == EventStalled {
-				stalled++
-				require.Contains(t, e.Reason, "someone-else")
-				require.Contains(t, e.Action, "--pane")
+		stalled := func() int {
+			n := 0
+			for _, e := range p.EventsSince(0) {
+				if e.Event == EventStalled {
+					n++
+					require.Contains(t, e.Reason, "after-clear")
+					require.Equal(t, "ape conductor watcher --repin", e.Action)
+				}
 			}
+			return n
 		}
 		if !replaced {
-			require.Len(t, pane.typed, 1, "the control: the recorded session gets the delivery")
-			require.Zero(t, stalled)
+			require.Len(t, pane.typed, 1, "the control: the pinned session gets the delivery")
+			require.Zero(t, stalled())
 			continue
 		}
-		require.Empty(t, pane.typed, "another session in the pane: nothing typed")
-		require.Equal(t, 1, stalled, "the person is notified, once")
-		require.Contains(t, logged.String(), "restart it with --pane")
-		pane.session = "conductor-1"
-		require.NoError(t, w.Tick(ctx))
-		require.NoError(t, w.Tick(ctx))
-		require.Empty(t, pane.typed, "stopped for good: a restart with --pane records the pane again")
+		require.Empty(t, pane.typed, "another session in the pane: paused, nothing typed")
+		require.Equal(t, 1, stalled(), "the person is notified, once")
+
+		require.NoError(t, RequestRepin(w.c.StateDir, "someone-else", time.Now()))
+		for range 3 {
+			require.NoError(t, w.Tick(ctx))
+		}
+		require.Empty(t, pane.typed, "a --repin from a session the pane does not run pins nothing")
+		require.Contains(t, logged.String(), `--repin from session "someone-else" ignored`)
+		require.Equal(t, 1, stalled(), "still paused, not notified again")
+
+		require.NoError(t, RequestRepin(w.c.StateDir, "after-clear", time.Now()))
+		for range 3 {
+			require.NoError(t, w.Tick(ctx))
+		}
+		require.Len(t, pane.typed, 1, "re-pinned from the new session: typing again")
+		require.Contains(t, logged.String(), "re-pinned to Claude Code session after-clear")
 	}
+}
+
+// D666+ F1: an event unacknowledged past the ack alert notifies the person
+// whether or not it was typed — a busy pane, and no pane at all, delay the
+// typing, never the alert. Within the alert nothing is raised.
+func TestWatcher_AlertsWhetherTypedOrNot(t *testing.T) {
+	for name, pane := range map[string]Pane{"busy pane": &fakePane{screen: busyScreen, conductor: true}, "notify-only": nil} {
+		p := project(t)
+		now := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
+		w := New(Config{Projects: []string{p.Root}, StateDir: t.TempDir(), Pane: pane, AckAlert: 15 * time.Minute, Now: func() time.Time { return now }})
+		ctx := context.Background()
+		p.Emit(ctx, apexv1.Event{Event: apexv1.EventBlock, Change: "x"}, nil)
+		require.NoError(t, w.Tick(ctx))
+		now = now.Add(14 * time.Minute)
+		require.NoError(t, w.Tick(ctx))
+		var stalled []apexv1.Event
+		collect := func() {
+			stalled = nil
+			for _, e := range p.EventsSince(0) {
+				if e.Event == EventStalled {
+					stalled = append(stalled, e)
+				}
+			}
+		}
+		collect()
+		require.Empty(t, stalled, name+": within the alert")
+		now = now.Add(2 * time.Minute)
+		require.NoError(t, w.Tick(ctx))
+		require.NoError(t, w.Tick(ctx))
+		collect()
+		require.Len(t, stalled, 1, name+": past the alert, once")
+		require.Contains(t, stalled[0].Reason, "never typed", name)
+	}
+}
+
+// --repin names the Claude Code session it runs under: the nearest
+// ancestor registered under the config dir.
+func TestCallerSession(t *testing.T) {
+	cfg := t.TempDir()
+	require.Empty(t, CallerSession(cfg), "no registered ancestor")
+	require.NoError(t, os.MkdirAll(filepath.Join(cfg, "sessions"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(cfg, "sessions", strconv.Itoa(os.Getppid())+".json"), []byte(`{"sessionId":"s-parent"}`), 0o600))
+	require.Equal(t, "s-parent", CallerSession(cfg))
 }
 
 // The real tmux: a shell pane is not the conductor (the negative control),
