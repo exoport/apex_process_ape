@@ -8,6 +8,11 @@ v1.4.2 release.
 - **`ape conductor send`, `stop`, `status` and `read` no longer fail during the supervisor's
   rewrite of its record on Windows.** The record is read again for up to about 200 ms; a missing
   one is still reported at once. This removes v1.4.2's Known issue.
+- **`ape doctor` reports a fail-open hook.** Its `hooks.project` row now WARNs on
+  `hooks.fail-open` (ape's pre-tool hook registered without `"onFailure": "block"`, as every
+  `ape project init` before rc.7q wrote it), naming `ape project init` as the fix. Before, doctor
+  said OK while `ape project check` listed the notice. The row now lists every hooks notice it
+  finds, so a fail-open hook no longer hides `hooks.monitor-unguarded`, or the other way round.
 
 ## v1.4.2 (2026-10-31)
 

@@ -379,6 +379,15 @@ func (p *Project) MonitorUnguarded() string {
 	return ""
 }
 
+// FailOpen is the first hooks.fail-open notice's message, "" when every
+// intact hook carries its onFailure (1.4.3 PDFA-4: doctor's hooks row).
+func (p *Project) FailOpen() string {
+	if ns := p.failOpenNotices(); len(ns) > 0 {
+		return ns[0].Message
+	}
+	return ""
+}
+
 // RequiredHookCount is how many hooks CheckHooks requires.
 func RequiredHookCount() int { return len(requiredHooks()) }
 
