@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## v1.4.3 (unreleased — draft)
+
+APEX v1.4.3, on v1.4.2: fixes found by the v1.4.2 update of a real project (pdfa) and the
+v1.4.2 release.
+
+- **`ape conductor send`, `stop`, `status` and `read` no longer fail during the supervisor's
+  rewrite of its record on Windows.** The record is read again for up to about 200 ms; a missing
+  one is still reported at once. This removes v1.4.2's Known issue.
+
 ## v1.4.2 (2026-10-31)
 
 APEX v1.4.2, on v1.4.1: **the delegated conductor** (D658–D661). A person's own Claude Code

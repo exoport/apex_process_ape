@@ -91,20 +91,37 @@ func LogPath(root string) string { return filepath.Join(runlog.ConductorDir(root
 // ErrNoTerminal: no supervisor ever ran for the project.
 var ErrNoTerminal = errors.New("conductorterm: no orchestrator terminal for this project (ape conductor start)")
 
-// LoadState reads the supervisor's record.
+// loadRetries and loadRetryEvery bound LoadState's retry of a transient
+// failure: on Windows a read that overlaps the supervisor's temp-file
+// rename fails with a sharing violation (1.4.2's Known issue, W1).
+const (
+	loadRetries    = 10
+	loadRetryEvery = 20 * time.Millisecond
+)
+
+// LoadState reads the supervisor's record. A missing record is
+// ErrNoTerminal at once; a read or parse that fails is retried for about
+// 200 ms, since Serve rewrites the record on every poll.
 func LoadState(root string) (*State, error) {
-	data, err := os.ReadFile(statePath(root))
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, ErrNoTerminal
+	var err error
+	for i := range loadRetries {
+		if i > 0 {
+			time.Sleep(loadRetryEvery)
+		}
+		var data []byte
+		data, err = os.ReadFile(statePath(root))
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, ErrNoTerminal
+		}
+		if err != nil {
+			continue
+		}
+		var s State
+		if err = json.Unmarshal(data, &s); err == nil {
+			return &s, nil
+		}
 	}
-	if err != nil {
-		return nil, err
-	}
-	var s State
-	if err := json.Unmarshal(data, &s); err != nil {
-		return nil, err
-	}
-	return &s, nil
+	return nil, err
 }
 
 func saveState(root string, s *State) error {
