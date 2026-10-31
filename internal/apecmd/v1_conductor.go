@@ -70,7 +70,7 @@ A remote project is driven over ssh: every verb takes --project <dir>, so
 	cmd.AddCommand(newConductorActCmd(), newConductorNoteCmd(), newConductorLogCmd(),
 		newConductorStartCmd(), newConductorServeCmd(), newConductorSendCmd(), newConductorReadCmd(),
 		newConductorStatusCmd(), newConductorStopCmd(), newConductorWatchCmd(),
-		newConductorWatcherCmd(), newConductorAckCmd())
+		newConductorWatcherCmd(), newConductorAckCmd(), newConductorAttachCmd())
 	return cmd
 }
 

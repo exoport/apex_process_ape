@@ -67,8 +67,8 @@ func registeredSession(configDir, pid string) string {
 // checkRepin consumes a waiting --repin request: it pins the session that
 // asked when the pane runs it (id), and drops any other — a request from a
 // session not in the pane pins nothing, now or later.
-func (w *Watcher) checkRepin(id string) {
-	path := repinPath(w.c.StateDir)
+func (g *Gate) checkRepin(id string) {
+	path := repinPath(g.StateDir)
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) || err != nil {
 		return
@@ -78,9 +78,9 @@ func (w *Watcher) checkRepin(id string) {
 	_ = os.Remove(path)
 	switch {
 	case r.Session == "" || r.Session != id:
-		w.c.Log("watcher: a --repin from session %q ignored: the pane runs %q\n", r.Session, id)
-	case r.Session != w.session:
-		w.c.Log("watcher: re-pinned to Claude Code session %s (was %s): typing again\n", id, w.session)
-		w.session, w.paused = id, ""
+		g.logf("watcher: a --repin from session %q ignored: the pane runs %q\n", r.Session, id)
+	case r.Session != g.session:
+		g.logf("watcher: re-pinned to Claude Code session %s (was %s): typing again\n", id, g.session)
+		g.session, g.paused = id, ""
 	}
 }

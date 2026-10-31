@@ -440,7 +440,7 @@ check-coord:  ## v1.5 stage 0: the coordination drills on Tier 1 (embedded NATS)
 	  ./internal/coord/... ./internal/apexv1/
 
 .PHONY: check-coord-live
-check-coord-live:  ## v1.5 stage 0: LOCAL ONLY. Claude Code's Read, Grep and Glob honour init's permissions.deny for hot/ape-nats.creds under bypass mode, with a control (two Haiku sessions through ape task).
+check-coord-live:  ## v1.5 stage 0: LOCAL ONLY. Claude Code's Read, Grep and Glob honour init's permissions.deny for hot/ape-nats.creds under bypass mode, with a control (three Haiku sessions through ape task: the project's rules, the inline rules alone, a non-v1 control).
 	APE_CLAUDE_LIVE=1 go test ./internal/hookdrift/ -run '^TestLive_CredsDeny$$' -v -count=1 -timeout 25m
 
 .PHONY: check-coord-cluster

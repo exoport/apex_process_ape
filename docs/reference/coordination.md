@@ -100,6 +100,12 @@ A conductor receives its ensemble's events through the durable consumer **`condu
 Only the holder of `conductor.<user>.<ens>` binds it, so a conductor that takes the lease over inherits the events the
 last one left unacknowledged, and its acknowledgements are what renews the lease.
 
+`ape conductor attach --project <dir>… --pane <tmux pane>` is that conductor's ape. It types each event into your own
+Claude Code session's tmux pane by the same rule as `ape conductor watcher` (v1.4.2): the session pinned at the first
+look, with no turn running, an empty input row and a steady screen. A different session in the pane (after a
+`/clear`) pauses it until `ape conductor watcher --repin` runs from that session. Each delivery is marked as ape's, so
+it never grants a person act, and ends with the `ape conductor ack $JS.ACK.…` that acknowledges it.
+
 ## Tokens and fencing
 
 A lease token is **`<epoch>.<revision>`**: the cluster's epoch and the lease key's KV revision. Every write a lease

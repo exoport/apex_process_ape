@@ -2481,6 +2481,7 @@ Subcommands:
 
 - `ack` — Acknowledge a delivery the watcher typed (its id, <project>.<seq>), or a v1.5 delivered event (its token)
 - `act` — Perform a person act under the person's standing orders
+- `attach` — APEX v1.5 (in development): deliver an ensemble's events into your conductor's tmux pane
 - `log` — Read the person's decision log: the acts done under the orders, the holds and questions
 - `note` — Add a hold for the person or an open question to the decision log, or resolve one
 - `read` — Print the orchestrator's messages after the n-th, from its transcript
@@ -2592,6 +2593,50 @@ Flags:
 | `--project` | string | `—` | the project's directory (the same as --cwd); on another host: ssh host 'ape conductor … --project /path' |
 | `--reason` | string | `—` | what the act rests on, quoting the evidence (required) |
 | `--text` | string | `—` | answer's answer |
+
+## ape conductor attach
+
+APEX v1.5 (in development): deliver an ensemble's events into your conductor's tmux pane
+
+```
+ape conductor attach --project <dir>… [--pane <tmux pane>] [--user <slug>] [flags]
+```
+
+Attach your conductor — your own Claude Code session, in a tmux pane — to the ensemble its
+--project directories belong to (v1.5, OQ25), and run until interrupted. ape claims the
+conductor lease conductor.<user>.<ensemble> (exit 1 if another of your conductors holds
+it), binds your durable consumer, and types each event — the coordinator's, the
+ensemble's contracts, each member project's — into the pane, marked as ape's
+(<ape-delivery …>: a prompt carrying one grants no person act) and ending with the
+`ape conductor ack <token>` that acknowledges it.
+
+It types by the same rule as `ape conductor watcher`: the pane runs the Claude Code
+session pinned at the first look (another session — after a /clear — pauses it until
+`ape conductor watcher --repin` from that session), no turn running, an empty input row,
+and a steady screen. An event not acknowledged is delivered again; a question left past
+30 minutes is escalated and past 2 hours its milestone pauses; a conductor that
+acknowledges nothing stops renewing its lease, which another of your conductors may
+then take over, unacknowledged events included.
+
+The projects must belong to one ensemble; the NATS URL and the credential
+(hot/ape-nats.creds) are the first project's.
+
+Exit codes: 0 stopped (Ctrl-C) · 1 the lease is held by another of your conductors, or
+was lost · 2 usage (no pane, no member project, projects of different ensembles).
+
+Examples:
+
+```
+  ape conductor attach --project ~/src/notes --project ~/src/billing --pane %3
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--pane` | string | `—` | your conductor's tmux pane (-t target); default the one pane running claude |
+| `--project` | stringArray | `[]` | a member project of the ensemble (repeatable; default the current directory's) |
+| `--user` | string | `—` | your conductor's name in the lease and consumer (default: the slug of git user.email) |
 
 ## ape conductor log
 

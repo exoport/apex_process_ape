@@ -14,7 +14,7 @@ which must fail where the drill passes. That control is what shows the protectio
 | --- | --- | --- | --- |
 | `make check-coord` | embedded NATS servers and a three-node embedded cluster (Tier 1) | nothing beyond Go | $0 |
 | `make check-coord-cluster` | three local `nats-server` processes (Tier 2, `deploy/natslocal/natslocal.sh`) | `nats-server` v2.14.5 on PATH, or `NATS_SERVER=<binary>` | $0 |
-| `make check-coord-live` | real Claude Code sessions through `ape task` | `claude` on PATH, a login, network | two short Haiku sessions (about $0.01 each) |
+| `make check-coord-live` | real Claude Code sessions through `ape task` | `claude` on PATH, a login, network | three short Haiku sessions (about $0.01 each) |
 
 `make test` runs everything `make check-coord` does. The other two are local only and never run in CI.
 
@@ -36,8 +36,10 @@ which must fail where the drill passes. That control is what shows the protectio
 - publish and wake: a member project's events reach NATS once each, and `ape status --wait` wakes on them.
 
 `make check-coord-live` checks that Read, Grep and Glob cannot read `hot/ape-nats.creds` under the
-`permissions.deny` rules `ape project init` writes, with bypass permissions on. Its control is the same project
-without the rules, where Read returns the file.
+`permissions.deny` rules, with bypass permissions on. It runs three arms. First, a v1 project as `ape project init`
+leaves it, with the rules in its `.claude/settings.json`. Second, the same project with that file emptied: the rules
+every v1 `ape task` session also gets inline in its `--settings` must still deny it. The control is a project that is
+not APEX v1, where no rules reach the session and Read returns the file.
 
 ## Run them
 
