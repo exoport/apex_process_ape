@@ -100,6 +100,22 @@ func project(t *testing.T) string {
 	return root
 }
 
+// loadState reads the supervisor's record while Serve may be rewriting it.
+// On Windows a read can overlap the temp-file rename and fail with a
+// sharing violation (Linux never does): the read is retried, never taken
+// as nil — main's push CI @ e82b48e (run 41242608014) panicked on exactly
+// that, a nil *State in TestServe's Eventually.
+func loadState(t *testing.T, root string) *State {
+	t.Helper()
+	var st *State
+	require.Eventually(t, func() bool {
+		var err error
+		st, err = LoadState(root)
+		return err == nil
+	}, 2*time.Second, 10*time.Millisecond, "the supervisor's record stays unreadable")
+	return st
+}
+
 // D659 A8 + D660.2 on a fake terminal: the first line once ready; a
 // conductor message typed only while idle, marked; an idle terminal with a
 // message pending past the threshold logs orchestrator-idle once; a reply
@@ -145,13 +161,12 @@ func TestServe(t *testing.T) {
 	require.Contains(t, ev.list()[0], EventIdle+": ")
 	time.Sleep(400 * time.Millisecond)
 	require.Len(t, ev.list(), 1, "once per idle stretch")
-	st, err := LoadState(root)
-	require.NoError(t, err)
+	st := loadState(t, root)
 	require.Equal(t, []int64{m.Seq}, st.Pending)
 
 	// A reply clears pending; Read returns it.
 	appendReply(t, transcript, "M2 gate is red on 3 scenarios, as planned", time.Now())
-	require.Eventually(t, func() bool { st, _ := LoadState(root); return len(st.Pending) == 0 }, 2*time.Second, 10*time.Millisecond)
+	require.Eventually(t, func() bool { st, err := LoadState(root); return err == nil && len(st.Pending) == 0 }, 2*time.Second, 10*time.Millisecond)
 	rs, err := Read(root, 0)
 	require.NoError(t, err)
 	require.Len(t, rs, 1)
@@ -164,9 +179,7 @@ func TestServe(t *testing.T) {
 	close(d.done)
 	require.Error(t, <-served)
 	require.Contains(t, ev.list()[len(ev.list())-1], EventDead+": ")
-	st, err = LoadState(root)
-	require.NoError(t, err)
-	require.False(t, st.Alive)
+	require.False(t, loadState(t, root).Alive)
 }
 
 // The v1.4-shaped control: with no message pending, an idle orchestrator
@@ -193,4 +206,34 @@ func TestSend_Limits(t *testing.T) {
 	require.ErrorContains(t, err, "write the details to a file")
 	_, err = LoadState(root)
 	require.ErrorIs(t, err, ErrNoTerminal)
+}
+
+// The cause of main's push CI failure @ e82b48e (run 41242608014, Windows):
+// a read of the supervisor's record that fails while Serve rewrites it
+// (on Windows, a read overlapping the temp-file rename is a sharing
+// violation) returned a nil *State, which the test dereferenced. Made
+// deterministic on every OS: the record is a directory for 100 ms, so
+// every read in that window fails. Before the fix — the read taken as is,
+// `st, _ := LoadState(root); len(st.Pending)` — this panics with the same
+// nil pointer dereference; loadState retries until the record reads.
+func TestLoadState_TransientlyUnreadableRecord(t *testing.T) {
+	root := project(t)
+	require.NoError(t, saveState(root, &State{Pending: []int64{7}, Delivered: []Delivered{}}))
+	p := statePath(root)
+	require.NoError(t, os.Rename(p, p+".away"))
+	require.NoError(t, os.Mkdir(p, 0o755))
+	restored := make(chan error, 1)
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		if err := os.Remove(p); err != nil {
+			restored <- err
+			return
+		}
+		restored <- os.Rename(p+".away", p)
+	}()
+	_, err := LoadState(root)
+	require.Error(t, err, "the window is real: a read in it fails")
+	st := loadState(t, root)
+	require.Equal(t, []int64{7}, st.Pending)
+	require.NoError(t, <-restored)
 }
