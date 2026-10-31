@@ -13,6 +13,10 @@ v1.4.2 release.
   `ape project init` before rc.7q wrote it), naming `ape project init` as the fix. Before, doctor
   said OK while `ape project check` listed the notice. The row now lists every hooks notice it
   finds, so a fail-open hook no longer hides `hooks.monitor-unguarded`, or the other way round.
+- **`ape status` no longer lists ape's own pin commit** as "Outside the change flow". That is the
+  `chore(ape): update ape to vX.Y.Z` commit that `ape update --pin` and
+  `ape framework update --update-ape` make. It is exempt only when it touches nothing outside
+  `.bingo/`, just as the framework's install commit is exempt only when it touches install files.
 
 ## v1.4.2 (2026-10-31)
 
