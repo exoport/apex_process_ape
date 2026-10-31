@@ -14,8 +14,9 @@ are mechanical, so they do not depend on the model following instructions:
 - the hooks fail closed: if `ape` cannot run, the session cannot edit or run commands;
 - `ape`'s own records can be changed only through `ape`, and a forged one stops the next change command;
 - every commit is scanned for secrets;
-- the eight person acts (approving a milestone or tweak, answering a blocked change, accepting a human-review task,
-  accepting the config, accepting a red gate, allowing pending human work, accepting an ADR) are refused when a
+- the nine person acts (approving a milestone or tweak, answering a blocked change or an orchestrator's question,
+  accepting a human-review task, accepting the config, accepting a red gate, allowing pending human work, accepting
+  an ADR) are refused when a
   model runs them, unless you typed the act's words yourself in that turn
   ([What only a person does](person-acts.md));
 - from 1.4.2, a conductor may carry out some of those acts for you, but only those your standing orders name, only in
@@ -127,9 +128,14 @@ What the orders can and cannot allow:
 
 | A conductor may | When |
 | --- | --- |
-| answer a blocked change; approve a tweak | whenever your orders are accepted |
-| approve a milestone; accept an ADR; accept a human-review task where the project names a delegate | only if your orders name it |
+| answer a blocked change; answer an orchestrator's question; approve a tweak; approve a milestone; accept an ADR; accept a human-review task whose task names a delegate; prepare a release for you; push a work branch and open a PR | only the acts your orders name |
 | accept the config; accept a red gate; allow pending human work; push to `main` or the base branch; tag; release; merge; change your orders | **never** |
+
+Preparing a release means the checks and the release notes, for a version the changelog already names: the conductor
+hands you the result and the exact tag and push commands, and you run them. Your orders can also list categories that
+always come to you even when the act is listed: a change that touches the gate, a change that edits the config, or a
+milestone past a token budget you set. A work branch is never `main` or the base branch, and the conductor never
+pushes tags; `ape` refuses both, and merging stays with you or your branch protection.
 
 Your orders can narrow an act further with conditions `ape` checks: the kinds of tweak it may approve, how many changes
 a milestone it approves may hold, the milestone's last gate result, and answers only to questions, not to changes
@@ -153,6 +159,12 @@ reason quotes it.
 you are notified of each one. The conductor also keeps a decision log on that machine: each act with its reason and
 evidence, and the questions and holds it is keeping for you. Your orders hold until you revoke them
 (`ape orders revoke --by <you>`, from a terminal), and a revocation takes effect at the next act.
+
+**Waking the conductor.** `ape conductor watcher` follows your projects' events. If your conductor runs in a tmux
+pane, the watcher types each event into that pane, marked as `ape`'s, and only when the pane still runs the conductor's
+Claude Code session, the session is idle and its input line is empty. If you are typing there, it waits. If no
+acknowledgement comes within 15 minutes, you are notified. Without tmux you are only notified. A marked message is
+never your words: a prompt that carries one anywhere cannot grant an act, whatever else it says.
 
 For a project on another machine, the conductor runs the same commands there over ssh. You accept or revoke that
 project's orders in a terminal on that machine.

@@ -34,6 +34,9 @@ const (
 const (
 	EventOrchestratorDead = "orchestrator-dead"
 	EventOrchestratorIdle = "orchestrator-idle"
+	// EventConductorStalled: a delivery the conductor's watcher typed went
+	// unacknowledged past conductor.ack_alert (D664): for the person.
+	EventConductorStalled = "conductor-stalled"
 )
 
 // UntilConditions are the conditions, in the order help lists them.

@@ -132,6 +132,9 @@ type Config struct {
 // ConductorConfig is the conductor: block.
 type ConductorConfig struct {
 	IdleAlert string `yaml:"idle_alert"`
+	// AckAlert: how long a delivery the watcher typed may go
+	// unacknowledged before conductor-stalled (D664; default 15m).
+	AckAlert string `yaml:"ack_alert"`
 }
 
 // SkillModel is one models.<skill> entry.

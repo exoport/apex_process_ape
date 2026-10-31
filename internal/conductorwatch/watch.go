@@ -1,0 +1,308 @@
+// Package conductorwatch is the conductor's watcher (APEX v1.4.2, D664):
+// the conductor stays the person's own Claude Code session, and this
+// process follows every project's events and wakes it.
+//
+//   - Each event the conductor acts on (block, person, question,
+//     orchestrator-dead/-idle, run-lost, delegated, orders) becomes a
+//     delivery, id <project>.<seq>.
+//   - When the conductor runs in a tmux pane, the watcher types each
+//     delivery into it, marked (apexv1.DeliveryTag and a nonce): the
+//     user-prompt hook records it kind "delivery", which never grants a
+//     person act. It types only when the pane still runs the registered
+//     Claude Code session, the session is idle (no turn running) and its
+//     input row is empty — never after half-typed input — and the screen
+//     did not change since the last look.
+//   - The conductor acknowledges a delivery (`ape conductor ack <id>`). A
+//     delivery not acknowledged within the ack alert (default 15 min) logs
+//     conductor-stalled in its project, once, so the project's notifier
+//     reaches the person.
+//   - Without a pane the watcher only records: the project's notifier
+//     already runs on each of those events (notify-only).
+package conductorwatch
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/exoport/apex_process_ape/internal/apexv1"
+	"github.com/exoport/apex_process_ape/internal/atomicfile"
+	"github.com/exoport/apex_process_ape/internal/repl"
+)
+
+// EventStalled: a delivery went unacknowledged past the ack alert.
+const EventStalled = apexv1.EventConductorStalled
+
+// DefaultAckAlert is conductor.ack_alert's default.
+const DefaultAckAlert = 15 * time.Minute
+
+// Watched are the events a conductor acts on.
+var Watched = []string{
+	apexv1.EventBlock, apexv1.EventPerson, apexv1.EventQuestion, apexv1.EventOrchestratorDead,
+	apexv1.EventOrchestratorIdle, apexv1.EventRunLost, apexv1.EventDelegated, apexv1.EventOrders,
+}
+
+// Delivery is one event for the conductor.
+//
+//nolint:tagliatelle // ape's state files are snake_case
+type Delivery struct {
+	ID          string `json:"id"`
+	Project     string `json:"project"`
+	Event       string `json:"event"`
+	Ref         string `json:"ref,omitempty"`
+	Reason      string `json:"reason,omitempty"`
+	At          string `json:"at"`
+	DeliveredAt string `json:"delivered_at,omitempty"`
+	AckedAt     string `json:"acked_at,omitempty"`
+	AlertedAt   string `json:"alerted_at,omitempty"`
+}
+
+// State is the watcher's record.
+//
+
+type State struct {
+	Cursors    map[string]int64 `json:"cursors"`
+	Deliveries []Delivery       `json:"deliveries"`
+}
+
+// Pane is what the watcher needs of a tmux pane (Tmux in production).
+type Pane interface {
+	// Capture is the pane's visible text.
+	Capture(ctx context.Context) (string, error)
+	// Type types text and presses Enter.
+	Type(ctx context.Context, text string) error
+	// Conductor reports whether the pane's foreground process is a Claude
+	// Code session registered on this machine; why names what failed.
+	Conductor(ctx context.Context) (ok bool, why string)
+}
+
+// Config is one watcher.
+type Config struct {
+	// Projects are the project roots it follows.
+	Projects []string
+	// StateDir holds its state and the acknowledgements.
+	StateDir string
+	// Pane is the conductor's tmux pane; nil: notify-only.
+	Pane     Pane
+	Nonce    string
+	AckAlert time.Duration
+	Poll     time.Duration
+	Now      func() time.Time
+	// Log reports what the watcher did (stderr in production).
+	Log func(format string, a ...any)
+}
+
+func (c *Config) defaults() {
+	if c.AckAlert == 0 {
+		c.AckAlert = DefaultAckAlert
+	}
+	if c.Poll == 0 {
+		c.Poll = 2 * time.Second
+	}
+	if c.Now == nil {
+		c.Now = time.Now
+	}
+	if c.Log == nil {
+		c.Log = func(string, ...any) {}
+	}
+}
+
+func statePath(dir string) string { return filepath.Join(dir, "watcher.json") }
+func ackDir(dir string) string    { return filepath.Join(dir, "acks") }
+
+// LoadState reads the watcher's record (empty when none).
+func LoadState(dir string) (*State, error) {
+	s := &State{Cursors: map[string]int64{}, Deliveries: []Delivery{}}
+	data, err := os.ReadFile(statePath(dir))
+	if errors.Is(err, os.ErrNotExist) {
+		return s, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(data, s); err != nil {
+		return nil, err
+	}
+	if s.Cursors == nil {
+		s.Cursors = map[string]int64{}
+	}
+	return s, nil
+}
+
+func saveState(dir string, s *State) error {
+	data, err := json.MarshalIndent(s, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	return atomicfile.Write(statePath(dir), append(data, '\n'))
+}
+
+// Ack records the conductor's acknowledgement of a delivery.
+func Ack(dir, id string, now time.Time) error {
+	if strings.ContainsAny(id, `/\`) || strings.TrimSpace(id) == "" {
+		return fmt.Errorf("conductorwatch: %q is not a delivery id", id)
+	}
+	if err := os.MkdirAll(ackDir(dir), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(ackDir(dir), id), []byte(now.UTC().Format(time.RFC3339)+"\n"), 0o600)
+}
+
+// maxMarkText bounds a delivery's text: one line, under Claude Code's
+// paste collapse with room for the mark and the ack.
+const maxMarkText = 400
+
+// Mark is a delivery as typed: one line, apexv1.DeliveryTag first.
+func Mark(d Delivery, nonce string) string {
+	text := strings.Join(strings.Fields(fmt.Sprintf("%s %s %s — %s", filepath.Base(d.Project), d.Event, d.Ref, d.Reason)), " ")
+	if r := []rune(text); len(r) > maxMarkText {
+		text = string(r[:maxMarkText-1]) + "…"
+	}
+	return fmt.Sprintf(`%sseq=%q nonce=%q> %s — ack: ape conductor ack %s </ape-delivery>`, apexv1.DeliveryTag, d.ID, nonce, text, d.ID)
+}
+
+// Watcher is a running watcher's per-look memory.
+type Watcher struct {
+	c        Config
+	lastPane string
+}
+
+// New is a watcher for c.
+func New(c Config) *Watcher {
+	c.defaults()
+	return &Watcher{c: c}
+}
+
+// Run looks every Poll until ctx ends.
+func (w *Watcher) Run(ctx context.Context) error {
+	t := time.NewTicker(w.c.Poll)
+	defer t.Stop()
+	for {
+		if err := w.Tick(ctx); err != nil {
+			w.c.Log("watcher: %v\n", err)
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-t.C:
+		}
+	}
+}
+
+// Tick is one look: new events become deliveries, acks are read, one
+// delivery is typed when the pane allows it, and overdue ones alert.
+func (w *Watcher) Tick(ctx context.Context) error {
+	s, err := LoadState(w.c.StateDir)
+	if err != nil {
+		return err
+	}
+	now := w.c.Now()
+	projects := map[string]*apexv1.Project{}
+	for _, root := range w.c.Projects {
+		p, err := apexv1.Open(root)
+		if err != nil {
+			continue
+		}
+		projects[root] = p
+		cur := s.Cursors[root]
+		evs := p.EventsSince(cur)
+		for i := range evs {
+			ev := &evs[i]
+			s.Cursors[root] = max(s.Cursors[root], ev.Seq)
+			if !slices.Contains(Watched, ev.Event) {
+				continue
+			}
+			ref := ev.Change
+			if ref == "" {
+				ref = ev.Milestone
+			}
+			reason := ev.Reason
+			if ev.Action != "" {
+				reason = strings.TrimSpace(ev.Action + "; " + reason)
+			}
+			s.Deliveries = append(s.Deliveries, Delivery{
+				ID: apexv1.PersonSlug(filepath.Base(root)) + "." + strconv.FormatInt(ev.Seq, 10), Project: root,
+				Event: ev.Event, Ref: ref, Reason: reason, At: now.UTC().Format(time.RFC3339),
+			})
+		}
+	}
+	for i := range s.Deliveries {
+		d := &s.Deliveries[i]
+		if d.AckedAt == "" {
+			if data, err := os.ReadFile(filepath.Join(ackDir(w.c.StateDir), d.ID)); err == nil {
+				d.AckedAt = strings.TrimSpace(string(data))
+			}
+		}
+	}
+	w.deliver(ctx, s, now)
+	for i := range s.Deliveries {
+		d := &s.Deliveries[i]
+		if d.DeliveredAt == "" || d.AckedAt != "" || d.AlertedAt != "" {
+			continue
+		}
+		at, err := time.Parse(time.RFC3339, d.DeliveredAt)
+		if err != nil || now.Sub(at) < w.c.AckAlert {
+			continue
+		}
+		if p := projects[d.Project]; p != nil {
+			p.Emit(ctx, apexv1.Event{
+				Event: EventStalled, Action: "ape conductor ack " + d.ID,
+				Reason: fmt.Sprintf("the conductor has not acknowledged %s (%s) since %s", d.ID, d.Event, d.DeliveredAt),
+			}, nil)
+		}
+		d.AlertedAt = now.UTC().Format(time.RFC3339)
+		w.c.Log("watcher: %s unacknowledged since %s: the person is notified\n", d.ID, d.DeliveredAt)
+	}
+	return saveState(w.c.StateDir, s)
+}
+
+// deliver types the oldest undelivered delivery when the pane runs the
+// conductor, idle, with an empty input row, and unchanged since the last
+// look (D664+).
+func (w *Watcher) deliver(ctx context.Context, s *State, now time.Time) {
+	if w.c.Pane == nil {
+		return
+	}
+	i := slices.IndexFunc(s.Deliveries, func(d Delivery) bool { return d.DeliveredAt == "" && d.AckedAt == "" })
+	if i < 0 {
+		return
+	}
+	if ok, why := w.c.Pane.Conductor(ctx); !ok {
+		w.c.Log("watcher: not typing into the pane: %s — notify-only until it is the conductor's session\n", why)
+		w.lastPane = ""
+		return
+	}
+	pane, err := w.c.Pane.Capture(ctx)
+	if err != nil {
+		return
+	}
+	steady := pane == w.lastPane
+	w.lastPane = pane
+	if !steady || !Idle(pane) {
+		return
+	}
+	if err := w.c.Pane.Type(ctx, Mark(s.Deliveries[i], w.c.Nonce)); err != nil {
+		w.c.Log("watcher: typing %s: %v\n", s.Deliveries[i].ID, err)
+		return
+	}
+	s.Deliveries[i].DeliveredAt = now.UTC().Format(time.RFC3339)
+	w.lastPane = ""
+}
+
+// Idle is the conductor pane's idle rule (D664, D664+): no turn running
+// ("esc to interrupt" absent) and an empty input row — never after a
+// half-typed line. The caller adds the third condition: the screen did
+// not change between two looks one poll apart.
+func Idle(pane string) bool {
+	return !strings.Contains(pane, "esc to interrupt") && repl.InputEmpty(pane)
+}

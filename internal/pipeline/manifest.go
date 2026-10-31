@@ -489,9 +489,14 @@ type ManifestTotals struct {
 	// remains the sum of the two, so v2 readers are unaffected.
 	TokensCacheCreation5m int `yaml:"tokens_cache_creation_5m"`
 	TokensCacheCreation1h int `yaml:"tokens_cache_creation_1h"`
-	NumTurns              int `yaml:"num_turns"`
-	StepsRun              int `yaml:"steps_run"`
-	StepsFailed           int `yaml:"steps_failed"`
+	// TokensTotal is the four kinds together — input, output, cache read
+	// and cache creation — the one token count limits and reports use
+	// (v1.4.2 D1, D656 Q-L1: cache reads included; the kinds stay above, so
+	// a cap or a report can be derived again).
+	TokensTotal int `yaml:"tokens_total"`
+	NumTurns    int `yaml:"num_turns"`
+	StepsRun    int `yaml:"steps_run"`
+	StepsFailed int `yaml:"steps_failed"`
 	// StepsSkipped / StagesSkipped count records with status skipped.
 	// Skipped steps are not in StepsRun. Omitted when zero, so a run that
 	// skipped nothing writes the same totals as before they existed.

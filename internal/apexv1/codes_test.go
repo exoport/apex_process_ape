@@ -146,6 +146,8 @@ func TestDiagnosticCodes_PublishedListMatchesTheCode(t *testing.T) {
 		"CodeOrdersMissing": CodeOrdersMissing, "CodeOrdersInvalid": CodeOrdersInvalid, "CodeOrdersUnaccepted": CodeOrdersUnaccepted,
 		"CodeOrdersRevoked": CodeOrdersRevoked, "CodeOrdersNonDelegable": CodeOrdersNonDelegable, "CodeOrdersNotNamed": CodeOrdersNotNamed,
 		"CodeConductorRunning": CodeConductorRunning, "CodeConductorNotRunning": CodeConductorNotRunning,
+		"CodeOrdersEscalate": CodeOrdersEscalate, "CodeOrdersRefused": CodeOrdersRefused,
+		"CodeQuestionNotFound": CodeQuestionNotFound, "CodeQuestionAnswered": CodeQuestionAnswered,
 		"CodeOrdersCheckRed": CodeOrdersCheckRed, "CodeOrdersDeclined": CodeOrdersDeclined,
 		"CodeOrdersCondition": CodeOrdersCondition, "CodeOrdersNoReason": CodeOrdersNoReason, "CodeOrdersEvidence": CodeOrdersEvidence,
 	}

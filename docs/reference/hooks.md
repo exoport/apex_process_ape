@@ -189,7 +189,7 @@ model's own command (`APE_ALLOW_PUSH=1 git push`, `env …`, `export …`), they
 
 ### Person acts
 
-On a Bash command that runs one of the eight person acts, the hook grants it only on the person's
+On a Bash command that runs one of the nine person acts, the hook grants it only on the person's
 own words: the phrase typed in the prompt that opened the turn, as `ape hook user-prompt` recorded
 it. A grant is a single-use file under `_apex/state/grants/`, valid for 120 s. Without one the hook
 denies the command and says why. The phrase grammar and the matching rules are in

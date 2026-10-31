@@ -9,7 +9,7 @@ its `--help` and [cli.md](../reference/cli.md).
 
 ## The acts
 
-Eight commands are a person's. The third column is what you type in your own Claude Code
+Nine commands are a person's. The third column is what you type in your own Claude Code
 session to grant the act (see [In your own Claude Code session](#in-your-own-claude-code-session)).
 
 | Command | What it decides | Phrase |
@@ -22,6 +22,7 @@ session to grant the act (see [In your own Claude Code session](#in-your-own-cla
 | [`ape milestone close <M> --accept-red "<reason>" --by <who>`](../reference/cli.md#ape-milestone-close) | The milestone is done although its gate is red. | `accept red on <M>` |
 | [`ape change archive <change-id> --allow-pending-human`](../reference/cli.md#ape-change-archive) | The change archives with human-review tasks not yet accepted. | `allow pending human on <change-id>` |
 | [`ape decision accept <ADR-NNNN> --by <who>`](../reference/cli.md#ape-decision-accept) | A proposed ADR binds the project from now on. | `accept <ADR-NNNN>` |
+| [`ape question answer <Q-id> --text "<answer>" --by <who>`](../reference/cli.md#ape-question-answer) | The answer to a question an orchestrator asked you (`ape question ask`, v1.4.2). | `answer <Q-id>: <answer>` |
 
 The same commands without the person's part are not person acts:
 
@@ -257,11 +258,10 @@ conditions:
 Answer questions the way the brief leans; bring anything about pricing back to me.
 ```
 
-| Tier | Acts | Under your orders |
-| --- | --- | --- |
-| 1 | answer a blocked change, approve a tweak | always, once accepted |
-| 2 | approve a milestone, accept a human-review task (where the project names a delegate), accept a decision | only when named under `acts:` |
-| never | accept the config, accept red, allow a pending human-review task, push, tag, release, the orders themselves | refused, `orders.non-delegable` |
+| Acts | Under your orders |
+| --- | --- |
+| answer a blocked change, approve a tweak, approve a milestone, accept a human-review task (where the project names a delegate), accept a decision | only when named under `acts:` |
+| accept the config, accept red, allow a pending human-review task, push to `main` or the base branch, tag, release, the orders themselves | never: refused, `orders.non-delegable` |
 
 The conditions are the ones ape can check: a tweak's type, a milestone's change count and the
 state of its last gate run, and an answer only for a change blocked on a question rather than on a
@@ -285,7 +285,7 @@ revoking both run your `notify:` command.
 **A conductor acts only through `ape conductor act`.** Before running an act, ape checks five
 things:
 - the act has a `--reason` that quotes what it rests on;
-- the act's tier;
+- that the act may be delegated at all, and that your orders name it under `acts:`;
 - that the orders are accepted and not revoked;
 - the orders' conditions;
 - the evidence: each `--evidence` path must exist, and a milestone approve must name its latest

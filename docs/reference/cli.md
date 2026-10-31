@@ -52,6 +52,7 @@ Subcommands:
 - `plugins` — Install the plugins _apex/config.yaml lists, and report what they and the tools slot bring
 - `project` — Create and check an APEX v1 project layout
 - `prompt` — Drive an unattended Claude session from a prompt or a handoff file
+- `question` — Questions for the person: ask (any session), answer (a person, or their conductor under orders), list
 - `rollback` — Rollback ape to the previous version
 - `run` — Wait for, or inspect, a run started with --detach
 - `sandbox` — Provision and operate hardware-isolated Kata VM workspaces (via aped)
@@ -2459,6 +2460,8 @@ performs some of the person's acts for them.
   status   the terminal (alive, idle, pending) and the open holds and questions
   stop     the terminal
   watch    show the terminal's screen, read-only
+  watcher  follow the projects' events and wake the conductor (its tmux pane, else notify)
+  ack      acknowledge a delivery the watcher typed
 
 Every delegated act runs the notifier (event "delegated"), and is recorded with
 by: "conductor under orders <person>@<commit> (<reason>)", in the act's own record and in
@@ -2469,6 +2472,7 @@ A remote project is driven over ssh: every verb takes --project <dir>, so
 
 Subcommands:
 
+- `ack` — Acknowledge a delivery the watcher typed (its id, <project>.<seq>)
 - `act` — Perform a person act under the person's standing orders
 - `log` — Read the person's decision log: the acts done under the orders, the holds and questions
 - `note` — Add a hold for the person or an open question to the decision log, or resolve one
@@ -2478,6 +2482,27 @@ Subcommands:
 - `status` — The orchestrator terminal (alive, idle, pending messages) and the decision log's open holds and questions
 - `stop` — Stop the project's orchestrator terminal
 - `watch` — Show the orchestrator terminal's screen, read-only
+- `watcher` — Follow the projects' events and wake the conductor: typed into its tmux pane, else notify-only
+
+## ape conductor ack
+
+Acknowledge a delivery the watcher typed (its id, <project>.<seq>)
+
+```
+ape conductor ack <id>
+```
+
+Acknowledge a delivery the conductor's watcher typed into its pane: the conductor has read
+the event (it reads `ape status` for it; the delivery is never the person's words). A
+delivery not acknowledged within the ack alert notifies the person.
+
+Exit codes: 0 acknowledged · 2 usage.
+
+Examples:
+
+```
+  ape conductor ack notes.42
+```
 
 ## ape conductor act
 
@@ -2493,7 +2518,8 @@ Perform one of the person's acts under their standing orders, checked first:
      tag, release, orders: orders.non-delegable);
   3. the orders exist on the base branch, are accepted and not revoked (orders.missing,
      orders.unaccepted, orders.revoked);
-  4. a tier-2 act is named in the orders' acts: (orders.not-named);
+  4. the act is named in the orders' acts: (orders.not-named), and no escalate: category
+     holds for it (orders.escalate);
   5. the orders' conditions hold (orders.condition);
   6. each --evidence path exists in the project; a milestone approve names the log of the
      milestone's latest gate run when it has one (orders.evidence-missing);
@@ -2507,10 +2533,21 @@ evidence: [{path, sha256}], checks, seq}.
 The acts and their targets:
   answer <change-id> --text "<answer>"      change answer (a blocked change)
   tweak-approve <tweak-id>                  change approve (a milestone-less change)
-  milestone-approve <M>                     milestone approve (only when the orders name it)
-  accept-task <change-id> <T<n>>            change accept (only when named; only where the
-                                            project names a human-review delegate)
-  decision-accept <ADR-id>                  decision accept (only when named)
+  milestone-approve <M>                     milestone approve
+  accept-task <change-id> <T<n>>            change accept (only where the project names a
+                                            human-review delegate)
+  decision-accept <ADR-id>                  decision accept
+  question-answer <Q-id> --text "<answer>"  question answer (an orchestrator's question)
+  prepare-release <version>                 record the release preparation; ape checks the
+                                            CHANGELOG at HEAD names the version and hands back
+                                            the tag and push commands, which stay the person's
+  push-branch <branch>                      ape pushes the work branch (never main, master, the
+                                            base or default branch, or a tag; no tags follow)
+  open-pr <branch> --text "<title>"         gh pr create for the branch (body: --reason);
+                                            without gh, refused with the push URL
+Every act runs only when the orders name it under acts: (every act, D664+); before the
+checks above, the orders' escalate: list (touches-gate, changes-config, tokens-over) sends
+an act in one of its categories to the person (orders.escalate).
 
 Exit codes: 0 done · 1 refused by a check or by the act itself (the code says which) · 2 usage
 (no reason, an unknown act, a missing target).
@@ -2781,6 +2818,53 @@ Flags:
 | `--json` | bool | `false` | machine output (JSON on stdout) |
 | `--orders` | string | `—` | whose standing orders (default: git config user.email) |
 | `--project` | string | `—` | the project's directory (the same as --cwd); on another host: ssh host 'ape conductor … --project /path' |
+
+## ape conductor watcher
+
+Follow the projects' events and wake the conductor: typed into its tmux pane, else notify-only
+
+```
+ape conductor watcher --project <dir>… [--pane <tmux pane>] [--ack-alert 15m] [flags]
+```
+
+Run the conductor's watcher until interrupted (another terminal, or in the background). It
+follows each --project's events — block, person (a question included), question,
+orchestrator-dead, orchestrator-idle, run-lost, delegated, orders — and turns each into a
+delivery, id <project>.<seq>.
+
+When your conductor (your own Claude Code session) runs in a tmux pane — --pane <target>, or
+the one tmux pane running claude when there is exactly one — the watcher types each delivery
+into it, marked (<ape-delivery …>, never your words: a prompt carrying one grants no person
+act), only when all of these hold:
+  - the pane's foreground process is claude and a Claude Code session registered on this
+    machine (<config>/sessions/<pid>.json) — a stale or wrong pane, a shell, gets nothing;
+  - no turn is running ("esc to interrupt" absent) and the input row is empty — never after
+    your half-typed line;
+  - the screen did not change between two looks (one --poll apart).
+The conductor acknowledges each: `ape conductor ack <id>`. A delivery not acknowledged within
+--ack-alert (default conductor.ack_alert of the first project, else 15m) logs
+conductor-stalled in its project, once, so that project's notify: command reaches you.
+
+Without a pane the watcher only records: each of those events already runs the project's
+notify: command (notify-only). State and acknowledgements are kept in
+$XDG_STATE_HOME/ape/conductor (else ~/.local/state/ape/conductor).
+
+Exit codes: 0 stopped (Ctrl-C) · 2 usage.
+
+Examples:
+
+```
+  ape conductor watcher --project ~/src/notes --project ~/src/billing --pane %3
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--ack-alert` | string | `—` | how long a delivery may go unacknowledged before conductor-stalled (default conductor.ack_alert, else 15m) |
+| `--pane` | string | `—` | the conductor's tmux pane (-t target); default the one pane running claude |
+| `--poll` | duration | `2s` | how often it looks |
+| `--project` | stringArray | `[]` | a project to follow (repeatable; default the current directory's) |
 
 ## ape config
 
@@ -4140,6 +4224,7 @@ words. Each line is the command, then what the person types (the phrase grammar)
   ape milestone close <M> --accept-red "<reason>"         accept red on <M>
   ape change archive <change-id> --allow-pending-human    allow pending human on <change-id>
   ape decision accept <ADR-NNNN>                          accept <ADR-NNNN>
+  ape question answer <Q-id> --text "<answer>"            answer <Q-id>: <answer>
 A Bash command that runs one is allowed only when the prompt that opened this turn — the
 tool call's prompt_id is the prompt's — is recorded by `ape hook user-prompt`, the
 session's transcript holds the person's user message with that promptId and the same
@@ -4298,6 +4383,7 @@ grant is decided): each line is the command, then what the person types for it.
   ape milestone close <M> --accept-red "<reason>"         accept red on <M>
   ape change archive <change-id> --allow-pending-human    allow pending human on <change-id>
   ape decision accept <ADR-NNNN>                          accept <ADR-NNNN>
+  ape question answer <Q-id> --text "<answer>"            answer <Q-id>: <answer>
 Run the command as a literal line (no $ or backquote, one act per command) and without
 --by: ape records by: <git config user.name> with the person's quoted words.
 
@@ -5167,12 +5253,14 @@ in slug form (dana@example.com → dana-example-com). Its frontmatter is what ap
   ---
   Free text the conductor reads: how to answer, what to bring back to me.
 
-The acts, by tier:
-  any accepted orders   answer (change answer), tweak-approve (change approve)
-  only when named       milestone-approve, accept-task (a human-review task naming a
-                        delegate), decision-accept
-  never                 accept-config, accept-red, allow-pending-human, push, tag, release,
-                        and the orders themselves
+Every act runs only when the orders name it under acts:. The acts:
+  everyday       answer (change answer), question-answer (ape question answer),
+                 tweak-approve (change approve)
+  weightier      milestone-approve, accept-task (a human-review task naming a delegate),
+                 decision-accept, prepare-release, push-branch, open-pr (a work branch,
+                 never main, the base branch or a tag)
+  never          accept-config, accept-red, allow-pending-human, push (to main, the base
+                 branch or a tag), tag, release, and the orders themselves
 
 The orders count only once the person accepts them, from a terminal: `ape orders accept`
 writes "accepted" (who, when, and the sha256 of what was accepted) into the file on the base
@@ -6964,6 +7052,114 @@ Flags:
 | `--ultracode` | bool | `false` | Prepend the ultracode keyword (session runs workflows by default) |
 | `--workflow` | bool | `false` | Append a directive to run the task through a Claude Code workflow |
 
+## ape question
+
+Questions for the person: ask (any session), answer (a person, or their conductor under orders), list
+
+```
+ape question
+```
+
+Questions as acts (v1.4.2): an orchestrator asks the person a design question through ape
+instead of in its chat, so it is recorded and reaches them.
+
+  ask      record a question (any session may ask): the person event and the notifier carry it
+  answer   it: a person's act — or their conductor's, under standing orders that name
+           question-answer`ape conductor act question-answer Q<n> --text …`)
+  list     the questions, open or all
+
+An open question is a person action: `ape status` lists it ("answer Q<n>: <answer>"), and
+`ape status --wait --until person` wakes on it. The questions are kept in
+_apex/state/questions.json (local).
+
+Subcommands:
+
+- `answer` — Answer a question (a person's act)
+- `ask` — Record a question for the person; prints its id (Q<n>)
+- `list` — List the questions (open, or all)
+
+## ape question answer
+
+Answer a question (a person's act)
+
+```
+ape question answer <Q-id> --text "<answer>" --by <who> [flags]
+```
+
+Answer a recorded question. A person's act: refused in a model session unless, in the
+person's own Claude Code session, the person typed "answer Q<n>: <answer>" in this turn (E2;
+--by is then git config user.name, recorded with the prompt). A conductor answers under the
+person's standing orders with `ape conductor act question-answer Q<n> --text …`.
+
+Exit codes: 0 answered · 1 no such question (question.not-found), or answered already
+(question.answered) · 2 usage, or a model session.
+
+Examples:
+
+```
+  ape question answer Q3 --text "EUR" --by dana
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--by` | string | `—` | who answers (required from a terminal) |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+| `--text` | string | `—` | the answer (required) |
+
+## ape question ask
+
+Record a question for the person; prints its id (Q<n>)
+
+```
+ape question ask "<question>" [--milestone M] [--change <id>] [--option "…"]… [flags]
+```
+
+Record a question for the person, with the milestone or change it is about and the options
+you see. Any session may ask: asking is no person act. ape logs the question event, so the
+project's notify: command runs, and the question is a person action until it is answered.
+
+Exit codes: 0 recorded (prints the id) · 2 usage (no text).
+
+Examples:
+
+```
+  ape question ask "Invoices in EUR or the customer's currency?" --milestone M3 --option EUR --option "customer's"
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--change` | string | `—` | the change it is about |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+| `--milestone` | string | `—` | the milestone it is about |
+| `--option` | stringArray | `[]` | an option you see (repeatable) |
+
+## ape question list
+
+List the questions (open, or all)
+
+```
+ape question list [--open] [flags]
+```
+
+List the project's questions, oldest first: id, what it is about, the text, and the answer
+when there is one. --open lists only those not answered. --json prints the list.
+
+Exit codes: 0 printed.
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+| `--open` | bool | `false` | only the open questions |
+
 ## ape rollback
 
 Rollback ape to the previous version
@@ -8552,7 +8748,9 @@ reason, action} (skill too, for an ape task run), seq strictly increasing; it ro
 into events.1.jsonl (one kept), seq carrying on. The events: person (action is the phrase
 the person types), gate-green, milestone-done, run-end (exit is the run's exit code),
 run-lost, stop and block, and since v1.4.2 delegated (a conductor's act under standing
-orders), orders (orders accepted or revoked), orchestrator-dead and orchestrator-idle.
+orders), orders (orders accepted or revoked), orchestrator-dead, orchestrator-idle,
+question and question-answered (ape question), and conductor-stalled (a delivery the
+conductor's watcher typed went unacknowledged).
 _apex/config.yaml's notify: runs after each line is written, with
 APE_EVENT, APE_SEQ, APE_MILESTONE, APE_CHANGE, APE_RUN, APE_EXIT, APE_SKILL, APE_REASON,
 APE_ACTION and APE_ORDERS (a delegated act's or an orders change's: <person>@<commit>) in its

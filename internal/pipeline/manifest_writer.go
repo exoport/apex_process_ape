@@ -216,6 +216,7 @@ func (w *manifestWriter) RecordStep(stageIdx int, rec StepRecord) error {
 	w.manifest.Totals.TokensCacheCreation += rec.TokensCacheCreation
 	w.manifest.Totals.TokensCacheCreation5m += rec.TokensCacheCreation5m
 	w.manifest.Totals.TokensCacheCreation1h += rec.TokensCacheCreation1h
+	w.manifest.Totals.TokensTotal += rec.TokensInput + rec.TokensOutput + rec.TokensCacheRead + rec.TokensCacheCreation
 	w.manifest.Totals.NumTurns += rec.NumTurns
 	if len(rec.ModelUsage) > 0 {
 		if w.manifest.Totals.ModelUsage == nil {

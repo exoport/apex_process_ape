@@ -19,6 +19,7 @@ import (
 
 	"github.com/exoport/apex_process_ape/internal/apexv1"
 	"github.com/exoport/apex_process_ape/internal/conductorterm"
+	"github.com/exoport/apex_process_ape/internal/conductorwatch"
 	"github.com/exoport/apex_process_ape/internal/repl"
 	"github.com/exoport/apex_process_ape/internal/runlog"
 	"github.com/exoport/apex_process_ape/internal/sessionref"
@@ -55,6 +56,8 @@ performs some of the person's acts for them.
   status   the terminal (alive, idle, pending) and the open holds and questions
   stop     the terminal
   watch    show the terminal's screen, read-only
+  watcher  follow the projects' events and wake the conductor (its tmux pane, else notify)
+  ack      acknowledge a delivery the watcher typed
 
 Every delegated act runs the notifier (event "delegated"), and is recorded with
 by: "conductor under orders <person>@<commit> (<reason>)", in the act's own record and in
@@ -65,7 +68,8 @@ A remote project is driven over ssh: every verb takes --project <dir>, so
 	}
 	cmd.AddCommand(newConductorActCmd(), newConductorNoteCmd(), newConductorLogCmd(),
 		newConductorStartCmd(), newConductorServeCmd(), newConductorSendCmd(), newConductorReadCmd(),
-		newConductorStatusCmd(), newConductorStopCmd(), newConductorWatchCmd())
+		newConductorStatusCmd(), newConductorStopCmd(), newConductorWatchCmd(),
+		newConductorWatcherCmd(), newConductorAckCmd())
 	return cmd
 }
 
@@ -82,7 +86,8 @@ func newConductorActCmd() *cobra.Command {
      tag, release, orders: orders.non-delegable);
   3. the orders exist on the base branch, are accepted and not revoked (orders.missing,
      orders.unaccepted, orders.revoked);
-  4. a tier-2 act is named in the orders' acts: (orders.not-named);
+  4. the act is named in the orders' acts: (orders.not-named), and no escalate: category
+     holds for it (orders.escalate);
   5. the orders' conditions hold (orders.condition);
   6. each --evidence path exists in the project; a milestone approve names the log of the
      milestone's latest gate run when it has one (orders.evidence-missing);
@@ -96,10 +101,21 @@ evidence: [{path, sha256}], checks, seq}.
 The acts and their targets:
   answer <change-id> --text "<answer>"      change answer (a blocked change)
   tweak-approve <tweak-id>                  change approve (a milestone-less change)
-  milestone-approve <M>                     milestone approve (only when the orders name it)
-  accept-task <change-id> <T<n>>            change accept (only when named; only where the
-                                            project names a human-review delegate)
-  decision-accept <ADR-id>                  decision accept (only when named)
+  milestone-approve <M>                     milestone approve
+  accept-task <change-id> <T<n>>            change accept (only where the project names a
+                                            human-review delegate)
+  decision-accept <ADR-id>                  decision accept
+  question-answer <Q-id> --text "<answer>"  question answer (an orchestrator's question)
+  prepare-release <version>                 record the release preparation; ape checks the
+                                            CHANGELOG at HEAD names the version and hands back
+                                            the tag and push commands, which stay the person's
+  push-branch <branch>                      ape pushes the work branch (never main, master, the
+                                            base or default branch, or a tag; no tags follow)
+  open-pr <branch> --text "<title>"         gh pr create for the branch (body: --reason);
+                                            without gh, refused with the push URL
+Every act runs only when the orders name it under acts: (every act, D664+); before the
+checks above, the orders' escalate: list (touches-gate, changes-config, tokens-over) sends
+an act in one of its categories to the person (orders.escalate).
 
 Exit codes: 0 done · 1 refused by a check or by the act itself (the code says which) · 2 usage
 (no reason, an unknown act, a missing target).`,
@@ -126,8 +142,10 @@ Exit codes: 0 done · 1 refused by a check or by the act itself (the code says w
 			switch {
 			case a.Act == apexv1.OrderAcceptTask && a.Task == "":
 				return v1Fail(cmd, &f.v1Flags, &apexv1.UsageError{Code: "usage.task", Msg: "accept-task needs the task: `ape conductor act accept-task <change-id> T<n> …`"}, nil)
-			case a.Act == apexv1.OrderAnswer && strings.TrimSpace(text) == "":
-				return v1Fail(cmd, &f.v1Flags, &apexv1.UsageError{Code: "usage.text", Msg: "answer needs --text: the answer to what blocks the change"}, nil)
+			case (a.Act == apexv1.OrderAnswer || a.Act == apexv1.OrderQuestionAnswer) && strings.TrimSpace(text) == "":
+				return v1Fail(cmd, &f.v1Flags, &apexv1.UsageError{Code: "usage.text", Msg: a.Act + " needs --text: the answer"}, nil)
+			case a.Act == apexv1.OrderOpenPR && strings.TrimSpace(text) == "":
+				return v1Fail(cmd, &f.v1Flags, &apexv1.UsageError{Code: "usage.text", Msg: "open-pr needs --text: the pull request's title (its body is --reason)"}, nil)
 			}
 			res, err := p.RunDelegated(cmd.Context(), a, cmd.ErrOrStderr())
 			if err != nil {
@@ -586,5 +604,124 @@ Exit codes: 0 printed · 1 no terminal ran here.`,
 	}
 	f.add(cmd)
 	cmd.Flags().BoolVar(&follow, "follow", false, "reprint every 2 seconds")
+	return cmd
+}
+
+func newConductorWatcherCmd() *cobra.Command {
+	var projects []string
+	var pane, ackAlert string
+	var poll time.Duration
+	cmd := &cobra.Command{
+		Use:   "watcher --project <dir>… [--pane <tmux pane>] [--ack-alert 15m]",
+		Short: "Follow the projects' events and wake the conductor: typed into its tmux pane, else notify-only",
+		Long: `Run the conductor's watcher until interrupted (another terminal, or in the background). It
+follows each --project's events — block, person (a question included), question,
+orchestrator-dead, orchestrator-idle, run-lost, delegated, orders — and turns each into a
+delivery, id <project>.<seq>.
+
+When your conductor (your own Claude Code session) runs in a tmux pane — --pane <target>, or
+the one tmux pane running claude when there is exactly one — the watcher types each delivery
+into it, marked (<ape-delivery …>, never your words: a prompt carrying one grants no person
+act), only when all of these hold:
+  - the pane's foreground process is claude and a Claude Code session registered on this
+    machine (<config>/sessions/<pid>.json) — a stale or wrong pane, a shell, gets nothing;
+  - no turn is running ("esc to interrupt" absent) and the input row is empty — never after
+    your half-typed line;
+  - the screen did not change between two looks (one --poll apart).
+The conductor acknowledges each: ` + "`ape conductor ack <id>`" + `. A delivery not acknowledged within
+--ack-alert (default conductor.ack_alert of the first project, else 15m) logs
+conductor-stalled in its project, once, so that project's notify: command reaches you.
+
+Without a pane the watcher only records: each of those events already runs the project's
+notify: command (notify-only). State and acknowledgements are kept in
+$XDG_STATE_HOME/ape/conductor (else ~/.local/state/ape/conductor).
+
+Exit codes: 0 stopped (Ctrl-C) · 2 usage.`,
+		Example: "  ape conductor watcher --project ~/src/notes --project ~/src/billing --pane %3",
+		Args:    cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if len(projects) == 0 {
+				wd, err := os.Getwd()
+				if err != nil {
+					return err
+				}
+				projects = []string{wd}
+			}
+			roots := make([]string, 0, len(projects))
+			for _, d := range projects {
+				abs, err := filepath.Abs(d)
+				if err != nil {
+					return err
+				}
+				roots = append(roots, apexv1.FindRoot(abs))
+			}
+			alert, err := conductorAckAlert(roots[0], ackAlert)
+			if err != nil {
+				return usageErr(err)
+			}
+			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+			defer stop()
+			if pane == "" {
+				pane = conductorwatch.DiscoverPane(ctx)
+			}
+			var tp conductorwatch.Pane
+			if pane != "" {
+				tp = &conductorwatch.Tmux{Target: pane}
+				fmt.Fprintf(cmd.ErrOrStderr(), "watcher: delivering into tmux pane %s\n", pane)
+			} else {
+				fmt.Fprintln(cmd.ErrOrStderr(), "watcher: no conductor pane (--pane, or exactly one tmux pane running claude): notify-only")
+			}
+			w := conductorwatch.New(conductorwatch.Config{
+				Projects: roots, StateDir: conductorwatch.StateDir(), Pane: tp, Nonce: uuid.NewString()[:8],
+				AckAlert: alert, Poll: poll,
+				Log: func(format string, a ...any) { fmt.Fprintf(cmd.ErrOrStderr(), format, a...) },
+			})
+			return w.Run(ctx)
+		},
+	}
+	cmd.Flags().StringArrayVar(&projects, "project", nil, "a project to follow (repeatable; default the current directory's)")
+	cmd.Flags().StringVar(&pane, "pane", "", "the conductor's tmux pane (-t target); default the one pane running claude")
+	cmd.Flags().StringVar(&ackAlert, "ack-alert", "", "how long a delivery may go unacknowledged before conductor-stalled (default conductor.ack_alert, else 15m)")
+	cmd.Flags().DurationVar(&poll, "poll", 2*time.Second, "how often it looks")
+	return cmd
+}
+
+// conductorAckAlert is --ack-alert, else conductor.ack_alert, else 15m.
+func conductorAckAlert(root, flag string) (time.Duration, error) {
+	v := flag
+	if v == "" {
+		if cfg, err := apexv1.LoadConfig(root); err == nil {
+			v = cfg.Conductor.AckAlert
+		}
+	}
+	if v == "" {
+		return conductorwatch.DefaultAckAlert, nil
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d <= 0 {
+		return 0, fmt.Errorf("ack alert %q is not a positive duration (e.g. 15m)", v)
+	}
+	return d, nil
+}
+
+func newConductorAckCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "ack <id>",
+		Short: "Acknowledge a delivery the watcher typed (its id, <project>.<seq>)",
+		Long: `Acknowledge a delivery the conductor's watcher typed into its pane: the conductor has read
+the event (it reads ` + "`ape status`" + ` for it; the delivery is never the person's words). A
+delivery not acknowledged within the ack alert notifies the person.
+
+Exit codes: 0 acknowledged · 2 usage.`,
+		Example: "  ape conductor ack notes.42",
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := conductorwatch.Ack(conductorwatch.StateDir(), args[0], time.Now()); err != nil {
+				return usageErr(err)
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "acknowledged %s\n", args[0])
+			return nil
+		},
+	}
 	return cmd
 }

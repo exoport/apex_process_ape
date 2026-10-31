@@ -359,7 +359,8 @@ func milestoneSpend(m *Milestone, runs []cost.RunCost, stops []LimitStop, tweaks
 		}
 	}
 	total := 0.0
-	for _, run := range runs {
+	for i := range runs {
+		run := &runs[i]
 		if run.StartedAt.Before(since) || tweaks[RunChangeArg(run.Args)] {
 			continue
 		}

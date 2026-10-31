@@ -11,6 +11,7 @@ import (
 	"path"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -62,7 +63,7 @@ func init() {
 		CodeDoc{CodeOrdersUnaccepted, 1, ActionPerson, "the standing orders changed since a person last accepted them, or were never accepted: no delegated act runs under them until the person runs `ape orders accept --by <person>` from a terminal"},
 		CodeDoc{CodeOrdersRevoked, 1, ActionPerson, "the person revoked their standing orders (`ape orders revoke`): no delegated act runs under them until they accept them again"},
 		CodeDoc{CodeOrdersNonDelegable, 1, ActionPerson, "the act is never delegated (accept the config, accept red, allow a pending human-review task, push, tag, release, the orders themselves): only the person does it, from a terminal or in their own words"},
-		CodeDoc{CodeOrdersNotNamed, 1, ActionPerson, "the act is delegated only when the person's orders name it under acts: (approve a milestone, accept a human-review task, accept a decision), and these orders do not"},
+		CodeDoc{CodeOrdersNotNamed, 1, ActionPerson, "the act is delegated only when the person's orders name it under acts: (every act, D664+), and these orders do not"},
 		CodeDoc{CodeOrdersCondition, 1, ActionPerson, "a condition the person's orders set for this act does not hold (a tweak's type, a milestone's change count, its last gate, an answer only for a change blocked on a question): the conductor relays it to the person"},
 		CodeDoc{CodeOrdersNoReason, 2, ActionStop, "`ape conductor act` needs --reason: what the act rests on, quoting the evidence the conductor read (D660)"},
 		CodeDoc{CodeConductorRunning, 1, ActionStop, "`ape conductor start`: the project's orchestrator terminal already runs (one per project): `ape conductor stop` first"},
@@ -82,6 +83,10 @@ func init() {
 // person act each one is.
 const (
 	OrderAnswer           = "answer"
+	OrderQuestionAnswer   = "question-answer"
+	OrderPrepareRelease   = "prepare-release"
+	OrderPushBranch       = "push-branch"
+	OrderOpenPR           = "open-pr"
 	OrderTweakApprove     = "tweak-approve"
 	OrderMilestoneApprove = "milestone-approve"
 	OrderAcceptTask       = "accept-task"
@@ -98,10 +103,13 @@ const (
 // OrderTier is how far an act can be delegated (D659 A2).
 type OrderTier int
 
+// Every delegable act runs only when the orders name it under acts:
+// (D664+ Q-D663-1). The tiers say how far an act may reach — tier 1 the
+// everyday acts, tier 2 the weightier ones — and which are never delegated.
 const (
-	// TierDelegable acts run under any accepted orders.
+	// TierDelegable: everyday acts (answer, tweak-approve), when named.
 	TierDelegable OrderTier = 1
-	// TierNamed acts run only when the orders name them under acts:.
+	// TierNamed: weightier acts, when named.
 	TierNamed OrderTier = 2
 	// TierNever acts are never delegated.
 	TierNever OrderTier = 3
@@ -114,6 +122,10 @@ var orderActs = map[string]struct {
 	Act  string
 }{
 	OrderAnswer:           {TierDelegable, ActAnswer},
+	OrderQuestionAnswer:   {TierDelegable, ActQuestionAnswer},
+	OrderPrepareRelease:   {TierNamed, ""},
+	OrderPushBranch:       {TierNamed, ""},
+	OrderOpenPR:           {TierNamed, ""},
 	OrderTweakApprove:     {TierDelegable, ActTweakApprove},
 	OrderMilestoneApprove: {TierNamed, ActMilestoneApprove},
 	OrderAcceptTask:       {TierNamed, ActAcceptTask},
@@ -171,6 +183,23 @@ type AnswerCondition struct {
 	QuestionOnly bool `json:"question_only" yaml:"question_only"`
 }
 
+// OrderEscalate is the escalate: list.
+//
+
+type OrderEscalate struct {
+	TouchesGate   bool `json:"touches-gate,omitempty"`
+	ChangesConfig bool `json:"changes-config,omitempty"`
+	// TokensOver: a milestone past this many tokens since its approval.
+	TokensOver int `json:"tokens-over,omitempty"`
+}
+
+// The escalate: categories.
+const (
+	EscalateTouchesGate   = "touches-gate"
+	EscalateChangesConfig = "changes-config"
+	EscalateTokensOver    = "tokens-over"
+)
+
 // OrdersMark is ape's record of an acceptance or a revocation.
 type OrdersMark struct {
 	By     string `json:"by"               yaml:"by"`
@@ -180,11 +209,14 @@ type OrdersMark struct {
 
 // Orders are one person's standing orders as read from the base branch.
 type Orders struct {
-	Person     string          `json:"person"             yaml:"person"`
-	Acts       []string        `json:"acts"               yaml:"acts"`
-	Conditions OrderConditions `json:"conditions"         yaml:"conditions"`
-	Accepted   *OrdersMark     `json:"accepted,omitempty" yaml:"accepted,omitempty"`
-	Revoked    *OrdersMark     `json:"revoked,omitempty"  yaml:"revoked,omitempty"`
+	Person     string          `json:"person"     yaml:"person"`
+	Acts       []string        `json:"acts"       yaml:"acts"`
+	Conditions OrderConditions `json:"conditions" yaml:"conditions"`
+	// Escalate are the categories that always go to the person, even for
+	// an act the orders name (D663 2c).
+	Escalate OrderEscalate `json:"escalate"           yaml:"-"`
+	Accepted *OrdersMark   `json:"accepted,omitempty" yaml:"accepted,omitempty"`
+	Revoked  *OrdersMark   `json:"revoked,omitempty"  yaml:"revoked,omitempty"`
 
 	// Read from the file, not its frontmatter.
 	Slug   string `json:"slug"   yaml:"-"`
@@ -292,6 +324,10 @@ func (o *Orders) parseHeader(m *yaml.Node) error {
 			}
 		case "conditions":
 			conds = v
+		case "escalate":
+			if err := o.parseEscalate(v); err != nil {
+				return err
+			}
 		case "accepted", "revoked":
 			var mk OrdersMark
 			if err := decodeStrict(v, &mk); err != nil {
@@ -331,6 +367,31 @@ func (o *Orders) parseActs(v *yaml.Node) error {
 	return nil
 }
 
+// parseEscalate reads escalate: — touches-gate, changes-config, or
+// {tokens-over: N} — strictly.
+func (o *Orders) parseEscalate(v *yaml.Node) error {
+	if v.Kind != yaml.SequenceNode {
+		return ordersInvalid(line(v), "escalate: is a list, e.g. [touches-gate, changes-config, {tokens-over: 40000000}]")
+	}
+	for _, it := range v.Content {
+		switch {
+		case it.Kind == yaml.ScalarNode && it.Value == EscalateTouchesGate:
+			o.Escalate.TouchesGate = true
+		case it.Kind == yaml.ScalarNode && it.Value == EscalateChangesConfig:
+			o.Escalate.ChangesConfig = true
+		case it.Kind == yaml.MappingNode && len(it.Content) == 2 && it.Content[0].Value == EscalateTokensOver:
+			n, err := strconv.Atoi(it.Content[1].Value)
+			if err != nil || n < 1 {
+				return ordersInvalid(line(it), "tokens-over: is a token count of at least 1")
+			}
+			o.Escalate.TokensOver = n
+		default:
+			return ordersInvalid(line(it), fmt.Sprintf("%q is not a category escalate: knows (touches-gate, changes-config, {tokens-over: N})", it.Value))
+		}
+	}
+	return nil
+}
+
 // parseConditions reads conditions:, each for an act the orders can use
 // (tier 1, or named), each field known and well formed.
 func (o *Orders) parseConditions(v *yaml.Node) error {
@@ -341,12 +402,11 @@ func (o *Orders) parseConditions(v *yaml.Node) error {
 		k, c := v.Content[i], v.Content[i+1]
 		act := k.Value
 		switch OrderTierOf(act) {
-		case TierDelegable:
 		case 0:
 			return ordersInvalid(line(k), fmt.Sprintf("%q is not an act, so it can have no conditions", act))
 		case TierNever:
 			return ordersInvalid(line(k), act+" is never delegated, so it can have no conditions")
-		case TierNamed:
+		case TierDelegable, TierNamed:
 			if !o.Names(act) {
 				return ordersInvalid(line(k), act+" has conditions but is not in acts:, so the orders cannot use it — name it, or drop its conditions")
 			}
@@ -410,8 +470,9 @@ func (o *Orders) digest() (string, error) {
 		Person     string          `json:"person"`
 		Acts       []string        `json:"acts"`
 		Conditions OrderConditions `json:"conditions"`
+		Escalate   OrderEscalate   `json:"escalate"`
 		Body       string          `json:"body"`
-	}{o.Person, o.Acts, o.Conditions, o.Body})
+	}{o.Person, o.Acts, o.Conditions, o.Escalate, o.Body})
 	if err != nil {
 		return "", err
 	}

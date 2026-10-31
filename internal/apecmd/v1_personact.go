@@ -52,6 +52,8 @@ func personCallOf(cmd *cobra.Command, args []string) *apexv1.PersonCall {
 		c.Act, c.Target = apexv1.ActTweakApprove, args[0]
 	case "change answer":
 		c.Act, c.Target, c.Text = apexv1.ActAnswer, args[0], str("text")
+	case "question answer":
+		c.Act, c.Target, c.Text = apexv1.ActQuestionAnswer, args[0], str("text")
 	case "project accept-config":
 		c.Act, c.Target = apexv1.ActAcceptConfig, "config"
 	case "decision accept":
@@ -119,6 +121,7 @@ func shellQuote(s string) string {
 // personActGroups build the command groups a person act lives in.
 var personActGroups = map[string]func() *cobra.Command{
 	"milestone": newMilestoneCmd, "change": newChangeCmd, "project": newProjectCmd, "decision": newDecisionCmd,
+	"question": newQuestionCmd,
 }
 
 // personCallsIn are the person acts a Bash command line runs, each read

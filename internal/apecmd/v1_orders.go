@@ -30,12 +30,14 @@ in slug form (dana@example.com → dana-example-com). Its frontmatter is what ap
   ---
   Free text the conductor reads: how to answer, what to bring back to me.
 
-The acts, by tier:
-  any accepted orders   answer (change answer), tweak-approve (change approve)
-  only when named       milestone-approve, accept-task (a human-review task naming a
-                        delegate), decision-accept
-  never                 accept-config, accept-red, allow-pending-human, push, tag, release,
-                        and the orders themselves
+Every act runs only when the orders name it under acts:. The acts:
+  everyday       answer (change answer), question-answer (ape question answer),
+                 tweak-approve (change approve)
+  weightier      milestone-approve, accept-task (a human-review task naming a delegate),
+                 decision-accept, prepare-release, push-branch, open-pr (a work branch,
+                 never main, the base branch or a tag)
+  never          accept-config, accept-red, allow-pending-human, push (to main, the base
+                 branch or a tag), tag, release, and the orders themselves
 
 The orders count only once the person accepts them, from a terminal: ` + "`ape orders accept`" + `
 writes "accepted" (who, when, and the sha256 of what was accepted) into the file on the base
@@ -214,10 +216,7 @@ func printOrdersTable(w io.Writer, o *apexv1.Orders, from string) {
 	fmt.Fprintln(w, "  act                  tier  delegated")
 	for _, a := range []string{apexv1.OrderAnswer, apexv1.OrderTweakApprove, apexv1.OrderMilestoneApprove, apexv1.OrderAcceptTask, apexv1.OrderDecisionAccept} {
 		state := "no (not named)"
-		switch {
-		case apexv1.OrderTierOf(a) == apexv1.TierDelegable:
-			state = "yes (tier 1: under any accepted orders)"
-		case o.Names(a):
+		if o.Names(a) {
 			state = "yes (named)"
 		}
 		fmt.Fprintf(w, "  %-20s %-5d %s\n", a, apexv1.OrderTierOf(a), state)

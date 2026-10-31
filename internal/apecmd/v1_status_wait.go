@@ -64,7 +64,9 @@ reason, action} (skill too, for an ape task run), seq strictly increasing; it ro
 into events.1.jsonl (one kept), seq carrying on. The events: person (action is the phrase
 the person types), gate-green, milestone-done, run-end (exit is the run's exit code),
 run-lost, stop and block, and since v1.4.2 delegated (a conductor's act under standing
-orders), orders (orders accepted or revoked), orchestrator-dead and orchestrator-idle.
+orders), orders (orders accepted or revoked), orchestrator-dead, orchestrator-idle,
+question and question-answered (ape question), and conductor-stalled (a delivery the
+conductor's watcher typed went unacknowledged).
 _apex/config.yaml's notify: runs after each line is written, with
 APE_EVENT, APE_SEQ, APE_MILESTONE, APE_CHANGE, APE_RUN, APE_EXIT, APE_SKILL, APE_REASON,
 APE_ACTION and APE_ORDERS (a delegated act's or an orders change's: <person>@<commit>) in its

@@ -157,12 +157,13 @@ func TestParseOrders_Strict(t *testing.T) {
 		"unknown act":          {"---\nperson: d@x\nacts:\n  - answer\n  - deploy\n---\n", "orders line 5: \"deploy\" is not an act"},
 		"never delegated":      {"---\nperson: d@x\nacts: [answer, accept-red]\n---\n", "orders line 3: accept-red is never delegated"},
 		"twice":                {"---\nperson: d@x\nacts: [answer, answer]\n---\n", "orders line 3: answer is listed twice"},
+		"tier 1 not named":     {"---\nperson: d@x\nacts: [answer]\nconditions:\n  tweak-approve: {types: [fix]}\n---\n", "orders line 5: tweak-approve has conditions but is not in acts:"},
 		"condition not named":  {"---\nperson: d@x\nacts: [answer]\nconditions:\n  milestone-approve: {max_changes: 3}\n---\n", "orders line 5: milestone-approve has conditions but is not in acts:"},
 		"condition never":      {"---\nperson: d@x\nacts: [answer]\nconditions:\n  push: {when: never}\n---\n", "orders line 5: push is never delegated"},
 		"unknown field":        {"---\nperson: d@x\nacts: [answer]\nconditions:\n  answer: {question_only: true, polite: true}\n---\n", "orders line 5: answer:"},
 		"malformed max":        {"---\nperson: d@x\nacts: [milestone-approve]\nconditions:\n  milestone-approve: {max_changes: six}\n---\n", "orders line 5: milestone-approve:"},
 		"bad gate":             {"---\nperson: d@x\nacts: [milestone-approve]\nconditions:\n  milestone-approve: {gate: amber}\n---\n", `gate: is red or green, not "amber"`},
-		"empty types":          {"---\nperson: d@x\nacts: [answer]\nconditions:\n  tweak-approve: {types: []}\n---\n", "types: names at least one"},
+		"empty types":          {"---\nperson: d@x\nacts: [tweak-approve]\nconditions:\n  tweak-approve: {types: []}\n---\n", "types: names at least one"},
 		"no condition for act": {"---\nperson: d@x\nacts: [decision-accept]\nconditions:\n  decision-accept: {only: ADR}\n---\n", "ape checks no condition for this act"},
 	} {
 		_, err := ParseOrders([]byte(tc.doc))

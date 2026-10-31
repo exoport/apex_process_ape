@@ -7,9 +7,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/exoport/apex_process_ape/internal/cost"
 )
 
 // The delegated conductor (v1.4.2, D659 A2–A7, D660): a person's
@@ -22,12 +25,22 @@ import (
 // person's decision log. Every other route from a model session stays
 // refused (session.person-only).
 
+// CodeOrdersEscalate: a category the orders' escalate: list sends to the
+// person holds for this act (D663 2c).
+const CodeOrdersEscalate = "orders.escalate"
+
+// CodeOrdersRefused: a delegated act ape refuses whatever the orders say —
+// a push to the base branch, main or a tag; a PR with no forge CLI.
+const CodeOrdersRefused = "orders.refused"
+
 // CodeOrdersCheckRed: the mechanical check behind a delegated act, re-run
 // by ape at act time (D662.2), is red: the act does not run.
 const CodeOrdersCheckRed = "orders.check-red"
 
 func init() {
 	DiagnosticCodes = append(DiagnosticCodes,
+		CodeDoc{CodeOrdersEscalate, 1, ActionPerson, "`ape conductor act` (D663 2c): the act falls in a category the person's orders always send to them (escalate: touches-gate, changes-config, tokens-over), named in the message, even though the orders name the act: the conductor relays it"},
+		CodeDoc{CodeOrdersRefused, 1, ActionPerson, "`ape conductor act` refuses this whatever the orders say: push-branch to main, the base branch, the remote's default branch or a tag, a branch that does not exist here; open-pr without the gh CLI (the message names the push URL); prepare-release for a version the CHANGELOG at HEAD does not name"},
 		CodeDoc{CodeOrdersCheckRed, 1, ActionPerson, "`ape conductor act` (D662.2): ape re-ran the mechanical check behind the act before acting — a milestone approve's gate self-test (`ape milestone gate-test` on its gate folder), a tweak approve's change check — and it is not as it must be, so the act did not run; the conductor relays it, whatever the orchestrator reported"},
 	)
 }
@@ -68,7 +81,11 @@ type DelegatedResult struct {
 	Evidence []EvidenceRef `json:"evidence"`
 	// Checks are the mechanical checks ape re-ran before acting (D662.2).
 	Checks []string `json:"checks"`
-	Seq    int64    `json:"seq"`
+	// Next are the commands left to the person (prepare-release's tag and
+	// push), or what ape did beyond the record (push-branch's push, the
+	// PR's URL).
+	Next []string `json:"next,omitempty"`
+	Seq  int64    `json:"seq"`
 }
 
 // limitBlockPrefixes open the reasons ape's own limits block a change
@@ -110,10 +127,13 @@ func (p *Project) CheckDelegated(ctx context.Context, a DelegatedAct) (*Orders, 
 	case OrdersUnaccepted:
 		return nil, nil, &FailError{Code: CodeOrdersUnaccepted, Msg: fmt.Sprintf("%s's orders (%s on %s) changed since they were accepted, or were never accepted: the person runs `ape orders accept --by %s` from a terminal", o.Person, o.Path, o.Branch, o.Person)}
 	}
-	if tier == TierNamed && !o.Names(a.Act) {
-		return nil, nil, &FailError{Code: CodeOrdersNotNamed, Msg: fmt.Sprintf("%s is delegated only when the orders name it, and %s's do not (acts: %s)", a.Act, o.Person, strings.Join(o.Acts, ", "))}
+	if !o.Names(a.Act) {
+		return nil, nil, &FailError{Code: CodeOrdersNotNamed, Msg: fmt.Sprintf("%s is delegated only when the orders name it under acts:, and %s's do not (acts: %s)", a.Act, o.Person, strings.Join(o.Acts, ", "))}
 	}
 	if err := p.checkConditions(ctx, o, a); err != nil {
+		return nil, nil, err
+	}
+	if err := p.checkEscalate(ctx, o, a); err != nil {
 		return nil, nil, err
 	}
 	ev, err := p.checkEvidence(a)
@@ -184,6 +204,95 @@ func (p *Project) checkMilestoneConditions(ctx context.Context, m string, maxCha
 	}
 	if state != gate {
 		return &FailError{Code: CodeOrdersCondition, Msg: fmt.Sprintf("%s's last gate run is %s, and the orders approve only on a %s one", m, state, gate)}
+	}
+	return nil
+}
+
+// checkEscalate refuses an act in a category the orders send to the
+// person (D663 2c).
+func (p *Project) checkEscalate(ctx context.Context, o *Orders, a DelegatedAct) error {
+	e := o.Escalate
+	esc := func(cat, why string) error {
+		return &FailError{Code: CodeOrdersEscalate, Msg: fmt.Sprintf("escalate: %s — %s; %s's orders send this to them", cat, why, o.Person)}
+	}
+	var changes []string
+	milestone := ""
+	switch a.Act {
+	case OrderMilestoneApprove:
+		milestone = a.Target
+		for _, ci := range p.changes(ctx) {
+			if ci.Doc != nil && ci.Doc.Meta.Milestone == milestone {
+				changes = append(changes, ci.ID)
+			}
+		}
+	case OrderAnswer, OrderTweakApprove, OrderAcceptTask:
+		changes = []string{a.Target}
+		milestone = p.ChangeMilestone(ctx, a.Target)
+	case OrderQuestionAnswer:
+		if q := p.question(a.Target); q != nil {
+			milestone = q.Milestone
+			if q.Change != "" {
+				changes = []string{q.Change}
+			}
+		}
+	}
+	if e.TouchesGate || e.ChangesConfig {
+		for _, id := range changes {
+			for _, f := range ClassifyFindings(p.CheckChangeAnywhere(ctx, id)) {
+				switch {
+				case e.TouchesGate && f.Code == CodeTouchesGate:
+					return esc(EscalateTouchesGate, "change "+id+" touches its milestone's gate")
+				case e.ChangesConfig && f.Code == CodeGuardedConfigTask:
+					return esc(EscalateChangesConfig, "change "+id+" edits a guarded block of _apex/config.yaml")
+				}
+			}
+		}
+		if e.TouchesGate && a.Act == OrderMilestoneApprove {
+			if recs, err := p.LoadMilestoneRecords(); err == nil && recs[milestone] != nil && recs[milestone].Approval != nil {
+				return esc(EscalateTouchesGate, milestone+" was approved before: approving it again re-approves its gate")
+			}
+		}
+	}
+	if e.TokensOver > 0 && milestone != "" {
+		if n := p.milestoneTokens(ctx, milestone); n > e.TokensOver {
+			return esc(EscalateTokensOver, fmt.Sprintf("%s has used %d tokens since its approval, over %d", milestone, n, e.TokensOver))
+		}
+	}
+	return nil
+}
+
+// milestoneTokens are the tokens of m's runs since its approval (every
+// run when it is not approved), a tweak's runs left out — as its spend.
+func (p *Project) milestoneTokens(ctx context.Context, m string) int {
+	rm := p.roadmap()
+	if rm == nil {
+		return 0
+	}
+	ms := rm.Find(m)
+	if ms == nil {
+		return 0
+	}
+	runs, _ := cost.RunCosts(p.Root)
+	since := approvedSince(ms)
+	tweaks := p.tweakIDs(ctx)
+	n := 0
+	for i := range runs {
+		r := &runs[i]
+		if r.StartedAt.Before(since) || tweaks[RunChangeArg(r.Args)] {
+			continue
+		}
+		n += r.TokensTotal
+	}
+	return n
+}
+
+// question is the question id, nil when there is none.
+func (p *Project) question(id string) *Question {
+	qs, _ := p.Questions()
+	for i := range qs {
+		if qs[i].ID == id {
+			return &qs[i]
+		}
 	}
 	return nil
 }
@@ -267,9 +376,11 @@ func (p *Project) RunDelegated(ctx context.Context, a DelegatedAct, progress io.
 	if a.Task != "" {
 		target += " " + a.Task
 	}
-	act := orderActs[a.Act].Act
-	ctx = WithPersonAct(ctx, &PersonAct{Act: act, Target: target, By: by, granted: true})
+	if act := orderActs[a.Act].Act; act != "" {
+		ctx = WithPersonAct(ctx, &PersonAct{Act: act, Target: target, By: by, granted: true})
+	}
 	milestone, change := "", a.Target
+	var next []string
 	switch a.Act {
 	case OrderAnswer:
 		_, err = p.AnswerChange(ctx, a.Target, a.Text, by)
@@ -287,6 +398,20 @@ func (p *Project) RunDelegated(ctx context.Context, a DelegatedAct, progress io.
 	case OrderDecisionAccept:
 		change = ""
 		_, err = p.AcceptDecision(ctx, a.Target, by)
+	case OrderQuestionAnswer:
+		var q *Question
+		if q, err = p.AnswerQuestion(ctx, a.Target, a.Text, by); err == nil {
+			milestone, change = q.Milestone, q.Change
+		}
+	case OrderPrepareRelease:
+		change = ""
+		next = []string{"git tag -a " + a.Target + ` -m "` + a.Target + `"`, "git push origin refs/tags/" + a.Target}
+	case OrderPushBranch:
+		change = ""
+		next, err = p.pushBranch(ctx, a.Target)
+	case OrderOpenPR:
+		change = ""
+		next, err = p.openPR(ctx, a.Target, a.Text, a.Reason)
 	}
 	if err != nil {
 		return nil, err
@@ -295,7 +420,7 @@ func (p *Project) RunDelegated(ctx context.Context, a DelegatedAct, progress io.
 		milestone = p.ChangeMilestone(ctx, change)
 	}
 	logged := p.Emit(ctx, Event{Event: EventDelegated, Milestone: milestone, Change: change, Action: a.Act + " " + target, Reason: reason, Orders: ordersRef}, progress)
-	res := &DelegatedResult{Act: a.Act, Target: target, By: by, Orders: ordersRef, Evidence: ev, Checks: checks, Seq: logged.Seq}
+	res := &DelegatedResult{Act: a.Act, Target: target, By: by, Orders: ordersRef, Evidence: ev, Checks: checks, Next: next, Seq: logged.Seq}
 	if res.Evidence == nil {
 		res.Evidence = []EvidenceRef{}
 	}
@@ -350,6 +475,22 @@ func (p *Project) recheck(ctx context.Context, a DelegatedAct, progress io.Write
 			return nil, nil, red("ape change check " + a.Target + " is red: " + strings.Join(limit(msgs, 3), "; "))
 		}
 		return []string{"ape change check " + a.Target + ": clean"}, nil, nil
+	case OrderPrepareRelease:
+		heading := "## " + a.Target
+		bare := "## " + strings.TrimPrefix(a.Target, "v")
+		data, err := os.ReadFile(filepath.Join(p.Root, "CHANGELOG.md"))
+		has := func(h string) bool {
+			for l := range strings.SplitSeq(string(data), "\n") {
+				if l == h || strings.HasPrefix(l, h+" ") {
+					return true
+				}
+			}
+			return false
+		}
+		if err != nil || (!has(heading) && !has(bare)) {
+			return nil, nil, &FailError{Code: CodeOrdersRefused, Msg: "CHANGELOG.md at HEAD names no " + heading + " section: a release is prepared for a version the changelog already names (D663+ Q-D663-2)"}
+		}
+		return []string{"CHANGELOG.md at HEAD names " + a.Target}, nil, nil
 	}
 	return []string{}, nil, nil
 }
@@ -360,4 +501,61 @@ func truncateRunes(s string, n int) string {
 		return s
 	}
 	return string(r[:n-1]) + "…"
+}
+
+// pushBranch pushes a work branch for the conductor (D663 3b): never the
+// base branch, main or master, the remote's default branch or a tag, and
+// only a branch that exists here. ape pushes it itself, with no tags.
+func (p *Project) pushBranch(ctx context.Context, branch string) ([]string, error) {
+	refused := func(why string) error {
+		return &FailError{Code: CodeOrdersRefused, Msg: "push-branch " + branch + ": " + why}
+	}
+	b := strings.TrimPrefix(branch, "refs/heads/")
+	if b == "" || strings.HasPrefix(branch, "refs/tags/") || strings.HasPrefix(b, "-") || strings.ContainsAny(b, ": ") {
+		return nil, refused("not a work branch name")
+	}
+	if b == "main" || b == "master" {
+		return nil, refused("never main or master: a conductor pushes work branches only")
+	}
+	if base, err := p.baseBranch(ctx); err == nil && b == base {
+		return nil, refused("never the base branch")
+	}
+	if def, err := git(ctx, p.Root, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"); err == nil && strings.TrimPrefix(def, "origin/") == b {
+		return nil, refused("never the remote's default branch")
+	}
+	if _, err := git(ctx, p.Root, "rev-parse", "--verify", "--quiet", "refs/heads/"+b); err != nil {
+		return nil, refused("no such branch here")
+	}
+	ref := "refs/heads/" + b + ":refs/heads/" + b
+	if _, err := git(ctx, p.Root, "push", "--no-follow-tags", "origin", ref); err != nil {
+		return nil, &FailError{Code: CodeOrdersRefused, Msg: "git push failed: " + err.Error()}
+	}
+	return []string{"git push --no-follow-tags origin " + ref}, nil
+}
+
+// openPR opens a pull request for a pushed work branch through the gh CLI
+// (D663 3b); merging stays the person's.
+func (p *Project) openPR(ctx context.Context, branch, title, body string) ([]string, error) {
+	if strings.TrimSpace(title) == "" {
+		return nil, &UsageError{Code: "usage.text", Msg: "open-pr needs --text: the pull request's title"}
+	}
+	base, err := p.baseBranch(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if branch == base || branch == "main" || branch == "master" {
+		return nil, &FailError{Code: CodeOrdersRefused, Msg: "open-pr " + branch + ": a pull request is from a work branch"}
+	}
+	gh, err := exec.LookPath("gh")
+	if err != nil {
+		url, _ := git(ctx, p.Root, "remote", "get-url", "origin")
+		return nil, &FailError{Code: CodeOrdersRefused, Msg: "open-pr: the gh CLI is not on PATH, so ape cannot open the pull request — the branch is pushed to " + url + "; the person opens it there"}
+	}
+	c := exec.CommandContext(ctx, gh, "pr", "create", "--head", branch, "--base", base, "--title", title, "--body", body)
+	c.Dir = p.Root
+	out, err := c.CombinedOutput()
+	if err != nil {
+		return nil, &FailError{Code: CodeOrdersRefused, Msg: "gh pr create failed: " + strings.TrimSpace(string(out))}
+	}
+	return []string{strings.TrimSpace(string(out))}, nil
 }

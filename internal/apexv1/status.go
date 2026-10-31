@@ -460,7 +460,8 @@ func (p *Project) Status() *StatusReport {
 		r.delegate = cfg.HumanReview.Skill()
 	}
 	runs, _ := cost.RunCosts(p.Root)
-	for _, run := range runs {
+	for i := range runs {
+		run := &runs[i]
 		r.Spend.TotalUSD += run.CostUSD
 		r.Spend.Runs++
 	}

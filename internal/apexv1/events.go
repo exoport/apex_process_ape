@@ -51,7 +51,7 @@ const (
 )
 
 // EventNames are every event, in the order the docs list them.
-var EventNames = []string{EventPerson, EventGateGreen, EventMilestoneDone, EventRunEnd, EventRunLost, EventStop, EventBlock, EventDelegated, EventOrders, EventOrchestratorDead, EventOrchestratorIdle}
+var EventNames = []string{EventPerson, EventGateGreen, EventMilestoneDone, EventRunEnd, EventRunLost, EventStop, EventBlock, EventDelegated, EventOrders, EventOrchestratorDead, EventOrchestratorIdle, EventQuestion, EventQuestionAnswered, EventConductorStalled}
 
 // EventsRollBytes is the size at which events.jsonl is rolled (10 MB).
 var EventsRollBytes int64 = 10 << 20

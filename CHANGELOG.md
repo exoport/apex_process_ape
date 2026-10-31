@@ -32,8 +32,27 @@ the patch rule for it):
     `conductor.idle_alert`, default 30m).
   - `ape status --wait --until conductor` wakes on either, and on `run-lost`.
   - Every verb takes `--project`, so a remote project is driven over ssh.
-- Events `delegated`, `orders`, `orchestrator-dead` and `orchestrator-idle`; the notifier's
-  `APE_ORDERS`.
+- **Every act runs only when the orders name it** under `acts:`. A header line can also
+  `escalate:` categories that always go to the person: `touches-gate`, `changes-config`,
+  `{tokens-over: N}` (`orders.escalate`).
+- **Questions as acts**: `ape question ask|answer|list`. An orchestrator asks; an open question
+  is a person action (`answer Q<n>: <answer>`, also by E2's typed phrase); a conductor answers
+  under orders naming `question-answer`.
+- **More delegable acts**, each only when named: `prepare-release <version>` (the CHANGELOG at HEAD
+  must name it; the tag and push commands are handed back to the person), `push-branch <branch>`
+  (ape pushes a work branch itself, never `main`, the base or default branch, or a tag, and no tag
+  follows it), `open-pr <branch>` (through `gh`; without it, refused with the push URL).
+- **The conductor's watcher**, `ape conductor watcher`, follows the projects' events and types
+  each into the conductor's tmux pane. It is marked, and only typed when the pane runs a registered
+  Claude Code session, is idle with an empty input row, and is steady. `ape conductor ack <id>`
+  acknowledges a delivery; one unacknowledged past `conductor.ack_alert` (15m) logs
+  `conductor-stalled`, so the person is notified. Without tmux the watcher is notify-only.
+- A prompt carrying ape's delivery mark anywhere is recorded `delivery` and never grants a person
+  act, not even on the person's earlier typed words.
+- Events `delegated`, `orders`, `orchestrator-dead`, `orchestrator-idle`, `question`,
+  `question-answered`, `conductor-stalled`; the notifier's `APE_ORDERS`.
+- `tokens_total` in a run's manifest totals, and tokens and wall time in the cost rollup
+  (limits, D1).
 
 ## v1.4.1 (2026-10-31)
 

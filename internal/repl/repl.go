@@ -1093,6 +1093,16 @@ func PaneIdle(pane string) bool {
 	return replReady(pane) && !strings.Contains(pane, "esc to interrupt")
 }
 
+// InputEmpty reports whether the pane's input box is empty: its last "❯"
+// row holds nothing after the glyph (D664+: ape types into a person's
+// pane only then, never after half-typed input). A placeholder Claude
+// Code draws in an empty box reads as not empty — the safe side: no
+// delivery, and the person is notified instead.
+func InputEmpty(pane string) bool {
+	row := inputRow(pane)
+	return row != "" && strings.TrimSpace(strings.TrimPrefix(row, ReadyGlyph)) == ""
+}
+
 // NotReadyError is returned by WaitForReady when the REPL did not become
 // ready: ctx expired, or a blocking modal could not be dismissed. Pane
 // carries the last captured snapshot so an unrecognized blocking modal is
