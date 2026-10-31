@@ -376,6 +376,9 @@ func printInitHooks(w io.Writer, res *apexv1.InitResult) {
 	for _, h := range res.HooksAdded {
 		fmt.Fprintln(w, "hook     "+h)
 	}
+	for _, r := range res.DenyAdded {
+		fmt.Fprintln(w, "deny     "+r)
+	}
 	if res.StandardADR != nil {
 		fmt.Fprintln(w, "ADR-0001 "+adrStandardLine(res.StandardADR))
 	}

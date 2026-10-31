@@ -1,6 +1,7 @@
 package apexv1
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -54,4 +55,36 @@ func TestCredsGuard(t *testing.T) {
 func TestGuardedConfigKeys_Coordination(t *testing.T) {
 	require.Contains(t, guardedConfigKeys, "coordination")
 	require.Contains(t, yamlKeys(Config{}), "coordination", "a known top-level key, not config.unknown-top-key")
+}
+
+// v1.5 Q1 (D654+): init's deny rules join a settings.json's own, keep its
+// other permissions, and a second merge writes nothing.
+func TestMergeCredsDeny(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".claude", "settings.json")
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+	require.NoError(t, os.WriteFile(path, []byte(`{"permissions":{"allow":["Bash(go test:*)"],"deny":["Read(./.env)"]},"model":"x"}`), 0o644))
+	added, err := MergeCredsDeny(path)
+	require.NoError(t, err)
+	require.Equal(t, CredsDenyRules, added)
+	var s struct {
+		Model       string `json:"model"`
+		Permissions struct {
+			Allow []string `json:"allow"`
+			Deny  []string `json:"deny"`
+		} `json:"permissions"`
+	}
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(data, &s))
+	require.Equal(t, "x", s.Model)
+	require.Equal(t, []string{"Bash(go test:*)"}, s.Permissions.Allow)
+	require.Equal(t, append([]string{"Read(./.env)"}, CredsDenyRules...), s.Permissions.Deny)
+	st, err := os.Stat(path)
+	require.NoError(t, err)
+	added, err = MergeCredsDeny(path)
+	require.NoError(t, err)
+	require.Empty(t, added)
+	st2, err := os.Stat(path)
+	require.NoError(t, err)
+	require.Equal(t, st.ModTime(), st2.ModTime(), "nothing written the second time")
 }

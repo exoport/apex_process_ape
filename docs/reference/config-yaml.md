@@ -599,7 +599,8 @@ coordination:
 ```
 
 - **The credential is not in the config.** ape connects with `hot/ape-nats.creds`, a credential
-  scoped to the ensemble. No session reads or writes it: the edit tools are denied the file, and a
+  scoped to the ensemble. No session reads or writes it: the edit tools are denied the file, Read, Grep and Glob are denied it
+  by the `permissions.deny` rules `ape project init` writes, and a
   Bash or Monitor command that names it, names `hot` as a folder, or holds a pattern matching it is
   denied ([security model](../explanation/security-model.md)).
 - **An ensemble named as a member project is refused.** Both are compared as subject tokens

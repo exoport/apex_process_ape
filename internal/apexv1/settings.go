@@ -233,6 +233,43 @@ func MergeHooks(path string) ([]string, error) {
 	return added, writeSettings(path, root)
 }
 
+// MergeCredsDeny adds CredsDenyRules to a settings.json's
+// permissions.deny, keeping every other key (v1.5 Q1). Returns the rules
+// added; a second run adds none and writes nothing.
+func MergeCredsDeny(path string) ([]string, error) {
+	root, err := readSettings(path)
+	if err != nil {
+		return nil, err
+	}
+	added := mergeDeny(root, CredsDenyRules)
+	if len(added) == 0 {
+		return nil, nil
+	}
+	return added, writeSettings(path, root)
+}
+
+// mergeDeny adds each rule missing from root's permissions.deny, keeping
+// every other permission, and returns the rules it added.
+func mergeDeny(root map[string]any, rules []string) []string {
+	perms, _ := root["permissions"].(map[string]any)
+	if perms == nil {
+		perms = map[string]any{}
+	}
+	deny, _ := perms["deny"].([]any)
+	var added []string
+	for _, r := range rules {
+		if !slices.Contains(deny, any(r)) {
+			deny = append(deny, r)
+			added = append(added, r)
+		}
+	}
+	if len(added) > 0 {
+		perms["deny"] = deny
+		root["permissions"] = perms
+	}
+	return added
+}
+
 // upgradeInPlace brings an intact entry e of w up to what init writes,
 // returning one line per upgrade. F-2: a registration from before rc.7q
 // gains onFailure. v1.3: one from before v1.3 gains Monitor — in place

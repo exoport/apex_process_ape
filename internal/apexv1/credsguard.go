@@ -11,6 +11,17 @@ import (
 // no session ever reads it, and no session's environment carries it.
 const NATSCredsRel = "hot/ape-nats.creds" //nolint:gosec // a path, not a credential
 
+// CredsDenyRules are the permissions.deny rules `ape project init` merges
+// into .claude/settings.json (v1.5 Q1, D654+): Claude Code applies a Read
+// rule to Read, Grep and Glob, so no session tool reads the credential,
+// bypass mode included (measured live, check-coord-live). The forms: the
+// project root's file, and the file under any folder a session starts in.
+var CredsDenyRules = []string{
+	"Read(./" + NATSCredsRel + ")",
+	"Read(/" + NATSCredsRel + ")",
+	"Read(**/" + NATSCredsRel + ")",
+}
+
 const credsReason = NATSCredsRel + " is the project's NATS credential: ape connects to NATS itself, and no session reads or writes it"
 
 // CredsGuard denies a Bash or Monitor command that could read the NATS

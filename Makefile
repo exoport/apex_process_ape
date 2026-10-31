@@ -439,6 +439,10 @@ check-coord:  ## v1.5 stage 0: the coordination drills on Tier 1 (embedded NATS)
 	go test -race -count=1 -timeout 10m -v -run '^(TestDrill_.*|TestE2_OQ25_.*|TestCoordinator_PublishesTheOutageOnReconnect|TestGate|TestGate_PausedMilestone|TestPublishAndWatch|TestCredsGuard)$$' \
 	  ./internal/coord/... ./internal/apexv1/
 
+.PHONY: check-coord-live
+check-coord-live:  ## v1.5 stage 0: LOCAL ONLY. Claude Code's Read, Grep and Glob honour init's permissions.deny for hot/ape-nats.creds under bypass mode, with a control (two Haiku sessions through ape task).
+	APE_CLAUDE_LIVE=1 go test ./internal/hookdrift/ -run '^TestLive_CredsDeny$$' -v -count=1 -timeout 25m
+
 .PHONY: check-coord-cluster
 check-coord-cluster:  ## v1.5 stage 0: the coordination drills that need a real three-node cluster (drill 3, wipe and rebuild), on deploy/natslocal.
 	@# LOCAL ONLY: needs nats-server v2.14.5 (NATS_SERVER= to point at it). The

@@ -43,6 +43,9 @@ type InitResult struct {
 	Created    []string `json:"created"`
 	Kept       []string `json:"kept"`
 	HooksAdded []string `json:"hooks_added"`
+	// DenyAdded are the permissions.deny rules init merged into
+	// settings.json (v1.5: the NATS credential, CredsDenyRules).
+	DenyAdded  []string `json:"deny_added,omitempty"`
 	Brownfield bool     `json:"brownfield"`
 	Commit     string   `json:"commit,omitempty"`
 	// PreCommit is what init did with git's pre-commit hook (Q89):
@@ -495,6 +498,9 @@ func (p *Project) initHooks(ctx context.Context, res *InitResult) error {
 		return err
 	}
 	res.HooksAdded = added
+	if res.DenyAdded, err = MergeCredsDeny(p.SettingsJSON()); err != nil {
+		return err
+	}
 	res.PreCommit, err = p.installPreCommitHook(ctx)
 	return err
 }
@@ -604,7 +610,7 @@ func (p *Project) initCommitPaths(ctx context.Context, res *InitResult) []string
 		paths = append(paths, ".gitignore")
 	}
 	// A settings.json the .claude/ shape un-ignored is the team's (D203).
-	if len(res.HooksAdded) > 0 || (res.GitIgnore != nil && slices.Contains(res.GitIgnore.RevealedFiles, settingsJSONRel)) {
+	if len(res.HooksAdded) > 0 || len(res.DenyAdded) > 0 || (res.GitIgnore != nil && slices.Contains(res.GitIgnore.RevealedFiles, settingsJSONRel)) {
 		paths = append(paths, p.Rel(p.SettingsJSON()))
 	}
 	// A pre-commit hook init installed in a hooks folder the project
