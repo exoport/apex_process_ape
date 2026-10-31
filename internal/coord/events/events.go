@@ -137,24 +137,27 @@ func MessageID(project, checkout string, seq int64) string {
 	return layout.MessageID(tok(project), checkout, uint64(seq)) //nolint:gosec // seq is events.jsonl's, never negative
 }
 
-// Wait blocks until done reports true. done reads the waiter's own truth
-// (ape's records): it runs once at the start, once on each event on filter,
-// and once after each reconnect (events published while the link was down
-// are not redelivered to a plain subscription, so the reconnect re-reads
-// instead). There is no timer: a connected waiter wakes only on events.
-func Wait(ctx context.Context, nc *nats.Conn, filter string, done func() (bool, error)) error {
-	wake := make(chan struct{}, 1)
+// Wake signals on each message on filter and once after each reconnect
+// (a plain subscription is not redelivered what was published while the
+// link was down, so the waiter re-reads its own records instead). The
+// channel holds one signal; stop unsubscribes and restores the
+// connection's reconnect handler.
+func Wake(nc *nats.Conn, filter string) (wake <-chan struct{}, stop func(), err error) {
+	ch := make(chan struct{}, 1)
 	poke := func() {
 		select {
-		case wake <- struct{}{}:
+		case ch <- struct{}{}:
 		default:
 		}
 	}
 	sub, err := nc.Subscribe(filter, func(*nats.Msg) { poke() })
 	if err != nil {
-		return fmt.Errorf("events: subscribe %s: %w", filter, err)
+		return nil, nil, fmt.Errorf("events: subscribe %s: %w", filter, err)
 	}
-	defer func() { _ = sub.Unsubscribe() }()
+	if err := nc.Flush(); err != nil {
+		_ = sub.Unsubscribe()
+		return nil, nil, fmt.Errorf("events: subscribe %s: %w", filter, err)
+	}
 	prev := nc.Opts.ReconnectedCB
 	nc.SetReconnectHandler(func(c *nats.Conn) {
 		poke()
@@ -162,8 +165,22 @@ func Wait(ctx context.Context, nc *nats.Conn, filter string, done func() (bool, 
 			prev(c)
 		}
 	})
-	defer nc.SetReconnectHandler(prev)
+	return ch, func() {
+		_ = sub.Unsubscribe()
+		nc.SetReconnectHandler(prev)
+	}, nil
+}
 
+// Wait blocks until done reports true. done reads the waiter's own truth
+// (ape's records): it runs once at the start, once on each event on filter,
+// and once after each reconnect (Wake). There is no timer: a connected
+// waiter wakes only on events.
+func Wait(ctx context.Context, nc *nats.Conn, filter string, done func() (bool, error)) error {
+	wake, stop, err := Wake(nc, filter)
+	if err != nil {
+		return err
+	}
+	defer stop()
 	for {
 		ok, err := done()
 		if err != nil || ok {
