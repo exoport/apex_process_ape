@@ -2,38 +2,50 @@
 
 ## v1.4.1 (unreleased — draft)
 
+APEX v1.4.1, on v1.4.0: a session that lost its Claude Code login now ends in minutes instead of an
+hour; the sandbox's credential sync can no longer spread a logged-out credential; a check that greps
+test output in a way that misjudges the tests gets a notice; an expert's advice can reach the
+planning session (`for: plan`); and a new page states ape's security model and its known limits.
+The framework's v1.4.1 payload declares `min_ape_version: "1.4.1"`. Measured on Claude Code 2.1.312.
+
+<!-- EVALUATION: filled from the D2 and R read-outs before the release commit (D651). -->
+
 - **A session that lost its login ends in minutes** (D603): `auth_lost` (manifest termination, `ape
   task`/`ape prompt` exit 15, `ape status` "stopped: auth-lost", `session.auth-lost` from `ape
   change review --run`) when its last turn ended with Claude Code's `authentication_failed` message
   and nothing followed for 3 minutes. Before, such a run sat until the 60-minute idle ceiling.
   `make check-claude` gains `auth_lost` (no tokens) to hold the contract.
 - **Credential sync ranks by token expiry** (aped, D605.1): a logged-out file is never spread,
-  whatever its modification time, and a logged-out publication is left alone.
+  whatever its modification time, and a logged-out publication is left alone. This fixes 1.4.0's
+  known issue (`credentials: oauth` could log sessions out, the host's included).
 - **`check.grep-test-output`** (D620): an informational notice at `change check`, `change start`
   (new JSON `notices`) and `change verify` for a check that greps test output in a way that
   misjudges the tests, including `grep -q` or `head` after the test runner under `set -o pipefail`,
   which exits 141 on a pass. Its fix text suggests running the test by name or capturing the output
-  first, never `pipefail`.
+  first, never `pipefail`. It changes no exit and asks for no action.
 - **`for: plan` advise entries** (D611, D641): an expert's advise files reach the planning session.
   An entry whose `for:` names `plan` is listed at the top of `ape status --json` (`advise`), where
   the framework's apex-plan reads it before it plans a milestone; `ape project check` caps those
   files together by `caps.advise_session`. An entry without `for:` is unchanged.
+  <!-- P: the measured result from D2's read-out goes here (D641, D651.1). -->
 - **Gate scratch and the gate guard** (D582, D634): `.go`, `.mk`, `.ps1` and Makefiles count as gate
   scripts; on Windows the gate guard reads Git Bash `/c/…` and Cygwin `/cygdrive/c/…` paths.
+- **`ape aboard` is aboard v0.4.2:** a board's server now closes before it removes its instance
+  record, so a client never finds no record while the old board still answers on its port (D564).
+  capsHash unchanged.
+- **Security model and known limits:** a new page,
+  [docs/explanation/security-model.md](docs/explanation/security-model.md), says what ape's guards
+  protect against (mistakes) and where they are weaker (a steered model), with what to do meanwhile
+  for each known limit: a person act carried out through a script; the push and tag guards' same gap;
+  sessions inheriting your whole environment; logs and transcripts not scanned for secrets; plugins
+  pinned by a ref, not by their content. It also describes the planned security review in the loop.
+  The framework's user docs carry the same page.
 - **Announced: v1.5 removes the names v1.3 renamed** (D526, D637). They warn in 1.4 and stop working
   in v1.5: the check tag `(live)` (run `ape project rewrite-live` to write `(full)`), the codes
   `session.orchestrator-running`, `models.operator-row` and `check.live-suggested`, and the JSON
   fields `live_skipped` and a task's `live` (read `full_skipped` and `full`).
-- **`ape aboard` is aboard v0.4.2:** a board's server now closes before it removes its instance record,
-  so a client never finds no record while the old board still answers on its port (D564). capsHash
-  unchanged.
-- Claude Code surface reviewed through 2.1.312; no pin moved.
-- **Security model and known limits:** a new page, [docs/explanation/security-model.md](docs/explanation/security-model.md),
-  says what ape's guards protect against (mistakes) and where they are weaker (a steered model), with what to do
-  meanwhile for each known limit: a person act carried out through a script; the push and tag guards' same gap;
-  sessions inheriting your whole environment; logs and transcripts not scanned for secrets; plugins pinned by a ref,
-  not by their content. It also describes the planned security review in the loop. The framework's user docs
-  carry the same page.
+- Claude Code surface reviewed through 2.1.312; no pin moved. `ci.yml` runs on every candidate's
+  `ci/<version>-check-N` branch, and `/release` and `/claude-bump` read the daily scheduled run first.
 - 1.4.0's evaluation note: the run that stopped did so in its sixth and last milestone, not its
   sixth of seven.
 
