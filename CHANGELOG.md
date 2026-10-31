@@ -1,11 +1,12 @@
 # CHANGELOG
 
-## v1.4.2 (unreleased — draft)
+## v1.4.2 (2026-10-31)
 
 APEX v1.4.2, on v1.4.1: **the delegated conductor** (D658–D661). A person's own Claude Code
 session can drive the projects' orchestrators and perform some of the person's acts under their
 standing orders, checked by ape. This patch release adds verbs, keys and events (D659 B1 amends
-the patch rule for it):
+the patch rule for it). The framework's v1.4.2 payload declares `min_ape_version: "1.4.2"`.
+Measured on Claude Code 2.1.312. What it adds:
 
 - **Standing orders**, `_apex/standing-orders/<person>.md`: who, which acts, which conditions, as
   frontmatter, and free text for the conductor. `ape orders show|accept|revoke`; accept and revoke
@@ -91,6 +92,11 @@ Fixes from the v1.4.1 evaluation (D659 D2–D4):
   `` kill `pidof …` ``, `pgrep … | xargs kill`, and the same through a variable or `sh -c`.
 - The `check.grep-test-output` notice is pinned by a test on the exact check the evaluation saw
   exit 141 under `pipefail`.
+
+**Known issue (Windows only):** `ape conductor send`, `stop` or `status` can fail once when it
+overlaps the supervisor's rewrite of the orchestrator terminal's record: `send` refuses with
+`conductor.not-running`, and `stop` reports that no terminal runs and stops nothing. Running it again
+works. Fixed in a later release.
 
 ## v1.4.1 (2026-10-31)
 
