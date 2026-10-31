@@ -64,3 +64,37 @@ func TestPublishAndWatch(t *testing.T) {
 	_, _, live = Watch(ctx, project(t, "project_name: x\n", false))
 	require.False(t, live, "a project in no ensemble polls as before")
 }
+
+// OQ24 (drill 4's pause, wired at the gate): a milestone whose newest
+// pause event is newer than its newest resume refuses change new/start
+// with coord.milestone-paused; another milestone goes on; a resume clears
+// it.
+func TestGate_PausedMilestone(t *testing.T) {
+	url := natstest.RunJetStreamServer(t)
+	nc, err := nats.Connect(url)
+	require.NoError(t, err)
+	t.Cleanup(nc.Close)
+	js, err := jetstream.New(nc)
+	require.NoError(t, err)
+	ctx := context.Background()
+	require.NoError(t, events.Declare(ctx, js, 1))
+	p := project(t, strings.Replace(block, "nats://127.0.0.1:4222", url, 1), false)
+	creds, _ := natstest.MintStandaloneCreds(t, "dana")
+	data, err := os.ReadFile(creds)
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(filepath.Join(p.Root, "hot"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(p.Root, "hot", "ape-nats.creds"), data, 0o600))
+
+	now := time.Now()
+	require.NoError(t, Gate(ctx, p, "change start", "M2", now), "nothing paused yet")
+	_, err = js.Publish(ctx, "ape.evt.dana.notes-svc.project.M2."+apexv1.EventMilestonePaused, []byte(`{}`))
+	require.NoError(t, err)
+	var fe *apexv1.FailError
+	require.ErrorAs(t, Gate(ctx, p, "change start", "M2", now), &fe)
+	require.Equal(t, apexv1.CodeCoordMilestonePaused, fe.Code)
+	require.NoError(t, Gate(ctx, p, "change new", "M3", now), "only that milestone")
+	require.NoError(t, Gate(ctx, p, "change archive", "", now), "archive reads no pause")
+	_, err = js.Publish(ctx, "ape.evt.dana.notes-svc.project.M2."+apexv1.EventMilestoneResumed, []byte(`{}`))
+	require.NoError(t, err)
+	require.NoError(t, Gate(ctx, p, "change start", "M2", now), "resumed")
+}

@@ -14,8 +14,10 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/exoport/apex_process_ape/internal/apexv1"
+	"github.com/exoport/apex_process_ape/internal/coord/conductor"
 	"github.com/exoport/apex_process_ape/internal/natsconn"
 )
 
@@ -92,11 +94,16 @@ func CheckEnsemble(ens string, members []string) error {
 	return nil
 }
 
+// pauseCheckTimeout bounds the read of a milestone's pause events.
+const pauseCheckTimeout = 2 * time.Second
+
 // Gate is the rule of OQ5 for one start or integration step (op): nil for
 // a project in no ensemble; coord.membership for a block that cannot be
 // used; coord.nats-unreachable when NATS cannot be reached with the
-// project's credential.
-func Gate(ctx context.Context, p *apexv1.Project, op string, now time.Time) error {
+// project's credential. With a milestone, a milestone the conductor's ape
+// paused (OQ24: a question left unanswered) refuses too, with
+// coord.milestone-paused: only that milestone.
+func Gate(ctx context.Context, p *apexv1.Project, op, milestone string, now time.Time) error {
 	m, err := Load(p)
 	if errors.Is(err, ErrNotMember) {
 		return nil
@@ -105,12 +112,27 @@ func Gate(ctx context.Context, p *apexv1.Project, op string, now time.Time) erro
 		return &apexv1.FailError{Code: apexv1.CodeCoordMembership, Msg: err.Error() +
 			" — a person fixes _apex/config.yaml's coordination: block or places the ensemble credential"}
 	}
-	return Require(p.Root, op, func() error {
-		nc, err := natsconn.Connect(ctx, natsconn.Config{URL: m.URL, CredsFile: m.Creds}, "ape-member", nats.NoReconnect())
-		if err != nil {
-			return err
-		}
-		nc.Close()
+	var nc *nats.Conn
+	if err := Require(p.Root, op, func() error {
+		var err error
+		nc, err = natsconn.Connect(ctx, natsconn.Config{URL: m.URL, CredsFile: m.Creds}, "ape-member", nats.NoReconnect())
+		return err
+	}, now); err != nil {
+		return err
+	}
+	defer nc.Close()
+	if milestone == "" || milestone == "none" {
 		return nil
-	}, now)
+	}
+	js, err := jetstream.New(nc)
+	if err != nil {
+		return nil // no stream to read: nothing is paused
+	}
+	pctx, cancel := context.WithTimeout(ctx, pauseCheckTimeout)
+	defer cancel()
+	if paused, err := conductor.Paused(pctx, js, m.Project, milestone); err == nil && paused {
+		return &apexv1.FailError{Code: apexv1.CodeCoordMilestonePaused, Msg: fmt.Sprintf(
+			"%s is paused: a question to the conductor went unanswered (OQ24), so %s waits — the conductor's answer resumes it", milestone, op)}
+	}
+	return nil
 }

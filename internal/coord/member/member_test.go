@@ -91,7 +91,7 @@ func TestRequireAndStatusLine(t *testing.T) {
 func TestGate(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now()
-	require.NoError(t, Gate(ctx, project(t, "project_name: x\n", false), "change start", now))
+	require.NoError(t, Gate(ctx, project(t, "project_name: x\n", false), "change start", "", now))
 
 	url, account := natstest.StartOperator(t)
 	creds, _ := natstest.MintCreds(t, account, "notes", nil, nil)
@@ -100,7 +100,7 @@ func TestGate(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Join(p.Root, "hot"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(p.Root, "hot", "ape-nats.creds"), data, 0o600))
-	require.NoError(t, Gate(ctx, p, "change start", now))
+	require.NoError(t, Gate(ctx, p, "change start", "", now))
 	require.True(t, ReadLink(p.Root).DownSince.IsZero())
 
 	// The control: a wrong credential is refused by the server, so the
@@ -112,14 +112,14 @@ func TestGate(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(q.Root, "hot"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(q.Root, "hot", "ape-nats.creds"), bad, 0o600))
 	var fe *apexv1.FailError
-	require.ErrorAs(t, Gate(ctx, q, "change start", now), &fe)
+	require.ErrorAs(t, Gate(ctx, q, "change start", "", now), &fe)
 	require.Equal(t, apexv1.CodeCoordNATSUnreachable, fe.Code)
 
 	down := project(t, strings.Replace(block, "nats://127.0.0.1:4222", "nats://127.0.0.1:1", 1), true) // nothing listens there
-	require.ErrorAs(t, Gate(ctx, down, "change archive", now), &fe)
+	require.ErrorAs(t, Gate(ctx, down, "change archive", "", now), &fe)
 	require.Equal(t, apexv1.CodeCoordNATSUnreachable, fe.Code)
 	require.False(t, ReadLink(down.Root).DownSince.IsZero())
 
-	require.ErrorAs(t, Gate(ctx, project(t, block, false), "change start", now), &fe)
+	require.ErrorAs(t, Gate(ctx, project(t, block, false), "change start", "", now), &fe)
 	require.Equal(t, apexv1.CodeCoordMembership, fe.Code)
 }

@@ -434,6 +434,11 @@ check-natslocal:  ## v1.5 stage 0: bring up the local 3-node NATS cluster (deplo
 	  go test ./internal/natstest/ -run TestLive_NatsLocalCluster -v -count=1 -timeout 5m; rc=$$?; \
 	$$NATSLOCAL_SCRIPT down; exit $$rc
 
+.PHONY: check-coord
+check-coord:  ## v1.5 stage 0: the coordination drills on Tier 1 (embedded NATS), each beside its v1.4-shaped control. Also run by make test.
+	go test -race -count=1 -timeout 10m -v -run '^(TestDrill_.*|TestE2_OQ25_.*|TestCoordinator_PublishesTheOutageOnReconnect|TestGate|TestGate_PausedMilestone|TestPublishAndWatch|TestCredsGuard)$$' \
+	  ./internal/coord/... ./internal/apexv1/
+
 .PHONY: check-coord-cluster
 check-coord-cluster:  ## v1.5 stage 0: the coordination drills that need a real three-node cluster (drill 3, wipe and rebuild), on deploy/natslocal.
 	@# LOCAL ONLY: needs nats-server v2.14.5 (NATS_SERVER= to point at it). The

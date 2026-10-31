@@ -143,7 +143,7 @@ func TestDiagnosticCodes_PublishedListMatchesTheCode(t *testing.T) {
 		// v1.4.1.
 		"CodeCheckGrepTestOutput": CodeCheckGrepTestOutput, "CodeSessionAuthLost": CodeSessionAuthLost,
 		// v1.5 (in development).
-		"CodeCoordNATSUnreachable": CodeCoordNATSUnreachable, "CodeCoordMembership": CodeCoordMembership,
+		"CodeCoordNATSUnreachable": CodeCoordNATSUnreachable, "CodeCoordMembership": CodeCoordMembership, "CodeCoordMilestonePaused": CodeCoordMilestonePaused,
 	}
 	for _, glob := range []string{"*.go", filepath.Join("..", "apecmd", "v1_*.go"), filepath.Join("..", "coord", "member", "*.go")} {
 		files, err := filepath.Glob(glob)

@@ -604,10 +604,14 @@ coordination:
   denied ([security model](../explanation/security-model.md)).
 - **An ensemble named as a member project is refused.** Both are compared as subject tokens
   (lowercase, `.`, `*`, `>` and spaces as `-`), so `notes.svc` clashes with the project `Notes Svc`.
-- **NATS is required to start and to integrate.** When it is unreachable, starting a milestone or a
-  change, claiming, and integrating refuse with `coord.nats-unreachable` (action `retry`). Work
-  already in flight continues. `ape status` shows `coordination: paused — NATS unreachable since
+- **NATS is required to start and to integrate.** When it is unreachable, `ape change new`, `ape change
+  start` and `ape change archive` refuse with `coord.nats-unreachable` (action `retry`). Work
+  already in flight (verify, review) continues. `ape status` shows `coordination: paused — NATS unreachable since
   14:02 (in-flight work continues; new claims and merges wait)` until ape connects again.
+- **A paused milestone waits for the conductor.** When a question to the ensemble's conductor goes
+  unanswered past the pause age, the conductor's ape pauses the milestone (OQ24): `ape change new`
+  and `ape change start` in it refuse with `coord.milestone-paused` (action `person`). Other
+  milestones go on, and the conductor's answer resumes it.
 
 ## Commands that act on the config
 

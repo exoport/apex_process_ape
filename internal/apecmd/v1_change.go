@@ -128,9 +128,10 @@ func splitList(s string) []string {
 // provenanceVerbs are the change verbs that check provenance first (H14).
 var provenanceVerbs = map[string]bool{"start": true, "verify": true, "archive": true}
 
-// coordVerbs need NATS in a project of an ensemble (v1.5, OQ5): start
-// claims, archive integrates. verify and review are in-flight work.
-var coordVerbs = map[string]bool{"start": true, "archive": true}
+// coordVerbs need NATS in a project of an ensemble (v1.5, OQ5): new and
+// start begin work (and refuse in a paused milestone, OQ24), archive
+// integrates. verify and review are in-flight work.
+var coordVerbs = map[string]bool{"new": true, "start": true, "archive": true}
 
 // v1ChangeLeaf builds a `ape change <verb> <id>` leaf around run.
 func v1ChangeLeaf(use, short, long, example string, f *v1Flags, run func(cmd *cobra.Command, p *apexv1.Project, id string) error) *cobra.Command {
@@ -156,7 +157,7 @@ func v1ChangeLeaf(use, short, long, example string, f *v1Flags, run func(cmd *co
 				}
 			}
 			if coordVerbs[cmd.Name()] {
-				if err := member.Gate(cmd.Context(), p, "change "+cmd.Name(), time.Now()); err != nil {
+				if err := member.Gate(cmd.Context(), p, "change "+cmd.Name(), coordMilestone(cmd, p, args[0]), time.Now()); err != nil {
 					return v1Fail(cmd, f, err, nil)
 				}
 			}
@@ -1482,4 +1483,17 @@ func renderArchive(cmd *cobra.Command, f *v1Flags, id string, res *apexv1.Archiv
 			fmt.Fprintf(w, "recorded: archived with human-review pending (%s)\n", strings.Join(res.PendingHuman, ", "))
 		}
 	})
+}
+
+// coordMilestone is the milestone a coordinated verb's pause check reads:
+// change new's --milestone, change start's change's own; none for archive.
+func coordMilestone(cmd *cobra.Command, p *apexv1.Project, id string) string {
+	switch cmd.Name() {
+	case "new":
+		m, _ := cmd.Flags().GetString("milestone")
+		return m
+	case "start":
+		return p.ChangeMilestone(cmd.Context(), id)
+	}
+	return ""
 }
