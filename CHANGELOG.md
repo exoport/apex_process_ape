@@ -27,7 +27,9 @@ The framework's v1.4.1 payload declares `min_ape_version: "1.4.1"`. Measured on 
   An entry whose `for:` names `plan` is listed at the top of `ape status --json` (`advise`), where
   the framework's apex-plan reads it before it plans a milestone; `ape project check` caps those
   files together by `caps.advise_session`. An entry without `for:` is unchanged.
-  <!-- P: the measured result from D2's read-out goes here (D641, D651.1). -->
+  Measured on an expert-advice project (three runs per arm): with the planning session reading the
+  expert's advice, runs handled 2, 4 and 4 of the four planted defects, against 4, 4 and 2 without
+  it. It matches the default; it does not beat it. It added no blocks and cost about the same.
 - **Gate scratch and the gate guard** (D582, D634): `.go`, `.mk`, `.ps1` and Makefiles count as gate
   scripts; on Windows the gate guard reads Git Bash `/c/…` and Cygwin `/cygdrive/c/…` paths.
 - **`ape aboard` is aboard v0.4.2:** a board's server now closes before it removes its instance
