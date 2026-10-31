@@ -3,7 +3,9 @@ package apecmd
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
+	"slices"
 
 	"github.com/exoport/apex_process_ape/internal/apexv1"
 	"github.com/exoport/apex_process_ape/internal/bridge/config"
@@ -133,6 +135,33 @@ func recordLaunch(projectRoot, skill, manifestDir string, v1 *v1TaskLaunch) {
 // v1InlineHooks are a v1 project's own hooks as ape task injects them,
 // and the environment entry that tells the settings.json copies to stand
 // down (apexv1.EnvInlineHooks).
+// withCredsDeny is a v1 session's inline --settings with the NATS
+// credential's permissions.deny rules (apexv1.CredsDenyRules) added
+// (v1.5 stage 1a): ride inline, as the hooks do (backlog 31), so a
+// session reads them whatever the project's .claude/settings.json holds —
+// a hand-edited or reverted file — and not only from the rules
+// `ape project init` merges there. Deny lists add up across settings
+// sources, so the project's own rules still apply beside them.
+func withCredsDeny(settings map[string]any) map[string]any {
+	out := make(map[string]any, len(settings)+1)
+	maps.Copy(out, settings)
+	perms, _ := out["permissions"].(map[string]any)
+	merged := make(map[string]any, len(perms)+1)
+	maps.Copy(merged, perms)
+	var deny []string
+	if prior, ok := merged["deny"].([]string); ok {
+		deny = append(deny, prior...)
+	}
+	for _, r := range apexv1.CredsDenyRules {
+		if !slices.Contains(deny, r) {
+			deny = append(deny, r)
+		}
+	}
+	merged["deny"] = deny
+	out["permissions"] = merged
+	return out
+}
+
 func v1InlineHooks() (hooks []config.ExtraHook, env []string) {
 	specs := apexv1.InlineHooks()
 	hooks = make([]config.ExtraHook, 0, len(specs))

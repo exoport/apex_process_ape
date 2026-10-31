@@ -1098,7 +1098,7 @@ func prepareV1Task(ctx context.Context, p *apexv1.Project, o *taskOptions, cfg *
 	if err != nil {
 		return nil, &taskPreflightError{err: err}
 	}
-	cfg.spawnSettings.settings = plugins
+	cfg.spawnSettings.settings = withCredsDeny(plugins)
 	// F-E1-1: a plugin skill (<plugin>:<skill>, a tools: entry's) resolves
 	// as `ape project check` resolves it — listed, installed, carrying the
 	// skill — never by a SKILL.md under .claude/skills.

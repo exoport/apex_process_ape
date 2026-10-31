@@ -257,3 +257,36 @@ func TestTask_V1PluginsPreflight(t *testing.T) {
 		require.NoFileExists(t, filepath.Join(fake, "launch"), "no session was spawned")
 	})
 }
+
+// v1.5 stage 1a (READY-V15-STAGE0 item 4): a v1 session's inline --settings
+// carries the NATS credential's permissions.deny rules beside the hooks, so
+// they hold even when the project's .claude/settings.json lost them. The
+// control: a non-v1 project's session gets no such rules.
+func TestTask_V1InlineCredsDeny(t *testing.T) {
+	for _, bin := range []string{"bash", "git"} {
+		if _, err := exec.LookPath(bin); err != nil {
+			t.Skip(bin + " not installed")
+		}
+	}
+	ape := buildApe(t)
+	for _, v1 := range []bool{true, false} {
+		project, fake, env := launchProject(t, ape, v1)
+		if v1 {
+			// The project file lost its rules: a hand edit, a revert.
+			require.NoError(t, writeFile(filepath.Join(project, ".claude", "settings.json"), "{}\n"))
+		}
+		_, code := runApe(t, ape, project, env, "task", "apex-foo", "--idle-timeout", "30s", "--output-format", "json", "--cwd", project)
+		require.Equal(t, 0, code)
+		args := readLaunch(t, fake).args
+		for _, rule := range []string{`"Read(./hot/ape-nats.creds)"`, `"Read(/hot/ape-nats.creds)"`, `"Read(**/hot/ape-nats.creds)"`} {
+			if v1 {
+				require.Contains(t, args, rule, "the deny rules ride inline")
+			} else {
+				require.NotContains(t, args, rule, "the control: not a v1 project")
+			}
+		}
+		if v1 {
+			require.Contains(t, args, `"permissions":{"deny":[`)
+		}
+	}
+}
