@@ -8,7 +8,7 @@ test output in a way that misjudges the tests gets a notice; an expert's advice 
 planning session (`for: plan`); and a new page states ape's security model and its known limits.
 The framework's v1.4.1 payload declares `min_ape_version: "1.4.1"`. Measured on Claude Code 2.1.312.
 
-Evaluated on Claude Code 2.1.312 with the release build, bin-v141rc3 (b0df794), and the framework's
+Evaluated on Claude Code 2.1.312 with bin-v141rc3 (b0df794) and the framework's
 v1.4.1-rc.1 payload (digest 0270c5f2): three projects (new, existing, and one whose tests run
 against Docker containers) built in full. Greenfield passed its gates 7/7 and e2e 8/8, brownfield
 7/7 and 18/18, and notes-svc 37/37. In every project no process a check started was left running,
@@ -18,12 +18,8 @@ full-length ledger and taskforge projects on v1.4.0's payload with no run stoppe
 consecutive-block limit, and nine expert-advice runs for `for: plan` (below). ape's harness gates and
 `make check-framework` against the payload pass on Claude Code 2.1.312.
 
-**Known issue:** `check.grep-test-output`'s fix text suggests capturing the output with a bash
-here-string (`grep -q … <<<"$out"`), which `sh -c` (dash) cannot parse; ape runs checks under `sh`.
-Use `out=$(go test -v ./pkg) && printf '%s\n' "$out" | grep … >/dev/null`, without `-q`: under
-`set -o pipefail`, `grep -q` stops at its first match, and once the output is larger than a pipe
-buffer the check exits 141 on a pass. Or run the test by name and use its exit. Fixed in the next
-release.
+The release build is bin-v141rc5 (19f8210): rc3 plus the notice's capture form rewritten for sh
+and for pipefail, a text-only change R did not reach.
 
 - **A session that lost its login ends in minutes** (D603): `auth_lost` (manifest termination, `ape
   task`/`ape prompt` exit 15, `ape status` "stopped: auth-lost", `session.auth-lost` from `ape
@@ -37,7 +33,11 @@ release.
   (new JSON `notices`) and `change verify` for a check that greps test output in a way that
   misjudges the tests, including `grep -q` or `head` after the test runner under `set -o pipefail`,
   which exits 141 on a pass. Its fix text suggests running the test by name or capturing the output
-  first, never `pipefail`. It changes no exit and asks for no action.
+  first (`out=$(go test -v ./pkg) && printf '%s\n' "$out" | grep … >/dev/null`), never
+  `pipefail`. It changes no exit and asks for no action. That text was fixed twice from reasoning
+  and broke both times (a bash here-string, then `grep -q`, which exits 141 under pipefail once the
+  output passes a pipe buffer). ape's tests now parse every suggested command with `sh`, and run
+  the capture form under `sh -c 'set -o pipefail'` on 2 MB of output.
 - **`for: plan` advise entries** (D611, D641): an expert's advise files reach the planning session.
   An entry whose `for:` names `plan` is listed at the top of `ape status --json` (`advise`), where
   the framework's apex-plan reads it before it plans a milestone; `ape project check` caps those
