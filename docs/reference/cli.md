@@ -7464,6 +7464,11 @@ failing or timing out on a loaded machine) keeps the wait going.
 The run's stdout is in its own file (the handle's "stdout"), apart from
 stderr (its "log"), so a --output-format json envelope reads clean.
 
+APEX v1.5 (in development): in a project of an ensemble with NATS reachable,
+the wait wakes on the project's published events — the run's run-end among
+them, logged once its exit is recorded — instead of re-reading the run every
+second; a slow read every 15 s still catches a supervisor that died.
+
 --json prints one object instead of the lines: id, state (running, held,
 ended or lost), exit_code (null until it ends), log, stdout, run_id and run_dir (the
 run's own record, once it has one), depth and parent_run (the nesting rule:

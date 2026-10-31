@@ -33,6 +33,7 @@ import (
 
 	"github.com/exoport/apex_process_ape/internal/apexv1"
 	"github.com/exoport/apex_process_ape/internal/atomicfile"
+	"github.com/exoport/apex_process_ape/internal/coord/member"
 	"github.com/exoport/apex_process_ape/internal/cost"
 	"github.com/exoport/apex_process_ape/internal/pipeline"
 	"github.com/exoport/apex_process_ape/internal/proctree"
@@ -369,6 +370,11 @@ failing or timing out on a loaded machine) keeps the wait going.
 The run's stdout is in its own file (the handle's "stdout"), apart from
 stderr (its "log"), so a --output-format json envelope reads clean.
 
+APEX v1.5 (in development): in a project of an ensemble with NATS reachable,
+the wait wakes on the project's published events — the run's run-end among
+them, logged once its exit is recorded — instead of re-reading the run every
+second; a slow read every 15 s still catches a supervisor that died.
+
 --json prints one object instead of the lines: id, state (running, held,
 ended or lost), exit_code (null until it ends), log, stdout, run_id and run_dir (the
 run's own record, once it has one), depth and parent_run (the nesting rule:
@@ -398,12 +404,39 @@ start it a second time.`,
 	return cmd
 }
 
+// runWaitPoll is how often `ape run wait` re-reads its run's handle;
+// runWaitLevelEvery, how often it does in a member project with NATS
+// reachable, where it wakes on the project's published events instead —
+// the run-end the supervisor logs once the exit is recorded among them
+// (v1.5 stage 1a) — and the slow read only catches a supervisor that died
+// logging nothing. Vars so tests can stretch them.
+var (
+	runWaitPoll       = time.Second
+	runWaitLevelEvery = 15 * time.Second
+)
+
+// runWaitWatch is member.Watch for the project a handle belongs to: no
+// wake and live false outside a member project or with NATS unreachable.
+func runWaitWatch(ctx context.Context, path string) (wake <-chan struct{}, stop func(), live bool) {
+	p, err := apexv1.Open(projectRootOfHandle(path))
+	if err != nil {
+		return nil, func() {}, false
+	}
+	return member.Watch(ctx, p)
+}
+
 func waitDetached(ctx context.Context, cmd *cobra.Command, path string, timeout time.Duration, jsonOut bool) error {
 	var deadline time.Time
 	if timeout > 0 {
 		deadline = time.Now().Add(timeout)
 	}
 	out := cmd.OutOrStdout()
+	wake, stopWatch, live := runWaitWatch(ctx, path)
+	defer stopWatch()
+	tick := runWaitPoll
+	if live {
+		tick = runWaitLevelEvery
+	}
 	for {
 		h, err := readHandle(path)
 		if err != nil {
@@ -451,10 +484,15 @@ func waitDetached(ctx context.Context, cmd *cobra.Command, path string, timeout 
 			}
 			return reportedErr(exitCodeStillRunning, errors.New("still running"))
 		}
+		next := tick
+		if !deadline.IsZero() {
+			next = min(tick, max(time.Until(deadline), 0)+10*time.Millisecond)
+		}
 		select {
 		case <-ctx.Done():
 			return reportedErr(exitCodeStillRunning, ctx.Err())
-		case <-time.After(time.Second):
+		case <-wake:
+		case <-time.After(next):
 		}
 	}
 }
