@@ -1,11 +1,12 @@
 # CHANGELOG
 
-## v1.4.2 (unreleased — draft)
+## v1.4.2 (2026-10-31)
 
 APEX v1.4.2, on v1.4.1: **the delegated conductor** (D658–D661). A person's own Claude Code
 session can drive the projects' orchestrators and perform some of the person's acts under their
 standing orders, checked by ape. This patch release adds verbs, keys and events (D659 B1 amends
-the patch rule for it):
+the patch rule for it). The framework's v1.4.2 payload declares `min_ape_version: "1.4.2"`.
+Measured on Claude Code 2.1.312. What it adds:
 
 - **Standing orders**, `_apex/standing-orders/<person>.md`: who, which acts, which conditions, as
   frontmatter, and free text for the conductor. `ape orders show|accept|revoke`; accept and revoke
