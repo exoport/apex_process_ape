@@ -1,6 +1,9 @@
 package apexv1
 
 import (
+	"os/exec"
+	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -91,5 +94,49 @@ func TestTestGrepShapes_FixTextNeverSuggestsPipefail(t *testing.T) {
 			_, fix, _ := strings.Cut(n, " — ")
 			require.NotContains(t, fix, "pipefail", cmd)
 		}
+	}
+}
+
+// D653: every command a notice suggests runs under ape's own shell. ape
+// runs checks with `sh -c`, which is dash on Debian and Ubuntu, so a
+// bash-only form (a `<<<` here-string, `[[`, `<(…)`) suggested as the fix
+// would only trade one broken check for another. Each backticked command in
+// a fix text must parse under /bin/sh.
+func TestTestGrepShapes_SuggestedCommandsAreSh(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("checks run under sh; no /bin/sh here")
+	}
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("no sh on PATH")
+	}
+	tick := regexp.MustCompile("`([^`]+)`")
+	seen := map[string]bool{}
+	for _, cmd := range []string{
+		"go test ./... | tail -5",
+		"go test -v ./x | grep -q '^--- PASS: TestX$'",
+		"set -o pipefail; go test -v ./x | grep -q 'PASS: TestX'",
+		"set -o pipefail; go test ./... | head -1",
+	} {
+		for _, n := range testGrepShapes(cmd) {
+			_, fix, ok := strings.Cut(n, " — ")
+			require.True(t, ok, n)
+			for _, m := range tick.FindAllStringSubmatch(fix, -1) {
+				seen[m[1]] = true
+			}
+		}
+	}
+	require.NotEmpty(t, seen)
+	for snippet := range seen {
+		if !strings.Contains(snippet, "go test") {
+			continue // a pattern or a name (`--- PASS: TestX `), not a command
+		}
+		line := strings.ReplaceAll(snippet, "…", "-- '--- PASS: TestX '")
+		out, err := exec.Command("sh", "-n", "-c", line).CombinedOutput()
+		require.NoError(t, err, "a suggested command does not parse under /bin/sh: %s\n%s", line, out)
+	}
+	// The control: the here-string form D650 shipped does not.
+	_, err := exec.Command("sh", "-n", "-c", `out=$(go test -v ./pkg) && grep -q x <<<"$out"`).CombinedOutput()
+	if err == nil {
+		t.Log("this host's /bin/sh accepts <<< (bash as sh); the control proves nothing here")
 	}
 }

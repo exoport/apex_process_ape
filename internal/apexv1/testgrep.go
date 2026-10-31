@@ -86,14 +86,14 @@ func testGrepShapes(cmd string) []string {
 		if !pipefail {
 			out = append(out, fmt.Sprintf("pipes `%s` into `%s`, so the check's exit is the last command's, not the tests' — "+
 				"a failing test can pass the check: run the tests by name and use their exit (`go test -run '^TestX$' ./pkg`), "+
-				"or capture the output first (`out=$(go test -v ./pkg) && grep -q … <<<\"$out\"`)",
+				"or capture the output first (`out=$(go test -v ./pkg) && printf '%%s\\n' \"$out\" | grep -q …`)",
 				name, filepath.Base(bareCommand(pl[len(pl)-1])[0])))
 		}
 		if setPipefail {
 			if early := earlyExit(pl[runner+1:]); early != "" {
 				out = append(out, fmt.Sprintf("pipes `%s` into `%s` under pipefail: `%s` stops reading at its first match, `%s` then dies of SIGPIPE, "+
 					"and the check exits 141 although the tests passed — run the tests by name and use their exit (`go test -run '^TestX$' ./pkg`), "+
-					"or capture the output first (`out=$(go test -v ./pkg) && grep -q … <<<\"$out\"`)",
+					"or capture the output first (`out=$(go test -v ./pkg) && printf '%%s\\n' \"$out\" | grep -q …`)",
 					name, early, early, name))
 			}
 		}
