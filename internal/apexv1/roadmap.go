@@ -2,9 +2,11 @@ package apexv1
 
 import (
 	"fmt"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Milestone statuses.
@@ -25,8 +27,18 @@ type Milestone struct {
 	Gate       string   `json:"gate"`
 	Budget     *float64 `json:"budget,omitempty"`
 	BudgetRaw  string   `json:"-"`
-	Goal       string   `json:"goal"`
-	OutOfScope []string `json:"out_of_scope,omitempty"`
+	// BudgetTokens and BudgetWallSecs are the milestone's limits in tokens
+	// (all four kinds, tokens_total) and in session wall time (the summed
+	// duration of its runs), from "Budget-tokens: 60M" and "Budget-wall:
+	// 4h" (v1.4.2 D1 L2). Enforced, as Budget: is, under limits.budget:
+	// enforce; Budget: (USD) stays as the legacy form, derived from the
+	// price table.
+	BudgetTokens    *int64   `json:"budget_tokens,omitempty"`
+	BudgetTokensRaw string   `json:"-"`
+	BudgetWallSecs  *float64 `json:"budget_wall_secs,omitempty"`
+	BudgetWallRaw   string   `json:"-"`
+	Goal            string   `json:"goal"`
+	OutOfScope      []string `json:"out_of_scope,omitempty"`
 	// ApprovedAt is the timestamp inside `approved (by <who> <ts>)`.
 	ApprovedAt string `json:"approved_at,omitempty"`
 }
@@ -100,6 +112,19 @@ func ParseRoadmap(file, doc string) *Roadmap {
 					raw := strings.TrimPrefix(strings.TrimSpace(strings.TrimSuffix(ms.BudgetRaw, "USD")), "$")
 					if f, err := strconv.ParseFloat(strings.TrimSpace(raw), 64); err == nil {
 						ms.Budget = &f
+					}
+					continue
+				case "budget-tokens":
+					ms.BudgetTokensRaw = stripComment(val)
+					if n, err := ParseTokens(ms.BudgetTokensRaw); err == nil {
+						ms.BudgetTokens = &n
+					}
+					continue
+				case "budget-wall":
+					ms.BudgetWallRaw = stripComment(val)
+					if d, err := time.ParseDuration(strings.TrimSpace(ms.BudgetWallRaw)); err == nil && d > 0 {
+						secs := d.Seconds()
+						ms.BudgetWallSecs = &secs
 					}
 					continue
 				case "goal":
@@ -242,9 +267,72 @@ func ValidateRoadmap(file, doc string) []Finding {
 		if m.BudgetRaw != "" && m.Budget == nil {
 			out = append(out, Finding{File: file, Line: m.Line, Message: m.ID + " budget \"" + m.BudgetRaw + "\" is not a number (USD)"})
 		}
+		if m.BudgetTokensRaw != "" && m.BudgetTokens == nil {
+			out = append(out, Finding{File: file, Line: m.Line, Message: m.ID + " Budget-tokens \"" + m.BudgetTokensRaw + "\" is not a token count above 0 (60M, 500k, 1.5G, 2000000)"})
+		}
+		if m.BudgetWallRaw != "" && m.BudgetWallSecs == nil {
+			out = append(out, Finding{File: file, Line: m.Line, Message: m.ID + " Budget-wall \"" + m.BudgetWallRaw + "\" is not a duration above 0 (4h, 90m, 2h30m)"})
+		}
 		if strings.TrimSpace(m.Goal) == "" || !hasProse([]mdLine{{Text: m.Goal}}) {
 			out = append(out, Finding{File: file, Line: m.Line, Message: m.ID + " has no `Goal:` paragraph"})
 		}
 	}
 	return out
+}
+
+// The token-count suffixes: k, M, G.
+const (
+	tokensK = 1e3
+	tokensM = 1e6
+	tokensG = 1e9
+)
+
+// ParseTokens reads a token count: a whole number, or a number with a k, M
+// or G suffix (thousands, millions, billions; either case) — 60M, 1.5G,
+// 500k, 2000000. It must be above 0.
+func ParseTokens(s string) (int64, error) {
+	s = strings.ReplaceAll(strings.TrimSpace(s), "_", "")
+	mult := 1.0
+	if s != "" {
+		switch s[len(s)-1] {
+		case 'k', 'K':
+			mult = tokensK
+		case 'm', 'M':
+			mult = tokensM
+		case 'g', 'G':
+			mult = tokensG
+		}
+		if mult != 1 {
+			s = s[:len(s)-1]
+		}
+	}
+	f, err := strconv.ParseFloat(s, 64)
+	n := int64(f * mult)
+	if err != nil || f <= 0 || n <= 0 || math.IsInf(f, 0) || math.IsNaN(f) {
+		return 0, fmt.Errorf("%q is not a token count above 0 (60M, 500k, 1.5G, 2000000)", s)
+	}
+	if mult == 1 && f != math.Trunc(f) {
+		return 0, fmt.Errorf("%q is not a whole number of tokens", s)
+	}
+	return n, nil
+}
+
+// appendMilestoneBudgets puts the token and wall budget lines into the
+// milestone AppendMilestone just added, before its Goal: line.
+func appendMilestoneBudgets(doc string, b MilestoneBudgets) string {
+	var lines string
+	if b.Tokens != "" {
+		lines += "Budget-tokens: " + b.Tokens + "\n"
+	}
+	if b.Wall != "" {
+		lines += "Budget-wall: " + b.Wall + "\n"
+	}
+	if lines == "" {
+		return doc
+	}
+	i := strings.LastIndex(doc, "\nGoal: ")
+	if i < 0 {
+		return doc
+	}
+	return doc[:i+1] + lines + doc[i+1:]
 }

@@ -26,6 +26,9 @@ type RunCost struct {
 	// written before tokens_total counts too; DurationSecs the run's wall.
 	TokensTotal  int     `json:"tokens_total"`
 	DurationSecs float64 `json:"duration_seconds"`
+	// TokensCacheRead is the cache-read share of TokensTotal: the rest is
+	// the non-cache tokens, new work rather than context re-read (D656 Q-L1).
+	TokensCacheRead int `json:"tokens_cache_read"`
 }
 
 // RunCosts lists every pipeline and task run's cost under the project's
@@ -42,7 +45,7 @@ func RunCosts(projectRoot string) ([]RunCost, error) {
 				Kind: kind, Name: name, RunID: m.RunID, StartedAt: day, CostUSD: m.Totals.CostUSD, Args: m.firstArgs(),
 				ParentRun: m.ParentRun, Depth: m.Depth,
 				TokensTotal:  m.Totals.TokensInput + m.Totals.TokensOutput + m.Totals.TokensCacheRead + m.Totals.TokensCacheCreation,
-				DurationSecs: m.DurationSecs,
+				DurationSecs: m.DurationSecs, TokensCacheRead: m.Totals.TokensCacheRead,
 			})
 		})
 		if err != nil {

@@ -126,22 +126,32 @@ command that updates ape — the same floor ` + "`ape framework update`" + ` ref
 install by (exit 11). A dev build or a pseudo-version cannot be compared:
 a warning, and the session runs.
 
-In an APEX v1 project ape also enforces the milestone budget, when
+In an APEX v1 project ape also enforces the milestone budgets, when
 _apex/config.yaml says so (it is off by default):
   limits:
     budget: enforce   # or off
-With enforce, and a Budget: line on the current milestone (the first not
-done, and only when approved), a session that would start with the
-milestone's spend already at its budget is refused (exit 1, code
-milestone.budget-exceeded); a running session is stopped when the
-milestone's spend — its runs since approval, plus this session's live cost
-read from its transcripts, sub-agents included, every 30 s (sooner in its
-first half minute) — reaches it.
+With enforce, and a budget line on the current milestone (the first not
+done, and only when approved) — Budget-tokens: (tokens_total), Budget-wall:
+(the summed session time of its runs) or the legacy Budget: (USD) — a session
+that would start with the milestone's use already at a budget is refused
+(exit 1, code milestone.budget-exceeded); a running session is stopped when
+the milestone's use — its runs since approval, plus this session's live
+cost and tokens read from its transcripts, sub-agents included, and its
+wall time, every 30 s (sooner in its first half minute) — reaches it.
 The stop ends the run (exit 1) with termination kind "budget" in the run
-manifest (spent_usd, budget_usd, session_cost_usd) and is recorded under
+manifest (unit usd|tokens|wall, with spent_*, budget_* and session_* for
+it) and is recorded under
 the milestone's stops in _apex/state/limit-stops.json (ignored by git:
-nothing is committed, whichever branch the session was on); ` + "`ape status`" + ` shows it. Raising the Budget:
-line (a person's call) lets sessions start again. An unparseable
+nothing is committed, whichever branch the session was on); ` + "`ape status`" + ` shows it. Raising the budget
+line (a person's call) lets sessions start again.
+
+Each session can be capped too (v1.4.2), with or without a milestone
+budget: limits.session: {tokens: 20M, wall: 3h} in _apex/config.yaml, and
+--max-tokens for one session (over limits.session.tokens). At a cap the
+session ends with termination max_tokens (session_tokens, max_tokens) or
+max_duration (elapsed_seconds, max_seconds), exit 1, a person's call; the
+stop is the session's, not the milestone's. Unlike --max-duration, the wall
+cap does not reset at a sub-agent boundary. An unparseable
 _apex/config.yaml in a v1 project refuses every session (exit 2) rather
 than run it with no limits.
 
@@ -371,6 +381,7 @@ func newTaskCmd() *cobra.Command {
 		allowDirtyFlag     bool
 		idleTimeoutFlag    time.Duration
 		maxDurationFlag    time.Duration
+		maxTokensFlag      string
 		outputFormat       string
 		jsonAlias          bool
 		cwdFlag            string
@@ -476,6 +487,15 @@ func newTaskCmd() *cobra.Command {
 				}
 				taskCommit = &pipeline.CommitDirective{Mode: pipeline.CommitModeExplicit, Message: msg}
 			}
+			var maxTokens int64
+			if cmd.Flags().Changed("max-tokens") {
+				n, err := apexv1.ParseTokens(maxTokensFlag)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Error: --max-tokens: %s\n", err)
+					os.Exit(ExitUsage)
+				}
+				maxTokens = n
+			}
 			warnUnknownOutputStyleFlag(cmd, outputStyleFlag)
 			opts := taskOptions{
 				skill:                 args[0],
@@ -490,6 +510,7 @@ func newTaskCmd() *cobra.Command {
 				allowDirty:            allowDirtyFlag,
 				idleTimeout:           idleTimeoutFlag,
 				maxDuration:           maxDurationFlag,
+				maxTokens:             maxTokens,
 				jsonMode:              jsonMode,
 				quiet:                 quietFlag,
 				projectRoot:           projectRoot,
@@ -524,6 +545,7 @@ func newTaskCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&allowDirtyFlag, "commit-allow-dirty", false, "Bypass the dirty-tree gate (relevant only with --task-commit)")
 	cmd.Flags().DurationVar(&idleTimeoutFlag, "idle-timeout", 0, "Idle backstop: cancel only after this long with no progress across hook events or transcript growth (e.g. 15m); default 60m. PTY output is NOT an anchor here — see `ape prompt`")
 	cmd.Flags().DurationVar(&maxDurationFlag, "max-duration", sessiondriver.DefaultMaxDuration, "Wall-clock ceiling regardless of progress (e.g. 8h); off by default (D159: a run showing progress stops only on the idle timeout, ape's limits or a person). The clock resets on each sub-agent boundary, so a sequential batch skill is bounded per item.")
+	cmd.Flags().StringVar(&maxTokensFlag, "max-tokens", "", "In an APEX v1 project: stop the session at this many tokens (tokens_total, sub-agents included: 20M, 500k), termination max_tokens; over limits.session.tokens; off by default (v1.4.2)")
 	cmd.Flags().StringVar(&outputFormat, "output-format", "human", "Output format: human|json (json = result envelope on stdout, progress on stderr)")
 	cmd.Flags().BoolVar(&jsonAlias, "json", false, "Alias for --output-format json")
 	cmd.Flags().BoolVar(&quietFlag, "quiet", false, "Suppress the per-event progress stream")
@@ -556,6 +578,7 @@ type taskOptions struct {
 	allowDirty            bool
 	idleTimeout           time.Duration
 	maxDuration           time.Duration
+	maxTokens             int64
 	jsonMode              bool
 	quiet                 bool
 	projectRoot           string
@@ -640,6 +663,17 @@ type taskUsage struct {
 	CacheCreation5mInputTokens int `json:"cache_creation_5m_input_tokens"`
 	CacheCreation1hInputTokens int `json:"cache_creation_1h_input_tokens"`
 	NumTurns                   int `json:"num_turns"`
+}
+
+// tokensLine is the run's tokens for the summary line (v1.4.2 D1 L4):
+// tokens_total and the share of it that is not cache reads.
+func (u taskUsage) tokensLine() string {
+	total := u.InputTokens + u.OutputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens
+	line := apexv1.FormatTokens(int64(total)) + " tokens"
+	if total > 0 {
+		line += fmt.Sprintf(" (%.0f%% non-cache)", 100*float64(total-u.CacheReadInputTokens)/float64(total))
+	}
+	return line
 }
 
 // taskModelUsage is one model's (or one session's) usage share on the
@@ -850,6 +884,10 @@ func dispatchTaskOnce(ctx context.Context, o taskOptions, cfg runConfig) (taskRu
 		v1Launch = l
 	} else if err := v1ConfigError(o.projectRoot); err != nil {
 		return taskRun{}, &taskPreflightError{err: err}
+	} else if o.maxTokens > 0 {
+		// The token cap is measured by the v1 limits watch: elsewhere it
+		// would be a flag that silently does nothing.
+		return taskRun{}, &taskPreflightError{err: errors.New("--max-tokens applies in an APEX v1 project (_apex/state/ exists); " + o.projectRoot + " is not one")}
 	}
 	step := buildTaskStep(o)
 	spec := pipeline.NewSingleStepSpec(o.skill, step, o.taskCommit)
@@ -1051,7 +1089,7 @@ func prepareV1Task(ctx context.Context, p *apexv1.Project, o *taskOptions, cfg *
 	}
 	// Backlog 30: the milestone's enforced budget refuses the start, or
 	// stops the session when its live spend reaches it.
-	if cfg.budgetWatch, err = newV1BudgetWatch(ctx, p, o.skill, o.args); err != nil {
+	if cfg.budgetWatch, err = newV1BudgetWatch(ctx, p, o.skill, o.args, o.maxTokens); err != nil {
 		return nil, &taskPreflightError{err: err}
 	}
 	// Backlog 36: the plugins _apex/config.yaml lists are installed at
@@ -1242,8 +1280,8 @@ func printTaskSummary(env taskEnvelope, runErr error) {
 		// as evidence, and on its own it says the dispatch was fine when
 		// the commit-ownership assertion may never have run. A skip is
 		// only reported if the summary cannot be quoted without it.
-		fmt.Fprintf(os.Stdout, "✅ task %s done in %.1fs — $%.2f, %d turn(s)%s\n",
-			env.Skill, env.DurationSeconds, env.CostUSD, env.Usage.NumTurns,
+		fmt.Fprintf(os.Stdout, "✅ task %s done in %.1fs — %s, $%.2f, %d turn(s)%s\n",
+			env.Skill, env.DurationSeconds, env.Usage.tokensLine(), env.CostUSD, env.Usage.NumTurns,
 			contractSkipSuffix(env.CommitContract))
 	}
 	if env.ManifestPath != "" {

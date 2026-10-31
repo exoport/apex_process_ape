@@ -132,6 +132,7 @@ var findingRules = []findingRule{
 	rule("", "has no `Gate:`", "roadmap.no-gate"),
 	rule("", "has no `Goal:`", "roadmap.no-goal"),
 	rule("", `is not a number \(USD\)`, "roadmap.bad-budget"),
+	rule("", `Budget-(tokens|wall) ".*" is not a`, "roadmap.bad-budget"),
 	rule("", `says approved, but ape has no record of a person approving it`, CodeStatusUnrecorded),
 	rule("", `says done, but ape recorded no close of it`, CodeStatusUnrecorded),
 	rule("", `gate changed since it was approved`, CodeGateChanged),

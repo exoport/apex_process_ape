@@ -35,6 +35,15 @@ type MilestoneStatus struct {
 	// approved (all runs when it is not approved yet); a session stopped
 	// at the budget counts at the cost ape measured when it stopped it.
 	SpentUSD float64 `json:"spent_usd"`
+	// SpentTokens, SpentTokensNonCache and SpentWallSecs are the same
+	// runs' tokens (tokens_total), the part of them that is not cache
+	// reads, and their summed session time (v1.4.2 D1 L4); BudgetTokens
+	// and BudgetWallSecs the milestone's Budget-tokens: and Budget-wall:.
+	SpentTokens         int64    `json:"spent_tokens"`
+	SpentTokensNonCache int64    `json:"spent_tokens_non_cache"`
+	SpentWallSecs       float64  `json:"spent_wall_secs"`
+	BudgetTokens        *int64   `json:"budget_tokens,omitempty"`
+	BudgetWallSecs      *float64 `json:"budget_wall_secs,omitempty"`
 	// BudgetEnforced: limits.budget is enforce and the milestone has a
 	// Budget:, so ape task stops at it (backlog 30).
 	BudgetEnforced bool `json:"budget_enforced"`
@@ -690,8 +699,10 @@ func (p *Project) milestoneStatus(m *Milestone, runs []cost.RunCost, tweaks map[
 	if ms.Stops == nil {
 		ms.Stops = []LimitStop{}
 	}
-	ms.SpentUSD = round2(milestoneSpend(m, runs, ms.Stops, tweaks))
-	ms.BudgetEnforced = p.limits().BudgetEnforced() && m.Budget != nil
+	use := milestoneUse(m, runs, ms.Stops, tweaks)
+	ms.SpentUSD, ms.SpentTokens, ms.SpentTokensNonCache, ms.SpentWallSecs = round2(use.USD), use.Tokens, use.NonCache(), math.Round(use.WallSecs)
+	ms.BudgetTokens, ms.BudgetWallSecs = m.BudgetTokens, m.BudgetWallSecs
+	ms.BudgetEnforced = p.limits().BudgetEnforced() && (m.Budget != nil || m.BudgetTokens != nil || m.BudgetWallSecs != nil)
 	ctx := context.Background()
 	ms.ConsecutiveBlocks, ms.ConsecutiveBlocksCap = p.consecutiveBlocks(ctx, m.ID), p.limits().ConsecutiveBlocksCap()
 	ms.Diagnostics = Diagnostics(p.blocksExceeded(ctx, m.ID))
@@ -1073,13 +1084,7 @@ func (m *MilestoneStatus) briefLines() []string {
 	default:
 		gate += fmt.Sprintf(" — last red (%s) at %s (%s)", m.GateLast.Why(), m.GateLast.At, short(m.GateLast.SHA))
 	}
-	spend := fmt.Sprintf("  spent $%.2f", m.SpentUSD)
-	if m.Budget != nil {
-		spend += fmt.Sprintf(" of $%.2f budget", *m.Budget)
-		if m.BudgetEnforced {
-			spend += " (enforced)"
-		}
-	}
+	spend := "  " + m.SpendLine()
 	lines := []string{fmt.Sprintf("Milestone %s — %s: %s", m.ID, m.Title, m.StatusText), gate, spend}
 	if m.ConsecutiveBlocks > 0 {
 		lines = append(lines, fmt.Sprintf("  %d of %d changes blocked in a row (limits.consecutive_blocks)", m.ConsecutiveBlocks, m.ConsecutiveBlocksCap))
@@ -1131,4 +1136,33 @@ func approvalSelfCheck(rec *MilestoneRecord) *GateSummary {
 	}
 	sc := rec.Approval.SelfCheck
 	return &GateSummary{SHA: sc.SHA, Exit: sc.Exit, At: sc.At, Log: sc.Log, AcceptGreen: rec.Approval.AcceptGreen}
+}
+
+// SpendLine is the milestone's use against its budgets, one line (v1.4.2
+// D1 L4): tokens with their non-cache share, session time, and USD.
+func (m *MilestoneStatus) SpendLine() string {
+	tokens := FormatTokens(m.SpentTokens) + " tokens"
+	if m.SpentTokens > 0 {
+		tokens += fmt.Sprintf(" (%.0f%% non-cache)", 100*float64(m.SpentTokensNonCache)/float64(m.SpentTokens))
+	}
+	if m.BudgetTokens != nil {
+		tokens += " of " + FormatTokens(*m.BudgetTokens)
+	}
+	wall := formatSecs(m.SpentWallSecs) + " session time"
+	if m.BudgetWallSecs != nil {
+		wall += " of " + formatSecs(*m.BudgetWallSecs)
+	}
+	usd := fmt.Sprintf("$%.2f", m.SpentUSD)
+	if m.Budget != nil {
+		usd += fmt.Sprintf(" of $%.2f", *m.Budget)
+	}
+	line := "spent " + tokens + " · " + wall + " · " + usd
+	if m.Budget != nil || m.BudgetTokens != nil || m.BudgetWallSecs != nil {
+		if m.BudgetEnforced {
+			line += " (budget enforced)"
+		} else {
+			line += " (budget not enforced: limits.budget)"
+		}
+	}
+	return line
 }

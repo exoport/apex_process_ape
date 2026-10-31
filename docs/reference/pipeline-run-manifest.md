@@ -248,6 +248,14 @@ termination:
   spent_usd: 41.20            # budget only: the milestone's spend
   budget_usd: 40.00           # budget only: the milestone's Budget: line
   session_cost_usd: 6.10      # budget only: this session's live cost
+  unit: tokens                # budget only (v1.4.2): usd | tokens | wall — the budget it reached
+  spent_tokens: 60200000      # budget: the milestone's tokens (recorded runs + this session)
+  budget_tokens: 60000000     # budget: its Budget-tokens: line
+  session_tokens: 4100000     # budget and max_tokens: this session's live tokens_total
+  max_tokens: 20000000        # max_tokens only: the session's cap
+  spent_wall_seconds: 14460   # budget: the milestone's summed session time
+  budget_wall_seconds: 14400  # budget: its Budget-wall: line
+  session_wall_seconds: 1820  # budget: this session's wall time
   resets: "11pm (Europe/Madrid)"          # usage_limit: the reset as Claude Code printed it; usage_guard: resets_at's local time
   resets_at: 2026-10-16T23:00:00+02:00    # usage_limit: parsed, absent when it does not parse; usage_guard: the 7-day window's reset
 ```
@@ -260,7 +268,8 @@ termination:
 | `auth_lost` | v1.4.1: the session lost its Claude Code login. Its last turn ended with Claude Code's own message of kind `authentication_failed` ("Login expired · Please run /login", "Not logged in · …", "Please run /login · API Error: 401 …") and nothing followed for the 3-minute API-error grace window. Running it again fails the same way until a person logs in (`claude /login`). `ape status` shows "stopped: auth-lost"; `ape change review --run` reports `session.auth-lost`. | 15 |
 | `prompt_not_submitted` | ape typed the line and claude never submitted it: no `UserPromptSubmit` through the Enter press and the two retries. `message` says whether the line was drawn and quotes the input row. | 1 |
 | `repl_not_ready` | claude never came up inside the PTY within the 30-second window: an unknown blocking modal, a trust dialog ape could not get past, or a claude that drew nothing. Claude Code's Settings Warning (a settings file holds a value it skips, such as an invalid permission rule) ends the wait at once instead: ape never presses Continue, which would run without the skipped rule, and `message` carries the warning's lines. `message` carries the last pane; the raw PTY bytes are saved beside the run. `status` is `failed`. A `--max-duration` shorter than the window records `max_duration` instead, and a run you cancel while claude is still starting stays `cancelled`. | 3 |
-| `budget` | APEX v1, `limits.budget: enforce`: the milestone's spend reached its budget, and ape stopped the session. | 1 |
+| `budget` | APEX v1, `limits.budget: enforce`: the milestone's use reached a budget — `unit` says which: `tokens` (`Budget-tokens:`), `wall` (`Budget-wall:`) or `usd` (`Budget:`; also when `unit` is absent, a stop recorded before v1.4.2) — and ape stopped the session. | 1 |
+| `max_tokens` | APEX v1, v1.4.2: the session reached its own token cap (`limits.session.tokens`, or `ape task --max-tokens`). `session_tokens` and `max_tokens` say how far. A person's call. A session's wall cap (`limits.session.wall`) ends it as `max_duration`, with `elapsed_seconds` and `max_seconds`. | 1 |
 | `usage_limit` | A claude.ai plan's usage limit stopped the session: the same limit line on two pane reads 15 s apart with no hook between them. `ape status` shows "stopped: usage-limit, resets <ts>". Matched against Claude Code 2.1.302's text. | 14 |
 | `usage_guard` | APEX v1: ape did not start the session. Its usage guard read the plan's 7-day window over `limits.usage.seven_day`, or with the launch's share over `limits.usage.ceiling` ([config-yaml.md](config-yaml.md#limitsusage)). `message` names the reading, the share, the reset and the `--usage-ok` override; `stages` is empty. `ape status` shows "stopped: usage-guard (not started: the 7-day window), resets <ts>". A person's call. | 14 |
 | `parent_gone` | APEX v1: the `apex-loop` run that started this session ended first (its ape process is gone), and ape stopped the session. | 1 |

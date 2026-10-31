@@ -252,11 +252,11 @@ func newCostsRollCmd() *cobra.Command {
 // one task row (groupLoopTasks).
 func printCostsHuman(r *cost.Rollup, v1 bool) {
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "BUCKET\tRUNS\tCOST\tINPUT\tOUTPUT\tCACHE-R")
+	fmt.Fprintln(tw, "BUCKET\tRUNS\tTOKENS\tNON-CACHE\tWALL\tCOST\tINPUT\tOUTPUT\tCACHE-R")
 	// All-time totals per pipeline.
 	for name, b := range r.Pipelines {
-		fmt.Fprintf(tw, "pipeline:%s\t%d\t$%.2f\t%d\t%d\t%d\n",
-			name, len(b.Runs), b.Totals.CostUSD,
+		fmt.Fprintf(tw, "pipeline:%s\t%d\t%s\t$%.2f\t%d\t%d\t%d\n",
+			name, len(b.Runs), bucketUse(b.Totals), b.Totals.CostUSD,
 			b.Totals.InputTokens, b.Totals.OutputTokens, b.Totals.CacheReadTokens)
 	}
 	// All-time totals per task skill (PLAN-11).
@@ -265,19 +265,19 @@ func printCostsHuman(r *cost.Rollup, v1 bool) {
 		tasks = groupLoopTasks(tasks)
 	}
 	for name, b := range tasks {
-		fmt.Fprintf(tw, "task:%s\t%d\t$%.2f\t%d\t%d\t%d\n",
-			name, len(b.Runs), b.Totals.CostUSD,
+		fmt.Fprintf(tw, "task:%s\t%d\t%s\t$%.2f\t%d\t%d\t%d\n",
+			name, len(b.Runs), bucketUse(b.Totals), b.Totals.CostUSD,
 			b.Totals.InputTokens, b.Totals.OutputTokens, b.Totals.CacheReadTokens)
 	}
 	if r.Chats.Totals.CostUSD > 0 || len(r.Chats.Runs) > 0 {
-		fmt.Fprintf(tw, "chats\t%d\t$%.2f\t%d\t%d\t%d\n",
-			len(r.Chats.Runs), r.Chats.Totals.CostUSD,
+		fmt.Fprintf(tw, "chats\t%d\t%s\t$%.2f\t%d\t%d\t%d\n",
+			len(r.Chats.Runs), bucketUse(r.Chats.Totals), r.Chats.Totals.CostUSD,
 			r.Chats.Totals.InputTokens, r.Chats.Totals.OutputTokens, r.Chats.Totals.CacheReadTokens)
 	}
 	// All-time totals for `ape prompt` sessions (PLAN-12).
 	if r.Prompts.Totals.CostUSD > 0 || len(r.Prompts.Runs) > 0 {
-		fmt.Fprintf(tw, "prompts\t%d\t$%.2f\t%d\t%d\t%d\n",
-			len(r.Prompts.Runs), r.Prompts.Totals.CostUSD,
+		fmt.Fprintf(tw, "prompts\t%d\t%s\t$%.2f\t%d\t%d\t%d\n",
+			len(r.Prompts.Runs), bucketUse(r.Prompts.Totals), r.Prompts.Totals.CostUSD,
 			r.Prompts.Totals.InputTokens, r.Prompts.Totals.OutputTokens, r.Prompts.Totals.CacheReadTokens)
 	}
 	tw.Flush()
@@ -421,4 +421,19 @@ func sortedOverrideKeys(m map[string]cost.OverrideEntry) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// bucketUse is a bucket's TOKENS, NON-CACHE and WALL cells, tab-separated (v1.4.2 D1 L4):
+// tokens_total, the share of it that is not cache reads, and the runs'
+// summed wall time ("-" where the rollup records none: chats, prompts, and
+// a rollup rebuilt before 1.4.2).
+func bucketUse(t cost.Totals) string {
+	tokens, nonCache, wall := apexv1.FormatTokens(int64(t.TokensTotal())), "-", "-"
+	if t.TokensTotal() > 0 {
+		nonCache = fmt.Sprintf("%.0f%%", 100*t.NonCacheShare())
+	}
+	if t.DurationSecs > 0 {
+		wall = time.Duration(t.DurationSecs * float64(time.Second)).Round(time.Second).String()
+	}
+	return tokens + "\t" + nonCache + "\t" + wall
 }

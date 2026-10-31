@@ -23,11 +23,13 @@ import (
 const v1OrchestratorSkill = apexv1.OrchestratorSkill
 
 // v1BudgetWatch stops an `ape task` session of an APEX v1 project when its
-// milestone's spend reaches the milestone's budget (backlog 30, only with
-// limits.budget: enforce and a Budget: line). The spend is live: what the
-// milestone's runs had recorded when the session started, plus the
-// session's own cost so far, read from its transcripts — the main session
-// and its sub-agents — as the manifest's telemetry would be.
+// milestone's use reaches one of the milestone's budgets (backlog 30, only
+// with limits.budget: enforce and a Budget:, Budget-tokens: or
+// Budget-wall: line), or the session reaches its own cap (limits.session,
+// --max-tokens; v1.4.2 D1). The use is live: what the milestone's runs had
+// recorded when the session started, plus the session's own cost and
+// tokens so far, read from its transcripts — the main session and its
+// sub-agents — as the manifest's telemetry would be, and its wall time.
 type v1BudgetWatch struct {
 	p      *apexv1.Project
 	limits *apexv1.TaskLimits
@@ -36,12 +38,20 @@ type v1BudgetWatch struct {
 	hit *apexv1.LimitHit
 }
 
-// newV1BudgetWatch decides the session's budget limit, or refuses to start
-// it (apexv1 FailError milestone.budget-exceeded). nil, nil when no budget
-// applies — also for a tweak's session (args names a change of `milestone:
-// none`, D40), which counts toward no milestone.
-func newV1BudgetWatch(ctx context.Context, p *apexv1.Project, skill, args string) (*v1BudgetWatch, error) {
-	tl, err := p.TaskLimitsFor(ctx, skill, args)
+// newV1BudgetWatch decides the session's limits, or refuses to start it
+// (apexv1 FailError milestone.budget-exceeded). nil, nil when none applies
+// — a tweak's session (args names a change of `milestone: none`, D40)
+// counts toward no milestone, so only its session caps can. maxTokens,
+// when above 0, is `ape task --max-tokens` over limits.session.tokens.
+func newV1BudgetWatch(ctx context.Context, p *apexv1.Project, skill, args string, maxTokens int64) (*v1BudgetWatch, error) {
+	caps := apexv1.SessionCaps{}
+	if cfg, err := apexv1.LoadConfig(p.Root); err == nil {
+		caps = cfg.Limits.SessionCaps()
+	}
+	if maxTokens > 0 {
+		caps.Tokens = maxTokens
+	}
+	tl, err := p.TaskLimitsWith(ctx, skill, args, caps)
 	if err != nil || tl == nil {
 		return nil, err
 	}
@@ -60,7 +70,7 @@ var (
 // records the hit and fails the session's step through stop — again every
 // second until the run ends, since a fatal posted before the step's wait
 // began is drained when that wait starts.
-func (w *v1BudgetWatch) run(ctx context.Context, sessionCost func() float64, stop func(error)) {
+func (w *v1BudgetWatch) run(ctx context.Context, sessionUse func() apexv1.SessionUse, stop func(error)) {
 	for i := 0; ; i++ {
 		wait := budgetPollSteady
 		if i < len(budgetPolls) {
@@ -71,17 +81,14 @@ func (w *v1BudgetWatch) run(ctx context.Context, sessionCost func() float64, sto
 			return
 		case <-time.After(wait):
 		}
-		hit := w.limits.Check(sessionCost())
+		hit := w.limits.Check(sessionUse())
 		if hit == nil {
 			continue
 		}
 		w.mu.Lock()
 		w.hit = hit
 		w.mu.Unlock()
-		err := &pipeline.LimitStopError{
-			Kind: pipeline.TerminationBudget, Message: hit.Message,
-			SpentUSD: hit.Stop.SpentUSD, BudgetUSD: hit.Stop.BudgetUSD, SessionCostUSD: hit.Stop.SessionUSD,
-		}
+		err := limitStopError(hit, w.limits)
 		for {
 			stop(err)
 			select {
@@ -91,6 +98,25 @@ func (w *v1BudgetWatch) run(ctx context.Context, sessionCost func() float64, sto
 			}
 		}
 	}
+}
+
+// limitStopError is the run error a hit ends the session with: its
+// termination kind (budget, max_tokens, max_duration) and figures.
+func limitStopError(hit *apexv1.LimitHit, l *apexv1.TaskLimits) *pipeline.LimitStopError {
+	s := hit.Stop
+	err := &pipeline.LimitStopError{
+		Kind: pipeline.TerminationBudget, Message: hit.Message, Unit: s.Unit,
+		SpentUSD: s.SpentUSD, BudgetUSD: s.BudgetUSD, SessionCostUSD: s.SessionUSD,
+		SpentTokens: s.SpentTokens, BudgetTokens: s.BudgetTokens, SessionTokens: s.SessionTokens,
+		SpentWallSecs: s.SpentWallSecs, BudgetWallSecs: s.BudgetWallSecs, SessionWallSecs: s.SessionWallSecs,
+	}
+	switch hit.Reason {
+	case apexv1.StopMaxTokens:
+		err.Kind, err.MaxTokens = pipeline.TerminationMaxTokens, l.Session.Tokens
+	case apexv1.StopMaxDuration:
+		err.Kind, err.MaxSecs = pipeline.TerminationMaxDuration, l.Session.Wall.Seconds()
+	}
+	return err
 }
 
 // stopped is the hit that stopped the session, or nil.
@@ -103,9 +129,10 @@ func (w *v1BudgetWatch) stopped() *apexv1.LimitHit {
 	return w.hit
 }
 
-// liveSessionCost is the running step's cost so far: its main transcript
-// and every sub-agent transcript of it, hook-captured or found beside it.
-func (c *interactiveCore) liveSessionCost() float64 {
+// liveSessionUse is the running step's cost and tokens so far — its main
+// transcript and every sub-agent transcript of it, hook-captured or found
+// beside it — and its wall time since it started.
+func (c *interactiveCore) liveSessionUse() apexv1.SessionUse {
 	c.transcriptMu.Lock()
 	main, since := c.activeTranscript, c.stepStartedAt
 	var subs []string
@@ -115,8 +142,12 @@ func (c *interactiveCore) liveSessionCost() float64 {
 		}
 	}
 	c.transcriptMu.Unlock()
+	use := apexv1.SessionUse{}
+	if !since.IsZero() {
+		use.Wall = time.Since(since)
+	}
 	if main == "" {
-		return 0
+		return use
 	}
 	seen := map[string]bool{}
 	var paths []string
@@ -130,7 +161,10 @@ func (c *interactiveCore) liveSessionCost() float64 {
 			paths = append(paths, s)
 		}
 	}
-	return cost.ScanPaths(paths).Totals.CostUSD
+	t := cost.ScanPaths(paths).Totals
+	use.USD = t.CostUSD
+	use.Tokens = int64(t.InputTokens + t.OutputTokens + t.CacheReadTokens + t.CacheCreationTokens)
+	return use
 }
 
 // recordBudgetStop records a budget stop in _apex/state/milestones.json
@@ -139,8 +173,8 @@ func (c *interactiveCore) liveSessionCost() float64 {
 // Best-effort beyond a warning: the run is over and already reported.
 func recordBudgetStop(projectRoot, skill, manifestDir string, w *v1BudgetWatch) {
 	hit := w.stopped()
-	if hit == nil {
-		return
+	if hit == nil || hit.Reason != apexv1.StopBudget {
+		return // a session cap is the session's, not the milestone's
 	}
 	stop := hit.Stop
 	if runDir := pipeline.ResolveLatestRunDir(projectRoot, skill, manifestDir); runDir != "" {

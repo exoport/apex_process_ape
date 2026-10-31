@@ -111,6 +111,7 @@ func walkManifestTree(root string, fold func(name, runID string, day time.Time, 
 			CacheReadTokens:     m.Totals.TokensCacheRead,
 			CacheCreationTokens: m.Totals.TokensCacheCreation,
 			NumTurns:            m.Totals.NumTurns,
+			DurationSecs:        m.DurationSecs,
 		}
 		fold(name, m.RunID, day, totals, perModelTotals(m.Totals.ModelUsage))
 	})

@@ -244,7 +244,18 @@ func writeTerminationDetail(b *strings.Builder, t *TerminationRecord) {
 		}
 		fmt.Fprintf(b, "- the claude.ai plan's usage limit stopped the session; it resets %s\n", resets)
 	case TerminationBudget:
-		fmt.Fprintf(b, "- the milestone had spent $%.2f of its $%.2f budget, $%.2f of it this session (measured live; the totals below count only completed steps)\n",
-			t.SpentUSD, t.BudgetUSD, t.SessionCostUSD)
+		switch t.Unit {
+		case "tokens":
+			fmt.Fprintf(b, "- the milestone had used %d of its %d-token budget, %d of them this session (measured live; the totals below count only completed steps)\n",
+				t.SpentTokens, t.BudgetTokens, t.SessionTokens)
+		case "wall":
+			fmt.Fprintf(b, "- the milestone's sessions had run %s of its %s wall budget, %s of it this session\n",
+				formatDuration(t.SpentWallSecs), formatDuration(t.BudgetWallSecs), formatDuration(t.SessionWallSecs))
+		default:
+			fmt.Fprintf(b, "- the milestone had spent $%.2f of its $%.2f budget, $%.2f of it this session (measured live; the totals below count only completed steps)\n",
+				t.SpentUSD, t.BudgetUSD, t.SessionCostUSD)
+		}
+	case TerminationMaxTokens:
+		fmt.Fprintf(b, "- the session used %d tokens against its cap of %d (limits.session.tokens / --max-tokens)\n", t.SessionTokens, t.MaxTokens)
 	}
 }

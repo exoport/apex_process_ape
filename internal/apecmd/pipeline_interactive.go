@@ -923,7 +923,7 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 		core.driver.SetStopGate(cfg.stopGate.bounded(runCtx))
 	}
 	if cfg.budgetWatch != nil {
-		go cfg.budgetWatch.run(runCtx, core.liveSessionCost, core.driver.SignalStepFatal)
+		go cfg.budgetWatch.run(runCtx, core.liveSessionUse, core.driver.SignalStepFatal)
 	}
 	if cfg.usageLimit != nil {
 		go cfg.usageLimit.run(runCtx, core.sessionName, core.driver.LastActivityAt, core.driver.SignalStepFatal)

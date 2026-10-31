@@ -670,6 +670,13 @@ func newTerminationRecord(runErr error) *TerminationRecord {
 			BudgetUSD:      lse.BudgetUSD,
 			SessionCostUSD: lse.SessionCostUSD,
 			Resets:         lse.Resets,
+			Unit:           lse.Unit, SpentTokens: lse.SpentTokens, BudgetTokens: lse.BudgetTokens,
+			SessionTokens: lse.SessionTokens, MaxTokens: lse.MaxTokens,
+			SpentWallSecs: lse.SpentWallSecs, BudgetWallSecs: lse.BudgetWallSecs, SessionWallSecs: lse.SessionWallSecs,
+			MaxSecs: lse.MaxSecs,
+		}
+		if lse.Kind == TerminationMaxDuration {
+			rec.ElapsedSecs = lse.SessionWallSecs // a session wall cap (limits.session.wall)
 		}
 		if !lse.ResetsAt.IsZero() {
 			at := lse.ResetsAt

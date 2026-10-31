@@ -56,8 +56,23 @@ the patch rule for it):
   act, not even on the person's earlier typed words.
 - Events `delegated`, `orders`, `orchestrator-dead`, `orchestrator-idle`, `question`,
   `question-answered`, `conductor-stalled`; the notifier's `APE_ORDERS`.
-- `tokens_total` in a run's manifest totals, and tokens and wall time in the cost rollup
-  (limits, D1).
+- **Limits in tokens and wall time** (D1, D655.4, D656). A token count is `tokens_total`: input,
+  output, cache read and cache creation, sub-agents included. It is in every run's manifest totals
+  and in the cost rollup, and reports show the non-cache share beside it.
+  - **Milestone budgets:** `Budget-tokens: 60M` and `Budget-wall: 4h` lines in `roadmap.md` (and
+    `ape milestone new --budget-tokens --budget-wall`). They are enforced as `Budget:` is, under
+    `limits.budget: enforce`: a session is refused at a budget, and a running one is stopped
+    there (termination `budget`, with `unit` and the token or wall figures). A milestone's wall
+    is the summed session time of its runs, not the calendar. `Budget:` (USD) stays as the legacy
+    form, derived from the price table.
+  - **Session caps:** `limits.session: {tokens, wall}` and `ape task --max-tokens`. They end a
+    session with termination `max_tokens` or `max_duration`, a person's call, and never count
+    against the milestone.
+  - **Reports:** `ape status` shows the milestone's tokens (with the non-cache share), session
+    time and USD against its budgets, and its JSON gains `spent_tokens`,
+    `spent_tokens_non_cache`, `spent_wall_secs`, `budget_tokens` and `budget_wall_secs`.
+    `ape costs` gains TOKENS, NON-CACHE and WALL columns, and the `ape task` summary line prints
+    the run's tokens.
 
 Fixes from the v1.4.1 evaluation (D659 D2–D4):
 

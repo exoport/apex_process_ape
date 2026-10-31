@@ -48,11 +48,15 @@ func newMilestoneNewCmd() *cobra.Command {
 	var f v1Flags
 	var gate, goal string
 	var budget float64
+	var budgetTokens, budgetWall string
 	cmd := &cobra.Command{
-		Use:   `new "<title>" --gate "<cmd>" [--budget N]`,
+		Use:   `new "<title>" --gate "<cmd>" [--budget-tokens 60M] [--budget-wall 4h] [--budget N]`,
 		Short: "Append a milestone (Status: proposed) to roadmap.md",
 		Long: `Append "## M<n> — <title>" to development/roadmap.md with Status: proposed, the gate
-command, the budget (USD list-price equivalent, when given) and a Goal: line. The id is
+command, the budget lines given — Budget-tokens: (a token count: 60M, 500k), Budget-wall:
+(the milestone's summed session time: 4h, 90m), Budget: (legacy, USD list-price
+equivalent) — and a Goal: line. ape enforces them under limits.budget: enforce
+(` + "`ape task --help`" + `). The id is
 the next free M<n>. Write the Goal paragraph and the Out of scope bullets afterwards
 (or pass --goal); the Status: line is ape's. Committed as "apex: <M> proposed".
 The gate's scripts must exist, and the gate must run red, before a person approves it
@@ -61,7 +65,7 @@ The gate's scripts must exist, and the gate must run red, before a person approv
 Refused on a change branch (see ` + "`ape milestone --help`" + `).
 
 Exit codes: 0 ok (prints the id) · 1 no roadmap.md, or HEAD on a change branch · 2 usage.`,
-		Example: `  ape milestone new "Walking skeleton" --gate "./scripts/e2e.sh m1" --budget 30`,
+		Example: `  ape milestone new "Walking skeleton" --gate "./scripts/e2e.sh m1" --budget-tokens 60M --budget-wall 4h`,
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			p, err := v1Project(&f)
@@ -75,7 +79,7 @@ Exit codes: 0 ok (prints the id) · 1 no roadmap.md, or HEAD on a change branch 
 			if cmd.Flags().Changed("budget") {
 				b = &budget
 			}
-			id, err := p.NewMilestone(cmd.Context(), args[0], gate, b, goal)
+			id, err := p.NewMilestoneWith(cmd.Context(), args[0], gate, goal, apexv1.MilestoneBudgets{Tokens: budgetTokens, Wall: budgetWall, USD: b})
 			if err != nil {
 				return v1Fail(cmd, &f, err, nil)
 			}
@@ -86,7 +90,9 @@ Exit codes: 0 ok (prints the id) · 1 no roadmap.md, or HEAD on a change branch 
 	}
 	addV1Flags(cmd, &f)
 	cmd.Flags().StringVar(&gate, "gate", "", "the one command that is red until the milestone is done (required)")
-	cmd.Flags().Float64Var(&budget, "budget", 0, "budget in USD list-price equivalent")
+	cmd.Flags().StringVar(&budgetTokens, "budget-tokens", "", "the milestone's token budget: tokens_total of its runs (60M, 500k)")
+	cmd.Flags().StringVar(&budgetWall, "budget-wall", "", "the milestone's wall budget: its runs' summed session time (4h, 90m)")
+	cmd.Flags().Float64Var(&budget, "budget", 0, "legacy: budget in USD list-price equivalent")
 	cmd.Flags().StringVar(&goal, "goal", "", "the Goal: paragraph (else a placeholder to fill in)")
 	return cmd
 }

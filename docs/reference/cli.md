@@ -5083,11 +5083,14 @@ Flags:
 Append a milestone (Status: proposed) to roadmap.md
 
 ```
-ape milestone new "<title>" --gate "<cmd>" [--budget N] [flags]
+ape milestone new "<title>" --gate "<cmd>" [--budget-tokens 60M] [--budget-wall 4h] [--budget N] [flags]
 ```
 
 Append "## M<n> — <title>" to development/roadmap.md with Status: proposed, the gate
-command, the budget (USD list-price equivalent, when given) and a Goal: line. The id is
+command, the budget lines given — Budget-tokens: (a token count: 60M, 500k), Budget-wall:
+(the milestone's summed session time: 4h, 90m), Budget: (legacy, USD list-price
+equivalent) — and a Goal: line. ape enforces them under limits.budget: enforce
+(`ape task --help`). The id is
 the next free M<n>. Write the Goal paragraph and the Out of scope bullets afterwards
 (or pass --goal); the Status: line is ape's. Committed as "apex: <M> proposed".
 The gate's scripts must exist, and the gate must run red, before a person approves it
@@ -5100,14 +5103,16 @@ Exit codes: 0 ok (prints the id) · 1 no roadmap.md, or HEAD on a change branch 
 Examples:
 
 ```
-  ape milestone new "Walking skeleton" --gate "./scripts/e2e.sh m1" --budget 30
+  ape milestone new "Walking skeleton" --gate "./scripts/e2e.sh m1" --budget-tokens 60M --budget-wall 4h
 ```
 
 Flags:
 
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
-| `--budget` | float64 | `0` | budget in USD list-price equivalent |
+| `--budget` | float64 | `0` | legacy: budget in USD list-price equivalent |
+| `--budget-tokens` | string | `—` | the milestone's token budget: tokens_total of its runs (60M, 500k) |
+| `--budget-wall` | string | `—` | the milestone's wall budget: its runs' summed session time (4h, 90m) |
 | `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
 | `--gate` | string | `—` | the one command that is red until the milestone is done (required) |
 | `--goal` | string | `—` | the Goal: paragraph (else a placeholder to fill in) |
@@ -8874,22 +8879,32 @@ command that updates ape — the same floor `ape framework update` refuses an
 install by (exit 11). A dev build or a pseudo-version cannot be compared:
 a warning, and the session runs.
 
-In an APEX v1 project ape also enforces the milestone budget, when
+In an APEX v1 project ape also enforces the milestone budgets, when
 _apex/config.yaml says so (it is off by default):
   limits:
     budget: enforce   # or off
-With enforce, and a Budget: line on the current milestone (the first not
-done, and only when approved), a session that would start with the
-milestone's spend already at its budget is refused (exit 1, code
-milestone.budget-exceeded); a running session is stopped when the
-milestone's spend — its runs since approval, plus this session's live cost
-read from its transcripts, sub-agents included, every 30 s (sooner in its
-first half minute) — reaches it.
+With enforce, and a budget line on the current milestone (the first not
+done, and only when approved) — Budget-tokens: (tokens_total), Budget-wall:
+(the summed session time of its runs) or the legacy Budget: (USD) — a session
+that would start with the milestone's use already at a budget is refused
+(exit 1, code milestone.budget-exceeded); a running session is stopped when
+the milestone's use — its runs since approval, plus this session's live
+cost and tokens read from its transcripts, sub-agents included, and its
+wall time, every 30 s (sooner in its first half minute) — reaches it.
 The stop ends the run (exit 1) with termination kind "budget" in the run
-manifest (spent_usd, budget_usd, session_cost_usd) and is recorded under
+manifest (unit usd|tokens|wall, with spent_*, budget_* and session_* for
+it) and is recorded under
 the milestone's stops in _apex/state/limit-stops.json (ignored by git:
-nothing is committed, whichever branch the session was on); `ape status` shows it. Raising the Budget:
-line (a person's call) lets sessions start again. An unparseable
+nothing is committed, whichever branch the session was on); `ape status` shows it. Raising the budget
+line (a person's call) lets sessions start again.
+
+Each session can be capped too (v1.4.2), with or without a milestone
+budget: limits.session: {tokens: 20M, wall: 3h} in _apex/config.yaml, and
+--max-tokens for one session (over limits.session.tokens). At a cap the
+session ends with termination max_tokens (session_tokens, max_tokens) or
+max_duration (elapsed_seconds, max_seconds), exit 1, a person's call; the
+stop is the session's, not the milestone's. Unlike --max-duration, the wall
+cap does not reset at a sub-agent boundary. An unparseable
 _apex/config.yaml in a v1 project refuses every session (exit 2) rather
 than run it with no limits.
 
@@ -9134,6 +9149,7 @@ Flags:
 | `--leftovers` | string | `kill` | What to do, once the session has ended, with the processes it left running (a server its Bash tool backgrounded), found by the session's APE_SESSION marker: kill stops each one's tree, report leaves them running. Either way they are listed under session_leftovers in the run record (Linux only; ape's own detached workers are never touched) |
 | `--manifest-dir` | string | `—` | Override the run-artifact base dir (default: <project>/_output/ape/tasks; _apex/state/runs/tasks in an APEX v1 project) |
 | `--max-duration` | duration | `0s` | Wall-clock ceiling regardless of progress (e.g. 8h); off by default (D159: a run showing progress stops only on the idle timeout, ape's limits or a person). The clock resets on each sub-agent boundary, so a sequential batch skill is bounded per item. |
+| `--max-tokens` | string | `—` | In an APEX v1 project: stop the session at this many tokens (tokens_total, sub-agents included: 20M, 500k), termination max_tokens; over limits.session.tokens; off by default (v1.4.2) |
 | `--model` | string | `—` | Claude model (APEX v1 unset: models.<skill> in _apex/config.yaml, else the parent session's, else claude's default). A bare family (fable, haiku, mythos, opus, sonnet) resolves to its current generation; sonnet-5 / claude-sonnet-5 / opus[1m] pin explicitly |
 | `--nats-creds` | string | `—` | NATS .creds file; its user identity is baked into every subject (env APE_NATS_CREDS). |
 | `--nats-url` | string | `—` | NATS server URL for progress events + transcript upload (env APE_NATS_URL). Empty disables both. |
