@@ -71,11 +71,24 @@ func liveStatuslineUsageRecorded(t *testing.T, claudeBin string) {
 	}
 	require.NotNil(t, r, "no usage reading after a turn: Claude Code did not run ape's statusLine command in an ape "+
 		"PTY session, or handed it no rate_limits (the plan has none, or the field moved).\nlast pane:\n%s", paneOf(ctx, name))
-	for label, v := range map[string]*float64{"five_hour": r.FiveHour, "seven_day": r.SevenDay} {
-		require.NotNil(t, v, "%s missing from the reading", label)
-		require.True(t, *v >= 0 && *v <= 1, "%s = %v is not a fraction 0..1 — used_percentage changed scale", label, *v)
+	// seven_day is always there; five_hour is not: right after a plan's
+	// usage reset Claude Code sends no 5-hour window at all (measured
+	// 2026-10-31 on 2.1.312, D673), and ape's guard skips the 5-hour check
+	// then. A five_hour present must still be a fraction with a resets_at.
+	require.NotNil(t, r.SevenDay, "seven_day missing from the reading")
+	type window struct {
+		v  *float64
+		at *time.Time
 	}
-	for label, at := range map[string]*time.Time{"five_hour": r.FiveHourResetsAt, "seven_day": r.SevenDayResetsAt} {
+	windows := map[string]window{"seven_day": {r.SevenDay, r.SevenDayResetsAt}}
+	if r.FiveHour != nil {
+		windows["five_hour"] = window{r.FiveHour, r.FiveHourResetsAt}
+	} else {
+		t.Logf("five_hour absent from this reading (none after a usage reset; D673): not judged")
+	}
+	for label, w := range windows {
+		v, at := w.v, w.at
+		require.True(t, *v >= 0 && *v <= 1, "%s = %v is not a fraction 0..1 — used_percentage changed scale", label, *v)
 		require.NotNil(t, at, "%s resets_at missing", label)
 		require.True(t, at.After(time.Now().Add(-time.Minute)) && at.Before(time.Now().Add(8*24*time.Hour)),
 			"%s resets_at = %v is not a near-future instant — resets_at is no longer epoch seconds", label, at)
@@ -83,6 +96,5 @@ func liveStatuslineUsageRecorded(t *testing.T, claudeBin string) {
 	first, last := usage.EndRun(key)
 	require.NotNil(t, first, "the reading was not kept under the run's launch key (--run)")
 	require.NotNil(t, last)
-	t.Logf("claude %s ran the status line: %s (5h resets %s, 7d resets %s)", r.ClaudeVersion, r.Short(),
-		r.FiveHourResetsAt.Format(time.RFC3339), r.SevenDayResetsAt.Format(time.RFC3339))
+	t.Logf("claude %s ran the status line: %s (7d resets %s)", r.ClaudeVersion, r.Short(), r.SevenDayResetsAt.Format(time.RFC3339))
 }
