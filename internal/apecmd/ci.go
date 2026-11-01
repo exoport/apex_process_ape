@@ -184,7 +184,7 @@ func newCIWorkflowCmd() *cobra.Command {
 		Short: "Print, or write, the merge queue's workflow (.github/workflows/apex-queue.yml)",
 		Long: `Print the merge queue's GitHub Actions workflow, or with --write put it at
 ` + apexv1.QueueWorkflowRel + ` (v1.5 stage 1a, section 5.5). On merge_group it runs
-` + "`ape ci check`" + ` (main's queue's required check, "apex-queue / check") and publishes
+` + "`ape ci check`" + ` (main's queue's required check, "apex-queue-check") and publishes
 ejected when it is red; on a push to main it publishes close-merged; on a pull request it
 passes at once, since the queue checks the tree that merges. Milestone branches have no
 queue: ape lands on them itself (D702). It runs on self-hosted runners with ape installed, and reads two secrets,
