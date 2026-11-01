@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -90,10 +91,20 @@ func TestLive_CredsDeny(t *testing.T) {
 			got := run(t, arm)
 			for _, tool := range []string{"Read", "Grep", "Glob"} {
 				o, ok := got[tool]
+				if tool != "Read" && o.absent {
+					// Claude Code 2.1.31x has no Grep or Glob tool (its tool
+					// list, claude-surface.json): a session searches through
+					// Bash, which ape's pre-tool hook judges (CredsGuard). The
+					// session's own word that the tool is absent — a call
+					// refused as no such tool, or ToolSearch finding none — is
+					// what makes the arm not applicable; silence is not.
+					t.Logf("%s: not a tool in this Claude Code's sessions (%s) — not exercised; a search goes through Bash, which CredsGuard judges", tool, firstLine(o.text))
+					continue
+				}
 				require.Truef(t, ok, "the session made no %s call: the rule was not exercised for %s (%v)", tool, tool, got)
 				require.Falsef(t, o.sawCanary, "DRIFT: %s returned the credential's contents despite permissions.deny (%s): %s", tool, arm, o.text)
 			}
-			require.Falsef(t, got["Glob"].sawFile, "Glob listed the credential despite permissions.deny (%s): %s", arm, got["Glob"].text)
+			require.Falsef(t, !got["Glob"].absent && got["Glob"].sawFile, "Glob listed the credential despite permissions.deny (%s): %s", arm, got["Glob"].text)
 		})
 	}
 	t.Run("control", func(t *testing.T) {
@@ -158,14 +169,28 @@ func credsProject(t *testing.T, apeBin, arm string) string {
 // toolOutcome is what one read tool's result showed.
 type toolOutcome struct {
 	sawCanary, sawFile bool
-	text               string
+	// absent: the session found the tool is not one it has — its call was
+	// refused as no such tool, or ToolSearch for it found none.
+	absent bool
+	text   string
+}
+
+// toolAbsentRe is how a session learns a tool is not one it has: the
+// refusal of a call to it, or ToolSearch's empty answer.
+var toolAbsentRe = regexp.MustCompile(`(?i)no such tool|is not available in this session|isn't available|no matching deferred tools`)
+
+// firstLine is s's first line, for a log.
+func firstLine(s string) string {
+	s, _, _ = strings.Cut(strings.TrimSpace(s), "\n")
+	return s
 }
 
 // credsToolOutcomes reads the transcripts' Read, Grep and Glob calls and
 // their results.
 func credsToolOutcomes(t *testing.T, dirs []string) map[string]toolOutcome {
 	t.Helper()
-	names := map[string]string{} // tool_use id → tool name
+	names := map[string]string{}      // tool_use id → tool name
+	searched := map[string][]string{} // ToolSearch's tool_use id → the tools it selected
 	got := map[string]toolOutcome{}
 	for _, dir := range dirs {
 		files, _ := filepath.Glob(filepath.Join(dir, "*.jsonl"))
@@ -184,9 +209,12 @@ func credsToolOutcomes(t *testing.T, dirs []string) map[string]toolOutcome {
 					continue
 				}
 				var blocks []struct {
-					Type      string          `json:"type"`
-					ID        string          `json:"id"`
-					Name      string          `json:"name"`
+					Type  string `json:"type"`
+					ID    string `json:"id"`
+					Name  string `json:"name"`
+					Input struct {
+						Query string `json:"query"`
+					} `json:"input"`
 					ToolUseID string          `json:"tool_use_id"` //nolint:tagliatelle // Claude Code's transcript shape
 					Content   json.RawMessage `json:"content"`
 				}
@@ -197,8 +225,20 @@ func credsToolOutcomes(t *testing.T, dirs []string) map[string]toolOutcome {
 					switch b.Type {
 					case "tool_use":
 						names[b.ID] = b.Name
+						if q, ok := strings.CutPrefix(b.Input.Query, "select:"); ok && b.Name == "ToolSearch" {
+							searched[b.ID] = strings.Split(q, ",")
+						}
 					case "tool_result":
 						name := names[b.ToolUseID]
+						if tools := searched[b.ToolUseID]; tools != nil && toolAbsentRe.Match(b.Content) {
+							for _, tool := range tools {
+								o := got[tool]
+								o.absent = true
+								o.text += "ToolSearch: " + string(b.Content)
+								got[tool] = o
+							}
+							continue
+						}
 						if name != "Read" && name != "Grep" && name != "Glob" {
 							continue
 						}
@@ -206,6 +246,7 @@ func credsToolOutcomes(t *testing.T, dirs []string) map[string]toolOutcome {
 						o := got[name]
 						o.sawCanary = o.sawCanary || strings.Contains(text, credsCanary)
 						o.sawFile = o.sawFile || strings.Contains(text, "ape-nats.creds")
+						o.absent = o.absent || name != "Read" && toolAbsentRe.MatchString(text)
 						o.text += text
 						got[name] = o
 					}
