@@ -475,6 +475,12 @@ func (p *Project) roadmap() *Roadmap {
 	return ParseRoadmap(p.Rel(p.RoadmapMD()), doc)
 }
 
+// IsMilestone reports whether id is a milestone of roadmap.md.
+func (p *Project) IsMilestone(id string) bool {
+	r := p.roadmap()
+	return r != nil && r.Find(id) != nil
+}
+
 // Overlap describes an active change sharing ground with another.
 type Overlap struct {
 	With    string   `json:"with"`

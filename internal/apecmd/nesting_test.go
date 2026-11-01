@@ -575,3 +575,40 @@ func TestNesting_ReviewRunTakesTheChildLockFirst(t *testing.T) {
 	_, statErr := os.Stat(filepath.Join(runlog.SessionLocksRoot(root), "child-orch-run.json"))
 	require.ErrorIs(t, statErr, os.ErrNotExist, "the refused review released its lock")
 }
+
+// v1.5 stage 1a: in a project in an ensemble, the loop lock is per
+// milestone (the loop's first --args word); elsewhere it stays one per
+// project (D62).
+func TestNesting_LoopLockPerMilestoneInAnEnsemble(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "_apex", "state"), 0o755))
+	loop := func(args string) *sessionLaunch {
+		return (&sessionLaunch{depth: 1, skill: apexv1.OrchestratorSkill}).withScope(root, args)
+	}
+	var ce *apexv1.ConflictError
+
+	// No coordination: block: one loop per project, whatever it runs.
+	m1 := loop("M1")
+	require.Empty(t, m1.scope)
+	require.NoError(t, m1.acquire(root, "pid-1"))
+	require.ErrorAs(t, loop("M2").acquire(root, "pid-2"), &ce)
+	require.Equal(t, apexv1.CodeLoopRunning, ce.Code)
+	m1.release()
+
+	require.NoError(t, os.WriteFile(filepath.Join(root, "_apex", "config.yaml"),
+		[]byte("coordination:\n  ensemble: shop\n  home: ../home\n  url: nats://127.0.0.1:4222\n"), 0o644))
+	m1 = loop("M1 --resume")
+	require.Equal(t, "M1", m1.scope)
+	require.NoError(t, m1.acquire(root, "pid-1"))
+	m2 := loop("M2")
+	require.NoError(t, m2.acquire(root, "pid-2"), "a loop on another milestone runs beside it")
+	err := loop("M1").acquire(root, "pid-3")
+	require.ErrorAs(t, err, &ce, "a second loop on the same milestone is refused")
+	require.Equal(t, apexv1.CodeLoopRunning, ce.Code)
+	require.Contains(t, err.Error(), "M1 already has an apex-loop run")
+	require.Equal(t, filepath.Join(runlog.SessionLocksRoot(root), "orchestrator-M1.json"), m1.locks[0])
+	m1.release()
+	m2.release()
+	require.NoError(t, loop("M1").acquire(root, "pid-3"))
+	require.Empty(t, (&sessionLaunch{depth: 1, skill: "apex-apply"}).withScope(root, "M1").scope, "only a loop is scoped")
+}

@@ -87,7 +87,7 @@ release = delete at the last revision; expiry = the key's TTL.
 
 | Lease | Held by | TTL, renewal |
 | ----- | ------- | ------------ |
-| `milestone.<project>.<M>` | the orchestrator driving the milestone | 30 s, renewed every 10 s |
+| `milestone.<project>.<M>` | one checkout of the project, as `<user>/<checkout>`: taken by `ape milestone claim <M>`, renewed by the milestone's `apex-loop` run | 30 s, renewed every 10 s while the run lives |
 | `steward.<ens>` | the ensemble's steward, any eligible member's conductor | 30 s, renewed every 10 s |
 | `coord.<ens>` | the ensemble's coordinator | 30 s, renewed every 10 s |
 | `sup.leader` | the active supervisor; a standby takes over on expiry | 30 s, renewed every 10 s |
@@ -95,6 +95,18 @@ release = delete at the last revision; expiry = the key's TTL.
 
 A credential may create, renew and delete only its own `conductor.<own user>.*` keys; the other kinds are claimable
 by any member.
+
+A milestone's lease is a person's claim kept alive by a run (stage 1a). `ape milestone claim <M>` takes it for this
+checkout, or keeps it when this checkout already holds it. When another checkout holds it, the claim is refused with
+`session.not-lease-holder`, naming the holder. The milestone's loop, `ape task apex-loop --args <M>`, re-takes the lease
+at launch and renews it for the run's life. A loop on a milestone this checkout never claimed, or released, is
+refused before any session starts. In an ensemble's project the loop lock is per milestone, so loops on two
+milestones run side by side; a second loop on the same one is `session.loop-running`. `change new --milestone <M>` and
+`change start` of M's change need this checkout to hold the lease.
+
+Between runs the lease can lapse. A later run or change start takes it again from this checkout's lease book
+(`_apex/state/coord/tokens.json`), unless another member claimed M meanwhile. In that case it is refused, and never
+taken back. `ape milestone release <M>` deletes the key and marks the book released.
 
 A conductor receives its ensemble's events through the durable consumer **`conductor-<user>-<ens>`** on `APE_EVENTS`.
 Only the holder of `conductor.<user>.<ens>` binds it, so a conductor that takes the lease over inherits the events the

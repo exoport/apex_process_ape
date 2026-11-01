@@ -4655,11 +4655,13 @@ every change in flight wherever it is worked.
 Subcommands:
 
 - `approve` — Write Status: approved (by <who> <ts>)
+- `claim` — Take a milestone's lease for this checkout (a project in an ensemble)
 - `close` — Run the gate; on exit 0 write Status: done (<ts> <sha>)
 - `full` — Run the milestone's full checks and regression command, and record them for the gate
 - `gate` — Run the milestone's gate and record the result
 - `gate-test` — Self-test a gate folder before its milestone exists: the stub run passes, the plain gate is red
 - `new` — Append a milestone (Status: proposed) to roadmap.md
+- `release` — Give up a milestone's lease (a project in an ensemble)
 
 ## ape milestone approve
 
@@ -4814,6 +4816,45 @@ Flags:
 | `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
 | `--json` | bool | `false` | machine output (JSON on stdout) |
 | `--wait` | duration | `9m0s` | how long this call waits for the detached run (at most 9m30s; 0 returns at once); exit 75 while it still runs — run the same command again to attach |
+
+## ape milestone claim
+
+Take a milestone's lease for this checkout (a project in an ensemble)
+
+```
+ape milestone claim <M> [flags]
+```
+
+In a project in an ensemble (a coordination: block), take the lease
+milestone.<project>.<M> for this checkout: its holder is <user>/<checkout>, the
+credential's user and the checkout's id, so one person's two checkouts are two holders
+(v1.5 stage 1a, proposal section 3.1). Claiming a milestone this checkout already holds
+keeps it. Held by another checkout, the claim is refused (session.not-lease-holder,
+naming the holder).
+
+The lease lives while a run renews it: TTL 30 s, renewed every 10 s by the apex-loop run
+for M (`ape task apex-loop --args <M>`), whose lock is per milestone in an ensemble's
+project. Between runs it may lapse; the next run, or change new/start of M, takes it
+again unless another member claimed M meanwhile. change new --milestone M and change
+start of M's changes refuse without it. The token is kept in this checkout's lease book
+(_apex/state/coord/tokens.json), what a re-claim after a rebuild presents.
+
+A person's act: refused in a model session. Needs NATS (coord.nats-unreachable).
+
+Exit codes: 0 claimed · 1 refused (held by another, no ensemble, NATS) · 2 usage.
+
+Examples:
+
+```
+  ape milestone claim M3
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
 
 ## ape milestone close
 
@@ -5242,6 +5283,34 @@ Flags:
 | `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
 | `--gate` | string | `—` | the one command that is red until the milestone is done (required) |
 | `--goal` | string | `—` | the Goal: paragraph (else a placeholder to fill in) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+
+## ape milestone release
+
+Give up a milestone's lease (a project in an ensemble)
+
+```
+ape milestone release <M> [flags]
+```
+
+Delete milestone.<project>.<M> at its revision when this checkout holds it, and mark it
+released in the lease book, so no later run of M takes it again without a new claim
+(v1.5 stage 1a). Releasing a milestone this checkout no longer holds (lapsed, or taken
+by another) marks the book only. A person's act: refused in a model session.
+
+Exit codes: 0 released · 1 refused (no ensemble, NATS) · 2 usage.
+
+Examples:
+
+```
+  ape milestone release M3
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
 | `--json` | bool | `false` | machine output (JSON on stdout) |
 
 ## ape nats

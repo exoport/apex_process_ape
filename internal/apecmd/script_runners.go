@@ -117,10 +117,12 @@ func (r *scriptRunner) runTask(ctx context.Context, o apescript.TaskOpts) (apesc
 	if err != nil {
 		return apescript.RunResult{}, err
 	}
-	if err := launch.acquire(root, "pid-"+strconv.Itoa(os.Getpid())+"-"+randomHex(3)); err != nil {
+	launch.withScope(root, o.Args)
+	release, err := launch.acquireAndHold(ctx, root, "pid-"+strconv.Itoa(os.Getpid())+"-"+randomHex(3))
+	if err != nil {
 		return apescript.RunResult{}, err
 	}
-	defer launch.release()
+	defer release()
 	run, err := dispatchTaskWith(ctx, taskOptions{
 		skill: o.Skill, agent: o.Agent, model: o.Model, args: o.Args,
 		prompt: o.Prompt, promptFlagName: o.PromptFlag, skillNoCommit: o.NoCommit,

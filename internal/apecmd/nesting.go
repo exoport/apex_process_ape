@@ -13,6 +13,7 @@ import (
 
 	"github.com/exoport/apex_process_ape/internal/apexv1"
 	"github.com/exoport/apex_process_ape/internal/atomicfile"
+	"github.com/exoport/apex_process_ape/internal/coord/member"
 	"github.com/exoport/apex_process_ape/internal/cost"
 	"github.com/exoport/apex_process_ape/internal/pipeline"
 	"github.com/exoport/apex_process_ape/internal/proctree"
@@ -195,6 +196,10 @@ type sessionLaunch struct {
 	parentPID int
 	// skill is the skill the session runs ("" for a prompt or chat).
 	skill string
+	// scope is what an apex-loop run's lock is per (withScope): "" for the
+	// project (D62), else the milestone or tweak a coordinated project's
+	// loop runs (v1.5 stage 1a: one loop per milestone).
+	scope string
 	// token identifies the holder of locks: the detached run's id, or
 	// pid-<pid>.
 	token string
@@ -324,7 +329,15 @@ func (l *sessionLaunch) acquire(projectRoot, token string) error {
 	rec.PIDStart, _ = proctree.StartTime(rec.PID)
 	if l.skill == apexv1.OrchestratorSkill {
 		path := filepath.Join(root, "orchestrator.json")
+		if l.scope != "" {
+			path = filepath.Join(root, "orchestrator-"+safeLockName(l.scope)+".json")
+		}
 		if err := acquireSessionLock(path, rec, false); err != nil {
+			var ce *apexv1.ConflictError
+			if l.scope != "" && errors.As(err, &ce) {
+				ce.Msg = strings.Replace(ce.Msg, "this project already has an apex-loop run", l.scope+" already has an apex-loop run", 1)
+				ce.Msg = strings.Replace(ce.Msg, "one per project", "one per milestone in an ensemble's project", 1)
+			}
 			return err
 		}
 		l.locks = append(l.locks, path)
@@ -339,6 +352,61 @@ func (l *sessionLaunch) acquire(projectRoot, token string) error {
 		l.locks = append(l.locks, path)
 	}
 	return nil
+}
+
+// withScope sets an apex-loop launch's lock scope from its --args: in a
+// project in an ensemble (a coordination: block), the loop's first word —
+// the milestone, or the tweak, it runs — so loops on two milestones run
+// side by side and a second on the same one is refused (v1.5 stage 1a,
+// section 3: one loop per milestone). Any other project keeps one loop per
+// project (D62). It returns l.
+func (l *sessionLaunch) withScope(projectRoot, args string) *sessionLaunch {
+	if l == nil || l.skill != apexv1.OrchestratorSkill {
+		return l
+	}
+	cfg, err := apexv1.LoadConfig(apexv1.FindRoot(projectRoot))
+	if err != nil || cfg.Coordination == nil {
+		return l
+	}
+	if f := strings.Fields(args); len(f) > 0 {
+		l.scope = f[0]
+	}
+	return l
+}
+
+// acquireAndHold is acquire, then holdMilestone: the locks and, for a
+// scoped loop, its milestone's lease, given up by the returned func. On
+// error nothing is held.
+func (l *sessionLaunch) acquireAndHold(ctx context.Context, projectRoot, token string) (func(), error) {
+	if err := l.acquire(projectRoot, token); err != nil {
+		return nil, err
+	}
+	stop, err := l.holdMilestone(ctx, projectRoot)
+	if err != nil {
+		l.release()
+		return nil, err
+	}
+	return func() { stop(); l.release() }, nil
+}
+
+// holdMilestone is a scoped loop's hold on its milestone's lease
+// (member.HoldMilestone): taken at launch, renewed for the run's life,
+// stopped by the returned func. A scope that is not a milestone (a tweak)
+// holds nothing yet.
+func (l *sessionLaunch) holdMilestone(ctx context.Context, projectRoot string) (func(), error) {
+	none := func() {}
+	if l == nil || l.scope == "" {
+		return none, nil
+	}
+	p, err := apexv1.Open(apexv1.FindRoot(projectRoot))
+	if err != nil || !p.IsMilestone(l.scope) {
+		return none, nil //nolint:nilerr // not an APEX v1 milestone: the launch refuses or runs on its own terms
+	}
+	stop, err := member.HoldMilestone(ctx, p, l.scope, os.Stderr)
+	if err != nil {
+		return none, err
+	}
+	return stop, nil
 }
 
 // lockToken is the holder token for this process: the detached run it is

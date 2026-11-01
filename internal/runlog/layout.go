@@ -286,6 +286,13 @@ func CoordLinkPath(projectRoot string) string {
 	return filepath.Join(ApeRoot(projectRoot), "coord-link.json")
 }
 
+// CoordTokensPath is the checkout's lease book (v1.5, §4.4 step 4;
+// lease.Book): the last token it saw for each lease it held, what a
+// re-claim after a rebuild presents.
+func CoordTokensPath(projectRoot string) string {
+	return filepath.Join(V1StateDir(projectRoot), "coord", "tokens.json")
+}
+
 // ConductorDir holds a project's orchestrator terminal (v1.4.2): the
 // supervisor's state, the conductor's queued messages, the last pane and
 // the supervisor's log.

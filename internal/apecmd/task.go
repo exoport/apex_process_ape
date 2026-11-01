@@ -442,6 +442,7 @@ func newTaskCmd() *cobra.Command {
 			if err != nil {
 				return sessionRefusal(err)
 			}
+			launch.withScope(projectRoot, argsFlag)
 			jsonMode := jsonAlias || outputFormat == "json"
 			if !jsonMode && outputFormat != "human" {
 				fmt.Fprintf(os.Stderr, "Error: --output-format must be human or json, got %q\n", outputFormat)
@@ -454,10 +455,11 @@ func newTaskCmd() *cobra.Command {
 			if detachFlag {
 				return startDetached(cmd, projectRoot, launch, jsonMode)
 			}
-			if err := launch.acquire(projectRoot, lockToken()); err != nil {
+			release, err := launch.acquireAndHold(cmd.Context(), projectRoot, lockToken())
+			if err != nil {
 				return sessionRefusal(err)
 			}
-			defer launch.release()
+			defer release()
 			if handoffFlag != "" {
 				prompt, err := resolveHandoffPrompt(handoffFlag, cmd.Flags().Changed("prompt"))
 				if err != nil {

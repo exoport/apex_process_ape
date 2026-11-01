@@ -14,6 +14,7 @@ import (
 
 	"github.com/exoport/apex_process_ape/internal/apexv1"
 	"github.com/exoport/apex_process_ape/internal/coord/events"
+	"github.com/exoport/apex_process_ape/internal/coord/lease"
 	"github.com/exoport/apex_process_ape/internal/natstest"
 )
 
@@ -84,6 +85,16 @@ func TestGate_PausedMilestone(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Join(p.Root, "hot"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(p.Root, "hot", "ape-nats.creds"), data, 0o600))
+
+	// Stage 1a: the gate also needs this checkout's lease on each milestone.
+	require.NoError(t, lease.Declare(ctx, js, 1))
+	ls, err := lease.Open(ctx, js)
+	require.NoError(t, err)
+	require.NoError(t, ls.SetEpoch(ctx, 1))
+	for _, ms := range []string{"M2", "M3"} {
+		_, err = ClaimMilestone(ctx, p, ms)
+		require.NoError(t, err)
+	}
 
 	now := time.Now()
 	require.NoError(t, Gate(ctx, p, "change start", "M2", now), "nothing paused yet")

@@ -144,7 +144,8 @@ const pauseCheckTimeout = 2 * time.Second
 // used; coord.nats-unreachable when NATS cannot be reached with the
 // project's credential. With a milestone, a milestone the conductor's ape
 // paused (OQ24: a question left unanswered) refuses too, with
-// coord.milestone-paused: only that milestone.
+// coord.milestone-paused: only that milestone; and one whose lease this
+// checkout does not hold refuses with session.not-lease-holder.
 func Gate(ctx context.Context, p *apexv1.Project, op, milestone string, now time.Time) error {
 	m, err := Load(p)
 	if errors.Is(err, ErrNotMember) {
@@ -176,5 +177,7 @@ func Gate(ctx context.Context, p *apexv1.Project, op, milestone string, now time
 		return &apexv1.FailError{Code: apexv1.CodeCoordMilestonePaused, Msg: fmt.Sprintf(
 			"%s is paused: a question to the conductor went unanswered (OQ24), so %s waits — the conductor's answer resumes it", milestone, op)}
 	}
-	return nil
+	// Stage 1a: a change of a milestone is this checkout's to start only
+	// while it holds the milestone's lease (section 3.1).
+	return requireMilestoneLease(ctx, p, op, milestone)
 }

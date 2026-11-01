@@ -97,7 +97,8 @@ ape bounds the loop from outside:
 
 - **One loop per project.** A second `apex-loop` run is exit 3, `session.loop-running`
   (formerly `session.orchestrator-running`, from the loop's name before rc.7; kept as its alias
-  until v1.5).
+  until v1.5). In a project in an ensemble (v1.5), it is one loop per milestone, on the milestone's
+  lease (`ape milestone claim`; [coordination](../reference/coordination.md#leases)).
 - **Consecutive blocks.** A loop session is refused (exit 1, `milestone.blocks-exceeded`) once
   `limits.consecutive_blocks` changes of its milestone (default 2) have blocked in a row. A person
   deals with them and re-approves the milestone, which resets the count. A tweak's run is not

@@ -144,7 +144,7 @@ func TestDiagnosticCodes_PublishedListMatchesTheCode(t *testing.T) {
 		"CodeCheckGrepTestOutput": CodeCheckGrepTestOutput, "CodeSessionAuthLost": CodeSessionAuthLost,
 		// v1.5 (in development).
 		"CodeCoordNATSUnreachable": CodeCoordNATSUnreachable, "CodeCoordMembership": CodeCoordMembership, "CodeCoordMilestonePaused": CodeCoordMilestonePaused,
-		"CodeFetchFailed": CodeFetchFailed,
+		"CodeFetchFailed": CodeFetchFailed, "CodeNotLeaseHolder": CodeNotLeaseHolder,
 		// v1.4.2: standing orders and the delegated conductor.
 		"CodeOrdersMissing": CodeOrdersMissing, "CodeOrdersInvalid": CodeOrdersInvalid, "CodeOrdersUnaccepted": CodeOrdersUnaccepted,
 		"CodeOrdersRevoked": CodeOrdersRevoked, "CodeOrdersNonDelegable": CodeOrdersNonDelegable, "CodeOrdersNotNamed": CodeOrdersNotNamed,
