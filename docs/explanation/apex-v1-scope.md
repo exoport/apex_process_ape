@@ -22,7 +22,7 @@ one person, a linear `main`, no merges. v1.0 states it rather than pretending ot
 
 - Change branches (`change/<id>`) are local. Attempts, limit stops, run logs and hook state live in
   the checkout's ignored `_apex/state/`. A second machine does not see them.
-- ape never fetches. It compares the base branch with its upstream as last fetched, shows
+- ape never fetches, outside a coordinated project (v1.5). It compares the base branch with its upstream as last fetched, shows
   ahead/behind in `ape status`, and refuses `change start` and `change archive` while the base is
   behind (`base.behind-upstream`: pull first). Without that, an archive onto a stale base would
   diverge from the remote.

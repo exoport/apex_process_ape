@@ -8,15 +8,21 @@ import (
 )
 
 // Scope is what v1.0 supports (D45, operator Q1): one operator per
-// checkout, on a local trunk. `ape project init` states it.
+// checkout, on a local trunk. `ape project init` states it. A coordinated
+// project (v1.5) fetches its trunk at start, archive and catch-up.
 const Scope = "v1.0: one operator per checkout, on a local trunk; PR mode comes later."
 
 // CodeBehindUpstream: the base branch is behind its upstream, and a change
 // would be started from, or archived onto, a stale trunk (H6, D45).
 const CodeBehindUpstream = "base.behind-upstream"
 
+// CodeFetchFailed: a coordinated project's start, archive or catch-up could
+// not fetch the branches it judges staleness by (v1.5, section 5.5).
+const CodeFetchFailed = "base.fetch-failed"
+
 // BaseUpstream is a base branch measured against its upstream, as the
-// local remote-tracking ref has it: ape never fetches.
+// local remote-tracking ref has it: status never fetches; start, archive
+// and catch-up fetch first only in a coordinated project (coordinated).
 type BaseUpstream struct {
 	Branch   string `json:"branch"`
 	Upstream string `json:"upstream"`
@@ -57,13 +63,51 @@ func (u *BaseUpstream) Describe() string {
 	if u.Behind > 0 {
 		s += " — pull before starting or archiving a change"
 	}
-	return s + " (the local " + u.Upstream + "; ape never fetches)"
+	return s + " (the local " + u.Upstream + ", as last fetched)"
+}
+
+// coordinated: the project integrates through a coordinated repository
+// (coordination.github, v1.5 stage 1a), so other members push to its
+// trunk and ape must fetch before judging the base.
+func (p *Project) coordinated() bool {
+	cfg, err := LoadConfig(p.Root)
+	return err == nil && cfg.Coordination != nil && cfg.Coordination.GitHub != nil && strings.TrimSpace(cfg.Coordination.GitHub.Repo) != ""
+}
+
+// fetchUpstreams fetches the upstream of base and of main (section 5.5:
+// "ape fetches main and its milestone branch"), each from its own
+// remote; a branch with no upstream is skipped. Only the remote-tracking
+// refs move: no local branch is touched. Never prompts for credentials.
+func (p *Project) fetchUpstreams(ctx context.Context, base, what string) error {
+	seen := map[string]bool{}
+	for _, b := range []string{base, "main"} {
+		if b == "" || seen[b] {
+			continue
+		}
+		seen[b] = true
+		remote, _ := git(ctx, p.Root, "config", "branch."+b+".remote")
+		merge, _ := git(ctx, p.Root, "config", "branch."+b+".merge")
+		if remote == "" || merge == "" || remote == "." {
+			continue
+		}
+		if _, err := gitWithEnv(ctx, p.Root, []string{"GIT_TERMINAL_PROMPT=0"}, "fetch", "--quiet", "--no-tags", remote, merge); err != nil {
+			return &FailError{Code: CodeFetchFailed, Msg: fmt.Sprintf("this project is coordinated, and %s needs %s's upstream fetched first: git fetch %s %s failed: %v — fix the remote or its credentials, then run this again; nothing was written",
+				what, b, remote, merge, err)}
+		}
+	}
+	return nil
 }
 
 // refuseBehindUpstream refuses starting a change from, or archiving one
 // onto, a base branch behind its upstream: v1.0 works on a local trunk
-// that is up to date (D45). No upstream configured, no check.
+// that is up to date (D45). No upstream configured, no check. A
+// coordinated project fetches first; an uncoordinated one never fetches.
 func (p *Project) refuseBehindUpstream(ctx context.Context, base, what string) error {
+	if p.coordinated() {
+		if err := p.fetchUpstreams(ctx, base, what); err != nil {
+			return err
+		}
+	}
 	u := p.upstreamOf(ctx, base)
 	if u == nil || u.Behind == 0 {
 		return nil

@@ -168,7 +168,9 @@ the trailer `Change: <id>`. Verify refuses until no unmerged path or marker rema
 blocks the change and the loop re-plans it.
 
 `start` and `archive` also refuse while the base branch is behind its upstream
-(`base.behind-upstream`: pull). ape compares with the local remote-tracking ref and never fetches.
+(`base.behind-upstream`: pull). ape compares with the local remote-tracking ref. It fetches that ref first only in a
+coordinated project (`coordination.github`): the upstreams of the base and of `main`, failing
+with `base.fetch-failed` when the fetch does. Otherwise it never fetches.
 
 ## Checks
 

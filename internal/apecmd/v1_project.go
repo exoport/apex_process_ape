@@ -1097,7 +1097,7 @@ func newStatusCmd() *cobra.Command {
     and never listed
   - the base branch (the checked-out one, or the base of the change whose branch is
     checked out) against its upstream (JSON "base_upstream": {branch, upstream, ahead,
-    behind}; null without one), from the local remote-tracking ref — ape never fetches.
+    behind}; null without one), from the local remote-tracking ref — status never fetches.
     v1.0 is one operator per checkout on a local trunk (D45): start and archive refuse
     while the base is behind (base.behind-upstream: pull)
   - work outside the change flow (JSON "outside_flow": [{sha, subject, files}], newest
