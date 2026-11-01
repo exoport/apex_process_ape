@@ -31,7 +31,15 @@ The lease lives while a run renews it: TTL 30 s, renewed every 10 s by the apex-
 for M (` + "`ape task apex-loop --args <M>`" + `), whose lock is per milestone in an ensemble's
 project. Between runs it may lapse; the next run, or change new/start of M, takes it
 again unless another member claimed M meanwhile. change new --milestone M and change
-start of M's changes refuse without it. The token is kept in this checkout's lease book
+start of M's changes refuse without it.
+
+In a project integrating through GitHub (coordination.github), the claim also prepares
+milestone/<M> (section 5.1): fetched from main's remote when it has one, else cut from
+the remote's main and pushed there, with a local milestone/<M> tracking it. change new
+--milestone M and change start of M's changes then run on milestone/<M>, switching to it
+from another base branch when the tree is clean (milestone.branch-missing in a checkout
+that never claimed M). A failed fetch or push is base.fetch-failed; the lease stays held,
+and claiming again retries the branch step. The token is kept in this checkout's lease book
 (_apex/state/coord/tokens.json), what a re-claim after a rebuild presents.
 
 A person's act: refused in a model session. Needs NATS (coord.nats-unreachable).
@@ -47,15 +55,27 @@ Exit codes: 0 claimed · 1 refused (held by another, no ensemble, NATS) · 2 usa
 			if err != nil {
 				return err
 			}
-			l, err := member.ClaimMilestone(cmd.Context(), p, args[0])
+			c, err := member.ClaimMilestone(cmd.Context(), p, args[0])
 			if errors.Is(err, member.ErrNotMember) {
 				return usageErr(errNotInEnsemble)
 			}
 			if err != nil {
 				return v1Fail(cmd, &f, err, nil)
 			}
-			return v1Emit(cmd.OutOrStdout(), &f, map[string]any{"milestone": args[0], "key": l.Key, "holder": l.Holder, "token": l.Token.String()}, func(w io.Writer) {
+			l := c.Lease
+			out := map[string]any{"milestone": args[0], "key": l.Key, "holder": l.Holder, "token": l.Token.String()}
+			if c.Branch != "" {
+				out["branch"], out["branch_created"] = c.Branch, c.Created
+			}
+			return v1Emit(cmd.OutOrStdout(), &f, out, func(w io.Writer) {
 				fmt.Fprintf(w, "%s claimed by %s (token %s); its loop keeps it: `ape task apex-loop --args %s`\n", args[0], l.Holder, l.Token, args[0])
+				if c.Branch != "" {
+					verb := "tracks the remote's"
+					if c.Created {
+						verb = "cut from main and pushed"
+					}
+					fmt.Fprintf(w, "%s: %s; %s's changes start from it\n", c.Branch, verb, args[0])
+				}
 			})
 		},
 	}

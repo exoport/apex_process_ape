@@ -602,8 +602,11 @@ func (p *Project) NewChangeOfType(ctx context.Context, id, milestone, typ string
 		return nil, &UsageError{Code: "usage.change-id", Msg: fmt.Sprintf("change id %q must match ^[a-z][a-z0-9-]{2,39}$ (verb-led kebab slug, e.g. add-tenant-delete)", id)}
 	}
 	// A new change is planned on the base branch, not inside another
-	// change's branch (D38).
+	// change's branch (D38); in a coordinated project, on its milestone's.
 	if err := p.refuseOnChangeBranch(ctx, "a new change"); err != nil {
+		return nil, err
+	}
+	if err := p.enterMilestoneBase(ctx, milestone, "change new "+id); err != nil {
 		return nil, err
 	}
 	if dirExists(p.ChangeDir(id)) {

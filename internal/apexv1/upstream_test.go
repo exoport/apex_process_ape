@@ -112,23 +112,30 @@ func TestBehindUpstream_CoordinatedFetches(t *testing.T) {
 	files := baseFiles()
 	files["_apex/config.yaml"] = coordinatedConfig
 	p := fixture(t, files)
+	bare := withOrigin(t, p)
+	_, _, err := p.PrepareMilestoneBranch(ctx(), "M1")
+	require.NoError(t, err)
+	run(t, p.Root, "switch", "-q", "milestone/M1")
 	addChange(t, p, "add-wave", changeDoc("add-wave", "greeting", addedWave, "- T1 wave — check: ./wave.sh"))
 	commitAll(t, p, "plan: add-wave")
-	bare, before := remoteAhead(t, p)
+	// Another member's change merges into milestone/M1 on the remote.
+	before := run(t, p.Root, "rev-parse", "refs/remotes/origin/milestone/M1")
+	run(t, p.Root, "push", "-q", bare, run(t, p.Root, "commit-tree", "-p", before, "-m", "someone else's merge", before+"^{tree}")+":refs/heads/milestone/M1")
+	require.Equal(t, before, run(t, p.Root, "rev-parse", "refs/remotes/origin/milestone/M1"), "not fetched yet")
+	local := run(t, p.Root, "rev-parse", "milestone/M1")
 
-	_, err := p.Start(ctx(), "add-wave", RunOptions{})
+	_, err = p.Start(ctx(), "add-wave", RunOptions{})
 	require.Equal(t, CodeBehindUpstream, failCode(t, err), "the fetch saw the member's push")
-	require.ErrorContains(t, err, "main is 1 commit(s) behind its upstream origin/main")
-	require.Equal(t, run(t, bare, "rev-parse", "main"), run(t, p.Root, "rev-parse", "refs/remotes/origin/main"))
-	require.Equal(t, "main", CurrentBranch(ctx(), p.Root))
-	require.NotEqual(t, before, run(t, p.Root, "rev-parse", "refs/remotes/origin/main"))
-	require.Equal(t, before, run(t, p.Root, "rev-parse", "main"), "only the remote-tracking ref moved")
+	require.ErrorContains(t, err, "milestone/M1 is 1 commit(s) behind its upstream origin/milestone/M1")
+	require.Equal(t, run(t, bare, "rev-parse", "milestone/M1"), run(t, p.Root, "rev-parse", "refs/remotes/origin/milestone/M1"))
+	require.Equal(t, "milestone/M1", CurrentBranch(ctx(), p.Root))
+	require.Equal(t, local, run(t, p.Root, "rev-parse", "milestone/M1"), "only the remote-tracking ref moved")
 
 	// A fetch that fails refuses, and writes nothing.
 	run(t, p.Root, "config", "remote.origin.url", "/nonexistent")
 	_, err = p.Start(ctx(), "add-wave", RunOptions{})
 	require.Equal(t, CodeFetchFailed, failCode(t, err))
-	require.ErrorContains(t, err, "git fetch origin refs/heads/main failed")
+	require.ErrorContains(t, err, "git fetch origin refs/heads/milestone/M1 failed")
 	require.False(t, p.branchExists(ctx(), "change/add-wave"))
 }
 

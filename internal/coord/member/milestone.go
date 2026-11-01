@@ -113,17 +113,34 @@ func (s *milestones) claimed(ms string) (bool, error) {
 	return ok && e.State == lease.Held && e.Holder == s.holder, err
 }
 
+// Claim is what `ape milestone claim` did: the lease, and in a project
+// integrating through GitHub the milestone's branch (Created: this claim
+// pushed it).
+type Claim struct {
+	Lease   lease.Lease
+	Branch  string
+	Created bool
+}
+
 // ClaimMilestone is `ape milestone claim <M>`: the person's act that takes
 // the milestone for this checkout (section 3.1). The lease then lives
 // while a run for M renews it (HoldMilestone); between runs it may lapse,
-// and the next run takes it again unless another member claimed it.
-func ClaimMilestone(ctx context.Context, p *apexv1.Project, ms string) (lease.Lease, error) {
+// and the next run takes it again unless another member claimed it. In a
+// project with coordination.github it also prepares milestone/<M>
+// (apexv1.PrepareMilestoneBranch, section 5.1), after the lease: only the
+// holder cuts the branch.
+func ClaimMilestone(ctx context.Context, p *apexv1.Project, ms string) (Claim, error) {
 	s, err := openMilestones(ctx, p, nats.NoReconnect())
 	if err != nil {
-		return lease.Lease{}, err
+		return Claim{}, err
 	}
 	defer s.close()
-	return s.claim(ctx, ms)
+	l, err := s.claim(ctx, ms)
+	if err != nil {
+		return Claim{}, err
+	}
+	branch, created, err := p.PrepareMilestoneBranch(ctx, ms)
+	return Claim{Lease: l, Branch: branch, Created: created}, err
 }
 
 // ReleaseMilestone is `ape milestone release <M>`: the key is deleted at

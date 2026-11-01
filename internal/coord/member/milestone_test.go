@@ -73,12 +73,14 @@ func TestMilestoneLease_ClaimGateRelease(t *testing.T) {
 	url := leaseCluster(t)
 	ann, bob := checkout(t, url, "ann"), checkout(t, url, "bob")
 
-	l, err := ClaimMilestone(ctx, ann, "M1")
+	c, err := ClaimMilestone(ctx, ann, "M1")
 	require.NoError(t, err)
+	l := c.Lease
+	require.Empty(t, c.Branch, "no coordination.github: no milestone branch")
 	require.True(t, strings.HasPrefix(l.Holder, "ann/"), l.Holder)
 	again, err := ClaimMilestone(ctx, ann, "M1")
 	require.NoError(t, err, "a checkout's claim of its own milestone keeps it")
-	require.Greater(t, again.Token.Revision, l.Token.Revision)
+	require.Greater(t, again.Lease.Token.Revision, l.Token.Revision)
 
 	_, err = ClaimMilestone(ctx, bob, "M1")
 	require.Equal(t, apexv1.CodeNotLeaseHolder, leaseCode(t, err))

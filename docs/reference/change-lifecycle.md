@@ -170,7 +170,9 @@ blocks the change and the loop re-plans it.
 `start` and `archive` also refuse while the base branch is behind its upstream
 (`base.behind-upstream`: pull). ape compares with the local remote-tracking ref. It fetches that ref first only in a
 coordinated project (`coordination.github`): the upstreams of the base and of `main`, failing
-with `base.fetch-failed` when the fetch does. Otherwise it never fetches.
+with `base.fetch-failed` when the fetch does. Otherwise it never fetches. In such a project a milestone's
+changes are based on `milestone/<M>`, the branch `ape milestone claim` prepares
+([coordination](coordination.md#leases)).
 
 ## Checks
 

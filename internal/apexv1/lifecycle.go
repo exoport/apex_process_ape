@@ -94,6 +94,10 @@ func (p *Project) Start(ctx context.Context, id string, opt RunOptions) (*StartR
 		return p.start(ctx, id, opt, nil)
 	}
 	branch := ChangeBranch(id)
+	// A coordinated project's change starts from its milestone's branch.
+	if err := p.enterMilestoneBase(ctx, p.ChangeMilestone(ctx, id), "start "+id); err != nil {
+		return nil, err
+	}
 	cur := CurrentBranch(ctx, p.Root)
 	switch {
 	case cur == branch:

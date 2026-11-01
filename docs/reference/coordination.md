@@ -108,6 +108,13 @@ Between runs the lease can lapse. A later run or change start takes it again fro
 (`_apex/state/coord/tokens.json`), unless another member claimed M meanwhile. In that case it is refused, and never
 taken back. `ape milestone release <M>` deletes the key and marks the book released.
 
+In a project integrating through GitHub (`coordination.github`), the claim also prepares the milestone's branch,
+`milestone/<M>`. When main's remote already has it, the claim fetches it. Otherwise it cuts it from the remote's
+`main` and pushes it. Either way a local `milestone/<M>` tracks it. `change new --milestone <M>` and `change start` of
+M's change run on that branch, switching to it from another base branch when the tree is clean. A checkout that never
+claimed M has no such branch and is refused with `milestone.branch-missing`. A failed fetch or push is
+`base.fetch-failed`. The lease stays held then, and claiming again retries.
+
 A conductor receives its ensemble's events through the durable consumer **`conductor-<user>-<ens>`** on `APE_EVENTS`.
 Only the holder of `conductor.<user>.<ens>` binds it, so a conductor that takes the lease over inherits the events the
 last one left unacknowledged, and its acknowledgements are what renews the lease.
