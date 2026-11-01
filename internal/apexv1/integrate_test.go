@@ -201,3 +201,25 @@ func TestFetchAndSync(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, lines[0], "left as it is")
 }
+
+// The mirror's PR #2: an acceptance landed through main's merge queue
+// arrives with a merge commit whose body repeats the PR's title, "apex:
+// config accepted by …". The guard takes the commit whose subject is the
+// acceptance, so the change it accepted is no finding.
+func TestConfigAcceptance_ThroughAMergeCommit(t *testing.T) {
+	p := fixture(t, baseFiles())
+	run(t, p.Root, "commit", "-q", "--allow-empty", "-m", "apex: project init")
+	run(t, p.Root, "switch", "-q", "-c", "apex/coord")
+	write(t, p, "_apex/config.yaml", coordinatedConfig)
+	commitAll(t, p, "chore(config): coordination")
+	run(t, p.Root, "switch", "-q", "main")
+	run(t, p.Root, "merge", "-q", "--no-ff", "-m", "Merge pull request #1 from shop/apex/coord\n\nchore(config): coordination", "apex/coord")
+	require.Contains(t, findingMessages(p.provenanceFindings(ctx())), "guarded config keys (coordination)")
+
+	run(t, p.Root, "switch", "-q", "-c", "apex/accept")
+	_, err := p.AcceptConfig(ctx(), "ann")
+	require.NoError(t, err)
+	run(t, p.Root, "switch", "-q", "main")
+	run(t, p.Root, "merge", "-q", "--no-ff", "-m", "Merge pull request #2 from shop/apex/accept\n\napex: config accepted by ann", "apex/accept")
+	require.NotContains(t, findingMessages(p.provenanceFindings(ctx())), "guarded config keys", "the acceptance in the merged branch counts")
+}
