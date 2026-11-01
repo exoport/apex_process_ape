@@ -118,6 +118,33 @@ func (p *Project) ApproveTweakFor(ctx context.Context, id, by, forM string) (*Ap
 	return &ApproveResult{ID: id, Status: st.Status, Approved: st.Approved, Commit: commit}, nil
 }
 
+// CodeTweakNoMilestone: a coordinated project's tweak approved for no
+// milestone. Its own lane, a one-change milestone (section 5.6), is
+// deferred past stage 1a (D692): such a tweak does not start.
+const CodeTweakNoMilestone = "change.tweak-no-milestone"
+
+func init() {
+	DiagnosticCodes = append(DiagnosticCodes,
+		CodeDoc{CodeTweakNoMilestone, 1, ActionPerson, "start, a project integrating through GitHub (coordination.github): the tweak is approved for no milestone, and a tweak no milestone uses — a one-change milestone, with its own branch, change PR and close PR (section 5.6) — is not built yet (deferred past v1.5 stage 1a, D692); nothing was written — a person approves it for a milestone that will carry it: typed \"approve <id> for <M>\", or `ape change approve <id> --milestone <M> --by <who>`"},
+	)
+}
+
+// refuseTweakWithoutMilestone refuses starting, in a coordinated
+// project, a tweak whose approval names no milestone (D692).
+func (p *Project) refuseTweakWithoutMilestone(ctx context.Context, id string) error {
+	if !p.coordinated() {
+		return nil
+	}
+	ci, err := p.requireChange(ctx, id)
+	if err != nil {
+		return nil //nolint:nilerr // start's own lookup reports the missing change
+	}
+	if !ci.Doc.IsTweak() || p.ChangeTarget(ctx, id) != "" {
+		return nil
+	}
+	return &FailError{Code: CodeTweakNoMilestone, Action: ActionPerson, Msg: "tweak " + id + " is approved for no milestone, and in a project integrating through GitHub a tweak runs with a milestone (a one-change milestone is not built yet) — nothing was written; a person approves it for one: typed \"approve " + id + " for <M>\", or `ape change approve " + id + " --milestone <M> --by <who>`"}
+}
+
 // requireTweakApproved is start's gate for a tweak, in place of an
 // approved milestone: a person's approval of the plan it now has.
 func requireTweakApproved(ci ChangeInfo) error {

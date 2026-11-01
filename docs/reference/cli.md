@@ -1516,7 +1516,8 @@ integrating through GitHub the tweak then runs on milestone/<M>, by M's loop und
 lease, and reaches main with M's close PR. ape never infers the target: the plain
 "approve <tweak-id>" does not grant a command that names one, and words naming one
 ("approve <id> for M2") do not grant the plain command. Without --milestone the tweak is
-a one-change milestone.
+a one-change milestone, which is not built yet (D692): in such a project its start is
+refused, change.tweak-no-milestone, until it is approved for a milestone.
 
 Tweaks form a queue: planned and approved between runs (or `ape run stop`, plan, approve,
 restart), never overlapping a run (D45). An approved tweak runs ahead of milestone work, at

@@ -300,3 +300,39 @@ func TestApproveTweak_ForMilestone(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "milestone/M1", st.BaseBranch)
 }
+
+// D692 (Q-1A-6): in a coordinated project a tweak approved for no
+// milestone does not start — the one-change milestone is deferred — and
+// nothing is written; approved for M1 it starts. The control: the same
+// tweak in an uncoordinated project starts as in v1.
+func TestStartTweak_NoMilestoneRefusedWhenCoordinated(t *testing.T) {
+	files := baseFiles()
+	files["_apex/config.yaml"] = coordinatedConfig
+	p := fixture(t, files)
+	withOrigin(t, p)
+	_, _, err := p.PrepareMilestoneBranch(ctx(), "M1")
+	require.NoError(t, err)
+	run(t, p.Root, "switch", "-q", "milestone/M1")
+	addTweak(t, p, "fix-hug")
+	_, err = p.ApproveTweak(ctx(), "fix-hug", "ann")
+	require.NoError(t, err)
+	head := HeadSHA(ctx(), p.Root)
+
+	_, err = p.Start(ctx(), "fix-hug", RunOptions{})
+	require.Equal(t, CodeTweakNoMilestone, failCode(t, err))
+	require.ErrorContains(t, err, "approve fix-hug for <M>")
+	require.Equal(t, head, HeadSHA(ctx(), p.Root), "nothing written")
+	require.False(t, p.branchExists(ctx(), "change/fix-hug"))
+
+	_, err = p.ApproveTweakFor(ctx(), "fix-hug", "ann", "M1")
+	require.NoError(t, err)
+	_, err = p.Start(ctx(), "fix-hug", RunOptions{})
+	require.NoError(t, err, "approved for M1, it starts")
+
+	q := fixture(t, baseFiles())
+	addTweak(t, q, "fix-hug")
+	_, err = q.ApproveTweak(ctx(), "fix-hug", "ann")
+	require.NoError(t, err)
+	_, err = q.Start(ctx(), "fix-hug", RunOptions{})
+	require.NoError(t, err, "uncoordinated: a tweak with no milestone starts as in v1")
+}
