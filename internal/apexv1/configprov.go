@@ -109,9 +109,9 @@ func (p *Project) lastConfigAcceptance(ctx context.Context, epoch string) string
 // scan's allow baseline for a commit on rev (R23).
 //
 // It is the newest commit whose subject is the acceptance, not the newest
-// whose message mentions it: an acceptance landed through main's merge
-// queue (v1.5) brings a merge commit whose body repeats the PR's title,
-// and that merge is no acceptance (the mirror's PR #2).
+// whose message mentions it (1.4.4): an acceptance landed through a pull
+// request — main's merge queue in v1.5 — brings a merge commit whose body
+// repeats the PR's title, and that merge is no acceptance.
 func (p *Project) lastConfigAcceptanceOn(ctx context.Context, epoch, rev string) string {
 	out, err := git(ctx, p.Root, "log", "--format=%H%x1f%s", "--fixed-strings", "--grep="+configAcceptedSubject, epoch+".."+rev)
 	if err != nil {
