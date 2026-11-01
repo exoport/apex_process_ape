@@ -93,8 +93,10 @@ var ErrNoTerminal = errors.New("conductorterm: no orchestrator terminal for this
 
 // loadRetries and loadRetryEvery bound LoadState's retry of a transient
 // failure: on Windows a read that overlaps the supervisor's temp-file
-// rename fails with a sharing violation (1.4.2's Known issue, W1).
-const (
+// rename fails with a sharing violation (1.4.2's Known issue, W1). About
+// 200 ms: a sharing violation lasts the rename. Vars so a test can give a
+// window of its own a budget a loaded CI runner cannot outlast.
+var (
 	loadRetries    = 10
 	loadRetryEvery = 20 * time.Millisecond
 )

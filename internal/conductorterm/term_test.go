@@ -248,6 +248,12 @@ func TestLoadState_RetriesATransientFailure(t *testing.T) {
 	_, err := LoadState(root)
 	require.ErrorIs(t, err, ErrNoTerminal, "no record: no retry, the answer at once")
 
+	// The test's own window (100 ms, then a goroutine restores the record)
+	// within a 2 s budget: on a loaded CI runner the restore came after
+	// production's ≈ 200 ms (run 41254079926).
+	retries := loadRetries
+	loadRetries = 100
+	t.Cleanup(func() { loadRetries = retries })
 	require.NoError(t, saveState(root, &State{Alive: true, Pending: []int64{3}, Delivered: []Delivered{}}))
 	p := statePath(root)
 	require.NoError(t, os.Rename(p, p+".away"))
