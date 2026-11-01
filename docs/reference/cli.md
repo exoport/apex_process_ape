@@ -45,6 +45,7 @@ Subcommands:
 - `doctor` — Probe the local environment for prerequisites
 - `event` — Publish a session progress event over NATS
 - `framework` — Install and inspect APEX framework assets in a project
+- `ghapp` — The GitHub App service: holds the App keys, issues narrowed tokens, runs templated set-up acts
 - `health` — APEX v1.5 (in development): report a coordinator that did not answer
 - `hook` — Claude Code and git hooks for APEX v1 projects (installed by `ape project init`)
 - `log` — Publish a structured log record over NATS
@@ -4286,6 +4287,102 @@ Global flags:
 | ---- | ---- | ------- | ----------- |
 | `--cwd` | string | `—` | Project root directory (default: current working dir) |
 | `--repo` | string | `—` | Path to a checked-out apex_process_framework repo (default: $APEX_FRAMEWORK_REPO) |
+
+## ape ghapp
+
+The GitHub App service: holds the App keys, issues narrowed tokens, runs templated set-up acts
+
+```
+ape ghapp
+```
+
+The key-holding service of a project integrating through GitHub (APEX v1.5,
+PLAN-V15-GHAPP). It runs on the coordination host as the systemd unit apex-ghapp.service
+under its own user, holds the private keys of two GitHub Apps (apex-setup, apex-member),
+and answers over NATS:
+
+  ape.sup.ghapp.token.<user>   a member's apex-member token: one hour, narrowed to one
+                               repository and a purpose (push, pr, read); never workflows
+  ape.sup.ghapp.setup.<user>   an operator's templated set-up act: rulesets (R1–R4), the
+                               queue workflow's PR, the secrets APE_NATS_URL and
+                               APE_NATS_CREDS, a runner registration token
+
+Every request is logged (never a token or a secret's value); secrets and runner-token also
+run the operator's notify. `ape ghapp print-config` and `ape ghapp print-unit` print the files a
+person installs.
+
+Subcommands:
+
+- `print-config` — Print /etc/apex-ghapp/config.yaml, filled in
+- `print-unit` — Print the hardened systemd unit apex-ghapp.service
+- `serve` — Run the service (the systemd unit runs this)
+
+## ape ghapp print-config
+
+Print /etc/apex-ghapp/config.yaml, filled in
+
+```
+ape ghapp print-config --repo <owner>/<name> --setup-app-id N --setup-installation N --member-app-id N --member-installation N --nats-url URL --members a,b --operators a [flags]
+```
+
+Print the service's config for one repository, filled in with the two Apps' ids and
+their installation ids there (the App's settings page and its installation URL show them),
+the NATS URL, the members who may ask for tokens and the operators who may run set-up acts
+(NATS user names: the credentials' user tokens). The keys are read through systemd's
+LoadCredential (`ape ghapp print-unit`); the act log is /var/lib/apex-ghapp/acts.jsonl.
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--member-app-id` | int64 | `0` | apex-member's App id |
+| `--member-installation` | int64 | `0` | apex-member's installation id on the repository |
+| `--members` | string | `—` | NATS users who may ask for member tokens, comma-separated |
+| `--nats-url` | string | `—` | the NATS URL(s), comma-separated |
+| `--notify` | string | `—` | a command (sh -c) run after secrets and runner-token, the act's record on stdin |
+| `--operators` | string | `—` | NATS users who may run set-up acts, comma-separated |
+| `--repo` | string | `—` | the repository, <owner>/<name> |
+| `--setup-app-id` | int64 | `0` | apex-setup's App id |
+| `--setup-installation` | int64 | `0` | apex-setup's installation id on the repository |
+
+## ape ghapp print-unit
+
+Print the hardened systemd unit apex-ghapp.service
+
+```
+ape ghapp print-unit [--ape /usr/local/bin/ape] [flags]
+```
+
+Print apex-ghapp.service: the service under its own user apex-ghapp, the two keys handed
+to it through LoadCredential from root-owned /etc/apex-ghapp/keys/{setup,member}.pem,
+its state in /var/lib/apex-ghapp (0700), no core dumps, umask 0077, and the systemd
+sandboxing of PLAN-V15-GHAPP §3. Per-host egress filtering (api.github.com and NATS only)
+is not expressible in a unit and is stated in the plan's threat model.
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--ape` | string | `/usr/local/bin/ape` | the ape binary the unit runs |
+
+## ape ghapp serve
+
+Run the service (the systemd unit runs this)
+
+```
+ape ghapp serve --config <path> [flags]
+```
+
+Run the GitHub App service with its config: load both keys, connect to NATS with the
+service's own credential, and answer token and set-up requests until stopped.
+
+Exit codes: 0 stopped · 1 the config, a key or NATS failed · 2 usage.
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--config` | string | `/etc/apex-ghapp/config.yaml` | the service's config |
 
 ## ape health
 
