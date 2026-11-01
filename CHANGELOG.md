@@ -29,6 +29,12 @@ v1.4.2 release.
   `apex-apply`) stopped on the guard and the tweak blocked. A child carries the override only when
   ape finds the loop by process ancestry, or for a detached child through the handle its launcher
   wrote. A session that only names the loop in its environment carries nothing.
+- **The conductor's watcher confirms that a delivery was submitted.** After typing it, the
+  watcher presses Enter and waits for the input row to empty or a turn to start. It presses Enter
+  again if neither happens, at most three times in all. A delivery still unsubmitted after that is
+  recorded as `unsubmitted`, nothing more is typed over it, and the ack alert reaches the person.
+  Before, Claude Code could swallow the Enter after a long typed delivery, which then sat in the
+  input row and made every later delivery wait.
 
 ## v1.4.2 (2026-10-31)
 

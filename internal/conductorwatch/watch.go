@@ -71,6 +71,10 @@ type Delivery struct {
 	DeliveredAt string `json:"delivered_at,omitempty"`
 	AckedAt     string `json:"acked_at,omitempty"`
 	AlertedAt   string `json:"alerted_at,omitempty"`
+	// Unsubmitted: typed, but no Enter of submitEnters submitted it (the
+	// row kept the text, no turn started). Nothing more is typed over it;
+	// the ack alert reaches the person (1.4.3 PDFA-6).
+	Unsubmitted bool `json:"unsubmitted,omitempty"`
 }
 
 // State is the watcher's record.
@@ -85,8 +89,11 @@ type State struct {
 type Pane interface {
 	// Capture is the pane's visible text.
 	Capture(ctx context.Context) (string, error)
-	// Type types text and presses Enter.
+	// Type types text into the input row; Enter presses Enter. Apart, so
+	// the watcher can confirm the submit and press Enter again (PDFA-6:
+	// after a long text Claude Code can swallow the first Enter).
 	Type(ctx context.Context, text string) error
+	Enter(ctx context.Context) error
 	// Session is the Claude Code session id of the pane's foreground
 	// process when that is a session registered on this machine; "" and
 	// why it is not otherwise.
@@ -104,6 +111,10 @@ type Config struct {
 	Nonce    string
 	AckAlert time.Duration
 	Poll     time.Duration
+	// SubmitSettle is how long a typed delivery settles before Enter, and
+	// SubmitWait how long each Enter is given to submit it (1.4.3 PDFA-6;
+	// defaults 300 ms and 3 s).
+	SubmitSettle, SubmitWait time.Duration
 	Now      func() time.Time
 	// Log reports what the watcher did (stderr in production).
 	Log func(format string, a ...any)
@@ -115,6 +126,12 @@ func (c *Config) defaults() {
 	}
 	if c.Poll == 0 {
 		c.Poll = 2 * time.Second
+	}
+	if c.SubmitSettle == 0 {
+		c.SubmitSettle = 300 * time.Millisecond
+	}
+	if c.SubmitWait == 0 {
+		c.SubmitWait = 3 * time.Second
 	}
 	if c.Now == nil {
 		c.Now = time.Now
@@ -329,12 +346,58 @@ func (w *Watcher) deliver(ctx context.Context, s *State, now time.Time, projects
 		w.why = "the pane was busy, changing, or had text in its input row"
 		return
 	}
-	if err := w.c.Pane.Type(ctx, Mark(s.Deliveries[i], w.c.Nonce)); err != nil {
-		w.c.Log("watcher: typing %s: %v\n", s.Deliveries[i].ID, err)
+	d := &s.Deliveries[i]
+	if err := w.c.Pane.Type(ctx, Mark(*d, w.c.Nonce)); err != nil {
+		w.c.Log("watcher: typing %s: %v\n", d.ID, err)
 		return
 	}
-	s.Deliveries[i].DeliveredAt = now.UTC().Format(time.RFC3339)
+	d.DeliveredAt = now.UTC().Format(time.RFC3339)
 	w.lastPane = ""
+	if !w.submit(ctx) {
+		d.Unsubmitted = true
+		w.c.Log("watcher: %s was typed but not submitted after %d Enters (the input row kept it, no turn started): nothing more is typed over it; the ack alert reaches the person\n", d.ID, submitEnters)
+	}
+}
+
+// submitEnters bounds the Enters pressed for one delivery.
+const submitEnters = 3
+
+// submit presses Enter until the typed delivery is submitted — the input
+// row empty, or a turn running — at most submitEnters times (1.4.3
+// PDFA-6: on Claude Code 2.1.311 the Enter after a ≈ 500-character typed
+// delivery was swallowed, the delivery sat in the row, and the next ones
+// saw a busy row). It never clears the row.
+func (w *Watcher) submit(ctx context.Context) bool {
+	sleep(ctx, w.c.SubmitSettle)
+	for range submitEnters {
+		if err := w.c.Pane.Enter(ctx); err != nil {
+			return false
+		}
+		deadline := time.Now().Add(w.c.SubmitWait)
+		for time.Now().Before(deadline) {
+			if pane, err := w.c.Pane.Capture(ctx); err == nil && Submitted(pane) {
+				return true
+			}
+			sleep(ctx, w.c.SubmitWait/submitLooks)
+		}
+	}
+	return false
+}
+
+// submitLooks is how many times submit looks within one SubmitWait.
+const submitLooks = 15
+
+// Submitted is the pane after a delivery's Enter took: a turn running, or
+// the input row empty again.
+func Submitted(pane string) bool {
+	return strings.Contains(pane, "esc to interrupt") || repl.InputEmpty(pane)
+}
+
+func sleep(ctx context.Context, d time.Duration) {
+	select {
+	case <-ctx.Done():
+	case <-time.After(d):
+	}
 }
 
 // pause stops typing: the pane runs another Claude Code session than the

@@ -26,11 +26,21 @@ type fakePane struct {
 	// session is the registered session's id; "" is "s1".
 	session string
 	typed   []string
+	// row is the input row's text after Type, until an Enter submits it
+	// (rows: a test that models the row); swallow is how many Enters are
+	// lost before one submits (PDFA-6), -1 for none ever.
+	rows    bool
+	row     string
+	swallow int
+	enters  int
 }
 
 func (f *fakePane) Capture(context.Context) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.row != "" {
+		return "● done\n\n────\n❯ " + f.row + "\n────\n", nil
+	}
 	return f.screen, nil
 }
 
@@ -38,6 +48,23 @@ func (f *fakePane) Type(_ context.Context, text string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.typed = append(f.typed, text)
+	if f.rows {
+		f.row = text
+	}
+	return nil
+}
+
+func (f *fakePane) Enter(context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.enters++
+	if f.swallow != 0 {
+		if f.swallow > 0 {
+			f.swallow--
+		}
+		return nil
+	}
+	f.row = ""
 	return nil
 }
 
@@ -330,4 +357,61 @@ func TestTmux_RegisteredClaudePaneIsTheConductor(t *testing.T) {
 	require.NoError(t, os.WriteFile(reg, []byte(`{"pid":`+pid+`,"sessionId":"ea461431-cb9b"}`), 0o600))
 	id, why = tm.Session(context.Background())
 	require.Equal(t, "ea461431-cb9b", id, why)
+}
+
+// 1.4.3 PDFA-6: on Claude Code 2.1.311 the Enter after a long typed delivery
+// (pdfa.9, ≈ 500 characters) was swallowed. The delivery sat in the input
+// row, unsubmitted, and every later delivery saw a busy row. The watcher now
+// confirms the submit (the row empty, or a turn running) and presses Enter
+// again, at most three times in all. The control: a pane that never submits
+// gets three Enters, the delivery is recorded unsubmitted, nothing is typed
+// over it, and the ack alert still reaches the person.
+func TestWatcher_ConfirmsTheSubmit(t *testing.T) {
+	long := strings.Repeat("the conductor's next step, as the orders read it; ", 10)
+	for _, c := range []struct {
+		name        string
+		swallow     int
+		enters      int
+		unsubmitted bool
+	}{
+		{"the first Enter swallowed: a second submits it", 1, 2, false},
+		{"the control: no Enter ever submits", -1, 3, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			p := project(t)
+			pane := &fakePane{screen: idleScreen, conductor: true, rows: true, swallow: c.swallow}
+			now := time.Date(2026, 10, 31, 23, 0, 0, 0, time.UTC)
+			w := New(Config{
+				Projects: []string{p.Root}, StateDir: t.TempDir(), Pane: pane, Nonce: "n0", AckAlert: 15 * time.Minute,
+				SubmitSettle: time.Millisecond, SubmitWait: 30 * time.Millisecond, Now: func() time.Time { return now },
+			})
+			ctx := context.Background()
+			p.Emit(ctx, apexv1.Event{Event: apexv1.EventBlock, Change: "add-toc", Reason: long}, nil)
+			require.NoError(t, w.Tick(ctx))
+			require.NoError(t, w.Tick(ctx))
+			require.Len(t, pane.typed, 1)
+			require.Equal(t, c.enters, pane.enters)
+			s, err := LoadState(w.c.StateDir)
+			require.NoError(t, err)
+			require.NotEmpty(t, s.Deliveries[0].DeliveredAt)
+			require.Equal(t, c.unsubmitted, s.Deliveries[0].Unsubmitted)
+			if !c.unsubmitted {
+				require.Empty(t, pane.row, "submitted: the row is empty again")
+				return
+			}
+			p.Emit(ctx, apexv1.Event{Event: apexv1.EventBlock, Change: "add-toc", Reason: "a second event"}, nil)
+			require.NoError(t, w.Tick(ctx))
+			require.NoError(t, w.Tick(ctx))
+			require.Len(t, pane.typed, 1, "nothing is typed over the unsubmitted delivery")
+			now = now.Add(16 * time.Minute)
+			require.NoError(t, w.Tick(ctx))
+			stalled := 0
+			for _, e := range p.EventsSince(0) {
+				if e.Event == EventStalled {
+					stalled++
+				}
+			}
+			require.Positive(t, stalled, "unacknowledged: the person is notified")
+		})
+	}
 }
