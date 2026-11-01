@@ -241,6 +241,7 @@ var DiagnosticCodes = []CodeDoc{
 	{"usage.touches", 2, "stop", "change new: --touches is empty or holds a non-kebab-case slug"},
 	{"usage.verdict", 2, "stop", "review: --verdict is not pass or block; accept --verdict: not pass or fail"},
 	{"usage.until", 2, "stop", "status: --until names no condition, or one other than person, stopped, done, blocked and event; --wait or --since without --until; --since below 0; or --board with --until (W3)"},
+	{"usage.not-coordinated", 2, "stop", "ape milestone take-in in a project that does not integrate through GitHub (no coordination.github): its milestones have no milestone/<M> branch, main is the only trunk (v1.5 stage 1a)"},
 	{"usage.wait", 2, "stop", "--wait is outside 0–9m30s: one call must stay under Claude Code's 10-minute Bash cap; run the same command again to wait longer (D58 2.3)"},
 	{"review.nested", 2, "stop", "review --run inside a review session (depth 1)"},
 	{"delegate.nested", 2, "stop", "accept --delegate inside a delegate session"},
@@ -349,7 +350,7 @@ var DiagnosticCodes = []CodeDoc{
 	{"error.unclassified", 1, "stop", "a failure without a code (a bug: report it)"},
 
 	// conflicts (exit 3)
-	{CodeConflicted, 3, "apply", "start, verify, archive: the base branch moved and change/<id> does not rebase onto it (D40, H8); ape aborted the rebase, kept the old tip under refs/apex/pre-rebase/<id>/<n>, recreated change/<id> at the base tip and cherry-picked the branch's net diff --no-commit: conflict markers and unmerged paths are in the tree, HEAD on the branch, the change in-progress (verify stale, review to run again); apex-apply resolves and commits — when it cannot, it blocks the change and the loop re-plans (D43)"},
+	{CodeConflicted, 3, "apply", "start, verify, archive: the base branch moved and change/<id> does not rebase onto it (D40, H8); ape aborted the rebase, kept the old tip under refs/apex/pre-rebase/<id>/<n>, recreated change/<id> at the base tip and cherry-picked the branch's net diff --no-commit: conflict markers and unmerged paths are in the tree, HEAD on the branch, the change in-progress (verify stale, review to run again); apex-apply resolves and commits — when it cannot, it blocks the change and the loop re-plans (D43). Also ape milestone take-in (v1.5 stage 1a, section 5.2): main does not merge cleanly into milestone/<M>; the merge is laid out on change/take-in-<n> with its markers, HEAD there — apex-apply resolves, git add, git commit --no-edit, and the next take-in pushes it"},
 	{"archive.base-changed", 3, "replan", "a requirement this change modifies or removes changed in the spec since start (another branch); nothing written"},
 	{CodeDeltaConflict, 3, "replan", "the delta no longer applies to the current specs; nothing written"},
 	{CodeFolderExists, 3, "stop", "the archive folder already exists; nothing written"},

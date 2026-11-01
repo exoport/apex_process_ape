@@ -81,6 +81,8 @@ const (
 // (_apex/state/coord/prs.json): never in git, which the PR itself is.
 type Integration struct {
 	Change string `json:"change"`
+	// Kind is "" for a change's PR, KindTakeIn for a take-in's.
+	Kind string `json:"kind,omitempty"`
 	// Head is apex/<id>; Base the branch the PR merges into.
 	Head string `json:"head"`
 	Base string `json:"base"`
@@ -194,7 +196,7 @@ func (p *Project) integrateSquash(ctx context.Context, ci ChangeInfo, res *Archi
 // limits.attempts blocks the change instead.
 func (p *Project) resolveIntegration(ctx context.Context, id string) (res *ArchiveResult, done bool, err error) {
 	in := p.LoadIntegration(id)
-	if in == nil || in.State != IntegrationQueued || !p.coordinated() {
+	if in == nil || in.Kind != "" || in.State != IntegrationQueued || !p.coordinated() {
 		return nil, false, nil
 	}
 	api, err := p.integrator()

@@ -42,7 +42,7 @@ every change in flight wherever it is worked.`,
 	// v1.4 (D543 B2).
 	cmd.AddCommand(newMilestoneGateTestCmd(), newMilestoneFullCmd())
 	// v1.5 stage 1a: milestone leases in an ensemble's project.
-	cmd.AddCommand(newMilestoneClaimCmd(), newMilestoneReleaseCmd())
+	cmd.AddCommand(newMilestoneClaimCmd(), newMilestoneReleaseCmd(), newMilestoneTakeInCmd())
 	return cmd
 }
 
