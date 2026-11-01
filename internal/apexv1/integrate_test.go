@@ -3,6 +3,7 @@ package apexv1
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -18,6 +19,12 @@ type fakeIntegrator struct {
 	enqueued []int
 	states   map[int]PRState
 	openErr  error
+	// numbers: each head's PR number, from 7 up, as GitHub reuses an open
+	// PR for its head.
+	numbers map[string]int
+	// onEnqueue, when set, runs as a PR is enqueued (outside the lock): a
+	// test's queue merging it.
+	onEnqueue func(head string, n int)
 }
 
 func (f *fakeIntegrator) OpenPR(_ context.Context, head, base, _, _ string) (PRRef, error) {
@@ -27,13 +34,31 @@ func (f *fakeIntegrator) OpenPR(_ context.Context, head, base, _, _ string) (PRR
 		return PRRef{}, f.openErr
 	}
 	f.opened = append(f.opened, head+"→"+base)
-	return PRRef{Number: 7, NodeID: "PR_7", URL: "https://github.example/shop/notes/pull/7"}, nil
+	if f.numbers == nil {
+		f.numbers = map[string]int{}
+	}
+	n, ok := f.numbers[head]
+	if !ok {
+		n = 7 + len(f.numbers)
+		f.numbers[head] = n
+	}
+	return PRRef{Number: n, NodeID: fmt.Sprintf("PR_%d", n), URL: fmt.Sprintf("https://github.example/shop/notes/pull/%d", n)}, nil
 }
 
 func (f *fakeIntegrator) Enqueue(_ context.Context, pr PRRef) (string, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.enqueued = append(f.enqueued, pr.Number)
+	head := ""
+	for h, n := range f.numbers {
+		if n == pr.Number {
+			head = h
+		}
+	}
+	hook := f.onEnqueue
+	f.mu.Unlock()
+	if hook != nil {
+		hook(head, pr.Number)
+	}
 	return "QUEUED", nil
 }
 

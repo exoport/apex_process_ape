@@ -199,6 +199,11 @@ type Approval struct {
 	// PlanDigest is the plan (change.md outside ## Why and ## Notes) the
 	// person approved: start refuses a tweak whose plan changed since.
 	PlanDigest string `json:"plan_digest"`
+	// For is the milestone a tweak was approved for (v1.5 section 5.6,
+	// D645: "approve <id> for <M>"): in a project integrating through
+	// GitHub it runs on milestone/<M>, by M's loop, and reaches main with
+	// M's close PR. "" for none: ape never infers it.
+	For string `json:"for,omitempty"`
 }
 
 // Rebase records ape catching a change up with its base branch, which

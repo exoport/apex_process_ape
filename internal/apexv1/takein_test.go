@@ -97,8 +97,8 @@ func TestTakeIn(t *testing.T) {
 	require.Equal(t, resolved, res.Integration.Commit, "apex-apply's resolution is what is pushed")
 	require.Equal(t, resolved, run(t, bare, "rev-parse", "apex/take-in-2"))
 
-	// Ejected: redone, an attempt.
-	f.states[7] = PRState{}
+	// Ejected: redone, an attempt (take-in-2 is PR 8).
+	f.states[8] = PRState{}
 	res, err = p.TakeIn(ctx(), "M1")
 	require.NoError(t, err)
 	require.Equal(t, 2, res.Integration.Attempts)

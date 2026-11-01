@@ -15,7 +15,7 @@ session to grant the act (see [In your own Claude Code session](#in-your-own-cla
 | Command | What it decides | Phrase |
 | ------- | --------------- | ------ |
 | [`ape milestone approve <M> --by <who>`](../reference/cli.md#ape-milestone-approve) | The milestone, its goal and its gate are what the loop works toward. `--accept-green "<reason>"` on a re-approval belongs to the same act. | `approve <M>` |
-| [`ape change approve <tweak-id> --by <who>`](../reference/cli.md#ape-change-approve) | A tweak (`milestone: none`) may start. | `approve <tweak-id>` |
+| [`ape change approve <tweak-id> --by <who> [--milestone <M>]`](../reference/cli.md#ape-change-approve) | A tweak (`milestone: none`) may start; with `--milestone`, as part of that milestone (v1.5). | `approve <tweak-id>`, or `approve <tweak-id> for <M>` |
 | [`ape change answer <change-id> --text "<answer>" --by <who>`](../reference/cli.md#ape-change-answer) | The answer to the question a blocked change stopped on. | `answer <change-id>: <answer>` |
 | [`ape change accept <change-id> T<n> --by <who>`](../reference/cli.md#ape-change-accept) | A human-review task is met, with `--evidence <path\|url>`. | `accept T<n> of <change-id>` |
 | [`ape project accept-config --by <who>`](../reference/cli.md#ape-project-accept-config) | A change to a guarded block of `_apex/config.yaml` stands. | `accept the config` |

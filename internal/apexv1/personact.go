@@ -91,7 +91,7 @@ const actionAcceptConfig = "accept the config"
 // PersonActs are the 8 guarded acts (D47 Q6, D45, OI-4).
 var PersonActs = []PersonActSpec{
 	{ActMilestoneApprove, "ape milestone approve <M>", "approve <M>", true},
-	{ActTweakApprove, "ape change approve <tweak-id>", "approve <tweak-id>", false},
+	{ActTweakApprove, "ape change approve <tweak-id> [--milestone <M>]", "approve <tweak-id> [for <M>]", false},
 	{ActAnswer, `ape change answer <change-id> --text "<answer>"`, "answer <change-id>: <answer>", false},
 	{ActAcceptTask, "ape change accept <change-id> T<n>", "accept T<n> of <change-id>", false},
 	{ActAcceptConfig, "ape project accept-config", actionAcceptConfig, false},
@@ -143,7 +143,10 @@ type PersonCall struct {
 	Target string
 	// Task is accept's T<n>; Text the answer's --text; By the --by given.
 	Task, Text, By string
-	ArgvSHA256     string
+	// For is a tweak approval's --milestone (v1.5 section 5.6): the phrase
+	// is then "approve <id> for <M>".
+	For        string
+	ArgvSHA256 string
 	// Line is the command as a reason shows it.
 	Line string
 	// Literal: no word holds $ or a backquote, so the command line the
@@ -164,7 +167,12 @@ func (c PersonCall) Spec() PersonActSpec {
 // Phrase is what the person types for this call.
 func (c PersonCall) Phrase() string {
 	switch c.Act {
-	case ActMilestoneApprove, ActTweakApprove:
+	case ActTweakApprove:
+		if c.For != "" {
+			return "approve " + c.Target + " for " + c.For
+		}
+		return "approve " + c.Target
+	case ActMilestoneApprove:
 		return "approve " + c.Target
 	case ActAnswer, ActQuestionAnswer:
 		return "answer " + c.Target + ": " + c.Text
@@ -196,7 +204,9 @@ func (c PersonCall) words() []string {
 func (c PersonCall) answerLike() bool { return c.Act == ActAnswer || c.Act == ActQuestionAnswer }
 
 // targetKey names the act and target a prompt may grant once.
-func (c PersonCall) targetKey() string { return c.Act + "\x00" + c.Target + "\x00" + c.Task }
+func (c PersonCall) targetKey() string {
+	return c.Act + "\x00" + c.Target + "\x00" + c.Task + "\x00" + c.For
+}
 
 // ArgvSHA256 is the sha256 a grant is keyed by: the normalised command
 // line, its words joined by NUL.
@@ -966,6 +976,11 @@ next:
 			}
 		}
 		first, last := toks[i], toks[i+len(want)-1]
+		// "approve <id> for <M>" names a target the plain approval lacks:
+		// it grants only the command naming that milestone (section 5.6).
+		if c.Act == ActTweakApprove && c.For == "" && i+len(want) < len(toks) && toks[i+len(want)].s == "for" {
+			continue
+		}
 		start := strings.LastIndexAny(text[:first.start], sentenceEnds) + 1
 		end := len(text)
 		if !c.answerLike() {

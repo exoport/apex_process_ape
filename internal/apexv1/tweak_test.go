@@ -248,3 +248,55 @@ func TestRunChangeArg(t *testing.T) {
 	require.Empty(t, RunChangeArg("--no-commit"))
 	require.Empty(t, RunChangeArg(""))
 }
+
+// v1.5 section 5.6 (D645): the person names the milestone that uses a
+// tweak, "approve <id> for <M>"; ape never infers it — the plain phrase
+// does not grant a command naming one, nor the reverse.
+func TestApproveTweak_ForMilestoneGrammar(t *testing.T) {
+	plain := PersonCall{Act: ActTweakApprove, Target: "fix-hug"}
+	forM2 := PersonCall{Act: ActTweakApprove, Target: "fix-hug", For: "M2"}
+	_, _, ok := matchAct("approve fix-hug for M2", plain)
+	require.False(t, ok, "words naming a milestone do not grant the plain approval")
+	_, _, ok = matchAct("ok, approve fix-hug for M2.", forM2)
+	require.True(t, ok)
+	_, _, ok = matchAct("approve fix-hug", forM2)
+	require.False(t, ok, "the plain words do not grant one naming a milestone")
+	_, _, ok = matchAct("approve fix-hug", plain)
+	require.True(t, ok)
+	require.Equal(t, "approve fix-hug for M2", forM2.Phrase())
+}
+
+// A tweak approved for M1 records it; in a coordinated project it starts
+// from milestone/M1, M1's change in all but its frontmatter.
+func TestApproveTweak_ForMilestone(t *testing.T) {
+	files := baseFiles()
+	files["_apex/config.yaml"] = coordinatedConfig
+	p := fixture(t, files)
+	withOrigin(t, p)
+	_, _, err := p.PrepareMilestoneBranch(ctx(), "M1")
+	require.NoError(t, err)
+	run(t, p.Root, "switch", "-q", "milestone/M1")
+	addTweak(t, p, "fix-hug")
+
+	_, err = p.ApproveTweakFor(ctx(), "fix-hug", "ann", "M9")
+	require.Equal(t, CodeMilestoneNotFound, failCode(t, err))
+	res, err := p.ApproveTweakFor(ctx(), "fix-hug", "ann", "M1")
+	require.NoError(t, err)
+	require.Equal(t, "M1", res.Approved.For)
+	again, err := p.ApproveTweakFor(ctx(), "fix-hug", "ann", "M1")
+	require.NoError(t, err)
+	require.True(t, again.Already)
+	moved, err := p.ApproveTweakFor(ctx(), "fix-hug", "ann", "")
+	require.NoError(t, err)
+	require.False(t, moved.Already, "another target is a new approval")
+	require.Empty(t, moved.Approved.For)
+	_, err = p.ApproveTweakFor(ctx(), "fix-hug", "ann", "M1")
+	require.NoError(t, err)
+	require.Equal(t, "M1", p.ChangeTarget(ctx(), "fix-hug"))
+
+	_, err = p.Start(ctx(), "fix-hug", RunOptions{})
+	require.NoError(t, err)
+	st, err := LoadState(p.StateFile("fix-hug"))
+	require.NoError(t, err)
+	require.Equal(t, "milestone/M1", st.BaseBranch)
+}

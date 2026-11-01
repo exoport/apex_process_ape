@@ -86,7 +86,7 @@ func TestMatchAct(t *testing.T) {
 func TestPersonActGrammar(t *testing.T) {
 	g := PersonActGrammar()
 	require.Len(t, strings.Split(g, "\n"), 9)
-	require.Regexp(t, `(?m)^  ape change approve <tweak-id> +approve <tweak-id>$`, g)
+	require.Regexp(t, `(?m)^  ape change approve <tweak-id> \[--milestone <M>\] +approve <tweak-id> \[for <M>\]$`, g)
 	require.NotContains(t, g, "fix-id")
 	require.Contains(t, g, "allow pending human on <change-id>")
 	require.Contains(t, g, "accept T<n> of <change-id>")

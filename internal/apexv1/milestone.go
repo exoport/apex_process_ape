@@ -892,10 +892,15 @@ func (p *Project) closeMilestone(ctx context.Context, id string, opt RunOptions,
 	// with main taken in (section 5.3).
 	coordinated := p.MilestoneBase(id) != ""
 	if coordinated {
-		if g, done, err := p.resolveClose(ctx, id); done || err != nil {
+		progress := func(line string) {
+			if opt.Progress != nil {
+				fmt.Fprintln(opt.Progress, line)
+			}
+		}
+		if g, done, err := p.resolveClose(ctx, id, progress); done || err != nil {
 			return g, err
 		}
-		if err := p.prepareClose(ctx, id); err != nil {
+		if err := p.prepareClose(ctx, id, progress); err != nil {
 			return nil, err
 		}
 	}

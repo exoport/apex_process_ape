@@ -1484,7 +1484,7 @@ Flags:
 Approve a tweak (a change with milestone: none), so it can start
 
 ```
-ape change approve <id> --by <who> [flags]
+ape change approve <id> --by <who> [--milestone <M>] [flags]
 ```
 
 Record a person approving a tweak (trial decision D40, D240): a change with "milestone: none",
@@ -1509,6 +1509,14 @@ in place of an approved milestone (else exit 1, change.not-approved).
     Code session, the person types "approve <tweak-id>" in that turn (E2: `ape hook pre-tool --help`;
     --by is then git config user.name, recorded with the prompt)
 
+For a milestone (v1.5, section 5.6; D645): --milestone <M> names the milestone that uses
+the tweak, typed in the person's own session as "approve <tweak-id> for <M>". In a project
+integrating through GitHub the tweak then runs on milestone/<M>, by M's loop under M's
+lease, and reaches main with M's close PR. ape never infers the target: the plain
+"approve <tweak-id>" does not grant a command that names one, and words naming one
+("approve <id> for M2") do not grant the plain command. Without --milestone the tweak is
+a one-change milestone.
+
 Tweaks form a queue: planned and approved between runs (or `ape run stop`, plan, approve,
 restart), never overlapping a run (D45). An approved tweak runs ahead of milestone work, at
 the loop's next change boundary; with no milestone run active,
@@ -1532,6 +1540,7 @@ Flags:
 | `--by` | string | `—` | who approves (required) |
 | `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
 | `--json` | bool | `false` | machine output (JSON on stdout) |
+| `--milestone` | string | `—` | the milestone that uses the tweak (v1.5, section 5.6; typed: "approve <id> for <M>"); none: a one-change milestone |
 
 ## ape change archive
 
@@ -4376,7 +4385,7 @@ Person acts (E2; D178, D179): eight commands are a person's — from a terminal 
 Claude Code as always, or in the person's own Claude Code session on the person's own
 words. Each line is the command, then what the person types (the phrase grammar):
   ape milestone approve <M>                               approve <M>
-  ape change approve <tweak-id>                           approve <tweak-id>
+  ape change approve <tweak-id> [--milestone <M>]         approve <tweak-id> [for <M>]
   ape change answer <change-id> --text "<answer>"         answer <change-id>: <answer>
   ape change accept <change-id> T<n>                      accept T<n> of <change-id>
   ape project accept-config                               accept the config
@@ -4538,7 +4547,7 @@ Code session is refused (session.person-only).
 The phrase grammar (A12; the same lines as `ape hook pre-tool --help`, which says how a
 grant is decided): each line is the command, then what the person types for it.
   ape milestone approve <M>                               approve <M>
-  ape change approve <tweak-id>                           approve <tweak-id>
+  ape change approve <tweak-id> [--milestone <M>]         approve <tweak-id> [for <M>]
   ape change answer <change-id> --text "<answer>"         answer <change-id>: <answer>
   ape change accept <change-id> T<n>                      accept T<n> of <change-id>
   ape project accept-config                               accept the config
@@ -4942,8 +4951,10 @@ done, gate green (exit 0) …", "close <M>: gate red, not closed (exit 1) …"; 
 `ape status --json` milestones[].last_gate); --json puts "exit" and "log" first and "verdict" last.
 
 Coordinated (v1.5 stage 1a; a project with coordination.github, section 5.3): the close
-runs on milestone/<M>, fetched and synced, and is refused until main is taken in
-(milestone.take-in-needed: `ape milestone take-in <M>`). The gate runs as above, and the
+runs on milestone/<M>, fetched and synced. When main moved since the milestone last took
+it in, the close takes it in first and waits for that take-in (`ape milestone take-in --help`):
+its conflict is the close's exit 3, change.conflicted, and a take-in still queued when
+the run ends is milestone.take-in-needed (retry: close again). The gate runs as above, and the
 close record, "apex: <M> done" (an accepted red recorded with its gate run), is
 milestone/<M>'s last commit. ape pushes that tip to apex/close-<M>, opens the close PR into
 main and enqueues it; its required check, the milestone gate on the merge with the
@@ -4951,8 +4962,8 @@ current main, runs in CI (the project's merge-queue workflow), and main's queue 
 release point. The run waits for the queue as a coordinated archive does. Merged: main
 fast-forwards to the merge, milestone/<M> is deleted here and on the remote, the
 milestone's lease is released, and milestone-done names the release point; tagging stays
-a person's act (OQ20). Ejected: once main is taken in again, the close PR is pushed and
-enqueued again, an attempt (limits.attempts: integration.ejections-exceeded).
+a person's act (OQ20). Ejected: main is taken in again the same way, then the close PR is
+pushed and enqueued again, an attempt (limits.attempts: integration.ejections-exceeded).
 
 Exit codes: 0 done · 1 gate red (without --accept-red), changes in flight, not approved,
 no approval record, a changed gate, an archived gate/ in the way, or HEAD on a change

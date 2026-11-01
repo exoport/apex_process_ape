@@ -369,9 +369,9 @@ Exit codes: 0 green · 1 findings · 2 usage.`,
 
 func newChangeApproveCmd() *cobra.Command {
 	var f v1Flags
-	var by string
+	var by, forM string
 	cmd := v1ChangeLeaf(
-		"approve <id> --by <who>",
+		"approve <id> --by <who> [--milestone <M>]",
 		"Approve a tweak (a change with milestone: none), so it can start",
 		`Record a person approving a tweak (trial decision D40, D240): a change with "milestone: none",
 written by apex-change for a person's request outside the roadmap. A milestone change is
@@ -395,6 +395,14 @@ in place of an approved milestone (else exit 1, change.not-approved).
     Code session, the person types "approve <tweak-id>" in that turn (E2: `+"`ape hook pre-tool --help`"+`;
     --by is then git config user.name, recorded with the prompt)
 
+For a milestone (v1.5, section 5.6; D645): --milestone <M> names the milestone that uses
+the tweak, typed in the person's own session as "approve <tweak-id> for <M>". In a project
+integrating through GitHub the tweak then runs on milestone/<M>, by M's loop under M's
+lease, and reaches main with M's close PR. ape never infers the target: the plain
+"approve <tweak-id>" does not grant a command that names one, and words naming one
+("approve <id> for M2") do not grant the plain command. Without --milestone the tweak is
+a one-change milestone.
+
 Tweaks form a queue: planned and approved between runs (or `+"`ape run stop`"+`, plan, approve,
 restart), never overlapping a run (D45). An approved tweak runs ahead of milestone work, at
 the loop's next change boundary; with no milestone run active,
@@ -410,7 +418,7 @@ checked out in another worktree · 2 usage (no --by), or a model session.`,
 			if err := v1PersonAct(cmd, p, personCallOf(cmd, cmd.Flags().Args())); err != nil {
 				return v1Fail(cmd, &f, err, nil)
 			}
-			res, err := p.ApproveTweak(cmd.Context(), id, personBy(cmd.Context(), by))
+			res, err := p.ApproveTweakFor(cmd.Context(), id, personBy(cmd.Context(), by), forM)
 			if err != nil {
 				return v1Fail(cmd, &f, err, nil)
 			}
@@ -419,11 +427,16 @@ checked out in another worktree · 2 usage (no --by), or a model session.`,
 					fmt.Fprintf(w, "tweak %s: already approved by %s at %s (nothing written)\n", id, res.Approved.By, res.Approved.At)
 					return
 				}
+				if m := res.Approved.For; m != "" {
+					fmt.Fprintf(w, "tweak %s: approved by %s for %s — %s's loop runs it at its next change boundary\n", id, res.Approved.By, m, m)
+					return
+				}
 				fmt.Fprintf(w, "tweak %s: approved by %s — it runs ahead of milestone work: `ape task apex-loop --args %s`, or the loop's next change boundary\n",
 					id, res.Approved.By, id)
 			})
 		})
 	cmd.Flags().StringVar(&by, "by", "", "who approves (required)")
+	cmd.Flags().StringVar(&forM, "milestone", "", "the milestone that uses the tweak (v1.5, section 5.6; typed: \"approve <id> for <M>\"); none: a one-change milestone")
 	return cmd
 }
 
@@ -1525,7 +1538,7 @@ func coordMilestone(cmd *cobra.Command, p *apexv1.Project, id string) string {
 		m, _ := cmd.Flags().GetString("milestone")
 		return m
 	case "start":
-		return p.ChangeMilestone(cmd.Context(), id)
+		return p.ChangeTarget(cmd.Context(), id)
 	}
 	return ""
 }

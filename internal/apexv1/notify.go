@@ -82,6 +82,19 @@ func (p *Project) ChangeIDIn(ctx context.Context, args string) string {
 	return fields[0]
 }
 
+// ChangeTarget is the milestone whose branch, lease and close a change
+// goes with: its milestone, or for a tweak the milestone it was approved
+// for (v1.5 section 5.6), "" for a tweak approved for none.
+func (p *Project) ChangeTarget(ctx context.Context, id string) string {
+	if m := p.ChangeMilestone(ctx, id); m != "" {
+		return m
+	}
+	if ci, err := p.requireChange(ctx, id); err == nil && ci.State != nil && ci.State.Approved != nil {
+		return ci.State.Approved.For
+	}
+	return ""
+}
+
 // ChangeMilestone is the milestone a change belongs to, "" for a tweak
 // (milestone: none) or a change that does not load.
 func (p *Project) ChangeMilestone(ctx context.Context, id string) string {

@@ -54,6 +54,14 @@ type ApproveResult struct {
 // and not be started. Re-approving the same plan is a no-op; a plan changed
 // since its approval is approved again (recorded anew).
 func (p *Project) ApproveTweak(ctx context.Context, id, by string) (*ApproveResult, error) {
+	return p.ApproveTweakFor(ctx, id, by, "")
+}
+
+// ApproveTweakFor is ApproveTweak naming the milestone that uses the
+// tweak (v1.5 section 5.6; `ape change approve <id> --milestone <M>`): a
+// roadmap milestone not done. Re-approving the same plan for another
+// milestone records the approval anew.
+func (p *Project) ApproveTweakFor(ctx context.Context, id, by, forM string) (*ApproveResult, error) {
 	// A model never approves its own tweak (D47 Q6).
 	if err := requirePerson(ctx, ActTweakApprove, "ape change approve"); err != nil {
 		return nil, err
@@ -82,11 +90,24 @@ func (p *Project) ApproveTweak(ctx context.Context, id, by string) (*ApproveResu
 	if fs := p.CheckChangeAnywhere(ctx, id); len(fs) > 0 {
 		return nil, &FailError{Code: CodeCheckFailed, Msg: "tweak " + id + " does not pass `ape change check` — fix change.md first, then approve", Findings: fs}
 	}
+	if forM = strings.TrimSpace(forM); forM != "" {
+		rm := p.roadmap()
+		m := (*Milestone)(nil)
+		if rm != nil {
+			m = rm.Find(forM)
+		}
+		switch {
+		case m == nil:
+			return nil, &FailError{Code: CodeMilestoneNotFound, Msg: "no milestone " + forM + " in roadmap.md — --milestone names the milestone that uses the tweak"}
+		case m.Status == MilestoneDone:
+			return nil, &FailError{Code: "milestone.done", Msg: forM + " is done — a tweak goes with a milestone still open, or with none (a one-change milestone)"}
+		}
+	}
 	digest := ci.Doc.PlanDigest()
-	if a := st.Approved; a != nil && a.PlanDigest == digest {
+	if a := st.Approved; a != nil && a.PlanDigest == digest && a.For == forM {
 		return &ApproveResult{ID: id, Status: st.Status, Approved: a, Already: true}, nil
 	}
-	st.Approved = &Approval{By: by, At: Stamp(), PlanDigest: digest}
+	st.Approved = &Approval{By: by, At: Stamp(), PlanDigest: digest, For: forM}
 	if err := p.saveChangeState(ctx, ci, st, "apex: "+id+" approved"); err != nil {
 		return nil, err
 	}

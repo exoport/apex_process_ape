@@ -1,9 +1,11 @@
 package apexv1
 
 import (
+	"context"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -56,15 +58,24 @@ func TestClosePR(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, f.opened, 1, "queued: nothing redone")
 
-	// Another milestone closed first; this PR was ejected.
+	// Another milestone closed first; this PR was ejected. The close takes
+	// main in itself (its take-in merges as it is enqueued), then goes again.
 	pushFile(t, bare, "main", "notes.txt", "M0 shipped\n")
 	f.states[7] = PRState{}
-	_, err = p.CloseMilestone(ctx(), "M1", RunOptions{})
-	require.Equal(t, CodeTakeInNeeded, failCode(t, err))
-
-	mergeOnRemote(t, bare, "milestone/M1", "main") // the take-in merged
+	f.onEnqueue = func(head string, n int) {
+		if !strings.HasPrefix(head, "apex/take-in-") {
+			return
+		}
+		merge := run(t, bare, "rev-parse", head)
+		run(t, bare, "update-ref", "refs/heads/milestone/M1", merge)
+		f.mu.Lock()
+		f.states[n] = PRState{Merged: true, MergeCommit: merge}
+		f.mu.Unlock()
+	}
 	g, err = p.CloseMilestone(ctx(), "M1", RunOptions{})
 	require.NoError(t, err)
+	require.Contains(t, f.opened, "apex/take-in-1→milestone/M1", "the close took main in first")
+	require.Equal(t, IntegrationMerged, p.LoadIntegration("take-in-1").State)
 	require.Equal(t, 2, g.Integration.Attempts)
 	require.Equal(t, "apex: M1 done", run(t, p.Root, "log", "-1", "--format=%s", "milestone/M1"), "the close record replayed on top of the take-in")
 	require.Equal(t, g.Integration.Commit, run(t, bare, "rev-parse", "apex/close-M1"), "pushed again")
@@ -91,4 +102,28 @@ func TestClosePR(t *testing.T) {
 	g, err = p.CloseMilestone(ctx(), "M1", RunOptions{})
 	require.NoError(t, err, "closed: a second close is a no-op")
 	require.Equal(t, MilestoneDone, g.Status)
+}
+
+// A take-in still queued as the close's run ends is take-in-needed, retry.
+func TestClosePR_TakeInStillQueued(t *testing.T) {
+	old := QueuePoll
+	QueuePoll = 20 * time.Millisecond
+	t.Cleanup(func() { QueuePoll = old })
+	files := baseFiles()
+	files["_apex/config.yaml"] = coordinatedConfig
+	files["gate.sh"] = "#!/bin/sh\nexit 0\n"
+	p := fixture(t, files)
+	bare := withOrigin(t, p)
+	_, _, err := p.PrepareMilestoneBranch(ctx(), "M1")
+	require.NoError(t, err)
+	f := &fakeIntegrator{states: map[int]PRState{7: {Queue: "AWAITING_CHECKS"}}}
+	useIntegrator(t, f)
+	pushFile(t, bare, "main", "notes.txt", "M0 shipped\n")
+
+	short, cancel := context.WithTimeout(ctx(), 200*time.Millisecond)
+	defer cancel()
+	_, err = p.CloseMilestone(short, "M1", RunOptions{})
+	require.Equal(t, CodeTakeInNeeded, failCode(t, err))
+	require.Equal(t, ActionRetry, ActionFor(CodeTakeInNeeded))
+	require.Equal(t, []string{"apex/take-in-1→milestone/M1"}, f.opened, "no close PR before main is in")
 }
