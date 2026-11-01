@@ -3,6 +3,8 @@ package member
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -60,16 +62,42 @@ func webHost(api string) string {
 // person's insteadOf rewrite of https://github.com/ to an ssh alias does
 // not apply. A project with a personal token file, or in no ensemble, uses
 // its remote with git's own credentials ("" url).
+//
+// An App project never falls back to the remote (FINDING-V15-1A-6): a
+// person's git config may rewrite it to ssh with their key, and with an
+// agent the call would run as the person, silently. A membership that
+// cannot be used is coord.membership, a token the service did not give
+// coord.nats-unreachable; both say the route.
 func GitVia(ctx context.Context, p *apexv1.Project, purpose string) (url string, env []string, err error) {
 	m, err := Load(p)
-	if err != nil || !m.GitHubApp {
-		return "", nil, nil //nolint:nilerr // not an App project: git's own credentials
+	if err != nil {
+		if !appConfigured(p) {
+			return "", nil, nil // not an App project: git's own credentials
+		}
+		return "", nil, &apexv1.FailError{Code: apexv1.CodeCoordMembership, Action: apexv1.ActionPerson, Msg: fmt.Sprintf(
+			"this project reaches GitHub only through the App service (coordination.github.app: true), and its membership cannot be used: %v"+
+				" — ape does not fall back to the remote with git's own credentials (they may be a person's); a person places the ensemble credential at %s (mode 0600, in the ignored hot/) or fixes the coordination: block, then runs the command again",
+			err, apexv1.NATSCredsRel)}
+	}
+	if !m.GitHubApp {
+		return "", nil, nil
 	}
 	tok, err := m.GitHubTokenFor(ctx, purpose)
 	if err != nil {
-		return "", nil, err
+		return "", nil, &apexv1.FailError{Code: apexv1.CodeCoordNATSUnreachable, Action: apexv1.ActionRetry, Msg: fmt.Sprintf(
+			"no %s token from the coordination host's App service (%s): %v"+
+				" — ape does not fall back to the remote with git's own credentials (they may be a person's); check that the App service runs (`ape ghapp serve`, the apex-ghapp unit) and NATS answers at %s, then run the command again",
+			purpose, m.GitHubRepo, err, m.URL)}
 	}
 	return gitURL(m.GitHubAPI, m.GitHubRepo), pushEnv(tok), nil
+}
+
+// appConfigured reports a project whose config says its GitHub access is
+// the App service's, read without the membership (whose credential may be
+// what is missing).
+func appConfigured(p *apexv1.Project) bool {
+	cfg, err := apexv1.LoadConfig(p.Root)
+	return err == nil && cfg.Coordination != nil && cfg.Coordination.GitHub != nil && cfg.Coordination.GitHub.App
 }
 
 // gitURL is the repository's https URL with the user x-access-token.
@@ -82,10 +110,14 @@ func gitURL(api, repo string) string {
 }
 
 // pushEnv carries tok to git in an Authorization header for this command
-// only.
+// only. The person's global and system git config are not read for it
+// (FINDING-V15-1A-6): an url.*.insteadOf there could send the call to ssh
+// with their key; a rule in the checkout's own config is refused by
+// apexv1's gitTarget, which checks the URL git would use.
 func pushEnv(tok string) []string {
 	basic := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + tok))
 	return []string{
+		"GIT_CONFIG_GLOBAL=" + os.DevNull, "GIT_CONFIG_NOSYSTEM=1",
 		"GIT_CONFIG_COUNT=2",
 		"GIT_CONFIG_KEY_0=http.extraHeader", "GIT_CONFIG_VALUE_0=AUTHORIZATION: basic " + basic,
 		"GIT_CONFIG_KEY_1=credential.helper", "GIT_CONFIG_VALUE_1=",

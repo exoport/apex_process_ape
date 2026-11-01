@@ -120,7 +120,9 @@ func (p *Project) RecordClaim(ctx context.Context, ms, holder string) (*Integrat
 	}
 	remote := p.trunkRemote(ctx)
 	if err := p.fetchCoordinated(ctx, "main"); err != nil {
-		return nil, &FailError{Code: CodeFetchFailed, Msg: fmt.Sprintf("the claim record of %s needs main from %s: %v — claim again", ms, remote, err)}
+		return nil, coded(err, func() error {
+			return &FailError{Code: CodeFetchFailed, Msg: fmt.Sprintf("the claim record of %s needs main from %s: %v — claim again", ms, remote, err)}
+		})
 	}
 	mainTip := "refs/remotes/" + remote + "/main"
 	subject := "apex: " + ms + " claimed by " + holder

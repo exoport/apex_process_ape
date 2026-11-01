@@ -2,6 +2,7 @@ package apexv1
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -48,10 +49,41 @@ func (p *Project) gitTarget(ctx context.Context, purpose string) (target string,
 			return "", nil, false, err
 		}
 		if url != "" {
-			return url, append(env, extra...), true, nil
+			env = append(env, extra...)
+			// FINDING-V15-1A-6: the URL git would use must be this one. The
+			// person's global and system config are not read (GitVia's
+			// env); a rule in the checkout's own config is refused.
+			if got, err := gitWithEnv(ctx, p.Root, env, "ls-remote", "--get-url", url); err == nil && got != url {
+				return "", nil, false, &FailError{Code: CodeCoordURLRewritten, Action: ActionPerson, Msg: fmt.Sprintf(
+					"this checkout's git config rewrites the coordinated repository's URL (url.*.insteadOf in .git/config): %s would go to %s, not where the App's token is for"+
+						" — ape refuses rather than reach it as someone else; a person removes the rule (`git config --unset url.<base>.insteadOf`) and runs the command again",
+					redactURL(url), redactURL(got))}
+			}
+			return url, env, true, nil
 		}
 	}
 	return p.trunkRemote(ctx), env, false, nil
+}
+
+// coded is err when it is a refusal ape already coded — the App
+// project's coord.membership, coord.nats-unreachable or
+// coord.url-rewritten (FINDING-V15-1A-6), which name the route — else
+// wrap's error.
+func coded(err error, wrap func() error) error {
+	if fe, ok := errors.AsType[*FailError](err); ok {
+		return fe
+	}
+	return wrap()
+}
+
+// redactURL is u for a message: its user (x-access-token) dropped.
+func redactURL(u string) string {
+	if scheme, rest, ok := strings.Cut(u, "://"); ok {
+		if _, host, ok := strings.Cut(rest, "@"); ok {
+			return scheme + "://" + host
+		}
+	}
+	return u
 }
 
 // pushTarget is gitTarget for a push.
@@ -147,7 +179,9 @@ func (p *Project) Integrator() (Integrator, error) { return p.integrator() }
 // with a clean tree, or not checked out. It returns one line per branch.
 func (p *Project) FetchAndSync(ctx context.Context, branches ...string) ([]string, error) {
 	if err := p.fetchCoordinated(ctx, branches...); err != nil {
-		return nil, &FailError{Code: CodeFetchFailed, Msg: "fetching " + strings.Join(branches, ", ") + " failed: " + err.Error()}
+		return nil, coded(err, func() error {
+			return &FailError{Code: CodeFetchFailed, Msg: "fetching " + strings.Join(branches, ", ") + " failed: " + err.Error()}
+		})
 	}
 	remote := p.trunkRemote(ctx)
 	out := make([]string, 0, len(branches))

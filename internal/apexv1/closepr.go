@@ -99,7 +99,9 @@ func (p *Project) regateClose(ctx context.Context, ms string, opt RunOptions) er
 // first.
 func (p *Project) mainIn(ctx context.Context, ms string) (bool, error) {
 	if err := p.fetchCoordinated(ctx, "main"); err != nil {
-		return false, &FailError{Code: CodeFetchFailed, Msg: "the close of " + ms + " needs main fetched: " + err.Error()}
+		return false, coded(err, func() error {
+			return &FailError{Code: CodeFetchFailed, Msg: "the close of " + ms + " needs main fetched: " + err.Error()}
+		})
 	}
 	_, err := git(ctx, p.Root, "merge-base", "--is-ancestor", "refs/remotes/"+p.trunkRemote(ctx)+"/main", "refs/heads/"+MilestoneBranch(ms))
 	return err == nil, nil
@@ -239,7 +241,9 @@ func (p *Project) checkoutMain(ctx context.Context, remote, what string) error {
 func (p *Project) finishClose(ctx context.Context, ms string, rec *Integration, s PRState, g *GateResult) error {
 	base, remote := MilestoneBranch(ms), p.trunkRemote(ctx)
 	if err := p.fetchCoordinated(ctx, "main"); err != nil {
-		return &FailError{Code: CodeFetchFailed, Msg: fmt.Sprintf("%s merged, but fetching main from %s failed: %v — close again once the remote answers", rec.PR.URL, remote, err)}
+		return coded(err, func() error {
+			return &FailError{Code: CodeFetchFailed, Msg: fmt.Sprintf("%s merged, but fetching main from %s failed: %v — close again once the remote answers", rec.PR.URL, remote, err)}
+		})
 	}
 	if err := p.checkoutMain(ctx, remote, "close "+ms); err != nil {
 		return err

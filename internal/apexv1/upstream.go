@@ -2,6 +2,7 @@ package apexv1
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -95,6 +96,9 @@ func (p *Project) fetchUpstreams(ctx context.Context, base, what string) error {
 			continue
 		}
 		if err := p.fetchUpstream(ctx, remote, merge); err != nil {
+			if fe, ok := errors.AsType[*FailError](err); ok {
+				return fe // the App project's refusal (FINDING-V15-1A-6)
+			}
 			return &FailError{Code: CodeFetchFailed, Msg: fmt.Sprintf("this project is coordinated, and %s needs %s's upstream fetched first: git fetch %s %s failed: %v — fix the remote or its credentials, then run this again; nothing was written",
 				what, b, remote, merge, err)}
 		}

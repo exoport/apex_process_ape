@@ -2,6 +2,7 @@ package apexv1
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -51,10 +52,13 @@ func (p *Project) PrepareMilestoneBranch(ctx context.Context, ms string) (branch
 		return &FailError{Code: CodeFetchFailed, Msg: fmt.Sprintf("claiming %s needs %s on %s: %s failed: %v — fix the remote or its credentials, then claim again (the lease is held)", ms, branch, remote, what, err)}
 	}
 	if err := p.fetchCoordinated(ctx, "main"); err != nil {
-		return branch, false, fail("git fetch "+remote+" main", err)
+		return branch, false, coded(err, func() error { return fail("git fetch "+remote+" main", err) })
 	}
 	tracking := "refs/remotes/" + remote + "/" + branch
 	if err := p.fetchCoordinated(ctx, branch); err != nil {
+		if fe, ok := errors.AsType[*FailError](err); ok {
+			return branch, false, fe // refused, not absent (FINDING-V15-1A-6)
+		}
 		// The remote has no milestone/<M> yet: cut it from its main.
 		if _, err := git(ctx, p.Root, "update-ref", tracking, "refs/remotes/"+remote+"/main"); err != nil {
 			return branch, false, fail("git update-ref "+tracking, err)

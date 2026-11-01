@@ -553,8 +553,21 @@ func (p *Project) pushBranch(ctx context.Context, branch string) ([]string, erro
 		return nil, refused("no such branch here")
 	}
 	ref := "refs/heads/" + b + ":refs/heads/" + b
-	if _, err := git(ctx, p.Root, "push", "--no-follow-tags", "origin", ref); err != nil {
+	// In an App project through the App's pusher token, never git's own
+	// credentials (FINDING-V15-1A-6); elsewhere the remote, as before.
+	target, env, viaURL, err := p.pushTarget(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !viaURL {
+		target = "origin"
+	}
+	if _, err := gitWithEnv(ctx, p.Root, env, "push", "--no-follow-tags", target, ref); err != nil {
 		return nil, &FailError{Code: CodeOrdersRefused, Msg: "git push failed: " + err.Error()}
+	}
+	if viaURL {
+		_, _ = git(ctx, p.Root, "update-ref", "refs/remotes/origin/"+b, "refs/heads/"+b)
+		return []string{"git push --no-follow-tags <the coordinated repository, through the App> " + ref}, nil
 	}
 	return []string{"git push --no-follow-tags origin " + ref}, nil
 }
