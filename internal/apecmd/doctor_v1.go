@@ -126,12 +126,24 @@ func checkV1Hooks(_ context.Context, env doctorEnv) CheckResult {
 	}
 	fs := p.CheckHooks()
 	if len(fs) == 0 {
-		// v1.3: project check's hooks.monitor-unguarded notice.
+		// Project check's notices, every one (a row that named only the
+		// first hid the other): hooks.fail-open (1.4.3 PDFA-4) and
+		// hooks.monitor-unguarded (v1.3). A WARN, as project check's are
+		// notices: `ape task` sessions get the hooks inline, with
+		// onFailure and Monitor, either way; what they miss is a person's
+		// own Claude Code session here.
+		var warns []string
+		if msg := p.FailOpen(); msg != "" {
+			warns = append(warns, apexv1.CodeHooksFailOpen+": "+msg)
+		}
 		if msg := p.MonitorUnguarded(); msg != "" {
+			warns = append(warns, apexv1.CodeHooksMonitorUnguarded+": "+msg)
+		}
+		if len(warns) > 0 {
 			return CheckResult{
 				Status:      StatusWarn,
-				Message:     apexv1.CodeHooksMonitorUnguarded + ": " + msg,
-				Remediation: "`ape project init` adds Monitor to the pre-tool matcher in place; `ape task` sessions get the hooks inline either way.",
+				Message:     strings.Join(warns, "; "),
+				Remediation: "`ape project init` fixes them in place (\"onFailure\": \"block\", Monitor in the pre-tool matcher); `ape task` sessions get the hooks inline either way, so what they miss is a person's own Claude Code session here.",
 				FixCommand:  "ape project init --cwd " + p.Root,
 			}
 		}

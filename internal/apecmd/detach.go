@@ -80,10 +80,13 @@ type detachedHandle struct {
 	// process running the parent, which the supervisor watches (the child
 	// dies with it). Locks are the session lock files the run holds under
 	// this handle's id; the supervisor releases them when the run ends.
-	Depth     int      `json:"depth,omitempty"`
-	ParentRun string   `json:"parent_run,omitempty"`
-	ParentPID int      `json:"parent_pid,omitempty"`
-	Locks     []string `json:"locks,omitempty"`
+	Depth     int    `json:"depth,omitempty"`
+	ParentRun string `json:"parent_run,omitempty"`
+	// UsageOKFrom is the parent run whose person's --usage-ok this run
+	// carries (1.4.3 PDFA-5), decided by the process that launched it.
+	UsageOKFrom string   `json:"usage_ok_from,omitempty"`
+	ParentPID   int      `json:"parent_pid,omitempty"`
+	Locks       []string `json:"locks,omitempty"`
 	// RunDir / RunID are the run's own record, written by the run once it
 	// has one (an `ape task` run's manifest directory).
 	RunDir string `json:"run_dir,omitempty"`
@@ -284,6 +287,7 @@ func launchDetached(root, dir string, argv, env []string, meta detachMeta) (*det
 	}
 	if l := meta.launch; l != nil {
 		h.Depth, h.ParentRun, h.ParentPID, h.Locks = l.depth, l.parentRun, l.parentPID, l.locks
+		h.UsageOKFrom = l.usageOKFrom
 	}
 	path := handlePath(root, id)
 	if err := writeHandle(path, h); err != nil {
@@ -907,6 +911,20 @@ func markParentGone(path, parentRun string, parentPID int) {
 		m.Termination = &pipeline.TerminationRecord{Kind: pipeline.TerminationParentGone, Message: fmt.Sprintf(
 			"the loop run %s that started this session ended (its ape process, pid %d, is gone), and ape stopped the session", parentRun, parentPID)}
 	})
+}
+
+// ownHandle is the handle of the detached run this process is
+// (APE_DETACHED_ID), nil when it is none.
+func ownHandle(projectRoot string) *detachedHandle {
+	id := os.Getenv(envDetachedID)
+	if id == "" || projectRoot == "" {
+		return nil
+	}
+	h, err := readHandle(handlePath(projectRoot, id))
+	if err != nil || h.ID != id {
+		return nil
+	}
+	return h
 }
 
 // noteDetachedRun records, on the handle of the detached run this process

@@ -3061,6 +3061,9 @@ act), only when all of these hold:
   - no turn is running ("esc to interrupt" absent) and the input row is empty — never after
     your half-typed line;
   - the screen did not change between two looks (one --poll apart).
+After typing, the watcher confirms the submit: the input row empties or a turn starts. If not,
+it presses Enter again, at most three Enters in all; a delivery still not submitted is recorded
+unsubmitted, nothing is typed over it, and the ack alert reaches you (1.4.3).
 The conductor acknowledges each: `ape conductor ack <id>`. An event not acknowledged within
 --ack-alert of it (default conductor.ack_alert of the first project, else 15m) logs
 conductor-stalled in its project, once, so that project's notify: command reaches you —
@@ -4176,6 +4179,13 @@ The install and the migrations it ran are committed together as
 Framework-Commit, Framework-Migrations and Generator trailers; an update
 that changed nothing commits nothing. A migration that commits on its own
 (the v1.0.0 lift) lands its commit first.
+
+In an APEX v1 project the update also brings ape's Claude Code hooks in
+.claude/settings.json up to date, as 'ape project init' does: a pre-tool
+hook registered without "onFailure": "block" gains it, Monitor joins the
+pre-tool matcher, a missing or altered hook is restored, and every other key
+and hook is kept. It prints a 'hook' line for each, and the update's commit
+carries settings.json (1.4.3).
 
 A 'blocking: true' derivable migration — the lift, above all — is one the
 install is not valid without. When one fails or is not attempted (an
@@ -9578,9 +9588,14 @@ reads the newest reading against _apex/config.yaml
            unknown (no reading in 10 min)" in the output and the manifest
 A window whose reset has passed counts as 0. --usage-ok launches whatever
 the reading says; it is a person's (refused in a model session, exit 2,
-session.person-only) and recorded. The decision is the run manifest's
+session.person-only) and recorded. On an apex-loop run it reaches the
+children that run launches, for that run only: each child launches whatever
+the reading says and records usage_ok with usage_ok_from: <the loop's run>
+(1.4.3). A child carries it only when ape finds the loop by process ancestry
+(the detached child, through the handle its launcher wrote), never because
+an environment variable names the loop. The decision is the run manifest's
 usage.guard: {decision, reading, share_five_hour, share_seven_day,
-share_source, held_until, held_seconds, usage_ok, note}, beside usage.before
+share_source, held_until, held_seconds, usage_ok, usage_ok_from, note}, beside usage.before
 and usage.after.
 
 Events and the notifier (H20, W3): in an APEX v1 project every run logs

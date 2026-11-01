@@ -33,11 +33,14 @@ func (t *Tmux) Capture(ctx context.Context) (string, error) {
 	return t.tmux(ctx, "capture-pane", "-p", "-t", t.Target)
 }
 
-// Type types text literally (-l: no key names) and presses Enter.
+// Type types text literally (-l: no key names), without Enter.
 func (t *Tmux) Type(ctx context.Context, text string) error {
-	if _, err := t.tmux(ctx, "send-keys", "-t", t.Target, "-l", text); err != nil {
-		return err
-	}
+	_, err := t.tmux(ctx, "send-keys", "-t", t.Target, "-l", text)
+	return err
+}
+
+// Enter presses Enter.
+func (t *Tmux) Enter(ctx context.Context) error {
 	_, err := t.tmux(ctx, "send-keys", "-t", t.Target, "Enter")
 	return err
 }

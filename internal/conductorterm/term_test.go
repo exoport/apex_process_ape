@@ -231,9 +231,40 @@ func TestLoadState_TransientlyUnreadableRecord(t *testing.T) {
 		}
 		restored <- os.Rename(p+".away", p)
 	}()
-	_, err := LoadState(root)
-	require.Error(t, err, "the window is real: a read in it fails")
+	_, err := os.ReadFile(p)
+	require.Error(t, err, "the window is real: a raw read in it fails")
 	st := loadState(t, root)
 	require.Equal(t, []int64{7}, st.Pending)
 	require.NoError(t, <-restored)
+}
+
+// W1 (1.4.3): LoadState itself retries a read that fails while the
+// supervisor rewrites the record (on Windows a read overlapping the rename
+// is a sharing violation), so `ape conductor send|stop|status|read` never
+// gives a wrong answer for it. Deterministic on every OS: the record is a
+// directory for 100 ms. A missing record stays ErrNoTerminal at once.
+func TestLoadState_RetriesATransientFailure(t *testing.T) {
+	root := project(t)
+	_, err := LoadState(root)
+	require.ErrorIs(t, err, ErrNoTerminal, "no record: no retry, the answer at once")
+
+	// The test's own window (100 ms, then a goroutine restores the record)
+	// within a 2 s budget: on a loaded CI runner the restore came after
+	// production's ≈ 200 ms (run 41254079926).
+	retries := loadRetries
+	loadRetries = 100
+	t.Cleanup(func() { loadRetries = retries })
+	require.NoError(t, saveState(root, &State{Alive: true, Pending: []int64{3}, Delivered: []Delivered{}}))
+	p := statePath(root)
+	require.NoError(t, os.Rename(p, p+".away"))
+	require.NoError(t, os.Mkdir(p, 0o755))
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		_ = os.Remove(p)
+		_ = os.Rename(p+".away", p)
+	}()
+	st, err := LoadState(root)
+	require.NoError(t, err, "a read that fails for a moment is retried")
+	require.True(t, st.Alive)
+	require.Equal(t, []int64{3}, st.Pending)
 }

@@ -27,6 +27,10 @@ type usageGuard struct {
 	skill   string
 	args    string
 	usageOK bool
+	// usageOKFrom is the parent run whose person's --usage-ok this
+	// launch carries (1.4.3 PDFA-5): a loop run started with it launches
+	// its children whatever the reading says, for that run only.
+	usageOKFrom string
 
 	// decision is the last decision, and heldFrom/heldUntil the hold
 	// before it, for the manifest (record); heldTo is when the hold ended
@@ -76,7 +80,10 @@ func (g *usageGuard) beforeSpawn(ctx context.Context, held func(*time.Time), w i
 		return nil
 	}
 	for {
-		d := usage.Decide(g.cfg, usage.Load(), g.share(), usageNow(), g.usageOK)
+		d := usage.Decide(g.cfg, usage.Load(), g.share(), usageNow(), g.usageOK || g.usageOKFrom != "")
+		if d.Outcome == usage.UsageOK && !g.usageOK && g.usageOKFrom != "" {
+			d.Why = strings.Replace(d.Why, "(--usage-ok)", "(--usage-ok on the loop run "+g.usageOKFrom+", carried to the children it launches)", 1)
+		}
 		g.decision = &d
 		switch d.Outcome {
 		case usage.Stop:
@@ -161,6 +168,9 @@ func (g *usageGuard) record() *pipeline.UsageGuardRecord {
 		Decision: string(d.Outcome), Reading: manifestReading(d.Reading),
 		ShareFiveHour: d.Share.FiveHour, ShareSevenDay: d.Share.SevenDay, ShareSource: d.Share.Source,
 		UsageOK: d.Outcome == usage.UsageOK,
+	}
+	if rec.UsageOK && !g.usageOK {
+		rec.UsageOKFrom = g.usageOKFrom
 	}
 	if d.Outcome == usage.Unknown || d.Outcome == usage.UsageOK {
 		rec.Note = d.Why

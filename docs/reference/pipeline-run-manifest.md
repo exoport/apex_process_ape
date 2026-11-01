@@ -193,7 +193,7 @@ it ends:
 | Field | Meaning |
 | --- | --- |
 | `before`, `after` | The first and the last reading the run's session recorded: `{at, five_hour, five_hour_resets_at, seven_day, seven_day_resets_at}`, the windows as fractions 0..1. `before` is taken at the session's first API response, not before the launch. Absent when the session recorded none (a plan without rate limits, a session that never reached the API). |
-| `guard` | APEX v1: the usage guard's decision before the launch: `decision` (`launch`, `unknown`, `stop`, `off`, `usage_ok`), `reading` (the reading decided on), `share_five_hour`, `share_seven_day` and `share_source` (`config`, `auto`, `default`), `held_until` and `held_seconds` when the launch was held on the 5-hour window first, `usage_ok` for a person's `--usage-ok`, and `note` ("usage unknown (no reading in 10 min)"). |
+| `guard` | APEX v1: the usage guard's decision before the launch: `decision` (`launch`, `unknown`, `stop`, `off`, `usage_ok`), `reading` (the reading decided on), `share_five_hour`, `share_seven_day` and `share_source` (`config`, `auto`, `default`), `held_until` and `held_seconds` when the launch was held on the 5-hour window first, `usage_ok` for a person's `--usage-ok` and, since v1.4.3, `usage_ok_from` (the apex-loop run whose `--usage-ok` a child of it carries), and `note` ("usage unknown (no reading in 10 min)"). |
 
 #### The usage files: `<user cache>/ape/usage.json`
 

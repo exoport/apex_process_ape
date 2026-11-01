@@ -49,6 +49,11 @@ func frameworkInstallPath(rel string) bool {
 	return strings.HasPrefix(rel, ".claude/") || strings.HasPrefix(rel, ".aboard/")
 }
 
+// apePinSubject starts the commit `ape update --pin` and `ape framework
+// update --update-ape` make to move the project's bingo pin of ape; with
+// files only under .bingo/ it is not outside the flow.
+const apePinSubject = "chore(ape): update ape to "
+
 // v1EpochSubjects start the commit that makes a project v1.
 var v1EpochSubjects = []string{"apex: project init", "apex: lift"}
 
@@ -124,6 +129,9 @@ func (p *Project) outsideFlow(ctx context.Context, base string) []OutsideFlow {
 		}
 		if framework != "" && !slices.ContainsFunc(files, func(f string) bool { return !frameworkInstallPath(f) }) {
 			continue // ape framework setup|update's install commit
+		}
+		if strings.HasPrefix(subject, apePinSubject) && !slices.ContainsFunc(files, func(f string) bool { return !strings.HasPrefix(f, ".bingo/") }) {
+			continue // ape's own pin commit (1.4.3 PDFA-3)
 		}
 		out = append(out, OutsideFlow{SHA: sha, Subject: subject, Files: limit(files, outsideFlowFiles)})
 	}

@@ -440,3 +440,40 @@ func TestEmitFrameworkDryRun_FailedFetchIsNotInSync(t *testing.T) {
 	require.NoError(t, emitFrameworkDryRun(t.Context(), &buf, fw, root, "", false, true))
 	require.Contains(t, buf.String(), "framework: in sync", "--no-fetch: nothing was meant to be fetched")
 }
+
+// 1.4.3 PDFA-2: `ape framework update` on a v1 project brings ape's Claude
+// Code hooks up to date as `ape project init` does — a pre-tool hook
+// registered before rc.7q, with no "onFailure", gains it in place — in the
+// update's own commit, and says so (a hook line). pdfa's update left the
+// hook fail-open.
+func TestFrameworkInstallV1_UpdateRefreshesTheHooks(t *testing.T) {
+	v1Env(t)
+	fw := v1FrameworkRepo(t, "v1.0.0-rc.8", v1LiftEntry("exit 0", "true"))
+	root := emptyGitProject(t)
+	_, stderr, err := v1Exec(t, newProjectCmd, "init", "--cwd", root)
+	require.NoError(t, err, stderr)
+	out, err := runFramework(t, "setup", fw, root, "--version", "v1.0.0-rc.8", "--no-fetch")
+	require.NoError(t, err, out)
+
+	settings := filepath.Join(root, ".claude", "settings.json")
+	data, err := os.ReadFile(settings)
+	require.NoError(t, err)
+	old := strings.ReplaceAll(string(data), `"onFailure": "block"`, `"x": 0`)
+	require.NotEqual(t, string(data), old)
+	require.NoError(t, os.WriteFile(settings, []byte(old), 0o644))
+	v1Git(t, root, "commit", "-qam", "an older init's hooks")
+
+	writeTree(t, fw, map[string]string{framework.SubtreeSkills + "/apex-plan/SKILL.md": "# apex-plan v1, rc.10\n"})
+	gitCommitAll(t, fw, "rc.10")
+	gitRun(t, fw, "tag", "-a", "v1.0.0-rc.10", "-m", "v1.0.0-rc.10")
+	out, err = runFramework(t, "update", fw, root, "--version", "v1.0.0-rc.10", "--no-fetch")
+	require.NoError(t, err, out)
+
+	data, err = os.ReadFile(settings)
+	require.NoError(t, err)
+	require.Contains(t, string(data), `"onFailure": "block"`, "the update restored onFailure, as init would")
+	require.Contains(t, out, "hook ", "the update says what it changed in the hooks")
+	require.Contains(t, v1Git(t, root, "log", "-1", "--format=%s"), "chore(framework): update APEX framework to v1.0.0-rc.10")
+	require.Contains(t, v1Git(t, root, "show", "--name-only", "--format=", "HEAD"), ".claude/settings.json", "in the update's own commit")
+	require.Empty(t, v1Git(t, root, "status", "--porcelain"))
+}

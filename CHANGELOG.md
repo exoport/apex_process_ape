@@ -1,5 +1,42 @@
 # CHANGELOG
 
+## v1.4.3 (2026-11-01)
+
+APEX v1.4.3, on v1.4.2: fixes found by the v1.4.2 update of a real project (pdfa) and the
+v1.4.2 release. The framework's v1.4.3 payload declares `min_ape_version: "1.4.3"`. Measured on
+Claude Code 2.1.311 and 2.1.312. What it fixes:
+
+- **`ape conductor send`, `stop`, `status` and `read` no longer fail during the supervisor's
+  rewrite of its record on Windows.** The record is read again for up to about 200 ms; a missing
+  one is still reported at once. This removes v1.4.2's Known issue.
+- **`ape doctor` reports a fail-open hook.** Its `hooks.project` row now WARNs on
+  `hooks.fail-open` (ape's pre-tool hook registered without `"onFailure": "block"`, as every
+  `ape project init` before rc.7q wrote it), naming `ape project init` as the fix. Before, doctor
+  said OK while `ape project check` listed the notice. The row now lists every hooks notice it
+  finds, so a fail-open hook no longer hides `hooks.monitor-unguarded`, or the other way round.
+- **`ape status` no longer lists ape's own pin commit** as "Outside the change flow". That is the
+  `chore(ape): update ape to vX.Y.Z` commit that `ape update --pin` and
+  `ape framework update --update-ape` make. It is exempt only when it touches nothing outside
+  `.bingo/`, just as the framework's install commit is exempt only when it touches install files.
+- **`ape framework update` brings ape's Claude Code hooks up to date**, as `ape project init`
+  does, in the update's own commit. A pre-tool hook registered without `"onFailure": "block"`
+  gains it, Monitor joins the pre-tool matcher, and a missing or altered hook is restored. Every
+  other key and hook in `.claude/settings.json` is kept, and a `hook` line is printed for each
+  change. Before, only the v0 lift did this, so an updated v1 project kept an older init's
+  fail-open hook.
+- **`ape task apex-loop … --usage-ok` carries the override to the loop's children**, for that run
+  only. Each child that run launches gets past the usage guard whatever the reading says, and its
+  manifest records `usage_ok` with `usage_ok_from: <the loop's run>`. Before, the first child (an
+  `apex-apply`) stopped on the guard and the tweak blocked. A child carries the override only when
+  ape finds the loop by process ancestry, or for a detached child through the handle its launcher
+  wrote. A session that only names the loop in its environment carries nothing.
+- **The conductor's watcher confirms that a delivery was submitted.** After typing it, the
+  watcher presses Enter and waits for the input row to empty or a turn to start. It presses Enter
+  again if neither happens, at most three times in all. A delivery still unsubmitted after that is
+  recorded as `unsubmitted`, nothing more is typed over it, and the ack alert reaches the person.
+  Before, Claude Code could swallow the Enter after a long typed delivery, which then sat in the
+  input row and made every later delivery wait.
+
 ## v1.4.2 (2026-10-31)
 
 APEX v1.4.2, on v1.4.1: **the delegated conductor** (D658–D661). A person's own Claude Code

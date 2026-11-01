@@ -277,9 +277,14 @@ reads the newest reading against _apex/config.yaml
            unknown (no reading in 10 min)" in the output and the manifest
 A window whose reset has passed counts as 0. --usage-ok launches whatever
 the reading says; it is a person's (refused in a model session, exit 2,
-session.person-only) and recorded. The decision is the run manifest's
+session.person-only) and recorded. On an apex-loop run it reaches the
+children that run launches, for that run only: each child launches whatever
+the reading says and records usage_ok with usage_ok_from: <the loop's run>
+(1.4.3). A child carries it only when ape finds the loop by process ancestry
+(the detached child, through the handle its launcher wrote), never because
+an environment variable names the loop. The decision is the run manifest's
 usage.guard: {decision, reading, share_five_hour, share_seven_day,
-share_source, held_until, held_seconds, usage_ok, note}, beside usage.before
+share_source, held_until, held_seconds, usage_ok, usage_ok_from, note}, beside usage.before
 and usage.after.
 
 Events and the notifier (H20, W3): in an APEX v1 project every run logs
@@ -443,6 +448,9 @@ func newTaskCmd() *cobra.Command {
 				return sessionRefusal(err)
 			}
 			launch.withScope(projectRoot, argsFlag)
+			// 1.4.3 PDFA-5: the session's registry row says a person's
+			// --usage-ok started it, for its children to carry.
+			launch.usageOK = usageOKFlag
 			jsonMode := jsonAlias || outputFormat == "json"
 			if !jsonMode && outputFormat != "human" {
 				fmt.Fprintf(os.Stderr, "Error: --output-format must be human or json, got %q\n", outputFormat)
@@ -1107,6 +1115,9 @@ func prepareV1Task(ctx context.Context, p *apexv1.Project, o *taskOptions, cfg *
 	cfg.pluginSkills = p.PluginSkillResolver(ctx, apexv1.ClaudePluginCLI{Bin: cfg.claudeBin})
 	// W4: the usage guard decides before the session is spawned.
 	cfg.usageGuard = newUsageGuard(p, o.skill, o.args, o.usageOK)
+	if o.launch != nil {
+		cfg.usageGuard.usageOKFrom = o.launch.usageOKFrom
+	}
 	return &l, nil
 }
 

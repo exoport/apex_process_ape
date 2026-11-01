@@ -101,3 +101,28 @@ func TestStatus_OutsideFlowFrameworkInstall(t *testing.T) {
 	commitAll(t, p, "chore: skills by hand")
 	require.Equal(t, []string{"chore: skills by hand", "chore(framework): update APEX framework to v1.0.0-rc.7"}, outsideSubjects(p.Status()))
 }
+
+// 1.4.3 PDFA-3: ape's own pin commit (`ape update --pin`, `framework update
+// --update-ape`: subject "chore(ape): update ape to vX.Y.Z", files only
+// under .bingo/) is not outside the flow, as the framework's install commit
+// is not. The same subject on a commit that also touches code is listed,
+// and a .bingo-only commit under another subject is listed too.
+func TestStatus_OutsideFlowApePinCommit(t *testing.T) {
+	p := reviewedWave(t)
+	run(t, p.Root, "switch", "-q", "main")
+	run(t, p.Root, "commit", "-q", "--allow-empty", "-m", "apex: project init")
+
+	write(t, p, ".bingo/ape.mod", "module _\n\nrequire github.com/exoport/apex_process_ape v1.4.2\n")
+	write(t, p, ".bingo/Variables.mk", "APE := $(GOBIN)/ape-v1.4.2\n")
+	run(t, p.Root, "add", "-A")
+	run(t, p.Root, "commit", "-q", "-m", "chore(ape): update ape to v1.4.2\n\nGenerator: ape update --pin")
+	require.Empty(t, p.Status().OutsideFlow, "the pin commit touches only .bingo/")
+
+	write(t, p, ".bingo/ape.mod", "module _\n\nrequire github.com/exoport/apex_process_ape v1.4.3\n")
+	write(t, p, "greet.sh", "#!/bin/sh\necho Hey\n")
+	run(t, p.Root, "add", "-A")
+	run(t, p.Root, "commit", "-q", "-m", "chore(ape): update ape to v1.4.3")
+	write(t, p, ".bingo/ape.mod", "module _\n\nrequire github.com/exoport/apex_process_ape v1.4.4\n")
+	commitAll(t, p, "chore: bump the pin by hand")
+	require.Equal(t, []string{"chore: bump the pin by hand", "chore(ape): update ape to v1.4.3"}, outsideSubjects(p.Status()))
+}
