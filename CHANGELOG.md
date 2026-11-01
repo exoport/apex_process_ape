@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## v1.4.4 (2026-11-01)
+
+APEX v1.4.4, on v1.4.3: one fix found when an accepted config landed through a pull request (the
+v1.5 trial's mirror, PR #2). The framework's v1.4.4 payload declares `min_ape_version: "1.4.4"`.
+Measured on Claude Code 2.1.316. What it fixes:
+
+- **A config acceptance landed through a pull request counts.** `ape project check` kept
+  reporting `config.changed` after `ape project accept-config` was merged by a PR. The cause:
+  GitHub's merge commit repeats the PR's title, "apex: config accepted by …", in its body, and
+  the guard found that merge first, saw it was no acceptance, and stopped there. It now takes the
+  newest commit whose *subject* is the acceptance. A merge whose body only names an acceptance
+  still accepts nothing.
+
 ## v1.4.3 (2026-11-01)
 
 APEX v1.4.3, on v1.4.2: fixes found by the v1.4.2 update of a real project (pdfa) and the
