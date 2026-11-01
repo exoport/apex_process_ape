@@ -130,6 +130,9 @@ func TestRunChecks_ConcurrentLegsTakeTurns(t *testing.T) {
 			u := legLockUse(rs)
 			require.Equal(t, 1, u.Waited)
 			require.Contains(t, u.String(), "1 waited")
+			require.Len(t, u.Waits, 1)
+			require.Equal(t, "cap/R/live", u.Waits[0].Check)
+			require.Contains(t, u.Waits[0].Holder, "cap/R/live in ")
 		}
 	}
 	require.Equal(t, 1, waited, "exactly one of the two legs waited for the other")

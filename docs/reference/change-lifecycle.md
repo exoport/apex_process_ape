@@ -397,10 +397,11 @@ What else a check gets in v1.4:
   sets a `*_LIVE` variable on (`X_LIVE=1`). Two gates, closes or verifies on one host (two milestones'
   members) therefore take their legs one at a time: their own compose projects do not separate a
   fixed host port or a fixed container name. The lock is a file in the system temporary folder
-  (`ape-compose-legs.lock`). A leg that waited records `leg_lock_wait_secs` and whose run it waited
-  for (`leg_lock_holder`); every leg records `leg_lock: true`. A gate's output ends its checks with
-  one line summing them (JSON `leg_lock`: `checks`, `waited`, `wait_secs`), never written to
-  `milestones.json`.
+  (`ape-compose-legs.lock`). A gate sums it in JSON `leg_lock` — `checks`, `waited`, `wait_secs`, and
+  `waits`, one `{check, secs, holder}` per leg that waited, `holder` naming the run that held the lock —
+  in its `--json` result and `_apex/state/logs/gate-<M>.json`, never in `milestones.json`; its human
+  output prints one line summing it. A check result also carries `leg_lock`, `leg_lock_wait_secs`
+  and `leg_lock_holder`, but a gate keeps whole results only for its red checks (`spec_failed`).
 
 ### Advise files and unmatched tools
 

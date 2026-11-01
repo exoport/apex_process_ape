@@ -51,11 +51,21 @@ func composeLeg(pc *PlannedCheck) bool {
 
 // LegLockUse sums a run's compose-leg lock: how many checks held it, how
 // many of them waited for another run's leg first, and for how long in
-// all.
+// all; Waits names each that waited. It is where a green leg's wait is
+// kept: a gate records only its red checks whole (spec_failed).
 type LegLockUse struct {
-	Checks   int     `json:"checks"`
-	Waited   int     `json:"waited"`
-	WaitSecs float64 `json:"wait_secs"`
+	Checks   int       `json:"checks"`
+	Waited   int       `json:"waited"`
+	WaitSecs float64   `json:"wait_secs"`
+	Waits    []LegWait `json:"waits,omitempty"`
+}
+
+// LegWait is one leg's wait for the lock: the check, how long, and whose
+// run held it when it began waiting.
+type LegWait struct {
+	Check  string  `json:"check"`
+	Secs   float64 `json:"secs"`
+	Holder string  `json:"holder,omitempty"`
 }
 
 // legLockUse sums results' use of the lock, nil when no check held it.
@@ -69,6 +79,7 @@ func legLockUse(results []CheckResult) *LegLockUse {
 		if results[i].LegLockWaitSecs > 0 {
 			u.Waited++
 			u.WaitSecs += results[i].LegLockWaitSecs
+			u.Waits = append(u.Waits, LegWait{Check: results[i].Task, Secs: results[i].LegLockWaitSecs, Holder: results[i].LegLockHolder})
 		}
 	}
 	if u.Checks == 0 {
