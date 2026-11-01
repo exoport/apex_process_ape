@@ -2,6 +2,7 @@ package member
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/exoport/apex_process_ape/internal/apexv1"
 	"github.com/exoport/apex_process_ape/internal/coord/github"
@@ -24,6 +25,49 @@ func Integrator(p *apexv1.Project) (apexv1.Integrator, error) {
 }
 
 type ghIntegrator struct{ c *github.Client }
+
+// PRStatus is the newest PR from head into base: one line.
+func PRStatus(ctx context.Context, p *apexv1.Project, head, base string) (string, error) {
+	m, err := Load(p)
+	if err != nil {
+		return "", err
+	}
+	tok, err := m.GitHubTokenFor(ctx, "read")
+	if err != nil {
+		return "", err
+	}
+	n, u, state, merged, err := github.New(m.GitHubAPI, m.GitHubRepo, tok).LatestFor(ctx, head, base)
+	switch {
+	case err != nil:
+		return "", err
+	case n == 0:
+		return "no pull request from " + head + " into " + base, nil
+	case merged != "":
+		return fmt.Sprintf("#%d %s merged as %s", n, u, merged), nil
+	}
+	return fmt.Sprintf("#%d %s %s", n, u, state), nil
+}
+
+// Dequeue takes the open PR from head into base out of the merge queue.
+func Dequeue(ctx context.Context, p *apexv1.Project, head, base string) (string, error) {
+	m, err := Load(p)
+	if err != nil {
+		return "", err
+	}
+	tok, err := m.GitHubTokenFor(ctx, "pr")
+	if err != nil {
+		return "", err
+	}
+	c := github.New(m.GitHubAPI, m.GitHubRepo, tok)
+	pr, err := c.FindOpen(ctx, head, base)
+	if err != nil {
+		return "", err
+	}
+	if pr == nil {
+		return "", fmt.Errorf("no open pull request from %s into %s", head, base)
+	}
+	return pr.URL, c.Dequeue(ctx, pr)
+}
 
 func (g ghIntegrator) OpenPR(ctx context.Context, head, base, title, body string) (apexv1.PRRef, error) {
 	pr, err := g.c.OpenPR(ctx, head, base, title, body)

@@ -15,6 +15,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	url2 "net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -209,6 +210,43 @@ func (c *Client) Enqueue(ctx context.Context, pr *PR) (string, error) {
 	}
 	return out.EnqueuePullRequest.MergeQueueEntry.State, nil
 }
+
+// Dequeue takes the pull request out of its base branch's merge queue
+// (a person's hold: `ape ghapp land --dequeue`).
+func (c *Client) Dequeue(ctx context.Context, pr *PR) error {
+	var out map[string]any
+	err := c.graphql(ctx, `mutation($id: ID!) { dequeuePullRequest(input: {id: $id}) { clientMutationId } }`,
+		map[string]any{"id": pr.NodeID}, &out)
+	if err != nil {
+		return fmt.Errorf("dequeue #%d: %w", pr.Number, err)
+	}
+	return nil
+}
+
+// LatestFor is the newest pull request from head into base in any state:
+// its number, URL, state (open|closed), and the merge commit when merged.
+func (c *Client) LatestFor(ctx context.Context, head, base string) (number int, url, state, merged string, err error) {
+	owner, _ := c.owner()
+	q := url2.Values{"state": {"all"}, "head": {owner + ":" + head}, "base": {base}, "sort": {"created"}, "direction": {"desc"}}
+	var prs []struct {
+		Number int    `json:"number"`
+		URL    string `json:"html_url"`
+		State  string `json:"state"`
+		Merge  string `json:"merge_commit_sha"`
+		Merged string `json:"merged_at"`
+	}
+	if err = c.do(ctx, http.MethodGet, c.API+"/repos/"+c.Repo+"/pulls?"+q.Encode(), nil, &prs); err != nil || len(prs) == 0 {
+		return 0, "", "", "", err
+	}
+	pr := prs[0]
+	if pr.Merged != "" {
+		merged = pr.Merge
+	}
+	return pr.Number, pr.URL, pr.State, merged, nil
+}
+
+// FindOpen is the open pull request from head into base, nil for none.
+func (c *Client) FindOpen(ctx context.Context, head, base string) (*PR, error) { return c.findOpen(ctx, head, base) }
 
 // State is a pull request's state as the wait reads it.
 type State struct {

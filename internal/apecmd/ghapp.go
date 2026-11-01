@@ -294,6 +294,7 @@ func newGhappLandCmd() *cobra.Command {
 	var f v1Flags
 	var title string
 	var wait time.Duration
+	var dequeue, state bool
 	cmd := &cobra.Command{
 		Use:   "land <branch> [--title <t>] [--wait 30m]",
 		Short: "Land a local branch on main through main's merge queue (push, PR, enqueue, wait)",
@@ -315,6 +316,22 @@ Exit codes: 0 merged · 1 refused, failed, ejected or closed · 2 usage · 75 st
 			}
 			ctx := cmd.Context()
 			branch := args[0]
+			if state {
+				line, err := member.PRStatus(ctx, p, branch, "main")
+				if err != nil {
+					return v1Fail(cmd, &f, &apexv1.FailError{Code: apexv1.CodeIntegrationPR, Msg: err.Error()}, nil)
+				}
+				fmt.Fprintln(cmd.OutOrStdout(), line)
+				return nil
+			}
+			if dequeue {
+				u, err := member.Dequeue(ctx, p, branch, "main")
+				if err != nil {
+					return v1Fail(cmd, &f, &apexv1.FailError{Code: apexv1.CodeIntegrationPR, Msg: "dequeuing " + branch + "'s PR failed: " + err.Error()}, nil)
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "%s taken out of main's merge queue (still open)\n", u)
+				return nil
+			}
 			sha, err := gitOut(ctx, p.Root, "rev-parse", "--verify", "refs/heads/"+branch)
 			if err != nil {
 				return usageErr(fmt.Errorf("no local branch %s", branch))
@@ -361,5 +378,7 @@ Exit codes: 0 merged · 1 refused, failed, ejected or closed · 2 usage · 75 st
 	addV1Flags(cmd, &f)
 	cmd.Flags().StringVar(&title, "title", "", "the PR's title (default: the branch tip's subject)")
 	cmd.Flags().DurationVar(&wait, "wait", 30*time.Minute, "how long to wait for the queue")
+	cmd.Flags().BoolVar(&state, "state", false, "print the branch's newest PR into main and its state instead (read-only)")
+	cmd.Flags().BoolVar(&dequeue, "dequeue", false, "take the branch's open PR out of main's merge queue instead (a hold; the PR stays open)")
 	return cmd
 }

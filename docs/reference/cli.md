@@ -4348,7 +4348,9 @@ Flags:
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
 | `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--dequeue` | bool | `false` | take the branch's open PR out of main's merge queue instead (a hold; the PR stays open) |
 | `--json` | bool | `false` | machine output (JSON on stdout) |
+| `--state` | bool | `false` | print the branch's newest PR into main and its state instead (read-only) |
 | `--title` | string | `—` | the PR's title (default: the branch tip's subject) |
 | `--wait` | duration | `30m0s` | how long to wait for the queue |
 

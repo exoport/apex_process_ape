@@ -71,6 +71,9 @@ func (f *fake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = json.Unmarshal(body, &q)
 		switch {
+		case strings.Contains(q.Query, "dequeuePullRequest"):
+			delete(f.queued, q.Variables["id"].(string))
+			_, _ = w.Write([]byte(`{"data":{"dequeuePullRequest":{"clientMutationId":null}}}`))
 		case strings.Contains(q.Query, "enqueuePullRequest"):
 			id := q.Variables["id"].(string)
 			if id == "PR_nope" {
@@ -161,4 +164,26 @@ func TestClient_QueueSettingsAndRateLimit(t *testing.T) {
 func TestClient_GraphQLURL(t *testing.T) {
 	require.Equal(t, "https://api.github.com/graphql", New("https://api.github.com/", "a/b", "t").graphqlURL())
 	require.Equal(t, "https://ghe.example/api/graphql", New("https://ghe.example/api/v3", "a/b", "t").graphqlURL())
+}
+
+// A person's hold and look (D708+): Dequeue takes a PR out of the queue;
+// LatestFor reads the newest PR for a head.
+func TestClient_DequeueAndLatest(t *testing.T) {
+	c, f := client(t)
+	ctx := context.Background()
+	pr, err := c.OpenPR(ctx, "apex/accept", "main", "accept", "")
+	require.NoError(t, err)
+	_, err = c.Enqueue(ctx, pr)
+	require.NoError(t, err)
+	require.Contains(t, f.queued, pr.NodeID)
+	require.NoError(t, c.Dequeue(ctx, pr))
+	require.NotContains(t, f.queued, pr.NodeID)
+	n, u, _, merged, err := c.LatestFor(ctx, "apex/accept", "main")
+	require.NoError(t, err)
+	require.Equal(t, pr.Number, n)
+	require.Equal(t, pr.URL, u)
+	require.Empty(t, merged, "not merged")
+	n, _, _, _, err = c.LatestFor(ctx, "apex/none", "main")
+	require.NoError(t, err)
+	require.Zero(t, n)
 }
