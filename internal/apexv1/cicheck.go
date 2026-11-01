@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -104,6 +105,11 @@ func (p *Project) CICheck(ctx context.Context, base, head string, opt RunOptions
 	if len(res.Closes) == 0 && len(res.Changes)+len(res.TakeIns) > 0 {
 		return res, &FailError{Code: CodeCIOutsideFlow, Msg: "the merge group " + short(base) + ".." + short(head) + " carries a change or take-in (" + strings.Join(append(append([]string{}, res.Changes...), res.TakeIns...), ", ") + ") without its milestone's close — changes and take-ins land on milestone/<M>, and reach main only through the close PR"}
 	}
+	// R4's required check refuses a PR that is not ape's (D703, research
+	// finding 3): a subject alone proves nothing.
+	if err := p.requireApeCommits(ctx, base, head, res); err != nil {
+		return res, err
+	}
 	for _, ms := range res.Closes {
 		red, err := p.ciGate(ctx, ms, opt, res)
 		if err != nil {
@@ -122,6 +128,73 @@ func (p *Project) CICheck(ctx context.Context, base, head string, opt RunOptions
 		return res, &FailError{Code: CodeCIRed, Msg: "the merge group is red: " + strings.Join(limit(res.Red, 8), "; ")}
 	}
 	return res, nil
+}
+
+// recordSubjectRe is a roadmap record's subject: what a record PR's commits
+// say.
+var recordSubjectRe = regexp.MustCompile(`^apex: [A-Za-z0-9._-]+ (proposed|approved|re-approved.*|claimed by \S+)$`)
+
+// requireApeCommits refuses a merge group into main that carries any
+// commit not ape's (D703): every non-merge commit must be on
+// origin/milestone/<M> of a close the group carries — a branch only
+// apex-member writes (R1) — or a record commit whose subject is a roadmap
+// record and whose diff touches only roadmap.md and milestones.json
+// (nothing, for a claim). The milestone branches are fetched first when
+// the checkout has a remote.
+func (p *Project) requireApeCommits(ctx context.Context, base, head string, res *CIResult) error {
+	remote := p.trunkRemote(ctx)
+	if len(res.Closes) > 0 {
+		_, _ = gitWithEnv(ctx, p.Root, noPromptEnv, "fetch", "--quiet", "--no-tags", remote,
+			"+refs/heads/"+MilestoneBranchPrefix+"*:refs/remotes/"+remote+"/"+MilestoneBranchPrefix+"*")
+	}
+	out, err := git(ctx, p.Root, "rev-list", "--no-merges", base+".."+head)
+	if err != nil {
+		return &FailError{Code: CodeGitStatusFailed, Msg: "cannot list the merge group's commits: " + err.Error()}
+	}
+	allowed := map[string]bool{p.Rel(p.RoadmapMD()): true, p.Rel(p.MilestonesJSON()): true}
+	var foreign []string
+	for sha := range strings.FieldsSeq(out) {
+		if p.onClosedMilestone(ctx, remote, sha, res.Closes) || p.isRecordCommit(ctx, sha, allowed) {
+			continue
+		}
+		subject, _ := git(ctx, p.Root, "log", "-1", "--format=%s", sha)
+		foreign = append(foreign, short(sha)+" "+subject)
+	}
+	if len(foreign) == 0 {
+		return nil
+	}
+	return &FailError{Code: CodeCIOutsideFlow, Msg: "the merge group " + short(base) + ".." + short(head) + " carries commits that are not ape's: " + strings.Join(limit(foreign, 5), "; ") +
+		" — main takes only a milestone's close PR (its commits on milestone/<M>) and record PRs"}
+}
+
+// onClosedMilestone reports sha on remote/milestone/<M> for a close in the
+// group.
+func (p *Project) onClosedMilestone(ctx context.Context, remote, sha string, closes []string) bool {
+	for _, ms := range closes {
+		if _, err := git(ctx, p.Root, "merge-base", "--is-ancestor", sha, "refs/remotes/"+remote+"/"+MilestoneBranch(ms)); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// isRecordCommit reports a roadmap record: its subject, and a diff only of
+// the allowed paths.
+func (p *Project) isRecordCommit(ctx context.Context, sha string, allowed map[string]bool) bool {
+	subject, err := git(ctx, p.Root, "log", "-1", "--format=%s", sha)
+	if err != nil || !recordSubjectRe.MatchString(subject) {
+		return false
+	}
+	files, err := git(ctx, p.Root, "diff-tree", "--no-commit-id", "--name-only", "-r", "--root", sha)
+	if err != nil {
+		return false
+	}
+	for f := range strings.FieldsSeq(files) {
+		if !allowed[f] {
+			return false
+		}
+	}
+	return true
 }
 
 // ciGate runs milestone ms's gate with its full run for a close in the

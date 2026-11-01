@@ -2507,8 +2507,11 @@ requests:
   records alone (apex: <M> proposed | approved | claimed by …)
       the project check
 
-Anything else — no commit of the flow, or a change or take-in without its milestone's close
-— is red (ci.outside-flow): main takes only ape's close and record pull requests.
+Anything else is red (ci.outside-flow): main takes only ape's close and record pull
+requests. A subject proves nothing (D703): every non-merge commit in the group must be on
+origin/milestone/<M> of a close the group carries — a branch only ape's App writes — or a
+record commit (apex: <M> proposed | approved | re-approved | claimed by …) whose diff
+touches only roadmap.md and milestones.json. A plain feature PR into main is refused.
 
 Exit codes: 0 green · 1 red (ci.red), outside the flow (ci.outside-flow), or git failed · 2 usage.
 
