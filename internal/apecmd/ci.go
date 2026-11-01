@@ -36,22 +36,21 @@ func newCICheckCmd() *cobra.Command {
 	var base, head string
 	cmd := &cobra.Command{
 		Use:   "check --base <sha> --head <sha>",
-		Short: "The merge queue's check: run what the merge group carries",
-		Long: `Run the merge queue's check on the merge group base..head, with head checked out (full
-history). ape reads what the group carries from its commits and runs what each kind needs,
-the union when the queue batched several pull requests:
+		Short: "Main's merge queue check: run what the merge group carries",
+		Long: `Run main's merge queue check on the merge group base..head, with head checked out (full
+history; D702: the queue is main's only). ape reads what the group carries from its
+commits and runs what each kind needs, the union when the queue batched several pull
+requests:
 
-  a change (a Change: trailer) or a take-in (Take-in:)
-      the regression command (regression.change) and the spec's scenario checks, full ones aside
-  a close (apex: <M> done, Milestone: <M>)
+  a close (apex: <M> done, Milestone: <M>; its changes and take-ins ride it)
       the milestone gate with its full run, as ` + "`ape milestone close`" + ` runs it, the gate
       folders the close moved put back first; a person's accepted red passes only on the
       red set accepted (OQ26)
   records alone (apex: <M> proposed | approved | claimed by …)
       the project check
 
-A group with no commit of the flow is red (ci.outside-flow): main and milestone branches take
-only ape's pull requests.
+Anything else — no commit of the flow, or a change or take-in without its milestone's close
+— is red (ci.outside-flow): main takes only ape's close and record pull requests.
 
 Exit codes: 0 green · 1 red (ci.red), outside the flow (ci.outside-flow), or git failed · 2 usage.`,
 		Example: `  ape ci check --base "$BASE_SHA" --head "$HEAD_SHA" --json`,
@@ -112,8 +111,8 @@ func newCIEventCmd() *cobra.Command {
 		Use:   "event <merged|ejected|close-merged> --ref <ref> [--sha <sha>] [--milestone <M>]",
 		Short: "Publish a merge queue event for the waiting ape",
 		Long: `Publish merged, ejected or close-merged as a project event of the coordinated project
-(ape.evt.<user>.<project>.project.<M>.<event>), where every member's waiting ape — an
-archive, a take-in or a close waiting on its pull request — wakes and reads GitHub (OQ10). The
+(ape.evt.<user>.<project>.project.<M>.<event>), where every member's waiting ape — a close
+waiting on its pull request in main's merge queue — wakes and reads GitHub (OQ10). The
 event carries the ref and sha; it decides nothing. Run in CI with the ensemble credential
 from a secret (--nats-url, --nats-creds), in the project's checkout for its project name.
 
@@ -182,10 +181,10 @@ func newCIWorkflowCmd() *cobra.Command {
 		Short: "Print, or write, the merge queue's workflow (.github/workflows/apex-queue.yml)",
 		Long: `Print the merge queue's GitHub Actions workflow, or with --write put it at
 ` + apexv1.QueueWorkflowRel + ` (v1.5 stage 1a, section 5.5). On merge_group it runs
-` + "`ape ci check`" + ` (the queue's required check, "apex-queue / check") and publishes ejected
-when it is red; on a push to main or a milestone branch it publishes merged (close-merged
-for main); on a pull request it passes at once, since the queue checks the tree that
-merges. It runs on self-hosted runners with ape installed, and reads two secrets,
+` + "`ape ci check`" + ` (main's queue's required check, "apex-queue / check") and publishes
+ejected when it is red; on a push to main it publishes close-merged; on a pull request it
+passes at once, since the queue checks the tree that merges. Milestone branches have no
+queue: ape lands on them itself (D702). It runs on self-hosted runners with ape installed, and reads two secrets,
 APE_NATS_URL and APE_NATS_CREDS (the ensemble credential's text), which a person sets on
 the repository. ape writes the file; committing it is the person's, through main's queue.
 

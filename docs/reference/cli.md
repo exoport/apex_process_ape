@@ -1621,22 +1621,16 @@ Archive a reviewed change onto its base branch (trial decision D38):
 The base branch gets exactly one commit per archived change; ape's status commits stay on
 the change branch, squashed away.
 
-Coordinated (v1.5 stage 1a; a project with coordination.github, section 5.1): the base is
-milestone/<M>, fetched first. When the remote moved it, the local base fast-forwards, or
-its own unpushed commits (a planned change's records, which ride that change's PR) are
-replayed onto the remote tip, and the catch-up above follows. Step 7's one squash commit
-is then pushed to apex/<id> on main's remote (forced: it replaces an earlier attempt's),
-and the base goes back where it was: the change lands through its pull request. ape
-opens the PR into milestone/<M>, or reuses the open one, and enqueues it in the base's
-merge queue. Its record is kept in _apex/state/coord/prs.json; change/<id> is kept. The
-archive then waits for the queue, re-reading the PR every minute and at each of the
-member's NATS events. Merged: the local base moves to the merged tip, change/<id>'s tip is
-kept as refs/apex/archive/<id> and the branch deleted. Ejected (out of the queue, not
-merged): archived again from the catch-up, counted as an attempt; the ejection that
-reaches limits.attempts blocks the change (integration.ejections-exceeded). A push that
-fails rolls back like any failure on the base (integration.push-failed), and a PR that
-cannot open or enqueue is integration.pr-failed: archive again. While it waits, --wait
-returns 75 as for any detached run.
+Coordinated (v1.5 stage 1a; a project with coordination.github; D702: ape handles the
+milestone branches, GitHub's merge queue is main's only): the base is milestone/<M>,
+fetched first. When the remote moved it, the local base fast-forwards, or its own
+unpushed commits (a planned change's records) are replayed onto the remote tip, and the
+catch-up above follows. Step 7's one squash commit then lands on the remote's
+milestone/<M> with one push: the checkout's lease on M is fenced right before it
+(session.not-lease-holder otherwise), and the push only fast-forwards, so a branch that
+moved since the fetch (another writer) refuses it (milestone.moved, retry). Refused, the
+squash is rolled back as any failure on the base is: nothing lands, change/<id> is checked
+out again; archive again, which fetches and catches up. Needs this checkout's lease on M.
 
 A crash mid-archive (H28): archive keeps a journal, _apex/state/archive-journal.json
 (ignored; base, its sha before, the branch and its tip, the step), from before the
@@ -2489,33 +2483,32 @@ runs both.
 
 Subcommands:
 
-- `check` — The merge queue's check: run what the merge group carries
+- `check` — Main's merge queue check: run what the merge group carries
 - `event` — Publish a merge queue event for the waiting ape
 - `workflow` — Print, or write, the merge queue's workflow (.github/workflows/apex-queue.yml)
 
 ## ape ci check
 
-The merge queue's check: run what the merge group carries
+Main's merge queue check: run what the merge group carries
 
 ```
 ape ci check --base <sha> --head <sha> [flags]
 ```
 
-Run the merge queue's check on the merge group base..head, with head checked out (full
-history). ape reads what the group carries from its commits and runs what each kind needs,
-the union when the queue batched several pull requests:
+Run main's merge queue check on the merge group base..head, with head checked out (full
+history; D702: the queue is main's only). ape reads what the group carries from its
+commits and runs what each kind needs, the union when the queue batched several pull
+requests:
 
-  a change (a Change: trailer) or a take-in (Take-in:)
-      the regression command (regression.change) and the spec's scenario checks, full ones aside
-  a close (apex: <M> done, Milestone: <M>)
+  a close (apex: <M> done, Milestone: <M>; its changes and take-ins ride it)
       the milestone gate with its full run, as `ape milestone close` runs it, the gate
       folders the close moved put back first; a person's accepted red passes only on the
       red set accepted (OQ26)
   records alone (apex: <M> proposed | approved | claimed by …)
       the project check
 
-A group with no commit of the flow is red (ci.outside-flow): main and milestone branches take
-only ape's pull requests.
+Anything else — no commit of the flow, or a change or take-in without its milestone's close
+— is red (ci.outside-flow): main takes only ape's close and record pull requests.
 
 Exit codes: 0 green · 1 red (ci.red), outside the flow (ci.outside-flow), or git failed · 2 usage.
 
@@ -2544,8 +2537,8 @@ ape ci event <merged|ejected|close-merged> --ref <ref> [--sha <sha>] [--mileston
 ```
 
 Publish merged, ejected or close-merged as a project event of the coordinated project
-(ape.evt.<user>.<project>.project.<M>.<event>), where every member's waiting ape — an
-archive, a take-in or a close waiting on its pull request — wakes and reads GitHub (OQ10). The
+(ape.evt.<user>.<project>.project.<M>.<event>), where every member's waiting ape — a close
+waiting on its pull request in main's merge queue — wakes and reads GitHub (OQ10). The
 event carries the ref and sha; it decides nothing. Run in CI with the ensemble credential
 from a secret (--nats-url, --nats-creds), in the project's checkout for its project name.
 
@@ -2578,10 +2571,10 @@ ape ci workflow [--write] [flags]
 
 Print the merge queue's GitHub Actions workflow, or with --write put it at
 .github/workflows/apex-queue.yml (v1.5 stage 1a, section 5.5). On merge_group it runs
-`ape ci check` (the queue's required check, "apex-queue / check") and publishes ejected
-when it is red; on a push to main or a milestone branch it publishes merged (close-merged
-for main); on a pull request it passes at once, since the queue checks the tree that
-merges. It runs on self-hosted runners with ape installed, and reads two secrets,
+`ape ci check` (main's queue's required check, "apex-queue / check") and publishes
+ejected when it is red; on a push to main it publishes close-merged; on a pull request it
+passes at once, since the queue checks the tree that merges. Milestone branches have no
+queue: ape lands on them itself (D702). It runs on self-hosted runners with ape installed, and reads two secrets,
 APE_NATS_URL and APE_NATS_CREDS (the ensemble credential's text), which a person sets on
 the repository. ape writes the file; committing it is the person's, through main's queue.
 
@@ -4821,7 +4814,7 @@ Subcommands:
 - `gate-test` — Self-test a gate folder before its milestone exists: the stub run passes, the plain gate is red
 - `new` — Append a milestone (Status: proposed) to roadmap.md
 - `release` — Give up a milestone's lease (a project in an ensemble)
-- `take-in` — Take main into milestone/<M> through its merge queue (a project integrating through GitHub)
+- `take-in` — Take main into milestone/<M>: the merge, checked by the regression, landed on the branch (a project integrating through GitHub)
 
 ## ape milestone approve
 
@@ -5083,14 +5076,14 @@ A close whose gate ran ends with its verdict line, as `ape milestone gate`'s doe
 done, gate green (exit 0) …", "close <M>: gate red, not closed (exit 1) …"; re-read through
 `ape status --json` milestones[].last_gate); --json puts "exit" and "log" first and "verdict" last.
 
-Coordinated (v1.5 stage 1a; a project with coordination.github, section 5.3): the close
-runs on milestone/<M>, fetched and synced. When main moved since the milestone last took
-it in, the close takes it in first and waits for that take-in (`ape milestone take-in --help`):
-its conflict is the close's exit 3, change.conflicted, and a take-in still queued when
-the run ends is milestone.take-in-needed (retry: close again). The gate runs as above, and the
-close record, "apex: <M> done" (an accepted red recorded with its gate run), is
-milestone/<M>'s last commit. ape pushes that tip to apex/close-<M>, opens the close PR into
-main and enqueues it; its required check, the milestone gate on the merge with the
+Coordinated (v1.5 stage 1a; a project with coordination.github, section 5.3; D702): the
+close needs this checkout's lease on M and runs on milestone/<M>, fetched and synced.
+When main moved since the milestone last took it in, the close takes it in first
+(`ape milestone take-in --help`): its conflict or red regression is the close's refusal,
+laid out for apex-apply. The gate runs as above, and the close record, "apex: <M> done"
+(an accepted red recorded with its gate run), lands on the remote's milestone/<M> with
+archive's fenced fast-forward push. ape opens the close PR milestone/<M> → main and
+enqueues it; its required check, the milestone gate on the merge with the
 current main, is `ape ci check` in CI (`ape ci --help`), and main's queue merges with a merge commit, the
 release point. The run waits for the queue as a coordinated archive does. Merged: main
 fast-forwards to the merge, milestone/<M> is deleted here and on the remote, the
@@ -5503,35 +5496,35 @@ Flags:
 
 ## ape milestone take-in
 
-Take main into milestone/<M> through its merge queue (a project integrating through GitHub)
+Take main into milestone/<M>: the merge, checked by the regression, landed on the branch (a project integrating through GitHub)
 
 ```
 ape milestone take-in <M> [--wait 9m] [flags]
 ```
 
 In a project integrating through GitHub (coordination.github), take main into
-milestone/<M> (v1.5 stage 1a, proposal section 5.2): when main moved past the milestone,
-ape makes the merge of main into milestone/<M>, merged and never rebased (a rebase
-would rewrite the protected branch), as take-in-<n>, a change of the milestone. It
-pushes it to apex/take-in-<n>, opens its PR into milestone/<M> and enqueues it; the
-queue's check is the regression. Main already in the milestone: up to date, nothing
-opened.
+milestone/<M> (v1.5 stage 1a, proposal section 5.2; D702: ape handles the milestone
+branches): when main moved past the milestone, ape makes the merge of main into
+milestone/<M>, merged and never rebased, as take-in-<n>, a change of the milestone. It
+moves the local milestone/<M> to the merge, runs the regression command on it, and lands
+it on the remote's milestone/<M> with archive's push: the lease fenced, a fast-forward
+only (milestone.moved when the branch moved). Main already in the milestone: up to date,
+nothing made.
 
-The run then waits for the queue as a coordinated archive does: merged, the local
-milestone/<M> moves to the merged tip; ejected, the take-in is made again and
-re-enqueued, an attempt (limits.attempts: integration.ejections-exceeded). A merge
-that conflicts is laid out on change/take-in-<n>, HEAD there, the conflict markers in
-the tree (change.conflicted, exit 3, action apply): apex-apply resolves them, `git add`
-and `git commit --no-edit`, and the next take-in pushes that resolution. A milestone
-takes main in again before its close. Records that reach main through record PRs
+A merge that conflicts is laid out on change/take-in-<n>, HEAD there, the conflict
+markers in the tree (change.conflicted, exit 3, action apply); a merge whose regression
+is red is laid out the same way (milestone.take-in-red, action apply). apex-apply
+resolves or fixes it and commits (`git add`, `git commit --no-edit`), and the next take-in
+lands that. Nothing lands before the regression is green. A milestone takes main in again
+before its close (the close does it itself). Records that reach main through record PRs
 (a milestone's approval, section 5.4) reach milestone/<M> the same way: a milestone
 claimed before its approval merged starts its changes once a take-in brought it.
 
 Needs this checkout's lease on M (`ape milestone claim`) and NATS.
 
-Exit codes: 0 up to date, or merged · 1 refused (no lease, NATS, push, PR, the attempts
-limit) · 2 usage, or a project not integrating through GitHub · 3 conflict · 75 still
-queued when --wait ran out (the run goes on; call again).
+Exit codes: 0 up to date, or landed · 1 refused (no lease, NATS, a red regression, the
+branch moved, a push) · 2 usage, or a project not integrating through GitHub · 3 conflict ·
+75 still running when --wait ran out (the run goes on; call again).
 
 Detached runs (D58 2.3): the command takes the run lock of its change (or milestone),
 _apex/state/runs/<id|M>.json, and runs in a detached worker (`ape __run`, its own

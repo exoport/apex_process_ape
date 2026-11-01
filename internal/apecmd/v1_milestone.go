@@ -624,14 +624,14 @@ A close whose gate ran ends with its verdict line, as ` + "`ape milestone gate`"
 done, gate green (exit 0) …", "close <M>: gate red, not closed (exit 1) …"; re-read through
 ` + "`ape status --json`" + ` milestones[].last_gate); --json puts "exit" and "log" first and "verdict" last.
 
-Coordinated (v1.5 stage 1a; a project with coordination.github, section 5.3): the close
-runs on milestone/<M>, fetched and synced. When main moved since the milestone last took
-it in, the close takes it in first and waits for that take-in (` + "`ape milestone take-in --help`" + `):
-its conflict is the close's exit 3, change.conflicted, and a take-in still queued when
-the run ends is milestone.take-in-needed (retry: close again). The gate runs as above, and the
-close record, "apex: <M> done" (an accepted red recorded with its gate run), is
-milestone/<M>'s last commit. ape pushes that tip to apex/close-<M>, opens the close PR into
-main and enqueues it; its required check, the milestone gate on the merge with the
+Coordinated (v1.5 stage 1a; a project with coordination.github, section 5.3; D702): the
+close needs this checkout's lease on M and runs on milestone/<M>, fetched and synced.
+When main moved since the milestone last took it in, the close takes it in first
+(` + "`ape milestone take-in --help`" + `): its conflict or red regression is the close's refusal,
+laid out for apex-apply. The gate runs as above, and the close record, "apex: <M> done"
+(an accepted red recorded with its gate run), lands on the remote's milestone/<M> with
+archive's fenced fast-forward push. ape opens the close PR milestone/<M> → main and
+enqueues it; its required check, the milestone gate on the merge with the
 current main, is ` + "`ape ci check`" + ` in CI (` + "`ape ci --help`" + `), and main's queue merges with a merge commit, the
 release point. The run waits for the queue as a coordinated archive does. Merged: main
 fast-forwards to the merge, milestone/<M> is deleted here and on the remote, the

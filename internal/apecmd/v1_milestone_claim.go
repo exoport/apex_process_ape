@@ -136,30 +136,30 @@ func newMilestoneTakeInCmd() *cobra.Command {
 	var f v1Flags
 	cmd := &cobra.Command{
 		Use:   "take-in <M> [--wait 9m]",
-		Short: "Take main into milestone/<M> through its merge queue (a project integrating through GitHub)",
+		Short: "Take main into milestone/<M>: the merge, checked by the regression, landed on the branch (a project integrating through GitHub)",
 		Long: `In a project integrating through GitHub (coordination.github), take main into
-milestone/<M> (v1.5 stage 1a, proposal section 5.2): when main moved past the milestone,
-ape makes the merge of main into milestone/<M>, merged and never rebased (a rebase
-would rewrite the protected branch), as take-in-<n>, a change of the milestone. It
-pushes it to apex/take-in-<n>, opens its PR into milestone/<M> and enqueues it; the
-queue's check is the regression. Main already in the milestone: up to date, nothing
-opened.
+milestone/<M> (v1.5 stage 1a, proposal section 5.2; D702: ape handles the milestone
+branches): when main moved past the milestone, ape makes the merge of main into
+milestone/<M>, merged and never rebased, as take-in-<n>, a change of the milestone. It
+moves the local milestone/<M> to the merge, runs the regression command on it, and lands
+it on the remote's milestone/<M> with archive's push: the lease fenced, a fast-forward
+only (milestone.moved when the branch moved). Main already in the milestone: up to date,
+nothing made.
 
-The run then waits for the queue as a coordinated archive does: merged, the local
-milestone/<M> moves to the merged tip; ejected, the take-in is made again and
-re-enqueued, an attempt (limits.attempts: integration.ejections-exceeded). A merge
-that conflicts is laid out on change/take-in-<n>, HEAD there, the conflict markers in
-the tree (change.conflicted, exit 3, action apply): apex-apply resolves them, ` + "`git add`" + `
-and ` + "`git commit --no-edit`" + `, and the next take-in pushes that resolution. A milestone
-takes main in again before its close. Records that reach main through record PRs
+A merge that conflicts is laid out on change/take-in-<n>, HEAD there, the conflict
+markers in the tree (change.conflicted, exit 3, action apply); a merge whose regression
+is red is laid out the same way (milestone.take-in-red, action apply). apex-apply
+resolves or fixes it and commits (` + "`git add`" + `, ` + "`git commit --no-edit`" + `), and the next take-in
+lands that. Nothing lands before the regression is green. A milestone takes main in again
+before its close (the close does it itself). Records that reach main through record PRs
 (a milestone's approval, section 5.4) reach milestone/<M> the same way: a milestone
 claimed before its approval merged starts its changes once a take-in brought it.
 
 Needs this checkout's lease on M (` + "`ape milestone claim`" + `) and NATS.
 
-Exit codes: 0 up to date, or merged · 1 refused (no lease, NATS, push, PR, the attempts
-limit) · 2 usage, or a project not integrating through GitHub · 3 conflict · 75 still
-queued when --wait ran out (the run goes on; call again).`,
+Exit codes: 0 up to date, or landed · 1 refused (no lease, NATS, a red regression, the
+branch moved, a push) · 2 usage, or a project not integrating through GitHub · 3 conflict ·
+75 still running when --wait ran out (the run goes on; call again).`,
 		Example: "  ape milestone take-in M2 --wait 9m --json",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -175,27 +175,17 @@ queued when --wait ran out (the run goes on; call again).`,
 				return v1Fail(cmd, &f, err, nil)
 			}
 			return runLong(cmd, &f, p, apexv1.TakeInPrefix+ms, func(ctx context.Context, opt apexv1.RunOptions) renderFn {
-				wake, stop, _ := member.Watch(ctx, p)
-				defer stop()
-				progress := func(line string) {
-					if opt.Progress != nil {
-						fmt.Fprintln(opt.Progress, line)
-					}
-				}
-				res, err := p.TakeInUntilMerged(ctx, ms, progress, wake)
+				res, err := p.TakeIn(ctx, ms, opt)
 				return func(cmd *cobra.Command, f *v1Flags) error {
 					if err != nil {
 						return v1Fail(cmd, f, err, res)
 					}
 					return v1Emit(cmd.OutOrStdout(), f, res, func(w io.Writer) {
-						switch in := res.Integration; {
-						case res.UpToDate:
+						if res.UpToDate {
 							fmt.Fprintf(w, "%s is up to date with main (%.7s): nothing to take in\n", res.Branch, res.Main)
-						case in != nil && in.State == apexv1.IntegrationMerged:
-							fmt.Fprintf(w, "took main into %s: %s merged through %s\n", res.Branch, in.Change, in.PR.URL)
-						case in != nil:
-							fmt.Fprintf(w, "queued %s: %s in %s's merge queue (attempt %d)\n", in.Change, in.PR.URL, res.Branch, in.Attempts)
+							return
 						}
+						fmt.Fprintf(w, "took main (%.7s) into %s: %s landed as %.7s\n", res.Main, res.Branch, res.ID, res.Commit)
 					})
 				}
 			})

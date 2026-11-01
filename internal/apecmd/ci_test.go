@@ -46,7 +46,8 @@ func TestCIWorkflow(t *testing.T) {
 	all := strings.Join(runs, "\n")
 	require.Contains(t, all, "ape ci check --base")
 	require.Contains(t, all, "ape ci event ejected")
-	require.Contains(t, all, `ape ci event "$event"`)
+	require.Contains(t, all, "ape ci event close-merged")
+	require.NotContains(t, stdout, "milestone/**", "D702: the queue is main's only")
 
 	stdout, _, err = v1Exec(t, newCICmd, "workflow", "--write", "--cwd", root)
 	require.NoError(t, err, stdout)

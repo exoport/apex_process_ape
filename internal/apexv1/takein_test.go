@@ -22,10 +22,11 @@ func pushFile(t *testing.T, bare, branch, path, content string) string {
 	return run(t, tmp, "rev-parse", "HEAD")
 }
 
-// v1.5 stage 1a step 7 (section 5.2): main is taken into milestone/<M> by
-// a PR of their merge, merged, never rebased; a conflict is laid out on
-// change/take-in-<n> for apex-apply, whose resolution the next take-in
-// pushes; an ejection is redone, an attempt.
+// v1.5 stage 1a step 7, reworked for ape-handled branches (D702): main is
+// taken into milestone/<M> as the merge of the two, never a rebase, landed
+// with the fenced fast-forward push; a conflict is laid out on
+// change/take-in-<n> for apex-apply, whose committed resolution the next
+// take-in lands.
 func TestTakeIn(t *testing.T) {
 	files := baseFiles()
 	files["_apex/config.yaml"] = coordinatedConfig
@@ -33,81 +34,89 @@ func TestTakeIn(t *testing.T) {
 	bare := withOrigin(t, p)
 	_, _, err := p.PrepareMilestoneBranch(ctx(), "M1")
 	require.NoError(t, err)
-	f := &fakeIntegrator{states: map[int]PRState{}}
-	useIntegrator(t, f)
 
-	res, err := p.TakeIn(ctx(), "M1")
+	res, err := p.TakeIn(ctx(), "M1", RunOptions{})
 	require.NoError(t, err)
 	require.True(t, res.UpToDate, "main is already in milestone/M1")
-	require.Empty(t, f.opened)
 
 	// Another milestone closed: main moved.
 	mainTip := pushFile(t, bare, "main", "notes.txt", "from M0\n")
 	baseTip := run(t, bare, "rev-parse", "milestone/M1")
-	res, err = p.TakeIn(ctx(), "M1")
+	res, err = p.TakeIn(ctx(), "M1", RunOptions{})
 	require.NoError(t, err)
 	require.Equal(t, "take-in-1", res.ID)
-	in := res.Integration
-	require.Equal(t, KindTakeIn, in.Kind)
-	require.Equal(t, IntegrationQueued, in.State)
-	require.Equal(t, []string{"apex/take-in-1→milestone/M1"}, f.opened)
-	parents := strings.Fields(run(t, bare, "rev-list", "--parents", "-n", "1", "apex/take-in-1"))
-	require.Equal(t, []string{in.Commit, baseTip, mainTip}, parents, "a merge of main into the milestone, never a rebase")
-	require.Equal(t, baseTip, run(t, p.Root, "rev-parse", "milestone/M1"), "the milestone moves only through its queue")
-
-	f.states[7] = PRState{Queue: "AWAITING_CHECKS"}
-	res, err = p.TakeIn(ctx(), "M1")
-	require.NoError(t, err)
-	require.Equal(t, IntegrationQueued, res.Integration.State)
-	require.Len(t, f.opened, 1, "queued: nothing redone")
-
-	run(t, bare, "update-ref", "refs/heads/milestone/M1", in.Commit) // the queue merged it
-	f.states[7] = PRState{Merged: true, MergeCommit: in.Commit}
-	res, err = p.TakeIn(ctx(), "M1")
-	require.NoError(t, err)
-	require.Equal(t, IntegrationMerged, res.Integration.State)
-	require.Equal(t, in.Commit, run(t, p.Root, "rev-parse", "milestone/M1"))
-	res, err = p.TakeIn(ctx(), "M1")
+	require.Equal(t, res.Commit, run(t, bare, "rev-parse", "milestone/M1"), "landed on the remote")
+	require.Equal(t, res.Commit, run(t, p.Root, "rev-parse", "milestone/M1"))
+	parents := strings.Fields(run(t, bare, "rev-list", "--parents", "-n", "1", "milestone/M1"))
+	require.Equal(t, []string{res.Commit, baseTip, mainTip}, parents, "a merge of main into the milestone, never a rebase")
+	res, err = p.TakeIn(ctx(), "M1", RunOptions{})
 	require.NoError(t, err)
 	require.True(t, res.UpToDate)
 
 	// A conflict: the milestone and main edited the same line.
 	pushFile(t, bare, "milestone/M1", "greet.sh", "#!/bin/sh\necho Hi $1\n")
 	pushFile(t, bare, "main", "greet.sh", "#!/bin/sh\necho Howdy $1\n")
-	f.states = map[int]PRState{}
-	_, err = p.TakeIn(ctx(), "M1")
+	_, err = p.TakeIn(ctx(), "M1", RunOptions{})
 	var ce *ConflictError
 	require.ErrorAs(t, err, &ce)
 	require.Equal(t, CodeConflicted, ce.Code)
 	require.ErrorContains(t, err, "greet.sh")
-	require.Equal(t, "change/take-in-2", CurrentBranch(ctx(), p.Root))
+	require.Equal(t, "change/take-in-2", CurrentBranch(ctx(), p.Root), "numbered from the Take-in: trailers on the branch")
 	data, err := os.ReadFile(filepath.Join(p.Root, "greet.sh"))
 	require.NoError(t, err)
 	require.Contains(t, string(data), "<<<<<<<")
-	_, err = p.TakeIn(ctx(), "M1")
+	before := run(t, bare, "rev-parse", "milestone/M1")
+	_, err = p.TakeIn(ctx(), "M1", RunOptions{})
 	require.ErrorAs(t, err, &ce, "unresolved: refused again")
+	require.Equal(t, before, run(t, bare, "rev-parse", "milestone/M1"), "nothing landed")
 
 	write(t, p, "greet.sh", "#!/bin/sh\necho Hi there $1\n")
 	run(t, p.Root, "add", "greet.sh")
 	run(t, p.Root, "commit", "-q", "--no-edit")
 	resolved := run(t, p.Root, "rev-parse", "HEAD")
-	res, err = p.TakeIn(ctx(), "M1")
+	res, err = p.TakeIn(ctx(), "M1", RunOptions{})
 	require.NoError(t, err)
 	require.Equal(t, "take-in-2", res.ID)
-	require.Equal(t, resolved, res.Integration.Commit, "apex-apply's resolution is what is pushed")
-	require.Equal(t, resolved, run(t, bare, "rev-parse", "apex/take-in-2"))
+	require.Equal(t, resolved, res.Commit, "apex-apply's resolution is what lands")
+	require.Equal(t, resolved, run(t, bare, "rev-parse", "milestone/M1"))
+	require.False(t, p.branchExists(ctx(), "change/take-in-2"))
+	require.Equal(t, "milestone/M1", CurrentBranch(ctx(), p.Root))
+}
 
-	// Ejected: redone, an attempt (take-in-2 is PR 8).
-	f.states[8] = PRState{}
-	res, err = p.TakeIn(ctx(), "M1")
+// The regression runs on the take-in's merge before it lands: red, nothing
+// lands and the merge is laid out for apex-apply (milestone.take-in-red);
+// its committed fix is what the next take-in lands.
+func TestTakeIn_RegressionRed(t *testing.T) {
+	files := baseFiles()
+	files["_apex/config.yaml"] = coordinatedConfig + "regression: ./reg.sh\n"
+	files["reg.sh"] = "#!/bin/sh\ntest ! -f boom\n"
+	p := fixture(t, files)
+	bare := withOrigin(t, p)
+	_, _, err := p.PrepareMilestoneBranch(ctx(), "M1")
 	require.NoError(t, err)
-	require.Equal(t, 2, res.Integration.Attempts)
-	require.Equal(t, "take-in-2", res.ID)
+	pushFile(t, bare, "main", "boom", "main broke the milestone's regression\n")
+	before := run(t, bare, "rev-parse", "milestone/M1")
+
+	res, err := p.TakeIn(ctx(), "M1", RunOptions{})
+	require.Equal(t, CodeTakeInRed, failCode(t, err))
+	require.NotNil(t, res.Regression)
+	require.Equal(t, before, run(t, bare, "rev-parse", "milestone/M1"), "nothing landed")
+	require.Equal(t, before, run(t, p.Root, "rev-parse", "milestone/M1"), "the local branch is back")
+	require.Equal(t, "change/take-in-1", CurrentBranch(ctx(), p.Root))
+
+	run(t, p.Root, "rm", "-q", "boom")
+	run(t, p.Root, "commit", "-q", "-m", "fix: the take-in passes the regression\n\nTake-in: take-in-1")
+	fix := run(t, p.Root, "rev-parse", "HEAD")
+	res, err = p.TakeIn(ctx(), "M1", RunOptions{})
+	require.NoError(t, err)
+	require.Equal(t, fix, res.Commit)
+	require.Equal(t, fix, run(t, bare, "rev-parse", "milestone/M1"))
+	require.Zero(t, res.Regression.Exit)
 }
 
 func TestTakeIn_UncoordinatedRefuses(t *testing.T) {
 	p := fixture(t, baseFiles())
-	_, err := p.TakeIn(ctx(), "M1")
+	_, err := p.TakeIn(ctx(), "M1", RunOptions{})
 	var ue *UsageError
 	require.ErrorAs(t, err, &ue)
 }

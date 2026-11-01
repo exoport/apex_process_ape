@@ -1,11 +1,9 @@
 package apexv1
 
 import (
-	"context"
 	"os"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -44,10 +42,10 @@ func TestClosePR(t *testing.T) {
 	require.True(t, g.Run.Green())
 	require.NotNil(t, g.Integration)
 	require.Equal(t, KindClose, g.Integration.Kind)
-	require.Equal(t, []string{"apex/close-M1→main"}, f.opened)
+	require.Equal(t, []string{"milestone/M1→main"}, f.opened, "the close PR's head is the milestone's branch itself")
 	require.Equal(t, "milestone/M1", CurrentBranch(ctx(), p.Root), "the close ran on the milestone's branch")
 	tip := run(t, p.Root, "rev-parse", "milestone/M1")
-	require.Equal(t, tip, run(t, bare, "rev-parse", "apex/close-M1"))
+	require.Equal(t, tip, run(t, bare, "rev-parse", "milestone/M1"), "the close record landed on the remote's milestone branch")
 	require.Equal(t, "apex: M1 done", run(t, p.Root, "log", "-1", "--format=%s", tip), "the close record is the branch's last commit")
 	require.Equal(t, mainBefore, run(t, bare, "rev-parse", "main"), "main moves only through its queue")
 	events, _ := os.ReadFile(p.EventsPath())
@@ -59,30 +57,21 @@ func TestClosePR(t *testing.T) {
 	require.Len(t, f.opened, 1, "queued: nothing redone")
 
 	// Another milestone closed first; this PR was ejected. The close takes
-	// main in itself (its take-in merges as it is enqueued), then goes again.
+	// main in itself (the take-in lands on milestone/M1), then enqueues
+	// the same PR again: its head followed the branch.
 	pushFile(t, bare, "main", "notes.txt", "M0 shipped\n")
 	f.states[7] = PRState{}
-	f.onEnqueue = func(head string, n int) {
-		if !strings.HasPrefix(head, "apex/take-in-") {
-			return
-		}
-		merge := run(t, bare, "rev-parse", head)
-		run(t, bare, "update-ref", "refs/heads/milestone/M1", merge)
-		f.mu.Lock()
-		f.states[n] = PRState{Merged: true, MergeCommit: merge}
-		f.mu.Unlock()
-	}
 	g, err = p.CloseMilestone(ctx(), "M1", RunOptions{})
 	require.NoError(t, err)
-	require.Contains(t, f.opened, "apex/take-in-1→milestone/M1", "the close took main in first")
-	require.Equal(t, IntegrationMerged, p.LoadIntegration("take-in-1").State)
 	require.Equal(t, 2, g.Integration.Attempts)
-	require.Equal(t, "apex: M1 done", run(t, p.Root, "log", "-1", "--format=%s", "milestone/M1"), "the close record replayed on top of the take-in")
-	require.Equal(t, g.Integration.Commit, run(t, bare, "rev-parse", "apex/close-M1"), "pushed again")
-	run(t, bare, "merge-base", "--is-ancestor", "main", "apex/close-M1")
+	require.Equal(t, []int{7, 7}, f.enqueued, "the same PR, enqueued again")
+	require.Equal(t, g.Integration.Commit, run(t, bare, "rev-parse", "milestone/M1"))
+	run(t, bare, "merge-base", "--is-ancestor", "main", "milestone/M1")
+	run(t, bare, "merge-base", "--is-ancestor", tip, "milestone/M1")
+	require.Equal(t, "take-in-1", run(t, bare, "log", "-1", "--format=%(trailers:key=Take-in,valueonly)", "milestone/M1"))
 
 	f.states[7] = PRState{Queue: "AWAITING_CHECKS"}
-	release := mergeOnRemote(t, bare, "main", "apex/close-M1")
+	release := mergeOnRemote(t, bare, "main", "milestone/M1")
 	f.states[7] = PRState{Merged: true, MergeCommit: release}
 	g, err = p.CloseMilestone(ctx(), "M1", RunOptions{})
 	require.NoError(t, err)
@@ -104,11 +93,9 @@ func TestClosePR(t *testing.T) {
 	require.Equal(t, MilestoneDone, g.Status)
 }
 
-// A take-in still queued as the close's run ends is take-in-needed, retry.
-func TestClosePR_TakeInStillQueued(t *testing.T) {
-	old := QueuePoll
-	QueuePoll = 20 * time.Millisecond
-	t.Cleanup(func() { QueuePoll = old })
+// A close whose take-in conflicts is refused with the take-in's
+// change.conflicted, laid out for apex-apply; no close PR opens.
+func TestClosePR_TakeInConflictRefuses(t *testing.T) {
 	files := baseFiles()
 	files["_apex/config.yaml"] = coordinatedConfig
 	files["gate.sh"] = "#!/bin/sh\nexit 0\n"
@@ -116,14 +103,15 @@ func TestClosePR_TakeInStillQueued(t *testing.T) {
 	bare := withOrigin(t, p)
 	_, _, err := p.PrepareMilestoneBranch(ctx(), "M1")
 	require.NoError(t, err)
-	f := &fakeIntegrator{states: map[int]PRState{7: {Queue: "AWAITING_CHECKS"}}}
+	f := &fakeIntegrator{states: map[int]PRState{}}
 	useIntegrator(t, f)
-	pushFile(t, bare, "main", "notes.txt", "M0 shipped\n")
+	pushFile(t, bare, "milestone/M1", "greet.sh", "#!/bin/sh\necho Hi $1\n")
+	pushFile(t, bare, "main", "greet.sh", "#!/bin/sh\necho Howdy $1\n")
 
-	short, cancel := context.WithTimeout(ctx(), 200*time.Millisecond)
-	defer cancel()
-	_, err = p.CloseMilestone(short, "M1", RunOptions{})
-	require.Equal(t, CodeTakeInNeeded, failCode(t, err))
-	require.Equal(t, ActionRetry, ActionFor(CodeTakeInNeeded))
-	require.Equal(t, []string{"apex/take-in-1→milestone/M1"}, f.opened, "no close PR before main is in")
+	_, err = p.CloseMilestone(ctx(), "M1", RunOptions{})
+	var ce *ConflictError
+	require.ErrorAs(t, err, &ce)
+	require.Equal(t, CodeConflicted, ce.Code)
+	require.Equal(t, "change/take-in-1", CurrentBranch(ctx(), p.Root))
+	require.Empty(t, f.opened, "no close PR before main is in")
 }

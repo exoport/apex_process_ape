@@ -904,10 +904,10 @@ func (p *Project) closeMilestone(ctx context.Context, id string, opt RunOptions,
 				fmt.Fprintln(opt.Progress, line)
 			}
 		}
-		if g, done, err := p.resolveClose(ctx, id, progress); done || err != nil {
+		if g, done, err := p.resolveClose(ctx, id, opt, progress); done || err != nil {
 			return g, err
 		}
-		if err := p.prepareClose(ctx, id, progress); err != nil {
+		if err := p.prepareClose(ctx, id, opt, progress); err != nil {
 			return nil, err
 		}
 	}

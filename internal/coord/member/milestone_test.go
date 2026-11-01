@@ -90,6 +90,9 @@ func TestMilestoneLease_ClaimGateRelease(t *testing.T) {
 
 	require.NoError(t, Gate(ctx, ann, "change start", "M1", now))
 	require.ErrorContains(t, Gate(ctx, bob, "change start", "M1", now), "change start refused: M1 is held by "+l.Holder)
+	// D702: the fence before a push of milestone/M1 passes only the holder.
+	require.NoError(t, FenceMilestone(ctx, ann, "M1"))
+	require.Equal(t, apexv1.CodeNotLeaseHolder, leaseCode(t, FenceMilestone(ctx, bob, "M1")))
 	require.NoError(t, Gate(ctx, bob, "change start", "", now), "no milestone, no lease check")
 
 	// Lapsed: nobody renews it. Its own checkout takes it again; bob's
@@ -101,6 +104,7 @@ func TestMilestoneLease_ClaimGateRelease(t *testing.T) {
 	held, err := ReleaseMilestone(ctx, ann, "M1")
 	require.NoError(t, err)
 	require.True(t, held)
+	require.ErrorContains(t, FenceMilestone(ctx, ann, "M1"), "held by nobody", "released: no push")
 	err = Gate(ctx, ann, "change start", "M1", now)
 	require.ErrorContains(t, err, "holds no lease on M1", "released: no gate takes it again")
 	_, err = ClaimMilestone(ctx, bob, "M1")

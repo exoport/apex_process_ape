@@ -123,19 +123,28 @@ to `apex/record-<M>-<what>-<sha>`, open its PR into main and enqueue it. The cla
 sent by the next record verb. Once the queue merged it, main fast-forwards at the next fetch. A record reaches a
 milestone's branch by its next take-in.
 
-The merge queues' check runs in CI. `ape ci workflow --write` writes `.github/workflows/apex-queue.yml`, which runs on
+**Milestone branches are ape's (D702); GitHub's merge queue is main's only.** A change's archive and a take-in land
+on `milestone/<M>` with one push: this checkout's lease on M is fenced right before it, and the push only
+fast-forwards. A branch that moved since the fetch, which means another writer, refuses the push (`milestone.moved`);
+nothing lands, and running the command again fetches and catches up. The single writer is the lease holder's ape:
+- `change new/start/archive`, `milestone take-in` and `milestone close` need M's lease;
+- the conductor's `push-branch` refuses `milestone/*` and `apex/*`;
+- sessions cannot push.
+
+The rulesets R1–R4, set once per repository, keep everyone else off on GitHub's side.
+
+Main's merge queue check runs in CI. `ape ci workflow --write` writes `.github/workflows/apex-queue.yml`, which runs on
 self-hosted runners:
 
-- On a merge group it runs `ape ci check`, the required check. ape reads what the group carries from its commits and
-  runs what each kind needs: a change or take-in gets the regression plus the spec's scenario checks; a close gets the
-  milestone gate with its full run, where an accepted red passes only on the red set accepted; records get the project
-  check. A group with nothing from the flow is `ci.outside-flow`.
-- On a red group it publishes `ejected`. On a push to a milestone branch it publishes `merged`, and on a push to main
-  `close-merged`. These go out with `ape ci event`, with the ensemble credential from the `APE_NATS_CREDS` secret.
-  They wake each member's waiting archive, take-in or close, which then reads GitHub.
+- On a merge group into main it runs `ape ci check`, the required check. A milestone's close PR, which carries the
+  milestone's changes and take-ins, gets the milestone gate with its full run, where an accepted red passes only on
+  the red set accepted. Records get the project check. Anything else, such as a change on its own, is
+  `ci.outside-flow`.
+- On a red group it publishes `ejected`, and on a push to main `close-merged`, with `ape ci event` and the ensemble
+  credential from the `APE_NATS_CREDS` secret. They wake the waiting close, which then reads GitHub.
 
-`ape project check` reads the merge queues of main and of each `milestone/<M>` branch on the remote. Each must merge
-with a merge commit, or it is a `coord.queue-settings` finding.
+`ape project check` reads main's merge queue. It must merge with a merge commit, or it is a `coord.queue-settings`
+finding.
 
 A conductor receives its ensemble's events through the durable consumer **`conductor-<user>-<ens>`** on `APE_EVENTS`.
 Only the holder of `conductor.<user>.<ens>` binds it, so a conductor that takes the lease over inherits the events the

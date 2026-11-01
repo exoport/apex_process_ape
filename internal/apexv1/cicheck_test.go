@@ -17,29 +17,18 @@ func commitOnTop(t *testing.T, p *Project, path, content, msg string) string {
 	return run(t, p.Root, "rev-parse", "HEAD")
 }
 
-// v1.5 stage 1a step 10: the merge queue's check reads what the group
-// carries from its trailers and runs what it needs.
-func TestCICheck_ChangeGroup(t *testing.T) {
-	p, _ := coordinatedReviewedWave(t)
-	useIntegrator(t, &fakeIntegrator{states: map[int]PRState{}})
-	res, err := p.Archive(ctx(), "add-wave", false, RunOptions{})
-	require.NoError(t, err)
-	in := res.Integration
-	run(t, p.Root, "switch", "-q", "--detach", in.Commit)
-
-	ci, err := p.CICheck(ctx(), in.BaseSHA, in.Commit, RunOptions{})
-	require.NoError(t, err, "%+v", ci)
-	require.True(t, ci.Green)
+// D702: main's queue takes a milestone's close (its changes ride it) and
+// records; a change on its own reaching main is outside the flow.
+func TestCICheck_ChangeAloneOnMainIsOutsideFlow(t *testing.T) {
+	p := fixture(t, baseFiles())
+	base := run(t, p.Root, "rev-parse", "HEAD")
+	run(t, p.Root, "switch", "-q", "--detach")
+	head := commitOnTop(t, p, "wave.sh", "#!/bin/sh\necho wave\n", "feat: wave\n\nChange: add-wave")
+	ci, err := p.CICheck(ctx(), base, head, RunOptions{})
+	require.Equal(t, CodeCIOutsideFlow, failCode(t, err))
+	require.ErrorContains(t, err, "reach main only through the close PR")
 	require.Equal(t, []string{"add-wave"}, ci.Changes)
-	require.Positive(t, ci.SpecChecks)
-	require.Empty(t, ci.Closes)
-
-	// The same group with a broken scenario on top is red.
-	head := commitOnTop(t, p, "greet.sh", "#!/bin/sh\necho Hi $1\n", "feat: break\n\nChange: add-wave")
-	ci, err = p.CICheck(ctx(), in.BaseSHA, head, RunOptions{})
-	require.Equal(t, CodeCIRed, failCode(t, err))
-	require.False(t, ci.Green)
-	require.Contains(t, strings.Join(ci.Red, "\n"), "scenario: greeting/")
+	require.Empty(t, ci.Gates, "nothing ran")
 }
 
 func TestCICheck_OutsideFlowAndRecords(t *testing.T) {
@@ -57,7 +46,7 @@ func TestCICheck_OutsideFlowAndRecords(t *testing.T) {
 	if ci.Green {
 		require.NoError(t, err)
 	}
-	require.Zero(t, ci.SpecChecks, "a record runs no scenario")
+	require.Empty(t, ci.Gates, "a record runs no gate")
 }
 
 // A close: the milestone gate with its full run; a person's accepted red

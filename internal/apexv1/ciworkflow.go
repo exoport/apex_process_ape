@@ -9,10 +9,10 @@ import (
 // through GitHub (v1.5 stage 1a, section 5.5; `ape ci workflow --write`).
 const QueueWorkflowRel = ".github/workflows/apex-queue.yml"
 
-// QueueWorkflow is that workflow. On merge_group it runs `ape ci check`
-// on the group, the queue's required check, and on a red one publishes
-// ejected; on a push to main or a milestone branch it publishes merged
-// (close-merged for main), so the waiting ape wakes (OQ10). On a pull
+// QueueWorkflow is that workflow (D702: the queue is main's only). On
+// merge_group it runs `ape ci check` on the group, the queue's required
+// check, and on a red one publishes ejected; on a push to main it
+// publishes close-merged, so the waiting close wakes (OQ10). On a pull
 // request it passes at once: the queue runs the checks, on the tree that
 // merges. Self-hosted runners (a project's live services, section 5.5);
 // the NATS URL and the ensemble credential are CI secrets, never a file
@@ -23,9 +23,9 @@ name: apex-queue
 on:
   merge_group:
   pull_request:
-    branches: [main, "milestone/**"]
+    branches: [main]
   push:
-    branches: [main, "milestone/**"]
+    branches: [main]
 concurrency:
   group: apex-queue-${{ github.ref }}
   cancel-in-progress: false
@@ -65,8 +65,7 @@ jobs:
           APE_NATS_CREDS_TEXT: ${{ secrets.APE_NATS_CREDS }}
         run: |
           creds="$RUNNER_TEMP/ape-nats.creds"; umask 077; printf '%s\n' "$APE_NATS_CREDS_TEXT" > "$creds"
-          event=merged; [ "${{ github.ref_name }}" = main ] && event=close-merged
-          ape ci event "$event" --ref "${{ github.ref_name }}" --sha "${{ github.sha }}" --nats-url "$APE_NATS_URL" --nats-creds "$creds"
+          ape ci event close-merged --ref "${{ github.ref_name }}" --sha "${{ github.sha }}" --nats-url "$APE_NATS_URL" --nats-creds "$creds"
 `
 
 // WriteQueueWorkflow writes QueueWorkflow to the project; changed reports

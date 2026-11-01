@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os/exec"
 	"strings"
 
 	"github.com/exoport/apex_process_ape/internal/apexv1"
@@ -13,11 +12,10 @@ import (
 )
 
 // QueueFindings is project check's reading of the coordinated
-// repository's merge queues (v1.5 stage 1a; coord.queue-settings): main
-// and every milestone/<M> branch on main's remote need a queue that
-// merges with a merge commit — main's close PR is the release point
-// (OQ17), and a take-in merges main into a milestone, never squashed
-// (section 5.2). Nothing for a project not integrating through GitHub. A
+// repository's merge queue (v1.5 stage 1a; coord.queue-settings): main
+// needs one that merges with a merge commit — the close PR's merge commit
+// is the release point (OQ17). Milestone branches have none: ape lands on
+// them itself (D702). Nothing for a project not integrating through GitHub. A
 // queue that cannot be read (network, rate limit) is written to note and
 // is no finding: project check judges settings, not the network.
 func QueueFindings(ctx context.Context, p *apexv1.Project, note io.Writer) []apexv1.Finding {
@@ -30,7 +28,8 @@ func QueueFindings(ctx context.Context, p *apexv1.Project, note io.Writer) []ape
 		return nil
 	}
 	c := github.New(m.GitHubAPI, m.GitHubRepo, tok)
-	branches := append([]string{"main"}, remoteMilestones(ctx, p.Root)...)
+	// D702: the merge queue is main's only; milestone branches are ape's.
+	branches := []string{"main"}
 	var out []apexv1.Finding
 	for _, b := range branches {
 		method, err := c.QueueMergeMethod(ctx, b)
@@ -46,27 +45,6 @@ func QueueFindings(ctx context.Context, p *apexv1.Project, note io.Writer) []ape
 	return out
 }
 
-func queueWhy(branch string) string {
-	if branch == "main" {
-		return "the close PR's merge commit is the release point, OQ17"
-	}
-	return "a take-in merges main into the milestone and must not be squashed, section 5.2"
-}
-
-// remoteMilestones is every milestone/<M> branch main's remote has, as
-// last fetched.
-func remoteMilestones(ctx context.Context, root string) []string {
-	remote := "origin"
-	if out, err := exec.CommandContext(ctx, "git", "-C", root, "config", "branch.main.remote").Output(); err == nil && strings.TrimSpace(string(out)) != "" {
-		remote = strings.TrimSpace(string(out))
-	}
-	out, err := exec.CommandContext(ctx, "git", "-C", root, "for-each-ref", "--format=%(refname:short)", "refs/remotes/"+remote+"/"+apexv1.MilestoneBranchPrefix).Output()
-	if err != nil {
-		return nil
-	}
-	var bs []string
-	for l := range strings.FieldsSeq(string(out)) {
-		bs = append(bs, strings.TrimPrefix(l, remote+"/"))
-	}
-	return bs
+func queueWhy(string) string {
+	return "the close PR's merge commit is the release point, OQ17"
 }

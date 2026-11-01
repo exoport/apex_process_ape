@@ -191,10 +191,6 @@ type ArchiveResult struct {
 	Verify            *VerifyResult `json:"verify,omitempty"`
 	AllowPendingHuman bool          `json:"allow_pending_human,omitempty"`
 	PendingHuman      []string      `json:"pending_human,omitempty"`
-	// Integration is a coordinated archive's pull request (v1.5 stage 1a):
-	// the squash went to apex/<id>, not onto the base, and the PR waits
-	// in the base's merge queue.
-	Integration *Integration `json:"integration,omitempty"`
 }
 
 // Archive lands a reviewed change on its base branch (D38): it catches
@@ -215,11 +211,6 @@ func (p *Project) Archive(ctx context.Context, id string, allowPendingHuman bool
 	}
 	if err := p.recoverArchive(ctx); err != nil {
 		return nil, err
-	}
-	// A coordinated change whose PR is queued: still queued, merged, or
-	// ejected (then archived again below, an attempt).
-	if res, done, err := p.resolveIntegration(ctx, id); done || err != nil {
-		return res, err
 	}
 	ci, err := p.requireChange(ctx, id)
 	if err != nil {
@@ -456,12 +447,12 @@ func (p *Project) squashOntoBase(ctx context.Context, ci ChangeInfo, updates []S
 		}
 		return undo(fmt.Errorf("%w: %s", err, strings.TrimSpace(out)))
 	}
-	if p.coordinated() {
-		attempts := 1
-		if prev := p.LoadIntegration(id); prev != nil {
-			attempts = prev.Attempts + 1
+	// D702: a coordinated change lands on milestone/<M> with one push,
+	// the lease fenced, a fast-forward only; refused, nothing landed.
+	if strings.HasPrefix(base, MilestoneBranchPrefix) && p.coordinated() {
+		if err := p.pushMilestone(ctx, base, HeadSHA(ctx, p.Root)); err != nil {
+			return undo(err)
 		}
-		return p.integrateSquash(ctx, ci, res, baseSHA, attempts, undo)
 	}
 	res.Commit = HeadSHA(ctx, p.Root)
 	if err := p.keepTip(ctx, archiveRef(id), tip, "archived as "+short(res.Commit)+" on "+base, branch); err != nil {

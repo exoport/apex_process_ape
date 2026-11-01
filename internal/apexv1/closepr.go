@@ -22,7 +22,7 @@ const CodeTakeInNeeded = "milestone.take-in-needed"
 
 func init() {
 	DiagnosticCodes = append(DiagnosticCodes,
-		CodeDoc{CodeTakeInNeeded, 1, ActionRetry, "a coordinated close (coordination.github): main moved since milestone/<M> last took it in, and the take-in the close started itself still waits in the milestone's merge queue as the run ends (its gate would otherwise run on a tree main will not have) — close again, which waits for that take-in (v1.5 stage 1a, section 5.2)"},
+		CodeDoc{CodeTakeInNeeded, 1, ActionRetry, "a coordinated close (coordination.github): main moved again since the take-in the close made itself, so milestone/<M> still lacks main's tip and its gate would run on a tree main will not have — close again, which takes it in first (v1.5 stage 1a, section 5.2; D702)"},
 	)
 }
 
@@ -32,17 +32,16 @@ func closeID(ms string) string { return "close-" + ms }
 func (p *Project) requireTakenIn(ctx context.Context, ms string) error {
 	base, remote := MilestoneBranch(ms), p.trunkRemote(ctx)
 	if _, err := git(ctx, p.Root, "merge-base", "--is-ancestor", "refs/remotes/"+remote+"/main", "refs/heads/"+base); err != nil {
-		return &FailError{Code: CodeTakeInNeeded, Action: ActionRetry, Msg: fmt.Sprintf("main moved since %s last took it in, and its take-in still waits in the merge queue — close %s again, which waits for it", base, ms)}
+		return &FailError{Code: CodeTakeInNeeded, Action: ActionRetry, Msg: fmt.Sprintf("main moved since %s last took it in — close %s again, which takes it in first", base, ms)}
 	}
 	return nil
 }
 
 // prepareClose is a coordinated close's preamble: on milestone/<M>,
 // fetched and synced, with main taken in — by the close itself when main
-// moved (TakeInUntilMerged, polled): a take-in conflict is its
-// change.conflicted, and a take-in still queued when ctx ends is
-// milestone.take-in-needed (retry).
-func (p *Project) prepareClose(ctx context.Context, ms string, progress func(string)) error {
+// moved (TakeIn, landed on milestone/<M>): its conflict or red regression
+// is the close's refusal, laid out for apex-apply.
+func (p *Project) prepareClose(ctx context.Context, ms string, opt RunOptions, progress func(string)) error {
 	if err := p.enterMilestoneBase(ctx, ms, "close "+ms); err != nil {
 		return err
 	}
@@ -55,14 +54,8 @@ func (p *Project) prepareClose(ctx context.Context, ms string, progress func(str
 	if progress != nil {
 		progress("main moved since " + MilestoneBranch(ms) + " took it in: taking it in first")
 	}
-	if _, err := p.TakeInUntilMerged(ctx, ms, progress, nil); err != nil {
-		if ctx.Err() != nil {
-			return p.requireTakenIn(context.WithoutCancel(ctx), ms)
-		}
+	if _, err := p.TakeIn(ctx, ms, opt); err != nil {
 		return err
-	}
-	if ctx.Err() != nil {
-		return p.requireTakenIn(context.WithoutCancel(ctx), ms)
 	}
 	if err := p.switchBranch(ctx, MilestoneBranch(ms)); err != nil {
 		return err
@@ -70,17 +63,18 @@ func (p *Project) prepareClose(ctx context.Context, ms string, progress func(str
 	return p.requireTakenIn(ctx, ms)
 }
 
-// openClosePR pushes milestone/<M>'s tip, close record last, to
-// apex/close-<M> and opens and enqueues its PR into main.
+// openClosePR lands milestone/<M>'s tip, close record last, on the
+// remote's milestone/<M> (the fenced fast-forward push, D702) and opens
+// and enqueues the PR milestone/<M> → main.
 func (p *Project) openClosePR(ctx context.Context, ms string, attempts int) (*Integration, error) {
 	base, remote := MilestoneBranch(ms), p.trunkRemote(ctx)
 	tip, err := git(ctx, p.Root, "rev-parse", "refs/heads/"+base)
 	if err != nil {
 		return nil, err
 	}
-	head := PRBranchPrefix + closeID(ms)
-	if _, err := gitWithEnv(ctx, p.Root, noPromptEnv, "push", "--quiet", "--force", "--no-follow-tags", remote, tip+":refs/heads/"+head); err != nil {
-		return nil, &FailError{Code: CodeIntegrationPush, Action: ActionRetry, Msg: fmt.Sprintf("%s is closed on %s, but pushing it to %s on %s failed: %v — close again", ms, base, head, remote, err)}
+	head := base
+	if err := p.pushMilestone(ctx, base, tip); err != nil {
+		return nil, err
 	}
 	api, err := p.integrator()
 	if err != nil {
@@ -112,7 +106,7 @@ func (p *Project) openClosePR(ctx context.Context, ms string, attempts int) (*In
 // remote, milestone-done emitted with the release point) or is queued;
 // ejected, it is pushed and enqueued again — main taken in first — an
 // attempt, up to limits.attempts. done false: no close PR recorded.
-func (p *Project) resolveClose(ctx context.Context, ms string, progress func(string)) (*GateResult, bool, error) {
+func (p *Project) resolveClose(ctx context.Context, ms string, opt RunOptions, progress func(string)) (*GateResult, bool, error) {
 	rec := p.LoadIntegration(closeID(ms))
 	if rec == nil || rec.Kind != KindClose || !p.coordinated() {
 		return nil, false, nil
@@ -146,7 +140,7 @@ func (p *Project) resolveClose(ctx context.Context, ms string, progress func(str
 			"the close PR of %s was ejected %d time(s) from main's merge queue (%s), reaching limits.attempts (%d) — a person looks at why its gate is red on the merge with main",
 			ms, rec.Attempts, rec.PR.URL, capN)}
 	}
-	if err := p.prepareClose(ctx, ms, progress); err != nil {
+	if err := p.prepareClose(ctx, ms, opt, progress); err != nil {
 		return g, true, err
 	}
 	in, err := p.openClosePR(ctx, ms, rec.Attempts+1)
@@ -185,7 +179,9 @@ func (p *Project) finishClose(ctx context.Context, ms string, rec *Integration, 
 		return &FailError{Code: CodeBranchFailed, Msg: "the close merged, but main does not fast-forward to " + remote + "/main: " + err.Error() + " — local commits on main are outside the flow; move them, then close again"}
 	}
 	_, _ = git(ctx, p.Root, "branch", "-q", "-D", base)
-	_, _ = gitWithEnv(ctx, p.Root, noPromptEnv, "push", "--quiet", "--no-follow-tags", remote, "--delete", base)
+	if env, err := p.pushEnv(ctx); err == nil {
+		_, _ = gitWithEnv(ctx, p.Root, env, "push", "--quiet", "--no-follow-tags", remote, "--delete", base)
+	}
 	rec.State = IntegrationMerged
 	if err := p.saveIntegration(*rec); err != nil {
 		return err

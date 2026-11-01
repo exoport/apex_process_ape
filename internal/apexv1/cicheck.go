@@ -7,20 +7,17 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
 )
 
-// The merge queue's check (v1.5 stage 1a, proposal sections 5.1–5.5): CI
-// runs `ape ci check --base <sha> --head <sha>` on each merge group, with
-// the group's head checked out. ape reads what the group carries from its
-// commits' trailers and runs what each kind needs, the union when the
-// queue batched several PRs: a change or a take-in, the regression
-// command and the spec's scenario checks (no full ones); a close, the
-// milestone gate with its full run, where an accepted red passes only on
-// that red set (OQ26); records alone, the project check. A group with no
-// commit of the flow is red: main and milestone branches take nothing
-// from outside it.
+// Main's merge queue check (v1.5 stage 1a, sections 5.3–5.5; D702: the
+// queue is main's only): CI runs `ape ci check --base <sha> --head <sha>`
+// on each merge group, with the group's head checked out. ape reads what
+// the group carries from its commits' trailers: a milestone's close (its
+// changes and take-ins ride it), the milestone gate with its full run,
+// where an accepted red passes only on that red set (OQ26); records alone,
+// the project check. Anything else is red: main takes nothing from outside
+// the flow.
 
 // CI codes.
 const (
@@ -47,12 +44,9 @@ type CIResult struct {
 	Closes  []string `json:"closes,omitempty"`
 	Records []string `json:"records,omitempty"`
 	// What ran.
-	Regression *CheckResult  `json:"regression,omitempty"`
-	SpecChecks int           `json:"spec_checks,omitempty"`
-	SpecFailed []CheckResult `json:"spec_failed,omitempty"`
-	Gates      []*GateResult `json:"gates,omitempty"`
-	Findings   []Finding     `json:"findings,omitempty"`
-	Green      bool          `json:"green"`
+	Gates    []*GateResult `json:"gates,omitempty"`
+	Findings []Finding     `json:"findings,omitempty"`
+	Green    bool          `json:"green"`
 	// Red says what was red, one line each.
 	Red []string `json:"red,omitempty"`
 }
@@ -104,25 +98,11 @@ func (p *Project) CICheck(ctx context.Context, base, head string, opt RunOptions
 	if err := p.classifyGroup(ctx, base, head, res); err != nil {
 		return res, err
 	}
-	dir := filepath.Join(p.LogsDir(), "ci-"+short(head))
-	if len(res.Changes)+len(res.TakeIns) > 0 {
-		if cmd := p.regressionCmd(); cmd != "" {
-			r := p.runRegression(ctx, cmd, dir, "", opt)
-			res.Regression = &r
-			if r.Exit != 0 {
-				res.Red = append(res.Red, "regression: "+cmd+" exited "+strconv.Itoa(r.Exit))
-			}
-		}
-		spec, _ := withoutFull(p.EffectiveSpecChecks(nil))
-		res.SpecChecks = len(spec)
-		results := p.RunChecks(ctx, dir, "", spec, opt)
-		for i := range results {
-			if r := &results[i]; r.Exit != 0 {
-				r.Tail = lastN(r.Tail, 15)
-				res.SpecFailed = append(res.SpecFailed, *r)
-				res.Red = append(res.Red, "scenario: "+r.Task)
-			}
-		}
+	// D702: main's queue takes a milestone's close PR (its changes and
+	// take-ins ride it) and record PRs; a change or take-in on its own
+	// reaches main only inside its milestone's close.
+	if len(res.Closes) == 0 && len(res.Changes)+len(res.TakeIns) > 0 {
+		return res, &FailError{Code: CodeCIOutsideFlow, Msg: "the merge group " + short(base) + ".." + short(head) + " carries a change or take-in (" + strings.Join(append(append([]string{}, res.Changes...), res.TakeIns...), ", ") + ") without its milestone's close — changes and take-ins land on milestone/<M>, and reach main only through the close PR"}
 	}
 	for _, ms := range res.Closes {
 		red, err := p.ciGate(ctx, ms, opt, res)

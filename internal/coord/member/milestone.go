@@ -259,3 +259,30 @@ func requireMilestoneLease(ctx context.Context, p *apexv1.Project, op, ms string
 	}
 	return notHolder(fmt.Sprintf("%s refused: %s is held by %s, not this checkout — its changes are theirs to start", op, ms, cur))
 }
+
+// FenceMilestone is apexv1.FenceMilestone (D702): right before ape pushes
+// milestone/<M>, this checkout must hold M's lease now — a holder whose
+// renewal failed, and whose lease another member took, does not push. A
+// project in no ensemble is not checked.
+func FenceMilestone(ctx context.Context, p *apexv1.Project, ms string) error {
+	s, err := openMilestones(ctx, p, nats.NoReconnect())
+	if errors.Is(err, ErrNotMember) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer s.close()
+	cur, _, err := s.store.Holder(ctx, s.key(ms))
+	if err != nil {
+		return err
+	}
+	if cur != s.holder {
+		who := cur
+		if who == "" {
+			who = "nobody (it lapsed)"
+		}
+		return notHolder(fmt.Sprintf("%s's lease is held by %s, not this checkout, so ape does not push milestone/%s: nothing landed — `ape milestone claim %s` if it is still yours to drive", ms, who, ms, ms))
+	}
+	return nil
+}

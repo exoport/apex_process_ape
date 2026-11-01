@@ -172,8 +172,8 @@ blocks the change and the loop re-plans it.
 coordinated project (`coordination.github`): the upstreams of the base and of `main`, failing
 with `base.fetch-failed` when the fetch does. Otherwise it never fetches. In such a project a milestone's
 changes are based on `milestone/<M>`, the branch `ape milestone claim` prepares
-([coordination](coordination.md#leases)). Their archive pushes the squash to `apex/<id>`, opens and enqueues its
-pull request into `milestone/<M>`, and waits for the merge queue (`ape change archive --help`, "Coordinated").
+([coordination](coordination.md#leases)). Their archive lands the squash on `milestone/<M>` with one fenced, fast-forward
+push (`ape change archive --help`, "Coordinated"; D702).
 
 ## Checks
 

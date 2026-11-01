@@ -64,8 +64,7 @@ func TestQueueFindings(t *testing.T) {
 		require.Equal(t, apexv1.CodeQueueSettings, f.Code)
 		msgs = append(msgs, f.Message)
 	}
-	require.Len(t, msgs, 2, "%q", msgs)
+	require.Len(t, msgs, 1, "%q", msgs)
 	require.Contains(t, msgs[0], "main on shop/notes merges by squash")
-	require.Contains(t, msgs[1], "milestone/M2 on shop/notes has no merge queue")
-	require.Contains(t, note.String(), "milestone/M3", "unreadable: a note, not a finding")
+	require.Empty(t, note.String(), "D702: milestone branches have no queue, and are not read")
 }
