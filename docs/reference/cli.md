@@ -9574,12 +9574,17 @@ ape supervisor [--id <id>] [--heartbeat 1m] [flags]
 
 Run a supervisor (stage 0; proposal §3.3). Two or more may run: one holds sup.leader
 and serves ape.sup.ensure, ape.sup.health.report and ape.sup.status; the others wait to
-take over. On ensure it starts `ape coordinator --ensemble <name>` as a child process
-with this command's connection flags. A health report is verified before anything is
+take over. On ensure (`ape supervisor ensure`) it starts `ape coordinator --ensemble <name>`
+as a child process with this command's connection flags and each --project (default: the
+member project it runs in), whose milestone leases the coordinator watches. A health report is verified before anything is
 killed: the coordinator's lease must be stale AND its ping unanswered; otherwise the
 reporter is told its own link looks unhealthy (health-unconfirmed). At most 3 starts per
 ensemble in 15 minutes. --no-verify kills on any report (the drills' control only).
 SIGINT/SIGTERM stops its coordinators and exits 0.
+
+Subcommands:
+
+- `ensure` — Ask the leading supervisor to run the ensemble's coordinator, starting it if none answers
 
 Flags:
 
@@ -9588,6 +9593,35 @@ Flags:
 | `--cwd` | string | `—` | the project whose coordination: block and hot/ape-nats.creds to use (default: the current directory) |
 | `--heartbeat` | duration | `1m0s` | how often each held conductor lease gets a heartbeat event (0: none) |
 | `--id` | string | `—` | this supervisor's id (default: sup-<host>-<pid>) |
+| `--nats-creds` | string | `—` | NATS credentials file, instead of the project's hot/ape-nats.creds (env APE_NATS_CREDS) |
+| `--nats-url` | string | `—` | NATS URL, instead of the project's (env APE_NATS_URL) |
+| `--project` | stringSlice | `[]` | a member project whose milestone leases its coordinators watch (repeatable; default: the member project it runs in) |
+
+## ape supervisor ensure
+
+Ask the leading supervisor to run the ensemble's coordinator, starting it if none answers
+
+```
+ape supervisor ensure [--ensemble <name>] [flags]
+```
+
+Send ape.sup.ensure: the leading supervisor pings the ensemble's coordinator and, when none
+answers, starts one. Prints started or running. Exit 1 when no supervisor answered, or it
+could not start one.
+
+Examples:
+
+```
+  ape supervisor ensure
+  ape supervisor ensure --ensemble atomix-1a --nats-url nats://127.0.0.1:14222
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | the project whose coordination: block and hot/ape-nats.creds to use (default: the current directory) |
+| `--ensemble` | string | `—` | the ensemble (default: the project's) |
 | `--nats-creds` | string | `—` | NATS credentials file, instead of the project's hot/ape-nats.creds (env APE_NATS_CREDS) |
 | `--nats-url` | string | `—` | NATS URL, instead of the project's (env APE_NATS_URL) |
 
