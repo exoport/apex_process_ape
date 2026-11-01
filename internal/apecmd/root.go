@@ -127,6 +127,7 @@ func rootSubcommands() []*cobra.Command {
 		newServiceCmd(),
 		// APEX v1.5 (in development): the coordination verbs.
 		newNatsCmd(),
+		newCICmd(),
 		newCoordinatorCmd(),
 		newSupervisorCmd(),
 		newHealthCmd(),

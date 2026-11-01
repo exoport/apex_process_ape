@@ -631,7 +631,7 @@ the run ends is milestone.take-in-needed (retry: close again). The gate runs as 
 close record, "apex: <M> done" (an accepted red recorded with its gate run), is
 milestone/<M>'s last commit. ape pushes that tip to apex/close-<M>, opens the close PR into
 main and enqueues it; its required check, the milestone gate on the merge with the
-current main, runs in CI (the project's merge-queue workflow), and main's queue merges with a merge commit, the
+current main, is ` + "`ape ci check`" + ` in CI (` + "`ape ci --help`" + `), and main's queue merges with a merge commit, the
 release point. The run waits for the queue as a coordinated archive does. Merged: main
 fast-forwards to the merge, milestone/<M> is deleted here and on the remote, the
 milestone's lease is released, and milestone-done names the release point; tagging stays

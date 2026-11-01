@@ -36,6 +36,7 @@ Subcommands:
 - `aboard` — A shared visual board for a human and one or more agent sessions
 - `change` — The unit of change: new, check, approve (tweaks), start, verify, review, accept, block, answer, archive, tool
 - `chat` — Bridged claude REPL with hooks captured to a runlog
+- `ci` — The merge queue's check and events, run in CI (a project integrating through GitHub)
 - `conductor` — A person's delegated conductor: act under standing orders, keep its decision log
 - `config` — Resolve the project's APEX configuration
 - `coordinator` — APEX v1.5 (in development): run an ensemble's coordinator until stopped
@@ -2471,6 +2472,127 @@ Flags:
 | `--ignore-project-settings` | bool | `false` | Tell claude to skip project + local .claude/settings*.json. |
 | `--model` | string | `—` | Initial claude model. A bare family (fable, haiku, mythos, opus, sonnet) resolves to its current generation; sonnet-5 / claude-sonnet-5 / opus[1m] pin explicitly. Empty falls back to claude's default. |
 | `--output-style` | string | `—` | Output style pinned on the spawned session (default "Default"). Pass "inherit" to keep whatever style the machine is configured with. |
+
+## ape ci
+
+The merge queue's check and events, run in CI (a project integrating through GitHub)
+
+```
+ape ci
+```
+
+What a project integrating through GitHub (coordination.github; v1.5 stage 1a, section 5.5)
+runs in CI: `ape ci check` is the merge queue's required check, `ape ci event` tells the
+waiting ape a group merged or was ejected, and `ape ci workflow` writes the workflow that
+runs both.
+
+Subcommands:
+
+- `check` — The merge queue's check: run what the merge group carries
+- `event` — Publish a merge queue event for the waiting ape
+- `workflow` — Print, or write, the merge queue's workflow (.github/workflows/apex-queue.yml)
+
+## ape ci check
+
+The merge queue's check: run what the merge group carries
+
+```
+ape ci check --base <sha> --head <sha> [flags]
+```
+
+Run the merge queue's check on the merge group base..head, with head checked out (full
+history). ape reads what the group carries from its commits and runs what each kind needs,
+the union when the queue batched several pull requests:
+
+  a change (a Change: trailer) or a take-in (Take-in:)
+      the regression command (regression.change) and the spec's scenario checks, full ones aside
+  a close (apex: <M> done, Milestone: <M>)
+      the milestone gate with its full run, as `ape milestone close` runs it, the gate
+      folders the close moved put back first; a person's accepted red passes only on the
+      red set accepted (OQ26)
+  records alone (apex: <M> proposed | approved | claimed by …)
+      the project check
+
+A group with no commit of the flow is red (ci.outside-flow): main and milestone branches take
+only ape's pull requests.
+
+Exit codes: 0 green · 1 red (ci.red), outside the flow (ci.outside-flow), or git failed · 2 usage.
+
+Examples:
+
+```
+  ape ci check --base "$BASE_SHA" --head "$HEAD_SHA" --json
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--base` | string | `—` | the merge group's base sha |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--head` | string | `—` | the merge group's head sha (checked out) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+| `--timeout` | duration | `0s` | ceiling for each command run, overriding _apex/config.yaml timeouts.<tier>.max (default: check 2h, regression 2h, gate 4h; capped at ape's hard ceilings 4h/8h/12h); the tier's idle window still applies; exit 124 when exceeded |
+
+## ape ci event
+
+Publish a merge queue event for the waiting ape
+
+```
+ape ci event <merged|ejected|close-merged> --ref <ref> [--sha <sha>] [--milestone <M>] [flags]
+```
+
+Publish merged, ejected or close-merged as a project event of the coordinated project
+(ape.evt.<user>.<project>.project.<M>.<event>), where every member's waiting ape — an
+archive, a take-in or a close waiting on its pull request — wakes and reads GitHub (OQ10). The
+event carries the ref and sha; it decides nothing. Run in CI with the ensemble credential
+from a secret (--nats-url, --nats-creds), in the project's checkout for its project name.
+
+Exit codes: 0 published · 1 publish failed · 2 usage, or no NATS.
+
+Examples:
+
+```
+  ape ci event merged --ref milestone/M2 --sha "$GITHUB_SHA" --nats-url "$URL" --nats-creds "$CREDS"
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | the project whose coordination: block and hot/ape-nats.creds to use (default: the current directory) |
+| `--milestone` | string | `—` | the milestone (default: from a milestone/<M> ref) |
+| `--nats-creds` | string | `—` | NATS credentials file, instead of the project's hot/ape-nats.creds (env APE_NATS_CREDS) |
+| `--nats-url` | string | `—` | NATS URL, instead of the project's (env APE_NATS_URL) |
+| `--ref` | string | `—` | the branch or merge group ref the event is about |
+| `--sha` | string | `—` | its sha |
+
+## ape ci workflow
+
+Print, or write, the merge queue's workflow (.github/workflows/apex-queue.yml)
+
+```
+ape ci workflow [--write] [flags]
+```
+
+Print the merge queue's GitHub Actions workflow, or with --write put it at
+.github/workflows/apex-queue.yml (v1.5 stage 1a, section 5.5). On merge_group it runs
+`ape ci check` (the queue's required check, "apex-queue / check") and publishes ejected
+when it is red; on a push to main or a milestone branch it publishes merged (close-merged
+for main); on a pull request it passes at once, since the queue checks the tree that
+merges. It runs on self-hosted runners with ape installed, and reads two secrets,
+APE_NATS_URL and APE_NATS_CREDS (the ensemble credential's text), which a person sets on
+the repository. ape writes the file; committing it is the person's, through main's queue.
+
+Exit codes: 0 printed or written · 1 the write failed · 2 usage.
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+| `--write` | bool | `false` | write the file instead of printing it |
 
 ## ape conductor
 
@@ -4958,7 +5080,7 @@ the run ends is milestone.take-in-needed (retry: close again). The gate runs as 
 close record, "apex: <M> done" (an accepted red recorded with its gate run), is
 milestone/<M>'s last commit. ape pushes that tip to apex/close-<M>, opens the close PR into
 main and enqueues it; its required check, the milestone gate on the merge with the
-current main, runs in CI (the project's merge-queue workflow), and main's queue merges with a merge commit, the
+current main, is `ape ci check` in CI (`ape ci --help`), and main's queue merges with a merge commit, the
 release point. The run waits for the queue as a coordinated archive does. Merged: main
 fast-forwards to the merge, milestone/<M> is deleted here and on the remote, the
 milestone's lease is released, and milestone-done names the release point; tagging stays

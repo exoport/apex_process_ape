@@ -8,7 +8,7 @@ import (
 // The close PR (v1.5 stage 1a, proposal sections 5.3 and 7): in a project
 // integrating through GitHub, a milestone closes into main through one PR
 // of milestone/<M>, enqueued in main's queue, whose required check is the
-// milestone gate on the merge with the current main, run in CI.
+// milestone gate on the merge with the current main (`ape ci check`, in CI).
 // The close record, `apex: <M> done`, is the last commit on milestone/<M>,
 // so it lands on main with the PR; main's queue merges with a merge
 // commit, the release point (OQ17, OQ20).

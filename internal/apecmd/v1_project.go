@@ -701,6 +701,8 @@ Exit codes: 0 green · 1 findings (listed on stderr, or under "findings" with --
 			cli := apexv1.ListOnce(pluginCLIOrNil())
 			fs = append(fs, p.CheckPlugins(cmd.Context(), cli)...)
 			fs = append(fs, p.CheckPluginContents(cmd.Context(), cli)...)
+			// v1.5 stage 1a: the coordinated repository's merge queues.
+			fs = append(fs, member.QueueFindings(cmd.Context(), p, cmd.ErrOrStderr())...)
 			// Notices never change the exit (D155 Q73).
 			notices := p.Notices()
 			if notices == nil {

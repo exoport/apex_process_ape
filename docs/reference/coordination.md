@@ -123,6 +123,20 @@ to `apex/record-<M>-<what>-<sha>`, open its PR into main and enqueue it. The cla
 sent by the next record verb. Once the queue merged it, main fast-forwards at the next fetch. A record reaches a
 milestone's branch by its next take-in.
 
+The merge queues' check runs in CI. `ape ci workflow --write` writes `.github/workflows/apex-queue.yml`, which runs on
+self-hosted runners:
+
+- On a merge group it runs `ape ci check`, the required check. ape reads what the group carries from its commits and
+  runs what each kind needs: a change or take-in gets the regression plus the spec's scenario checks; a close gets the
+  milestone gate with its full run, where an accepted red passes only on the red set accepted; records get the project
+  check. A group with nothing from the flow is `ci.outside-flow`.
+- On a red group it publishes `ejected`. On a push to a milestone branch it publishes `merged`, and on a push to main
+  `close-merged`. These go out with `ape ci event`, with the ensemble credential from the `APE_NATS_CREDS` secret.
+  They wake each member's waiting archive, take-in or close, which then reads GitHub.
+
+`ape project check` reads the merge queues of main and of each `milestone/<M>` branch on the remote. Each must merge
+with a merge commit, or it is a `coord.queue-settings` finding.
+
 A conductor receives its ensemble's events through the durable consumer **`conductor-<user>-<ens>`** on `APE_EVENTS`.
 Only the holder of `conductor.<user>.<ens>` binds it, so a conductor that takes the lease over inherits the events the
 last one left unacknowledged, and its acknowledgements are what renews the lease.

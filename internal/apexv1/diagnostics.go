@@ -112,6 +112,7 @@ func rule(kind, pattern, code string) findingRule {
 // findingRules: one per validation rule. Ordered: specific before general.
 var findingRules = []findingRule{
 	rule("", `^missing — `, "file.missing"),
+	rule("", `^merge queue: `, CodeQueueSettings),
 	rule("", `is the old archive location`, "layout.old-archive"),
 	rule("", `is the old state folder`, "layout.old-state"),
 	rule("", `^the lift's disposition list awaits review`, "lift.disposition-pending"),
