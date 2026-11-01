@@ -4298,12 +4298,12 @@ ape ghapp
 
 The key-holding service of a project integrating through GitHub (APEX v1.5,
 PLAN-V15-GHAPP). It runs on the coordination host as the systemd unit apex-ghapp.service
-under its own user, holds the private keys of two GitHub Apps (apex-setup, apex-member),
+under its own user, holds the private keys of two GitHub Apps (apex-warden, apex-pusher),
 and answers over NATS:
 
-  ape.sup.ghapp.token.<user>   a member's apex-member token: one hour, narrowed to one
+  ape.sup.ghapp.pusher.<user>   a member's apex-pusher token: one hour, narrowed to one
                                repository and a purpose (push, pr, read); never workflows
-  ape.sup.ghapp.setup.<user>   an operator's templated set-up act: rulesets (R1–R4), the
+  ape.sup.ghapp.warden.<user>   an operator's templated set-up act: rulesets (R1–R4), the
                                queue workflow's PR, the secrets APE_NATS_URL and
                                APE_NATS_CREDS, a runner registration token
 
@@ -4323,7 +4323,7 @@ Subcommands:
 Print /etc/apex-ghapp/config.yaml, filled in
 
 ```
-ape ghapp print-config --repo <owner>/<name> --setup-app-id N --setup-installation N --member-app-id N --member-installation N --nats-url URL --members a,b --operators a [flags]
+ape ghapp print-config --repo <owner>/<name> --warden-app-id N --warden-installation N --pusher-app-id N --pusher-installation N --nats-url URL --members a,b --operators a [flags]
 ```
 
 Print the service's config for one repository, filled in with the two Apps' ids and
@@ -4336,15 +4336,15 @@ Flags:
 
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
-| `--member-app-id` | int64 | `0` | apex-member's App id |
-| `--member-installation` | int64 | `0` | apex-member's installation id on the repository |
 | `--members` | string | `—` | NATS users who may ask for member tokens, comma-separated |
 | `--nats-url` | string | `—` | the NATS URL(s), comma-separated |
 | `--notify` | string | `—` | a command (sh -c) run after secrets and runner-token, the act's record on stdin |
 | `--operators` | string | `—` | NATS users who may run set-up acts, comma-separated |
+| `--pusher-app-id` | int64 | `0` | apex-pusher's App id |
+| `--pusher-installation` | int64 | `0` | apex-pusher's installation id on the repository |
 | `--repo` | string | `—` | the repository, <owner>/<name> |
-| `--setup-app-id` | int64 | `0` | apex-setup's App id |
-| `--setup-installation` | int64 | `0` | apex-setup's installation id on the repository |
+| `--warden-app-id` | int64 | `0` | apex-warden's App id |
+| `--warden-installation` | int64 | `0` | apex-warden's installation id on the repository |
 
 ## ape ghapp print-unit
 
@@ -4355,7 +4355,7 @@ ape ghapp print-unit [--ape /usr/local/bin/ape] [flags]
 ```
 
 Print apex-ghapp.service: the service under its own user apex-ghapp, the two keys handed
-to it through LoadCredential from root-owned /etc/apex-ghapp/keys/{setup,member}.pem,
+to it through LoadCredential from root-owned /etc/apex-ghapp/keys/{warden,pusher}.pem,
 its state in /var/lib/apex-ghapp (0700), no core dumps, umask 0077, and the systemd
 sandboxing of PLAN-V15-GHAPP §3. Per-host egress filtering (api.github.com and NATS only)
 is not expressible in a unit and is stated in the plan's threat model.

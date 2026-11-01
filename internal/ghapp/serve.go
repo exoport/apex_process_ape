@@ -26,13 +26,13 @@ import (
 
 // Subjects the service answers.
 const (
-	TokenSubject = "ape.sup.ghapp.token" //nolint:gosec // a NATS subject, not a credential: .<user>
-	SetupSubject = "ape.sup.ghapp.setup" // .<user>
+	TokenSubject = "ape.sup.ghapp.pusher" //nolint:gosec // a NATS subject, not a credential: .<user>
+	SetupSubject = "ape.sup.ghapp.warden" // .<user>
 	queueGroup   = "ape-ghapp"
 )
 
-// SetupPermissions are what an apex-setup token carries for one act.
-var SetupPermissions = map[string]string{
+// WardenPermissions are what an apex-warden token carries for one act.
+var WardenPermissions = map[string]string{
 	"administration": "write", "secrets": "write", "contents": "write",
 	"pull_requests": "write", "workflows": "write", "metadata": "read",
 }
@@ -59,9 +59,11 @@ type Config struct {
 		URL   string `yaml:"url"`
 		Creds string `yaml:"creds"`
 	} `yaml:"nats"`
-	API    string                `yaml:"api"`
-	Setup  AppConfig             `yaml:"setup"`
-	Member AppConfig             `yaml:"member"`
+	API string `yaml:"api"`
+	// Warden is the set-up App (rulesets, secrets, the workflow PR, runner
+	// tokens); Pusher the everyday one (pushes and PRs; R1's bypass actor).
+	Warden AppConfig             `yaml:"warden"`
+	Pusher AppConfig             `yaml:"pusher"`
 	Repos  map[string]RepoPolicy `yaml:"repos"`
 	// Log is the act log (append-only JSON lines, 0600).
 	Log string `yaml:"log"`
@@ -83,8 +85,8 @@ func LoadConfig(path string) (*Config, error) {
 	if c.API == "" {
 		c.API = "https://api.github.com"
 	}
-	if c.Member.AppID == 0 || c.Setup.AppID == 0 || len(c.Repos) == 0 || c.Log == "" {
-		return nil, fmt.Errorf("ghapp: %s needs setup.app_id, member.app_id, repos and log", path)
+	if c.Pusher.AppID == 0 || c.Warden.AppID == 0 || len(c.Repos) == 0 || c.Log == "" {
+		return nil, fmt.Errorf("ghapp: %s needs warden.app_id, pusher.app_id, repos and log", path)
 	}
 	return &c, nil
 }
@@ -93,8 +95,8 @@ func LoadConfig(path string) (*Config, error) {
 type Service struct {
 	cfg       *Config
 	gh        *Client
-	setupKey  *rsa.PrivateKey
-	memberKey *rsa.PrivateKey
+	wardenKey *rsa.PrivateKey
+	pusherKey *rsa.PrivateKey
 	now       func() time.Time
 
 	mu    sync.Mutex
@@ -111,15 +113,15 @@ func NewService(cfg *Config) (*Service, error) {
 		}
 		return LoadKey(data)
 	}
-	sk, err := load(cfg.Setup.Key)
+	sk, err := load(cfg.Warden.Key)
 	if err != nil {
 		return nil, err
 	}
-	mk, err := load(cfg.Member.Key)
+	mk, err := load(cfg.Pusher.Key)
 	if err != nil {
 		return nil, err
 	}
-	return &Service{cfg: cfg, gh: NewClient(cfg.API), setupKey: sk, memberKey: mk, now: time.Now, cache: map[string]Token{}}, nil
+	return &Service{cfg: cfg, gh: NewClient(cfg.API), wardenKey: sk, pusherKey: mk, now: time.Now, cache: map[string]Token{}}, nil
 }
 
 // Request is a caller's request; Reply the service's answer.
@@ -136,7 +138,7 @@ type Request struct {
 type Reply struct {
 	OK    bool   `json:"ok"`
 	Error string `json:"error,omitempty"`
-	// Token is a member token or a runner registration token.
+	// Token is a pusher token or a runner registration token.
 	Token     string    `json:"token,omitempty"`
 	ExpiresAt time.Time `json:"expires_at,omitzero"`
 	Result    []string  `json:"result,omitempty"`
@@ -172,51 +174,51 @@ func (s *Service) Serve(ctx context.Context, nc *nats.Conn) error {
 
 func refuse(format string, a ...any) Reply { return Reply{Error: fmt.Sprintf(format, a...)} }
 
-// token is a member token for (repo, purpose), to a member of the repo.
+// token is a pusher token for (repo, purpose), to a member of the repo.
 func (s *Service) token(ctx context.Context, user string, req Request) Reply {
 	perms, ok := Purposes[req.Purpose]
 	pol, known := s.cfg.Repos[req.Repo]
-	inst := s.cfg.Member.Installations[req.Repo]
+	inst := s.cfg.Pusher.Installations[req.Repo]
 	switch {
 	case !known || inst == 0:
-		return s.logged(user, "token", req, refuse("repository %q is not served", req.Repo))
+		return s.logged(user, "pusher", req, refuse("repository %q is not served", req.Repo))
 	case !slices.Contains(pol.Members, user):
-		return s.logged(user, "token", req, refuse("%s is not a member of %s", user, req.Repo))
+		return s.logged(user, "pusher", req, refuse("%s is not a member of %s", user, req.Repo))
 	case !ok:
-		return s.logged(user, "token", req, refuse("purpose %q: push, pr or read", req.Purpose))
+		return s.logged(user, "pusher", req, refuse("purpose %q: push, pr or read", req.Purpose))
 	}
 	key := req.Repo + "|" + req.Purpose
 	s.mu.Lock()
 	t, cached := s.cache[key]
 	s.mu.Unlock()
 	if !cached || t.ExpiresAt.Before(s.now().Add(10*time.Minute)) {
-		jwt, err := AppJWT(s.cfg.Member.AppID, s.memberKey, s.now())
+		jwt, err := AppJWT(s.cfg.Pusher.AppID, s.pusherKey, s.now())
 		if err != nil {
-			return s.logged(user, "token", req, refuse("signing: %v", err))
+			return s.logged(user, "pusher", req, refuse("signing: %v", err))
 		}
 		_, name, _ := strings.Cut(req.Repo, "/")
 		if t, err = s.gh.InstallationToken(ctx, jwt, inst, name, perms); err != nil {
-			return s.logged(user, "token", req, refuse("%v", err))
+			return s.logged(user, "pusher", req, refuse("%v", err))
 		}
 		s.mu.Lock()
 		s.cache[key] = t
 		s.mu.Unlock()
 	}
-	return s.logged(user, "token", req, Reply{OK: true, Token: t.Token, ExpiresAt: t.ExpiresAt})
+	return s.logged(user, "pusher", req, Reply{OK: true, Token: t.Token, ExpiresAt: t.ExpiresAt})
 }
 
-// setupToken is an apex-setup token for repo.
+// setupToken is an apex-warden token for repo.
 func (s *Service) setupToken(ctx context.Context, repo string) (string, error) {
-	inst := s.cfg.Setup.Installations[repo]
+	inst := s.cfg.Warden.Installations[repo]
 	if inst == 0 {
-		return "", fmt.Errorf("apex-setup is not installed on %s", repo)
+		return "", fmt.Errorf("apex-warden is not installed on %s", repo)
 	}
-	jwt, err := AppJWT(s.cfg.Setup.AppID, s.setupKey, s.now())
+	jwt, err := AppJWT(s.cfg.Warden.AppID, s.wardenKey, s.now())
 	if err != nil {
 		return "", err
 	}
 	_, name, _ := strings.Cut(repo, "/")
-	t, err := s.gh.InstallationToken(ctx, jwt, inst, name, SetupPermissions)
+	t, err := s.gh.InstallationToken(ctx, jwt, inst, name, WardenPermissions)
 	return t.Token, err
 }
 
@@ -224,19 +226,19 @@ func (s *Service) setupToken(ctx context.Context, repo string) (string, error) {
 func (s *Service) setup(ctx context.Context, user string, req Request) Reply {
 	pol, known := s.cfg.Repos[req.Repo]
 	if !known {
-		return s.logged(user, "setup", req, refuse("repository %q is not served", req.Repo))
+		return s.logged(user, "warden", req, refuse("repository %q is not served", req.Repo))
 	}
 	if !slices.Contains(pol.Operators, user) {
-		return s.logged(user, "setup", req, refuse("%s is not an operator of %s: set-up acts are the operator's", user, req.Repo))
+		return s.logged(user, "warden", req, refuse("%s is not an operator of %s: set-up acts are the operator's", user, req.Repo))
 	}
 	tok, err := s.setupToken(ctx, req.Repo)
 	if err != nil {
-		return s.logged(user, "setup", req, refuse("%v", err))
+		return s.logged(user, "warden", req, refuse("%v", err))
 	}
 	var rep Reply
 	switch req.Act {
 	case "rulesets":
-		done, err := s.gh.ApplyRulesets(ctx, tok, req.Repo, s.cfg.Member.AppID, apexv1.QueueWorkflowRel)
+		done, err := s.gh.ApplyRulesets(ctx, tok, req.Repo, s.cfg.Pusher.AppID, apexv1.QueueWorkflowRel)
 		rep = Reply{OK: err == nil, Result: done}
 		if err != nil {
 			rep.Error = err.Error()
@@ -249,7 +251,7 @@ func (s *Service) setup(ctx context.Context, user string, req Request) Reply {
 		}
 	case "secrets":
 		if !SecretNames[req.Name] || req.Value == "" {
-			return s.logged(user, "setup", req, refuse("secret %q: only APE_NATS_URL and APE_NATS_CREDS, with a value", req.Name))
+			return s.logged(user, "warden", req, refuse("secret %q: only APE_NATS_URL and APE_NATS_CREDS, with a value", req.Name))
 		}
 		err := s.gh.SetSecret(ctx, tok, req.Repo, req.Name, req.Value)
 		rep = Reply{OK: err == nil, Result: []string{"set " + req.Name}}
@@ -265,9 +267,9 @@ func (s *Service) setup(ctx context.Context, user string, req Request) Reply {
 		}
 		s.notify(ctx, user, req, rep)
 	default:
-		return s.logged(user, "setup", req, refuse("act %q: rulesets, workflow, secrets or runner-token", req.Act))
+		return s.logged(user, "warden", req, refuse("act %q: rulesets, workflow, secrets or runner-token", req.Act))
 	}
-	return s.logged(user, "setup", req, rep)
+	return s.logged(user, "warden", req, rep)
 }
 
 // actRecord is one act log line: never a token or a secret's value.
@@ -313,7 +315,7 @@ func (s *Service) notify(ctx context.Context, user string, req Request, rep Repl
 	if s.cfg.Notify == "" {
 		return
 	}
-	data, err := json.Marshal(s.record(user, "setup", req, rep))
+	data, err := json.Marshal(s.record(user, "warden", req, rep))
 	if err != nil {
 		return
 	}

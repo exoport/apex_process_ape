@@ -137,7 +137,7 @@ var recordSubjectRe = regexp.MustCompile(`^apex: [A-Za-z0-9._-]+ (proposed|appro
 // requireApeCommits refuses a merge group into main that carries any
 // commit not ape's (D703): every non-merge commit must be on
 // origin/milestone/<M> of a close the group carries — a branch only
-// apex-member writes (R1) — or a record commit whose subject is a roadmap
+// apex-pusher writes (R1) — or a record commit whose subject is a roadmap
 // record and whose diff touches only roadmap.md and milestones.json
 // (nothing, for a claim). The milestone branches are fetched first when
 // the checkout has a remote.

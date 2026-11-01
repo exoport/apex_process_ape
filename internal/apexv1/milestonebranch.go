@@ -62,7 +62,7 @@ func (p *Project) PrepareMilestoneBranch(ctx context.Context, ms string) (branch
 		if _, err := git(ctx, p.Root, "update-ref", tracking, "refs/remotes/"+remote+"/main"); err != nil {
 			return branch, false, fail("git update-ref "+tracking, err)
 		}
-		// R1: only apex-member creates milestone/* (the App service's
+		// R1: only apex-pusher creates milestone/* (the App service's
 		// token, when the project has one: pushTarget).
 		target, penv, _, terr := p.pushTarget(ctx)
 		if terr != nil {

@@ -25,12 +25,12 @@ func newGhappCmd() *cobra.Command {
 		Short: "The GitHub App service: holds the App keys, issues narrowed tokens, runs templated set-up acts",
 		Long: `The key-holding service of a project integrating through GitHub (APEX v1.5,
 PLAN-V15-GHAPP). It runs on the coordination host as the systemd unit apex-ghapp.service
-under its own user, holds the private keys of two GitHub Apps (apex-setup, apex-member),
+under its own user, holds the private keys of two GitHub Apps (apex-warden, apex-pusher),
 and answers over NATS:
 
-  ape.sup.ghapp.token.<user>   a member's apex-member token: one hour, narrowed to one
+  ape.sup.ghapp.pusher.<user>   a member's apex-pusher token: one hour, narrowed to one
                                repository and a purpose (push, pr, read); never workflows
-  ape.sup.ghapp.setup.<user>   an operator's templated set-up act: rulesets (R1–R4), the
+  ape.sup.ghapp.warden.<user>   an operator's templated set-up act: rulesets (R1–R4), the
                                queue workflow's PR, the secrets APE_NATS_URL and
                                APE_NATS_CREDS, a runner registration token
 
@@ -78,9 +78,9 @@ Exit codes: 0 stopped · 1 the config, a key or NATS failed · 2 usage.`,
 
 func newGhappPrintConfigCmd() *cobra.Command {
 	var repo, natsURL, members, operators, notify string
-	var setupID, memberID, setupInst, memberInst int64
+	var wardenID, pusherID, wardenInst, pusherInst int64
 	cmd := &cobra.Command{
-		Use:   "print-config --repo <owner>/<name> --setup-app-id N --setup-installation N --member-app-id N --member-installation N --nats-url URL --members a,b --operators a",
+		Use:   "print-config --repo <owner>/<name> --warden-app-id N --warden-installation N --pusher-app-id N --pusher-installation N --nats-url URL --members a,b --operators a",
 		Short: "Print /etc/apex-ghapp/config.yaml, filled in",
 		Long: `Print the service's config for one repository, filled in with the two Apps' ids and
 their installation ids there (the App's settings page and its installation URL show them),
@@ -89,7 +89,7 @@ the NATS URL, the members who may ask for tokens and the operators who may run s
 LoadCredential (` + "`ape ghapp print-unit`" + `); the act log is /var/lib/apex-ghapp/acts.jsonl.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if repo == "" || natsURL == "" || setupID == 0 || memberID == 0 || setupInst == 0 || memberInst == 0 || members == "" || operators == "" {
+			if repo == "" || natsURL == "" || wardenID == 0 || pusherID == 0 || wardenInst == 0 || pusherInst == 0 || members == "" || operators == "" {
 				return usageErr(errors.New("every flag but --notify is required"))
 			}
 			list := func(s string) string {
@@ -105,14 +105,14 @@ nats:
   url: %s
   creds: /var/lib/apex-ghapp/nats.creds
 api: https://api.github.com
-setup:
+warden:
   app_id: %d
-  key: ${CREDENTIALS_DIRECTORY}/setup.pem
+  key: ${CREDENTIALS_DIRECTORY}/warden.pem
   installations:
     %s: %d
-member:
+pusher:
   app_id: %d
-  key: ${CREDENTIALS_DIRECTORY}/member.pem
+  key: ${CREDENTIALS_DIRECTORY}/pusher.pem
   installations:
     %s: %d
 repos:
@@ -121,16 +121,16 @@ repos:
     operators: %s
 log: /var/lib/apex-ghapp/acts.jsonl
 notify: %q
-`, natsURL, setupID, repo, setupInst, memberID, repo, memberInst, repo, list(members), list(operators), notify)
+`, natsURL, wardenID, repo, wardenInst, pusherID, repo, pusherInst, repo, list(members), list(operators), notify)
 			return nil
 		},
 	}
 	f := cmd.Flags()
 	f.StringVar(&repo, "repo", "", "the repository, <owner>/<name>")
-	f.Int64Var(&setupID, "setup-app-id", 0, "apex-setup's App id")
-	f.Int64Var(&setupInst, "setup-installation", 0, "apex-setup's installation id on the repository")
-	f.Int64Var(&memberID, "member-app-id", 0, "apex-member's App id")
-	f.Int64Var(&memberInst, "member-installation", 0, "apex-member's installation id on the repository")
+	f.Int64Var(&wardenID, "warden-app-id", 0, "apex-warden's App id")
+	f.Int64Var(&wardenInst, "warden-installation", 0, "apex-warden's installation id on the repository")
+	f.Int64Var(&pusherID, "pusher-app-id", 0, "apex-pusher's App id")
+	f.Int64Var(&pusherInst, "pusher-installation", 0, "apex-pusher's installation id on the repository")
 	f.StringVar(&natsURL, "nats-url", "", "the NATS URL(s), comma-separated")
 	f.StringVar(&members, "members", "", "NATS users who may ask for member tokens, comma-separated")
 	f.StringVar(&operators, "operators", "", "NATS users who may run set-up acts, comma-separated")
@@ -153,8 +153,8 @@ Restart=on-failure
 RestartSec=5s
 # The keys, read by systemd from root-owned files and handed to the
 # service only (research finding 7): never in the service's home.
-LoadCredential=setup.pem:/etc/apex-ghapp/keys/setup.pem
-LoadCredential=member.pem:/etc/apex-ghapp/keys/member.pem
+LoadCredential=warden.pem:/etc/apex-ghapp/keys/warden.pem
+LoadCredential=pusher.pem:/etc/apex-ghapp/keys/pusher.pem
 StateDirectory=apex-ghapp
 StateDirectoryMode=0700
 UMask=0077
@@ -187,7 +187,7 @@ func newGhappPrintUnitCmd() *cobra.Command {
 		Use:   "print-unit [--ape /usr/local/bin/ape]",
 		Short: "Print the hardened systemd unit apex-ghapp.service",
 		Long: `Print apex-ghapp.service: the service under its own user apex-ghapp, the two keys handed
-to it through LoadCredential from root-owned /etc/apex-ghapp/keys/{setup,member}.pem,
+to it through LoadCredential from root-owned /etc/apex-ghapp/keys/{warden,pusher}.pem,
 its state in /var/lib/apex-ghapp (0700), no core dumps, umask 0077, and the systemd
 sandboxing of PLAN-V15-GHAPP §3. Per-host egress filtering (api.github.com and NATS only)
 is not expressible in a unit and is stated in the plan's threat model.`,

@@ -146,8 +146,8 @@ self-hosted runners:
 **Tokens come from the GitHub App service** when `coordination.github.app` is true (PLAN-V15-GHAPP). `ape ghapp serve`
 runs on the coordination host as `apex-ghapp.service` under its own user and holds the keys of two Apps:
 
-- **apex-member** (contents and pull requests): R1's bypass actor.
-- **apex-setup** (administration, secrets and workflows): set-up acts only.
+- **apex-pusher** (contents and pull requests): R1's bypass actor.
+- **apex-warden** (administration, secrets and workflows): set-up acts only.
 
 ape asks it over NATS, as the member's user, for a one-hour token narrowed to the repository and a purpose: `push`,
 `pr` or `read`, never `workflows`. A push goes to the repository over https, with the token in an `http.extraHeader`

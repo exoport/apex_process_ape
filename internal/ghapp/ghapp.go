@@ -145,7 +145,7 @@ type Token struct {
 	Permissions map[string]string `json:"permissions"`
 }
 
-// Purposes and the permissions a member token carries for each (G9: never
+// Purposes and the permissions a pusher token carries for each (G9: never
 // workflows, administration or secrets).
 var Purposes = map[string]map[string]string{
 	"push": {"contents": "write", "metadata": "read"},

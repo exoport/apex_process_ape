@@ -29,8 +29,8 @@ func TestService(t *testing.T) {
 	notified := filepath.Join(dir, "notified")
 	cfg := &Config{
 		API:    srv.URL,
-		Setup:  AppConfig{AppID: 42, Key: keyPath, Installations: map[string]int64{"shop/notes": 8}},
-		Member: AppConfig{AppID: 42, Key: keyPath, Installations: map[string]int64{"shop/notes": 7}},
+		Warden: AppConfig{AppID: 42, Key: keyPath, Installations: map[string]int64{"shop/notes": 8}},
+		Pusher: AppConfig{AppID: 42, Key: keyPath, Installations: map[string]int64{"shop/notes": 7}},
 		Repos:  map[string]RepoPolicy{"shop/notes": {Members: []string{"dana", "ci"}, Operators: []string{"dana"}}},
 		Log:    filepath.Join(dir, "acts.jsonl"), Notify: "cat >> " + notified,
 	}
