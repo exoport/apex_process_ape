@@ -4313,11 +4313,41 @@ person installs.
 
 Subcommands:
 
+- `fetch` — Fetch branches of the coordinated repository through the App's read token, fast-forwarding them here
 - `land` — Land a local branch on main through main's merge queue (push, PR, enqueue, wait)
 - `print-config` — Print /etc/apex-ghapp/config.yaml, filled in
 - `print-unit` — Print the hardened systemd unit apex-ghapp.service
 - `serve` — Run the service (the systemd unit runs this)
 - `setup` — Run one templated set-up act on the coordinated repository (the operator's)
+
+## ape ghapp fetch
+
+Fetch branches of the coordinated repository through the App's read token, fast-forwarding them here
+
+```
+ape ghapp fetch [<branch>...] [flags]
+```
+
+Fetch branches (default main) of the coordinated repository into refs/remotes/<remote>/…
+— through the App service's read token when coordination.github.app is set, so no
+person's ssh key or agent is needed — and fast-forward each local branch that is only
+behind (checked out with a clean tree, or not checked out). A branch with commits the
+remote lacks is left as it is.
+
+Exit codes: 0 fetched · 1 the fetch or a fast-forward failed · 2 usage.
+
+Examples:
+
+```
+  ape ghapp fetch main
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
 
 ## ape ghapp land
 

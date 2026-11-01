@@ -39,7 +39,7 @@ Every request is logged (never a token or a secret's value); secrets and runner-
 run the operator's notify. ` + "`ape ghapp print-config`" + ` and ` + "`ape ghapp print-unit`" + ` print the files a
 person installs.`,
 	}
-	cmd.AddCommand(newGhappServeCmd(), newGhappPrintConfigCmd(), newGhappPrintUnitCmd(), newGhappSetupCmd(), newGhappLandCmd())
+	cmd.AddCommand(newGhappServeCmd(), newGhappPrintConfigCmd(), newGhappPrintUnitCmd(), newGhappSetupCmd(), newGhappLandCmd(), newGhappFetchCmd())
 	return cmd
 }
 
@@ -380,5 +380,40 @@ Exit codes: 0 merged · 1 refused, failed, ejected or closed · 2 usage · 75 st
 	cmd.Flags().DurationVar(&wait, "wait", 30*time.Minute, "how long to wait for the queue")
 	cmd.Flags().BoolVar(&state, "state", false, "print the branch's newest PR into main and its state instead (read-only)")
 	cmd.Flags().BoolVar(&dequeue, "dequeue", false, "take the branch's open PR out of main's merge queue instead (a hold; the PR stays open)")
+	return cmd
+}
+
+func newGhappFetchCmd() *cobra.Command {
+	var f v1Flags
+	cmd := &cobra.Command{
+		Use:   "fetch [<branch>...]",
+		Short: "Fetch branches of the coordinated repository through the App's read token, fast-forwarding them here",
+		Long: `Fetch branches (default main) of the coordinated repository into refs/remotes/<remote>/…
+— through the App service's read token when coordination.github.app is set, so no
+person's ssh key or agent is needed — and fast-forward each local branch that is only
+behind (checked out with a clean tree, or not checked out). A branch with commits the
+remote lacks is left as it is.
+
+Exit codes: 0 fetched · 1 the fetch or a fast-forward failed · 2 usage.`,
+		Example: "  ape ghapp fetch main",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			p, err := v1Project(&f)
+			if err != nil {
+				return err
+			}
+			if len(args) == 0 {
+				args = []string{"main"}
+			}
+			lines, err := p.FetchAndSync(cmd.Context(), args...)
+			for _, l := range lines {
+				fmt.Fprintln(cmd.OutOrStdout(), l)
+			}
+			if err != nil {
+				return v1Fail(cmd, &f, err, nil)
+			}
+			return nil
+		},
+	}
+	addV1Flags(cmd, &f)
 	return cmd
 }

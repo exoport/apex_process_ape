@@ -140,3 +140,42 @@ func (p *Project) PushHead(ctx context.Context, sha, branch string) error {
 // Integrator is the coordinated repository's API (NewIntegrator's), for
 // callers outside the archive and close.
 func (p *Project) Integrator() (Integrator, error) { return p.integrator() }
+
+// FetchAndSync fetches branches from the coordinated repository (the App's
+// read token when the project has one) into their remote-tracking refs,
+// and fast-forwards each local branch that is behind only — checked out
+// with a clean tree, or not checked out. It returns one line per branch.
+func (p *Project) FetchAndSync(ctx context.Context, branches ...string) ([]string, error) {
+	if err := p.fetchCoordinated(ctx, branches...); err != nil {
+		return nil, &FailError{Code: CodeFetchFailed, Msg: "fetching " + strings.Join(branches, ", ") + " failed: " + err.Error()}
+	}
+	remote := p.trunkRemote(ctx)
+	out := make([]string, 0, len(branches))
+	for _, b := range branches {
+		tip, _ := git(ctx, p.Root, "rev-parse", "refs/remotes/"+remote+"/"+b)
+		local, err := git(ctx, p.Root, "rev-parse", "--verify", "--quiet", "refs/heads/"+b)
+		switch {
+		case err != nil:
+			out = append(out, fmt.Sprintf("%s: %s/%s at %s (no local branch)", b, remote, b, short(tip)))
+		case local == tip:
+			out = append(out, fmt.Sprintf("%s: up to date at %s", b, short(tip)))
+		default:
+			if _, err := git(ctx, p.Root, "merge-base", "--is-ancestor", local, tip); err != nil {
+				out = append(out, fmt.Sprintf("%s: %s has commits %s/%s lacks: left as it is", b, short(local), remote, b))
+				continue
+			}
+			if CurrentBranch(ctx, p.Root) == b {
+				if err := p.requireCleanTree(ctx, "fast-forwarding "+b); err != nil {
+					return out, err
+				}
+				if _, err := git(ctx, p.Root, "merge", "--ff-only", "-q", tip); err != nil {
+					return out, &FailError{Code: CodeBranchFailed, Msg: "fast-forwarding " + b + ": " + err.Error()}
+				}
+			} else if _, err := git(ctx, p.Root, "update-ref", "refs/heads/"+b, tip, local); err != nil {
+				return out, &FailError{Code: CodeBranchFailed, Msg: "fast-forwarding " + b + ": " + err.Error()}
+			}
+			out = append(out, fmt.Sprintf("%s: fast-forwarded %s → %s", b, short(local), short(tip)))
+		}
+	}
+	return out, nil
+}

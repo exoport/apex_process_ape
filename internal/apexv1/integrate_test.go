@@ -179,3 +179,25 @@ func TestCoordinatedArchive_GitVia(t *testing.T) {
 	require.Equal(t, res.Commit, run(t, bare, "rev-parse", "milestone/M1"))
 	require.Equal(t, res.Commit, run(t, p.Root, "rev-parse", "refs/remotes/origin/milestone/M1"), "the tracking ref follows a push by URL")
 }
+
+// ape ghapp fetch: branches fetched (through GitVia when set) and the
+// local ones that are only behind fast-forwarded; ahead is left alone.
+func TestFetchAndSync(t *testing.T) {
+	files := baseFiles()
+	files["_apex/config.yaml"] = coordinatedConfig
+	p := fixture(t, files)
+	bare := withOrigin(t, p)
+	theirs := pushFile(t, bare, "main", "notes.txt", "merged elsewhere\n")
+	lines, err := p.FetchAndSync(ctx(), "main")
+	require.NoError(t, err)
+	require.Contains(t, lines[0], "fast-forwarded")
+	require.Equal(t, theirs, run(t, p.Root, "rev-parse", "main"))
+	lines, err = p.FetchAndSync(ctx(), "main")
+	require.NoError(t, err)
+	require.Contains(t, lines[0], "up to date")
+	commitOnTop(t, p, "local.txt", "x\n", "local: not pushed")
+	pushFile(t, bare, "main", "more.txt", "y\n")
+	lines, err = p.FetchAndSync(ctx(), "main")
+	require.NoError(t, err)
+	require.Contains(t, lines[0], "left as it is")
+}
