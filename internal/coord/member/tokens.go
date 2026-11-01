@@ -52,22 +52,33 @@ func webHost(api string) string {
 	return strings.Replace(api, "://api.", "://", 1)
 }
 
-// PushVia is apexv1.PushVia for a member project whose tokens come from
-// the App service: the repository over https, with a push token in
-// http.extraHeader passed only through git's GIT_CONFIG_* environment
-// (never argv, a URL or disk), and no credential helper. A project with a
-// personal token file, or in no ensemble, pushes to its remote with git's
-// own credentials ("" url).
-func PushVia(ctx context.Context, p *apexv1.Project) (url string, env []string, err error) {
+// GitVia is apexv1.GitVia for a member project whose tokens come from the
+// App service: the repository over https, with a token for purpose (push,
+// or read for a fetch) in http.extraHeader passed only through git's
+// GIT_CONFIG_* environment (never argv, a URL or disk), and no credential
+// helper. The URL carries the user x-access-token (no secret), so a
+// person's insteadOf rewrite of https://github.com/ to an ssh alias does
+// not apply. A project with a personal token file, or in no ensemble, uses
+// its remote with git's own credentials ("" url).
+func GitVia(ctx context.Context, p *apexv1.Project, purpose string) (url string, env []string, err error) {
 	m, err := Load(p)
 	if err != nil || !m.GitHubApp {
-		return "", nil, nil //nolint:nilerr // not an App project: git's own credentials push
+		return "", nil, nil //nolint:nilerr // not an App project: git's own credentials
 	}
-	tok, err := m.GitHubTokenFor(ctx, "push")
+	tok, err := m.GitHubTokenFor(ctx, purpose)
 	if err != nil {
 		return "", nil, err
 	}
-	return webHost(m.GitHubAPI) + "/" + m.GitHubRepo + ".git", pushEnv(tok), nil
+	return gitURL(m.GitHubAPI, m.GitHubRepo), pushEnv(tok), nil
+}
+
+// gitURL is the repository's https URL with the user x-access-token.
+func gitURL(api, repo string) string {
+	host := webHost(api)
+	if rest, ok := strings.CutPrefix(host, "https://"); ok {
+		host = "https://x-access-token@" + rest
+	}
+	return host + "/" + repo + ".git"
 }
 
 // pushEnv carries tok to git in an Authorization header for this command

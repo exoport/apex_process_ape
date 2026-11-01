@@ -47,17 +47,14 @@ func (p *Project) PrepareMilestoneBranch(ctx context.Context, ms string) (branch
 		return "", false, nil
 	}
 	remote := p.trunkRemote(ctx)
-	env := noPromptEnv
 	fail := func(what string, err error) error {
 		return &FailError{Code: CodeFetchFailed, Msg: fmt.Sprintf("claiming %s needs %s on %s: %s failed: %v — fix the remote or its credentials, then claim again (the lease is held)", ms, branch, remote, what, err)}
 	}
-	if _, err := gitWithEnv(ctx, p.Root, env, "fetch", "--quiet", "--no-tags", remote,
-		"+refs/heads/main:refs/remotes/"+remote+"/main"); err != nil {
+	if err := p.fetchCoordinated(ctx, "main"); err != nil {
 		return branch, false, fail("git fetch "+remote+" main", err)
 	}
 	tracking := "refs/remotes/" + remote + "/" + branch
-	if _, err := gitWithEnv(ctx, p.Root, env, "fetch", "--quiet", "--no-tags", remote,
-		"+refs/heads/"+branch+":"+tracking); err != nil {
+	if err := p.fetchCoordinated(ctx, branch); err != nil {
 		// The remote has no milestone/<M> yet: cut it from its main.
 		if _, err := git(ctx, p.Root, "update-ref", tracking, "refs/remotes/"+remote+"/main"); err != nil {
 			return branch, false, fail("git update-ref "+tracking, err)

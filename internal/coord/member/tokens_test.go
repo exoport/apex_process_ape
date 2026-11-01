@@ -56,9 +56,9 @@ func TestAppTokensAndPushVia(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "ghs_pr", tok)
 
-	u, env, err := PushVia(context.Background(), p)
+	u, env, err := GitVia(context.Background(), p, "push")
 	require.NoError(t, err)
-	require.Equal(t, "https://github.com/shop/notes.git", u)
+	require.Equal(t, "https://x-access-token@github.com/shop/notes.git", u, "no insteadOf rewrite of https://github.com/ applies")
 	require.Contains(t, env, "GIT_CONFIG_KEY_0=http.extraHeader")
 	require.Contains(t, env, "GIT_CONFIG_VALUE_1=", "no credential helper")
 	var header string
@@ -80,7 +80,7 @@ func TestAppTokensAndPushVia(t *testing.T) {
 	// The control: no app — git's own credentials, no service asked.
 	q := project(t, block+"  github:\n    repo: shop/notes\n", true)
 	require.NoError(t, os.WriteFile(filepath.Join(q.Root, "hot", "github.token"), []byte("github_pat_x\n"), 0o600))
-	u, env, err = PushVia(context.Background(), q)
+	u, env, err = GitVia(context.Background(), q, "push")
 	require.NoError(t, err)
 	require.Empty(t, u)
 	require.Empty(t, env)

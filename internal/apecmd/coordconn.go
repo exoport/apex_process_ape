@@ -78,5 +78,5 @@ func init() {
 	apexv1.EventSink = member.Publish
 	apexv1.NewIntegrator = member.Integrator
 	apexv1.FenceMilestone = member.FenceMilestone
-	apexv1.PushVia = member.PushVia
+	apexv1.GitVia = member.GitVia
 }

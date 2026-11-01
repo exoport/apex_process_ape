@@ -94,7 +94,7 @@ func (p *Project) fetchUpstreams(ctx context.Context, base, what string) error {
 		if remote == "" || merge == "" || remote == "." {
 			continue
 		}
-		if _, err := gitWithEnv(ctx, p.Root, noPromptEnv, "fetch", "--quiet", "--no-tags", remote, merge); err != nil {
+		if err := p.fetchUpstream(ctx, remote, merge); err != nil {
 			return &FailError{Code: CodeFetchFailed, Msg: fmt.Sprintf("this project is coordinated, and %s needs %s's upstream fetched first: git fetch %s %s failed: %v — fix the remote or its credentials, then run this again; nothing was written",
 				what, b, remote, merge, err)}
 		}
@@ -131,6 +131,18 @@ func (p *Project) syncCoordinatedBase(ctx context.Context, base string) {
 	if cur != "" && CurrentBranch(ctx, p.Root) != cur {
 		_, _ = git(ctx, p.Root, "switch", "-q", cur)
 	}
+}
+
+// fetchUpstream fetches one branch's upstream (merge, refs/heads/X on
+// remote) into its remote-tracking ref: the coordinated repository through
+// GitVia when the project has it, else remote itself.
+func (p *Project) fetchUpstream(ctx context.Context, remote, merge string) error {
+	b, ok := strings.CutPrefix(merge, "refs/heads/")
+	if GitVia != nil && ok && remote == p.trunkRemote(ctx) {
+		return p.fetchCoordinated(ctx, b)
+	}
+	_, err := gitWithEnv(ctx, p.Root, noPromptEnv, "fetch", "--quiet", "--no-tags", remote, merge)
+	return err
 }
 
 // refuseBehindUpstream refuses starting a change from, or archiving one

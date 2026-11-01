@@ -144,8 +144,7 @@ var recordSubjectRe = regexp.MustCompile(`^apex: [A-Za-z0-9._-]+ (proposed|appro
 func (p *Project) requireApeCommits(ctx context.Context, base, head string, res *CIResult) error {
 	remote := p.trunkRemote(ctx)
 	if len(res.Closes) > 0 {
-		_, _ = gitWithEnv(ctx, p.Root, noPromptEnv, "fetch", "--quiet", "--no-tags", remote,
-			"+refs/heads/"+MilestoneBranchPrefix+"*:refs/remotes/"+remote+"/"+MilestoneBranchPrefix+"*")
+		_ = p.fetchCoordinated(ctx, MilestoneBranchPrefix+"*")
 	}
 	out, err := git(ctx, p.Root, "rev-list", "--no-merges", base+".."+head)
 	if err != nil {

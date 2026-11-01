@@ -158,22 +158,24 @@ func TestCoordinatedArchive_FenceAndMovedRefuse(t *testing.T) {
 	run(t, p.Root, "merge-base", "--is-ancestor", theirs, res.Commit)
 }
 
-// PLAN-V15-GHAPP 9.3: with PushVia set (the App service's token), the
-// push goes to its URL with its environment, and ape moves the
-// remote-tracking ref itself.
-func TestCoordinatedArchive_PushVia(t *testing.T) {
+// PLAN-V15-GHAPP 9.3: with GitVia set (the App service's tokens), the
+// fetches (read) and the push (push) go to its URL with its environment —
+// the trunk's remote is not used at all — and ape moves the
+// remote-tracking refs itself.
+func TestCoordinatedArchive_GitVia(t *testing.T) {
 	p, bare := coordinatedReviewedWave(t)
-	old := PushVia
-	t.Cleanup(func() { PushVia = old })
-	var got []string
-	PushVia = func(context.Context, *Project) (string, []string, error) {
-		env := []string{"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=http.extraHeader", "GIT_CONFIG_VALUE_0=AUTHORIZATION: basic eDp5"}
-		got = env
-		return bare, env, nil
+	old := GitVia
+	t.Cleanup(func() { GitVia = old })
+	purposes := map[string]int{}
+	GitVia = func(_ context.Context, _ *Project, purpose string) (string, []string, error) {
+		purposes[purpose]++
+		return bare, []string{"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=http.extraHeader", "GIT_CONFIG_VALUE_0=AUTHORIZATION: basic eDp5"}, nil
 	}
+	run(t, p.Root, "config", "remote.origin.url", "/nonexistent")
 	res, err := p.Archive(ctx(), "add-wave", false, RunOptions{})
-	require.NoError(t, err)
-	require.NotEmpty(t, got)
+	require.NoError(t, err, "the remote's URL is broken: everything went through GitVia")
+	require.Positive(t, purposes["read"])
+	require.Equal(t, 1, purposes["push"])
 	require.Equal(t, res.Commit, run(t, bare, "rev-parse", "milestone/M1"))
 	require.Equal(t, res.Commit, run(t, p.Root, "rev-parse", "refs/remotes/origin/milestone/M1"), "the tracking ref follows a push by URL")
 }

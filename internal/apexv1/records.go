@@ -119,7 +119,7 @@ func (p *Project) RecordClaim(ctx context.Context, ms, holder string) (*Integrat
 		return nil, nil //nolint:nilnil // no record PRs
 	}
 	remote := p.trunkRemote(ctx)
-	if _, err := gitWithEnv(ctx, p.Root, noPromptEnv, "fetch", "--quiet", "--no-tags", remote, "+refs/heads/main:refs/remotes/"+remote+"/main"); err != nil {
+	if err := p.fetchCoordinated(ctx, "main"); err != nil {
 		return nil, &FailError{Code: CodeFetchFailed, Msg: fmt.Sprintf("the claim record of %s needs main from %s: %v — claim again", ms, remote, err)}
 	}
 	mainTip := "refs/remotes/" + remote + "/main"

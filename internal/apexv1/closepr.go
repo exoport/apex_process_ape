@@ -169,7 +169,7 @@ func (p *Project) checkoutMain(ctx context.Context, remote, what string) error {
 // finishClose ends a milestone whose close PR merged.
 func (p *Project) finishClose(ctx context.Context, ms string, rec *Integration, s PRState, g *GateResult) error {
 	base, remote := MilestoneBranch(ms), p.trunkRemote(ctx)
-	if _, err := gitWithEnv(ctx, p.Root, noPromptEnv, "fetch", "--quiet", "--no-tags", remote, "+refs/heads/main:refs/remotes/"+remote+"/main"); err != nil {
+	if err := p.fetchCoordinated(ctx, "main"); err != nil {
 		return &FailError{Code: CodeFetchFailed, Msg: fmt.Sprintf("%s merged, but fetching main from %s failed: %v — close again once the remote answers", rec.PR.URL, remote, err)}
 	}
 	if err := p.checkoutMain(ctx, remote, "close "+ms); err != nil {

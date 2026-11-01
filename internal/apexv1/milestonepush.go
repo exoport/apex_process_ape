@@ -30,20 +30,20 @@ func init() {
 // checked.
 var FenceMilestone func(ctx context.Context, p *Project, ms string) error
 
-// PushVia, when set, is how a push to the coordinated repository goes
-// (PLAN-V15-GHAPP §5): to url — the repository over https — with env
-// carrying the App service's installation token in http.extraHeader, never
-// argv, a URL or disk. url "" (or PushVia unset): to main's remote, with
-// git's own credentials.
-var PushVia func(ctx context.Context, p *Project) (url string, env []string, err error)
+// GitVia, when set, is how ape reaches the coordinated repository for a
+// purpose — "push", or "read" for a fetch (PLAN-V15-GHAPP §5): to url, the
+// repository over https, with env carrying the App service's installation
+// token in http.extraHeader, never argv, a URL or disk. url "" (or GitVia
+// unset): main's remote, with git's own credentials.
+var GitVia func(ctx context.Context, p *Project, purpose string) (url string, env []string, err error)
 
-// pushTarget is a push's target and environment: PushVia's, else the
+// gitTarget is the target and environment for purpose: GitVia's, else the
 // trunk's remote; noPromptEnv either way. viaURL reports a URL target,
-// after which ape updates the remote-tracking ref itself.
-func (p *Project) pushTarget(ctx context.Context) (target string, env []string, viaURL bool, err error) {
+// after which ape updates remote-tracking refs itself.
+func (p *Project) gitTarget(ctx context.Context, purpose string) (target string, env []string, viaURL bool, err error) {
 	env = append([]string(nil), noPromptEnv...)
-	if PushVia != nil {
-		url, extra, err := PushVia(ctx, p)
+	if GitVia != nil {
+		url, extra, err := GitVia(ctx, p, purpose)
 		if err != nil {
 			return "", nil, false, err
 		}
@@ -52,6 +52,29 @@ func (p *Project) pushTarget(ctx context.Context) (target string, env []string, 
 		}
 	}
 	return p.trunkRemote(ctx), env, false, nil
+}
+
+// pushTarget is gitTarget for a push.
+func (p *Project) pushTarget(ctx context.Context) (target string, env []string, viaURL bool, err error) {
+	return p.gitTarget(ctx, "push")
+}
+
+// fetchCoordinated fetches each branch of the coordinated repository into
+// refs/remotes/<trunk remote>/<branch> (forced, as a remote-tracking ref
+// is): through GitVia's read token when the project has one, else from
+// the trunk's remote.
+func (p *Project) fetchCoordinated(ctx context.Context, branches ...string) error {
+	target, env, _, err := p.gitTarget(ctx, "read")
+	if err != nil {
+		return err
+	}
+	remote := p.trunkRemote(ctx)
+	args := []string{"fetch", "--quiet", "--no-tags", target}
+	for _, b := range branches {
+		args = append(args, "+refs/heads/"+b+":refs/remotes/"+remote+"/"+b)
+	}
+	_, err = gitWithEnv(ctx, p.Root, env, args...)
+	return err
 }
 
 // pushMilestone lands sha on the remote's milestone branch base: the lease
