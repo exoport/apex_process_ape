@@ -16,7 +16,7 @@ func Integrator(p *apexv1.Project) (apexv1.Integrator, error) {
 		return nil, &apexv1.FailError{Code: apexv1.CodeCoordMembership, Msg: err.Error() +
 			" — a person fixes _apex/config.yaml's coordination: block or places the token"}
 	}
-	tok, err := m.ReadGitHubToken()
+	tok, err := m.GitHubTokenFor(context.Background(), "pr")
 	if err != nil {
 		return nil, &apexv1.FailError{Code: apexv1.CodeCoordMembership, Msg: err.Error()}
 	}

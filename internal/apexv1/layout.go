@@ -157,6 +157,9 @@ type GitHubConfig struct {
 	// API is the API's base URL; default https://api.github.com (a
 	// test's fake, or GitHub Enterprise).
 	API string `yaml:"api,omitempty"`
+	// App: the coordination host's GitHub App service (PLAN-V15-GHAPP)
+	// issues ape's tokens over NATS; hot/github.token is not used.
+	App bool `yaml:"app,omitempty"`
 }
 
 // ConductorConfig is the conductor: block.

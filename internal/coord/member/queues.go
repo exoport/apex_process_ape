@@ -23,8 +23,9 @@ func QueueFindings(ctx context.Context, p *apexv1.Project, note io.Writer) []ape
 	if err != nil || m.GitHubRepo == "" {
 		return nil
 	}
-	tok, err := m.ReadGitHubToken()
+	tok, err := m.GitHubTokenFor(ctx, "read")
 	if err != nil {
+		fmt.Fprintf(note, "note: no GitHub token to read %s's merge queue (%v); not judged\n", m.GitHubRepo, err)
 		return nil
 	}
 	c := github.New(m.GitHubAPI, m.GitHubRepo, tok)

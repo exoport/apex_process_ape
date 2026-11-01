@@ -3,12 +3,16 @@ package apecmd
 import (
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/exoport/apex_process_ape/internal/coord/member"
 	"github.com/exoport/apex_process_ape/internal/ghapp"
 	"github.com/exoport/apex_process_ape/internal/natsconn"
 )
@@ -34,7 +38,7 @@ Every request is logged (never a token or a secret's value); secrets and runner-
 run the operator's notify. ` + "`ape ghapp print-config`" + ` and ` + "`ape ghapp print-unit`" + ` print the files a
 person installs.`,
 	}
-	cmd.AddCommand(newGhappServeCmd(), newGhappPrintConfigCmd(), newGhappPrintUnitCmd())
+	cmd.AddCommand(newGhappServeCmd(), newGhappPrintConfigCmd(), newGhappPrintUnitCmd(), newGhappSetupCmd())
 	return cmd
 }
 
@@ -194,5 +198,93 @@ is not expressible in a unit and is stated in the plan's threat model.`,
 		},
 	}
 	cmd.Flags().StringVar(&bin, "ape", "/usr/local/bin/ape", "the ape binary the unit runs")
+	return cmd
+}
+
+func newGhappSetupCmd() *cobra.Command {
+	var f coordFlags
+	var name, valueFile string
+	cmd := &cobra.Command{
+		Use:   "setup <rulesets|workflow|secrets|runner-token> [--name APE_NATS_URL|APE_NATS_CREDS --value-file <path>|-]",
+		Short: "Run one templated set-up act on the coordinated repository (the operator's)",
+		Long: `Ask the GitHub App service to run one set-up act on this project's coordinated repository
+(coordination.github.repo), as this checkout's NATS user — the service runs it only for an
+operator of that repository (PLAN-V15-GHAPP §4):
+
+  rulesets       create or update R1–R4 (R4's required check once the queue workflow is on
+                 the default branch: run it again after the workflow PR merges)
+  workflow       open the PR adding .github/workflows/apex-queue.yml
+  secrets        set APE_NATS_URL or APE_NATS_CREDS (--name), the value read from
+                 --value-file (or - for stdin); never echoed
+  runner-token   print a self-hosted runner registration token (one hour) for the person
+                 who registers the runner
+
+The order for a new repository: workflow, then (once its PR merged) rulesets, then the two
+secrets; runner-token when the runner is registered. Every act is logged by the service, and
+secrets and runner-token notify the operator.
+
+Exit codes: 0 done · 1 refused or failed (the service's message) · 2 usage, or no service.`,
+		Example: "  ape ghapp setup workflow\n  ape ghapp setup secrets --name APE_NATS_CREDS --value-file hot/ci-nats.creds",
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			act := args[0]
+			req := ghapp.Request{Act: act}
+			switch act {
+			case "rulesets", "workflow", "runner-token":
+			case "secrets":
+				if !ghapp.SecretNames[name] || valueFile == "" {
+					return usageErr(errors.New("secrets needs --name APE_NATS_URL|APE_NATS_CREDS and --value-file <path>|-"))
+				}
+				var data []byte
+				var err error
+				if valueFile == "-" {
+					data, err = io.ReadAll(cmd.InOrStdin())
+				} else {
+					data, err = os.ReadFile(valueFile)
+				}
+				if err != nil {
+					return usageErr(err)
+				}
+				req.Name, req.Value = name, strings.TrimRight(string(data), "\n")+"\n"
+				if name == "APE_NATS_URL" {
+					req.Value = strings.TrimSpace(string(data))
+				}
+			default:
+				return usageErr(fmt.Errorf("act %q: rulesets, workflow, secrets or runner-token", act))
+			}
+			p, err := f.project()
+			if err != nil {
+				return usageErr(err)
+			}
+			m, err := member.Load(p)
+			if err != nil || m.GitHubRepo == "" {
+				return usageErr(errors.New("this project names no coordinated repository (coordination.github.repo)"))
+			}
+			req.Repo = m.GitHubRepo
+			id, err := natsconn.DecodeIdentity(m.Creds)
+			if err != nil {
+				return failErr(err)
+			}
+			nc, _, err := f.connect(cmd.Context(), "ape-ghapp-setup")
+			if err != nil {
+				return err
+			}
+			defer nc.Close()
+			rep, err := ghapp.Ask(cmd.Context(), nc, ghapp.SetupSubject, id.SubjectToken, req)
+			if err != nil {
+				return failErr(err)
+			}
+			for _, line := range rep.Result {
+				fmt.Fprintln(cmd.OutOrStdout(), line)
+			}
+			if act == "runner-token" {
+				fmt.Fprintf(cmd.OutOrStdout(), "runner registration token (expires %s): %s\n", rep.ExpiresAt.Format(time.RFC3339), rep.Token)
+			}
+			return nil
+		},
+	}
+	f.add(cmd)
+	cmd.Flags().StringVar(&name, "name", "", "the secret's name (secrets): APE_NATS_URL or APE_NATS_CREDS")
+	cmd.Flags().StringVar(&valueFile, "value-file", "", "the secret's value, from a file (or - for stdin)")
 	return cmd
 }

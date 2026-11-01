@@ -4316,6 +4316,7 @@ Subcommands:
 - `print-config` — Print /etc/apex-ghapp/config.yaml, filled in
 - `print-unit` — Print the hardened systemd unit apex-ghapp.service
 - `serve` — Run the service (the systemd unit runs this)
+- `setup` — Run one templated set-up act on the coordinated repository (the operator's)
 
 ## ape ghapp print-config
 
@@ -4383,6 +4384,49 @@ Flags:
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
 | `--config` | string | `/etc/apex-ghapp/config.yaml` | the service's config |
+
+## ape ghapp setup
+
+Run one templated set-up act on the coordinated repository (the operator's)
+
+```
+ape ghapp setup <rulesets|workflow|secrets|runner-token> [--name APE_NATS_URL|APE_NATS_CREDS --value-file <path>|-] [flags]
+```
+
+Ask the GitHub App service to run one set-up act on this project's coordinated repository
+(coordination.github.repo), as this checkout's NATS user — the service runs it only for an
+operator of that repository (PLAN-V15-GHAPP §4):
+
+  rulesets       create or update R1–R4 (R4's required check once the queue workflow is on
+                 the default branch: run it again after the workflow PR merges)
+  workflow       open the PR adding .github/workflows/apex-queue.yml
+  secrets        set APE_NATS_URL or APE_NATS_CREDS (--name), the value read from
+                 --value-file (or - for stdin); never echoed
+  runner-token   print a self-hosted runner registration token (one hour) for the person
+                 who registers the runner
+
+The order for a new repository: workflow, then (once its PR merged) rulesets, then the two
+secrets; runner-token when the runner is registered. Every act is logged by the service, and
+secrets and runner-token notify the operator.
+
+Exit codes: 0 done · 1 refused or failed (the service's message) · 2 usage, or no service.
+
+Examples:
+
+```
+  ape ghapp setup workflow
+  ape ghapp setup secrets --name APE_NATS_CREDS --value-file hot/ci-nats.creds
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | the project whose coordination: block and hot/ape-nats.creds to use (default: the current directory) |
+| `--name` | string | `—` | the secret's name (secrets): APE_NATS_URL or APE_NATS_CREDS |
+| `--nats-creds` | string | `—` | NATS credentials file, instead of the project's hot/ape-nats.creds (env APE_NATS_CREDS) |
+| `--nats-url` | string | `—` | NATS URL, instead of the project's (env APE_NATS_URL) |
+| `--value-file` | string | `—` | the secret's value, from a file (or - for stdin) |
 
 ## ape health
 

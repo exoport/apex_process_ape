@@ -62,7 +62,14 @@ func (p *Project) PrepareMilestoneBranch(ctx context.Context, ms string) (branch
 		if _, err := git(ctx, p.Root, "update-ref", tracking, "refs/remotes/"+remote+"/main"); err != nil {
 			return branch, false, fail("git update-ref "+tracking, err)
 		}
-		if _, err := gitWithEnv(ctx, p.Root, env, "push", "--quiet", "--no-follow-tags", remote,
+		// R1: only apex-member creates milestone/* (the App service's
+		// token, when the project has one: pushTarget).
+		target, penv, _, terr := p.pushTarget(ctx)
+		if terr != nil {
+			_, _ = git(ctx, p.Root, "update-ref", "-d", tracking)
+			return branch, false, terr
+		}
+		if _, err := gitWithEnv(ctx, p.Root, penv, "push", "--quiet", "--no-follow-tags", target,
 			tracking+":refs/heads/"+branch); err != nil {
 			_, _ = git(ctx, p.Root, "update-ref", "-d", tracking)
 			return branch, false, fail("git push "+remote+" "+branch, err)

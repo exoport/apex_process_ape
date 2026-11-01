@@ -179,8 +179,8 @@ func (p *Project) finishClose(ctx context.Context, ms string, rec *Integration, 
 		return &FailError{Code: CodeBranchFailed, Msg: "the close merged, but main does not fast-forward to " + remote + "/main: " + err.Error() + " — local commits on main are outside the flow; move them, then close again"}
 	}
 	_, _ = git(ctx, p.Root, "branch", "-q", "-D", base)
-	if env, err := p.pushEnv(ctx); err == nil {
-		_, _ = gitWithEnv(ctx, p.Root, env, "push", "--quiet", "--no-follow-tags", remote, "--delete", base)
+	if target, env, _, err := p.pushTarget(ctx); err == nil {
+		_, _ = gitWithEnv(ctx, p.Root, env, "push", "--quiet", "--no-follow-tags", target, "--delete", base)
 	}
 	rec.State = IntegrationMerged
 	if err := p.saveIntegration(*rec); err != nil {

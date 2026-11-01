@@ -51,6 +51,9 @@ type Membership struct {
 	// project then integrates by local trunk. GitHubToken is the token's
 	// absolute path.
 	GitHubRepo, GitHubAPI, GitHubToken string
+	// GitHubApp: tokens come from the coordination host's GitHub App
+	// service over NATS (PLAN-V15-GHAPP); GitHubToken is then unused.
+	GitHubApp bool
 }
 
 // Load resolves the project's membership. A block that names its own
@@ -100,6 +103,9 @@ func Load(p *apexv1.Project) (Membership, error) {
 			m.GitHubAPI = DefaultGitHubAPI
 		}
 		m.GitHubToken = filepath.Join(p.Root, filepath.FromSlash(apexv1.GitHubTokenRel))
+		if m.GitHubApp = g.App; m.GitHubApp {
+			return m, nil
+		}
 		if st, err := os.Stat(m.GitHubToken); err != nil || st.Size() == 0 {
 			return Membership{}, fmt.Errorf("%w: no token at %s (a fine-grained token for %s, placed by a person)", ErrGitHub, apexv1.GitHubTokenRel, m.GitHubRepo)
 		}

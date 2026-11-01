@@ -68,7 +68,11 @@ func (p *Project) sendRecord(ctx context.Context, commit, subject string) (*Inte
 	slug := recordSlug(subject) + "-" + short(commit)
 	id := "record-" + slug
 	head := PRBranchPrefix + id
-	if _, err := gitWithEnv(ctx, p.Root, noPromptEnv, "push", "--quiet", "--force", "--no-follow-tags", remote, commit+":refs/heads/"+head); err != nil {
+	target, env, _, err := p.pushTarget(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := gitWithEnv(ctx, p.Root, env, "push", "--quiet", "--force", "--no-follow-tags", target, commit+":refs/heads/"+head); err != nil {
 		return nil, &FailError{Code: CodeIntegrationPush, Action: ActionRetry, Msg: fmt.Sprintf("the record %q is committed on main, but pushing it to %s on %s failed: %v — the next milestone record sends it, or run the command again", subject, head, remote, err)}
 	}
 	api, err := p.integrator()

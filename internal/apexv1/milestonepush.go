@@ -30,22 +30,28 @@ func init() {
 // checked.
 var FenceMilestone func(ctx context.Context, p *Project, ms string) error
 
-// PushEnv, when set, is the environment a push to the coordinated
-// repository runs with (the GitHub App service's installation token in
-// http.extraHeader, never argv; ghapp). Unset, git's own credentials push.
-var PushEnv func(ctx context.Context, p *Project) ([]string, error)
+// PushVia, when set, is how a push to the coordinated repository goes
+// (PLAN-V15-GHAPP §5): to url — the repository over https — with env
+// carrying the App service's installation token in http.extraHeader, never
+// argv, a URL or disk. url "" (or PushVia unset): to main's remote, with
+// git's own credentials.
+var PushVia func(ctx context.Context, p *Project) (url string, env []string, err error)
 
-// pushEnv is the push's environment: noPromptEnv, plus PushEnv's.
-func (p *Project) pushEnv(ctx context.Context) ([]string, error) {
-	env := append([]string(nil), noPromptEnv...)
-	if PushEnv == nil {
-		return env, nil
+// pushTarget is a push's target and environment: PushVia's, else the
+// trunk's remote; noPromptEnv either way. viaURL reports a URL target,
+// after which ape updates the remote-tracking ref itself.
+func (p *Project) pushTarget(ctx context.Context) (target string, env []string, viaURL bool, err error) {
+	env = append([]string(nil), noPromptEnv...)
+	if PushVia != nil {
+		url, extra, err := PushVia(ctx, p)
+		if err != nil {
+			return "", nil, false, err
+		}
+		if url != "" {
+			return url, append(env, extra...), true, nil
+		}
 	}
-	extra, err := PushEnv(ctx, p)
-	if err != nil {
-		return nil, err
-	}
-	return append(env, extra...), nil
+	return p.trunkRemote(ctx), env, false, nil
 }
 
 // pushMilestone lands sha on the remote's milestone branch base: the lease
@@ -58,13 +64,16 @@ func (p *Project) pushMilestone(ctx context.Context, base, sha string) error {
 			return err
 		}
 	}
-	env, err := p.pushEnv(ctx)
+	target, env, viaURL, err := p.pushTarget(ctx)
 	if err != nil {
 		return err
 	}
 	remote := p.trunkRemote(ctx)
-	out, err := gitRawEnv(ctx, p.Root, env, "push", "--quiet", "--porcelain", "--no-follow-tags", remote, sha+":refs/heads/"+base)
+	out, err := gitRawEnv(ctx, p.Root, env, "push", "--quiet", "--porcelain", "--no-follow-tags", target, sha+":refs/heads/"+base)
 	if err == nil {
+		if viaURL {
+			_, _ = git(ctx, p.Root, "update-ref", "refs/remotes/"+remote+"/"+base, sha)
+		}
 		return nil
 	}
 	if moved(out + err.Error()) {
