@@ -330,6 +330,10 @@ func (p *Project) NewMilestoneWith(ctx context.Context, title, gate, goal string
 	if err := p.refuseOnChangeBranch(ctx, "a new milestone"); err != nil {
 		return "", err
 	}
+	// Coordinated: on main, its record sent as a record PR (section 5.4).
+	if err := p.prepareRecordOnMain(ctx, "a new milestone"); err != nil {
+		return "", err
+	}
 	doc, rm, err := p.loadRoadmapDoc()
 	if err != nil {
 		return "", err
@@ -342,7 +346,7 @@ func (p *Project) NewMilestoneWith(ctx context.Context, title, gate, goal string
 	if _, err := p.commitMilestone(ctx, own, id, MilestoneProposed); err != nil {
 		return id, err
 	}
-	return id, nil
+	return id, p.sendPendingRecords(ctx)
 }
 
 // ApproveMilestone writes `Status: approved (by <who> <ts>)` and records
@@ -399,6 +403,9 @@ func (p *Project) approveMilestone(ctx context.Context, id, by, acceptGreen stri
 		return nil, false, &UsageError{Code: "usage.by", Msg: "--by names who approves"}
 	}
 	if err := p.refuseOnChangeBranch(ctx, "a milestone approval"); err != nil {
+		return nil, false, err
+	}
+	if err := p.prepareRecordOnMain(ctx, "a milestone approval"); err != nil {
 		return nil, false, err
 	}
 	doc, rm, err := p.loadRoadmapDoc()
@@ -478,7 +485,7 @@ func (p *Project) approveMilestone(ctx context.Context, id, by, acceptGreen stri
 	if _, err := p.commitMilestone(ctx, own, id, what); err != nil {
 		return m, true, err
 	}
-	return m, true, nil
+	return m, true, p.sendPendingRecords(ctx)
 }
 
 // filterMilestone keeps the findings that name milestone m. Status

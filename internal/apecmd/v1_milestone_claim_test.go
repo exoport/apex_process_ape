@@ -3,8 +3,10 @@ package apecmd
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/nats-io/nats.go"
@@ -114,9 +116,17 @@ func TestMilestoneTakeIn_CLI(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(root, "hot", "ape-nats.creds"), data, 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(root, "hot", "github.token"), []byte("github_pat_t\n"), 0o600))
 
+	fake := &cliIntegrator{}
+	old := apexv1.NewIntegrator
+	apexv1.NewIntegrator = func(*apexv1.Project) (apexv1.Integrator, error) { return fake, nil }
+	t.Cleanup(func() { apexv1.NewIntegrator = old })
+
 	stdout, _, err := v1Exec(t, newMilestoneCmd, "claim", "M1", "--cwd", root)
 	require.NoError(t, err, stdout)
 	require.Contains(t, stdout, "milestone/M1: cut from main and pushed")
+	require.Contains(t, stdout, "claim record: https://github.example/pull/1 in main's merge queue")
+	require.Len(t, fake.opened, 1)
+	require.True(t, strings.HasPrefix(fake.opened[0], "apex/record-M1-claimed-by-dana-"), fake.opened[0])
 	require.Equal(t, v1Git(t, root, "rev-parse", "main"), v1Git(t, bare, "rev-parse", "milestone/M1"))
 
 	stdout, _, err = v1Exec(t, newMilestoneCmd, "take-in", "M1", "--json", "--cwd", root)
@@ -125,4 +135,18 @@ func TestMilestoneTakeIn_CLI(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(stdout), &res), stdout)
 	require.Equal(t, true, res["up_to_date"])
 	require.Equal(t, "milestone/M1", res["branch"])
+}
+
+// cliIntegrator is the coordinated repository's API for a CLI test.
+type cliIntegrator struct{ opened []string }
+
+func (f *cliIntegrator) OpenPR(_ context.Context, head, base, _, _ string) (apexv1.PRRef, error) {
+	f.opened = append(f.opened, head+"→"+base)
+	return apexv1.PRRef{Number: len(f.opened), NodeID: "PR", URL: fmt.Sprintf("https://github.example/pull/%d", len(f.opened))}, nil
+}
+
+func (f *cliIntegrator) Enqueue(context.Context, apexv1.PRRef) (string, error) { return "QUEUED", nil }
+
+func (f *cliIntegrator) PRState(context.Context, int) (apexv1.PRState, error) {
+	return apexv1.PRState{Queue: "AWAITING_CHECKS"}, nil
 }

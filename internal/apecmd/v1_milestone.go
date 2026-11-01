@@ -67,6 +67,11 @@ The gate's scripts must exist, and the gate must run red, before a person approv
 
 Refused on a change branch (see ` + "`ape milestone --help`" + `).
 
+In a project integrating through GitHub (coordination.github; v1.5, section 5.4) the record
+is made on main (ape switches there when the tree is clean) and reaches it as a record PR
+through main's merge queue: ape pushes it to apex/record-<M>-proposed-<sha>, opens the PR
+and enqueues it. approve does the same with its record.
+
 Exit codes: 0 ok (prints the id) · 1 no roadmap.md, or HEAD on a change branch · 2 usage.`,
 		Example: `  ape milestone new "Walking skeleton" --gate "./scripts/e2e.sh m1" --budget-tokens 60M --budget-wall 4h`,
 		Args:    cobra.ExactArgs(1),
@@ -88,6 +93,9 @@ Exit codes: 0 ok (prints the id) · 1 no roadmap.md, or HEAD on a change branch 
 			}
 			return v1Emit(cmd.OutOrStdout(), &f, map[string]any{"id": id, "title": args[0], "status": apexv1.MilestoneProposed}, func(w io.Writer) {
 				fmt.Fprintf(w, "%s — %s: proposed (a person approves with `ape milestone approve %s --by <who>`)\n", id, args[0], id)
+				if r := p.PendingRecord(id); r != nil {
+					fmt.Fprintf(w, "record PR: %s in main's merge queue\n", r.PR.URL)
+				}
 			})
 		},
 	}
@@ -239,6 +247,7 @@ with no grant.`,
 						out.Approval = "recorded"
 					}
 					out.Frozen, at = p.ApprovalFrozen(id)
+					out.RecordPR = p.PendingRecord(id)
 				}
 				return func(cmd *cobra.Command, f *v1Flags) error {
 					if err != nil {
@@ -248,6 +257,9 @@ with no grant.`,
 						fmt.Fprintf(w, "%s — %s: %s\n", m.ID, m.Title, m.StatusText)
 						if line := frozenLine(out.Approval, at, out.Frozen); line != "" {
 							fmt.Fprintln(w, line)
+						}
+						if r := out.RecordPR; r != nil {
+							fmt.Fprintf(w, "record PR: %s in main's merge queue (the record reaches milestone/%s by a take-in)\n", r.PR.URL, m.ID)
 						}
 					})
 				}
@@ -272,6 +284,8 @@ type approveOut struct {
 	// is what the approval on record froze (v1.2 F4).
 	Approval string             `json:"approval,omitempty"`
 	Frozen   *apexv1.FrozenGate `json:"frozen,omitempty"`
+	// RecordPR is the approval's record PR into main (v1.5 section 5.4).
+	RecordPR *apexv1.Integration `json:"record_pr,omitempty"` //nolint:tagliatelle // the v1 --json payloads are snake_case by contract
 }
 
 // frozenLineMax is how many paths approve's human line names.

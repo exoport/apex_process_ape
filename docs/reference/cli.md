@@ -5315,6 +5315,11 @@ The gate's scripts must exist, and the gate must run red, before a person approv
 
 Refused on a change branch (see `ape milestone --help`).
 
+In a project integrating through GitHub (coordination.github; v1.5, section 5.4) the record
+is made on main (ape switches there when the tree is clean) and reaches it as a record PR
+through main's merge queue: ape pushes it to apex/record-<M>-proposed-<sha>, opens the PR
+and enqueues it. approve does the same with its record.
+
 Exit codes: 0 ok (prints the id) · 1 no roadmap.md, or HEAD on a change branch · 2 usage.
 
 Examples:

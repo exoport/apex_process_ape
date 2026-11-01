@@ -88,22 +88,30 @@ func notHolder(msg string) error {
 // holds (its own live key, adopted at its revision). Held by another, it
 // refuses, naming the holder. The token goes to the book.
 func (s *milestones) claim(ctx context.Context, ms string) (lease.Lease, error) {
+	l, _, err := s.claimFresh(ctx, ms)
+	return l, err
+}
+
+// claimFresh is claim, reporting whether the key was created now (fresh)
+// rather than this checkout's live key kept.
+func (s *milestones) claimFresh(ctx context.Context, ms string) (lease.Lease, bool, error) {
 	key := s.key(ms)
 	l, err := s.store.Claim(ctx, key, s.holder, MilestoneTTL)
+	fresh := err == nil
 	if errors.Is(err, lease.ErrHeld) {
 		cur, tok, herr := s.store.Holder(ctx, key)
 		switch {
 		case herr != nil:
-			return lease.Lease{}, herr
+			return lease.Lease{}, false, herr
 		case cur != s.holder:
-			return lease.Lease{}, notHolder(fmt.Sprintf("%s is held by %s — a milestone has one holder; agree a handover with them, or claim another milestone", ms, cur))
+			return lease.Lease{}, false, notHolder(fmt.Sprintf("%s is held by %s — a milestone has one holder; agree a handover with them, or claim another milestone", ms, cur))
 		}
 		l, err = s.store.Renew(ctx, lease.Lease{Key: key, Holder: s.holder, Token: tok, TTL: MilestoneTTL})
 	}
 	if err != nil {
-		return lease.Lease{}, err
+		return lease.Lease{}, false, err
 	}
-	return l, s.book.Record(key, l, lease.Held)
+	return l, fresh, s.book.Record(key, l, lease.Held)
 }
 
 // claimed reports whether this checkout's book holds ms (claimed and not
@@ -120,6 +128,9 @@ type Claim struct {
 	Lease   lease.Lease
 	Branch  string
 	Created bool
+	// Record is the claim record's PR into main (section 5.4), sent on a
+	// fresh claim in a project integrating through GitHub.
+	Record *apexv1.Integration
 }
 
 // ClaimMilestone is `ape milestone claim <M>`: the person's act that takes
@@ -135,12 +146,17 @@ func ClaimMilestone(ctx context.Context, p *apexv1.Project, ms string) (Claim, e
 		return Claim{}, err
 	}
 	defer s.close()
-	l, err := s.claim(ctx, ms)
+	l, fresh, err := s.claimFresh(ctx, ms)
 	if err != nil {
 		return Claim{}, err
 	}
 	branch, created, err := p.PrepareMilestoneBranch(ctx, ms)
-	return Claim{Lease: l, Branch: branch, Created: created}, err
+	c := Claim{Lease: l, Branch: branch, Created: created}
+	if err != nil || !fresh {
+		return c, err
+	}
+	c.Record, err = p.RecordClaim(ctx, ms, s.holder)
+	return c, err
 }
 
 // ReleaseMilestone is `ape milestone release <M>`: the key is deleted at

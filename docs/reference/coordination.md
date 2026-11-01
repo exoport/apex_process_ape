@@ -115,6 +115,14 @@ M's change run on that branch, switching to it from another base branch when the
 claimed M has no such branch and is refused with `milestone.branch-missing`. A failed fetch or push is
 `base.fetch-failed`. The lease stays held then, and claiming again retries.
 
+In such a project main is protected and ape never pushes to it. The roadmap records others must see reach it as
+**record PRs** through main's merge queue: `ape milestone new` (proposed), `ape milestone approve` (approved) and the
+claim. new and approve run on main, switching there when the tree is clean. They make their commit as before, then push it
+to `apex/record-<M>-<what>-<sha>`, open its PR into main and enqueue it. The claim record (`apex: <M> claimed by
+<holder>`) is a commit with no change on the remote's main, and decides no lease. A record whose PR did not open is
+sent by the next record verb. Once the queue merged it, main fast-forwards at the next fetch. A record reaches a
+milestone's branch by its next take-in.
+
 A conductor receives its ensemble's events through the durable consumer **`conductor-<user>-<ens>`** on `APE_EVENTS`.
 Only the holder of `conductor.<user>.<ens>` binds it, so a conductor that takes the lease over inherits the events the
 last one left unacknowledged, and its acknowledgements are what renews the lease.
