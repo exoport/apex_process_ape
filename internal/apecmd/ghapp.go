@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/exoport/apex_process_ape/internal/apexv1"
 	"github.com/exoport/apex_process_ape/internal/coord/member"
 	"github.com/exoport/apex_process_ape/internal/ghapp"
 	"github.com/exoport/apex_process_ape/internal/natsconn"
@@ -38,7 +39,7 @@ Every request is logged (never a token or a secret's value); secrets and runner-
 run the operator's notify. ` + "`ape ghapp print-config`" + ` and ` + "`ape ghapp print-unit`" + ` print the files a
 person installs.`,
 	}
-	cmd.AddCommand(newGhappServeCmd(), newGhappPrintConfigCmd(), newGhappPrintUnitCmd(), newGhappSetupCmd())
+	cmd.AddCommand(newGhappServeCmd(), newGhappPrintConfigCmd(), newGhappPrintUnitCmd(), newGhappSetupCmd(), newGhappLandCmd())
 	return cmd
 }
 
@@ -286,5 +287,79 @@ Exit codes: 0 done · 1 refused or failed (the service's message) · 2 usage, or
 	f.add(cmd)
 	cmd.Flags().StringVar(&name, "name", "", "the secret's name (secrets): APE_NATS_URL or APE_NATS_CREDS")
 	cmd.Flags().StringVar(&valueFile, "value-file", "", "the secret's value, from a file (or - for stdin)")
+	return cmd
+}
+
+func newGhappLandCmd() *cobra.Command {
+	var f v1Flags
+	var title string
+	var wait time.Duration
+	cmd := &cobra.Command{
+		Use:   "land <branch> [--title <t>] [--wait 30m]",
+		Short: "Land a local branch on main through main's merge queue (push, PR, enqueue, wait)",
+		Long: `Land a local branch on main through main's merge queue, for changes outside a milestone a
+person decides to land — a framework update, the coordination config (v1.5 stage 1a, D706):
+push the branch through the coordinated repository's pusher path (the App service's token
+when coordination.github.app is set, else git's own credentials), open its pull request
+into main (or reuse the open one; the title is --title, else the branch tip's subject),
+enqueue it, and wait for merged, ejected or --wait. Never milestone/<M> (ape's) or main.
+
+Exit codes: 0 merged · 1 refused, failed, ejected or closed · 2 usage · 75 still queued when
+--wait ran out.`,
+		Example: "  ape ghapp land apex/framework-v15-1a --wait 30m",
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			p, err := v1Project(&f)
+			if err != nil {
+				return err
+			}
+			ctx := cmd.Context()
+			branch := args[0]
+			sha, err := gitOut(ctx, p.Root, "rev-parse", "--verify", "refs/heads/"+branch)
+			if err != nil {
+				return usageErr(fmt.Errorf("no local branch %s", branch))
+			}
+			sha = strings.TrimSpace(sha)
+			if title == "" {
+				subject, _ := gitOut(ctx, p.Root, "log", "-1", "--format=%s", sha)
+				title = strings.TrimSpace(subject)
+			}
+			if err := p.PushHead(ctx, sha, branch); err != nil {
+				return v1Fail(cmd, &f, err, nil)
+			}
+			api, err := p.Integrator()
+			if err != nil {
+				return v1Fail(cmd, &f, err, nil)
+			}
+			pr, err := api.OpenPR(ctx, branch, "main", title, "Landed through main's merge queue by `ape ghapp land` (APEX v1.5).")
+			if err != nil {
+				return v1Fail(cmd, &f, &apexv1.FailError{Code: apexv1.CodeIntegrationPR, Msg: "opening the PR failed: " + err.Error()}, nil)
+			}
+			if _, err := api.Enqueue(ctx, pr); err != nil {
+				return v1Fail(cmd, &f, &apexv1.FailError{Code: apexv1.CodeIntegrationPR, Msg: pr.URL + " opened, but enqueuing it in main's merge queue failed: " + err.Error()}, nil)
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "pushed %.7s to %s; %s enqueued in main's merge queue\n", sha, branch, pr.URL)
+			deadline := time.Now().Add(wait)
+			for {
+				st, err := api.PRState(ctx, pr.Number)
+				switch {
+				case err != nil:
+					return v1Fail(cmd, &f, &apexv1.FailError{Code: apexv1.CodeIntegrationPR, Msg: "reading " + pr.URL + ": " + err.Error()}, nil)
+				case st.Merged:
+					fmt.Fprintf(cmd.OutOrStdout(), "merged into main as %.7s\n", st.MergeCommit)
+					return nil
+				case st.Queue == "" || st.Closed:
+					return v1Fail(cmd, &f, &apexv1.FailError{Code: apexv1.CodeIntegrationPR, Msg: pr.URL + " left main's queue without merging (ejected or closed): read its checks on GitHub"}, nil)
+				}
+				if !time.Now().Before(deadline) || !apexv1.WaitQueue(ctx, nil) {
+					fmt.Fprintf(cmd.OutOrStdout(), "still queued (%s)\n", st.Queue)
+					return usageErrExit(exitCodeStillRunning, fmt.Errorf("%s is still in main's queue", pr.URL))
+				}
+			}
+		},
+	}
+	addV1Flags(cmd, &f)
+	cmd.Flags().StringVar(&title, "title", "", "the PR's title (default: the branch tip's subject)")
+	cmd.Flags().DurationVar(&wait, "wait", 30*time.Minute, "how long to wait for the queue")
 	return cmd
 }

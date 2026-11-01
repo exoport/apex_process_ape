@@ -4313,10 +4313,44 @@ person installs.
 
 Subcommands:
 
+- `land` — Land a local branch on main through main's merge queue (push, PR, enqueue, wait)
 - `print-config` — Print /etc/apex-ghapp/config.yaml, filled in
 - `print-unit` — Print the hardened systemd unit apex-ghapp.service
 - `serve` — Run the service (the systemd unit runs this)
 - `setup` — Run one templated set-up act on the coordinated repository (the operator's)
+
+## ape ghapp land
+
+Land a local branch on main through main's merge queue (push, PR, enqueue, wait)
+
+```
+ape ghapp land <branch> [--title <t>] [--wait 30m] [flags]
+```
+
+Land a local branch on main through main's merge queue, for changes outside a milestone a
+person decides to land — a framework update, the coordination config (v1.5 stage 1a, D706):
+push the branch through the coordinated repository's pusher path (the App service's token
+when coordination.github.app is set, else git's own credentials), open its pull request
+into main (or reuse the open one; the title is --title, else the branch tip's subject),
+enqueue it, and wait for merged, ejected or --wait. Never milestone/<M> (ape's) or main.
+
+Exit codes: 0 merged · 1 refused, failed, ejected or closed · 2 usage · 75 still queued when
+--wait ran out.
+
+Examples:
+
+```
+  ape ghapp land apex/framework-v15-1a --wait 30m
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+| `--title` | string | `—` | the PR's title (default: the branch tip's subject) |
+| `--wait` | duration | `30m0s` | how long to wait for the queue |
 
 ## ape ghapp print-config
 

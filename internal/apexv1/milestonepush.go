@@ -91,3 +91,29 @@ func moved(s string) bool {
 	}
 	return false
 }
+
+// PushHead pushes sha to branch on the coordinated repository through
+// pushTarget (the App service's pusher token when the project has one), a
+// plain push: never forced. For a branch a person lands through main's
+// queue (`ape ghapp land`); milestone/<M> goes through pushMilestone.
+func (p *Project) PushHead(ctx context.Context, sha, branch string) error {
+	if strings.HasPrefix(branch, MilestoneBranchPrefix) || branch == "main" {
+		return &UsageError{Code: "usage.branch", Msg: branch + " is not a head to land: milestone/<M> is ape's (archive, take-in, close) and main takes PRs only"}
+	}
+	target, env, viaURL, err := p.pushTarget(ctx)
+	if err != nil {
+		return err
+	}
+	out, err := gitRawEnv(ctx, p.Root, env, "push", "--quiet", "--porcelain", "--no-follow-tags", target, sha+":refs/heads/"+branch)
+	if err != nil {
+		return &FailError{Code: CodeIntegrationPush, Action: ActionRetry, Msg: fmt.Sprintf("pushing %s to %s failed: %v", short(sha), branch, strings.TrimSpace(out+" "+err.Error()))}
+	}
+	if viaURL {
+		_, _ = git(ctx, p.Root, "update-ref", "refs/remotes/"+p.trunkRemote(ctx)+"/"+branch, sha)
+	}
+	return nil
+}
+
+// Integrator is the coordinated repository's API (NewIntegrator's), for
+// callers outside the archive and close.
+func (p *Project) Integrator() (Integrator, error) { return p.integrator() }

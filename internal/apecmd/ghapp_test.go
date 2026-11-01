@@ -1,6 +1,7 @@
 package apecmd
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -96,4 +97,59 @@ func TestGhappSetup_CLI(t *testing.T) {
 	require.Equal(t, ExitUsage, exitCodeOf(t, err))
 	_, _, err = v1Exec(t, newGhappCmd, "setup", "secrets", "--name", "GITHUB_TOKEN", "--value-file", secret, "--cwd", root)
 	require.Equal(t, ExitUsage, exitCodeOf(t, err))
+}
+
+// landIntegrator merges every enqueued PR at once.
+type landIntegrator struct{ opened, enqueued []string }
+
+func (f *landIntegrator) OpenPR(_ context.Context, head, base, _, _ string) (apexv1.PRRef, error) {
+	f.opened = append(f.opened, head+"→"+base)
+	return apexv1.PRRef{Number: 5, NodeID: "PR_5", URL: "https://github.example/pull/5"}, nil
+}
+
+func (f *landIntegrator) Enqueue(_ context.Context, pr apexv1.PRRef) (string, error) {
+	f.enqueued = append(f.enqueued, pr.URL)
+	return "QUEUED", nil
+}
+
+func (f *landIntegrator) PRState(context.Context, int) (apexv1.PRState, error) {
+	return apexv1.PRState{Merged: true, MergeCommit: "abc1234"}, nil
+}
+
+// D706: ape ghapp land pushes a local branch, opens its PR into main,
+// enqueues it and waits for the merge; never milestone/<M> or main.
+func TestGhappLand_CLI(t *testing.T) {
+	root := v1Repo(t)
+	v1Git(t, root, "branch", "-M", "main")
+	bare := t.TempDir()
+	v1Git(t, bare, "init", "-q", "--bare")
+	v1Git(t, root, "remote", "add", "origin", bare)
+	v1Git(t, root, "push", "-q", "-u", "origin", "main")
+	cfg, err := os.ReadFile(apexv1.ConfigPath(root))
+	require.NoError(t, err)
+	block := "coordination:\n  ensemble: shop\n  home: x\n  url: nats://127.0.0.1:1\n  github:\n    repo: example/notes\n"
+	require.NoError(t, os.WriteFile(apexv1.ConfigPath(root), append(cfg, []byte(block)...), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "hot"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "hot", "ape-nats.creds"), []byte("x"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "hot", "github.token"), []byte("t\n"), 0o600))
+	v1Git(t, root, "switch", "-q", "-c", "apex/framework-update")
+	v1Git(t, root, "commit", "-qam", "chore(config): coordination for stage 1a")
+	tip := v1Git(t, root, "rev-parse", "HEAD")
+	fake := &landIntegrator{}
+	old := apexv1.NewIntegrator
+	apexv1.NewIntegrator = func(*apexv1.Project) (apexv1.Integrator, error) { return fake, nil }
+	t.Cleanup(func() { apexv1.NewIntegrator = old })
+
+	stdout, _, err := v1Exec(t, newGhappCmd, "land", "apex/framework-update", "--cwd", root)
+	require.NoError(t, err, stdout)
+	require.Contains(t, stdout, "merged into main as abc1234")
+	require.Equal(t, tip, v1Git(t, bare, "rev-parse", "apex/framework-update"), "pushed")
+	require.Equal(t, []string{"apex/framework-update→main"}, fake.opened)
+	require.Len(t, fake.enqueued, 1)
+
+	v1Git(t, root, "branch", "milestone/M1")
+	_, _, err = v1Exec(t, newGhappCmd, "land", "milestone/M1", "--cwd", root)
+	require.Error(t, err, "milestone branches are ape's")
+	_, _, err = v1Exec(t, newGhappCmd, "land", "main", "--cwd", root)
+	require.Error(t, err)
 }
