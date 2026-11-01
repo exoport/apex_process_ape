@@ -2849,6 +2849,9 @@ act), only when all of these hold:
   - no turn is running ("esc to interrupt" absent) and the input row is empty — never after
     your half-typed line;
   - the screen did not change between two looks (one --poll apart).
+After typing, the watcher confirms the submit: the input row empties or a turn starts. If not,
+it presses Enter again, at most three Enters in all; a delivery still not submitted is recorded
+unsubmitted, nothing is typed over it, and the ack alert reaches you (1.4.3).
 The conductor acknowledges each: `ape conductor ack <id>`. An event not acknowledged within
 --ack-alert of it (default conductor.ack_alert of the first project, else 15m) logs
 conductor-stalled in its project, once, so that project's notify: command reaches you —
