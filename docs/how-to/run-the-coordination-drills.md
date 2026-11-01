@@ -14,7 +14,7 @@ which must fail where the drill passes. That control is what shows the protectio
 | --- | --- | --- | --- |
 | `make check-coord` | embedded NATS servers and a three-node embedded cluster (Tier 1) | nothing beyond Go | $0 |
 | `make check-coord-cluster` | three local `nats-server` processes (Tier 2, `deploy/natslocal/natslocal.sh`) | `nats-server` v2.14.5 on PATH, or `NATS_SERVER=<binary>` | $0 |
-| `make check-coord-live` | real Claude Code sessions through `ape task` | `claude` on PATH, a login, network | three short Haiku sessions (about $0.01 each) |
+| `make check-coord-live` | real Claude Code sessions through `ape task` | `claude` on PATH, a login, network | five short Haiku sessions (about $0.01 each) |
 
 `make test` runs everything `make check-coord` does. The other two are local only and never run in CI.
 
@@ -40,6 +40,13 @@ which must fail where the drill passes. That control is what shows the protectio
 leaves it, with the rules in its `.claude/settings.json`. Second, the same project with that file emptied: the rules
 every v1 `ape task` session also gets inline in its `--settings` must still deny it. The control is a project that is
 not APEX v1, where no rules reach the session and Read returns the file.
+
+Since Claude Code 2.1.316 a session has no Grep or Glob tool: it searches through Bash. A Grep or Glob arm counts
+as not applicable when the session's own transcript shows the tool missing (a call refused as "No such tool
+available", or ToolSearch finding none). A missing call with no such evidence still fails. Bash is what reaches
+`hot/` now, so two more arms run `grep -r CANARY hot` through Bash. In the v1 project, ape's pre-tool hook
+(CredsGuard) must refuse it with its own reason. In the project that is not APEX v1, it prints the file's
+contents.
 
 ## Run them
 

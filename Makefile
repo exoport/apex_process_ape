@@ -440,8 +440,8 @@ check-coord:  ## v1.5 stage 0: the coordination drills on Tier 1 (embedded NATS)
 	  ./internal/coord/... ./internal/apexv1/
 
 .PHONY: check-coord-live
-check-coord-live:  ## v1.5 stage 0: LOCAL ONLY. Claude Code's Read, Grep and Glob honour init's permissions.deny for hot/ape-nats.creds under bypass mode, with a control (three Haiku sessions through ape task: the project's rules, the inline rules alone, a non-v1 control).
-	APE_CLAUDE_LIVE=1 go test ./internal/hookdrift/ -run '^TestLive_CredsDeny$$' -v -count=1 -timeout 25m
+check-coord-live:  ## v1.5 stage 0: LOCAL ONLY. No session reads hot/ape-nats.creds under bypass mode: Read (and Grep/Glob where the session has them) honour init's permissions.deny (the project's rules, the inline rules alone, a non-v1 control), and a Bash `grep -r CANARY hot` is refused by ape's pre-tool hook (CredsGuard; a non-v1 control prints it). Five Haiku sessions through ape task.
+	APE_CLAUDE_LIVE=1 go test ./internal/hookdrift/ -run '^TestLive_Creds(Deny|Bash)$$' -v -count=1 -timeout 25m
 
 .PHONY: check-coord-cluster
 check-coord-cluster:  ## v1.5 stage 0: the coordination drills that need a real three-node cluster (drill 3, wipe and rebuild), on deploy/natslocal.
