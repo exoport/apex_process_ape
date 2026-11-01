@@ -7127,7 +7127,11 @@ unparseable and every command refuses it):
 
 Scope (D45): v1.0: one operator per checkout, on a local trunk; PR mode comes later. Init
 says so (JSON "scope"); change start and archive refuse while the base branch is behind its
-upstream (base.behind-upstream).
+upstream (base.behind-upstream). In a coordinated project (coordination.github, v1.5, in
+development) init says that project's scope instead, and never commits on main or a
+milestone/<M> branch: there it switches to a new apex/project-init (-2, -3 … when taken),
+commits there, stays on it and prints the route (JSON "branch", "land": ape ghapp land
+<branch>); on any other branch it commits where it is.
 
 A library (W7, D208): with a go.mod at the root and no main package (examples/, testdata/,
 generators built only with //go:build ignore and the development folder's gate programs

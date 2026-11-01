@@ -13,6 +13,19 @@ import (
 // project (v1.5) fetches its trunk at start, archive and catch-up.
 const Scope = "v1.0: one operator per checkout, on a local trunk; PR mode comes later."
 
+// CoordinatedScope is a coordinated project's (v1.5, FINDING-V15-1A-5):
+// what init says there instead of Scope.
+const CoordinatedScope = "v1.5 (in development): a coordinated project — main changes only through its merge queue, milestone/<M> branches are ape's, and members fetch before they judge a base."
+
+// ScopeLine is the scope init states: CoordinatedScope in a coordinated
+// project, else Scope.
+func (p *Project) ScopeLine() string {
+	if p.coordinated() {
+		return CoordinatedScope
+	}
+	return Scope
+}
+
 // CodeBehindUpstream: the base branch is behind its upstream, and a change
 // would be started from, or archived onto, a stale trunk (H6, D45).
 const CodeBehindUpstream = "base.behind-upstream"

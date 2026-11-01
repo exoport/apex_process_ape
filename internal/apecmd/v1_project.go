@@ -269,7 +269,11 @@ unparseable and every command refuses it):
 
 Scope (D45): v1.0: one operator per checkout, on a local trunk; PR mode comes later. Init
 says so (JSON "scope"); change start and archive refuse while the base branch is behind its
-upstream (base.behind-upstream).
+upstream (base.behind-upstream). In a coordinated project (coordination.github, v1.5, in
+development) init says that project's scope instead, and never commits on main or a
+milestone/<M> branch: there it switches to a new apex/project-init (-2, -3 … when taken),
+commits there, stays on it and prints the route (JSON "branch", "land": ape ghapp land
+<branch>); on any other branch it commits where it is.
 
 A library (W7, D208): with a go.mod at the root and no main package (examples/, testdata/,
 generators built only with //go:build ignore and the development folder's gate programs
@@ -332,7 +336,7 @@ func newProjectInitCmd() *cobra.Command {
 				// Next is the step after init: the framework's skills first
 				// when they are absent (D162).
 				Next string `json:"next"`
-			}{res, plugins, apexv1.Scope, next}
+			}{res, plugins, p.ScopeLine(), next}
 			return v1Emit(cmd.OutOrStdout(), &f, out, func(w io.Writer) {
 				for _, c := range res.Created {
 					fmt.Fprintln(w, "created  "+c)
@@ -360,7 +364,10 @@ func newProjectInitCmd() *cobra.Command {
 				for _, warn := range res.Warnings {
 					fmt.Fprintln(cmd.ErrOrStderr(), "warning: "+warn)
 				}
-				fmt.Fprintln(w, "scope: "+apexv1.Scope)
+				if res.Branch != "" {
+					fmt.Fprintln(w, "branch   "+res.Branch+" (init committed here: in a coordinated project main changes only through its merge queue; land it with `"+res.Land+"`)")
+				}
+				fmt.Fprintln(w, "scope: "+p.ScopeLine())
 				fmt.Fprintln(w, "next: "+next)
 			})
 		},

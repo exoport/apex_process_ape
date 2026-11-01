@@ -3,11 +3,13 @@ package apexv1
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/exoport/apex_process_ape/internal/runlog"
@@ -48,6 +50,11 @@ type InitResult struct {
 	DenyAdded  []string `json:"deny_added,omitempty"`
 	Brownfield bool     `json:"brownfield"`
 	Commit     string   `json:"commit,omitempty"`
+	// Branch is the branch the commit is on when init made it for the
+	// commit (FINDING-V15-1A-5): a coordinated project's main changes only
+	// through its merge queue. Land is how it reaches main.
+	Branch string `json:"branch,omitempty"`
+	Land   string `json:"land,omitempty"`
 	// PreCommit is what init did with git's pre-commit hook (Q89):
 	// installed, present, or kept (another tool's); absent outside a git
 	// work tree.
@@ -328,13 +335,59 @@ func Init(ctx context.Context, root string, brownfield bool) (*InitResult, error
 			res.Warnings = append(res.Warnings, initCommitWithheld)
 			return res, nil
 		}
+		from, branch, err := p.initBranch(ctx)
+		if err != nil {
+			return res, commitFailed(err, "skeleton written but the branch for its commit could not be made: "+err.Error())
+		}
 		sha, err := p.commitRecord(ctx, "apex: project init", "", paths...)
 		if err != nil {
 			return res, commitFailed(err, "skeleton written but its commit failed: "+err.Error())
 		}
 		res.Commit = sha
+		switch {
+		case branch != "" && sha == "":
+			// Nothing to commit after all: back where it was.
+			_, _ = git(ctx, p.Root, "switch", "-q", from)
+			_, _ = git(ctx, p.Root, "branch", "-q", "-D", branch)
+		case branch != "":
+			res.Branch, res.Land = branch, "ape ghapp land "+branch
+		}
 	}
 	return res, nil
+}
+
+// initBranch puts a coordinated project's init commit on a branch of its
+// own (FINDING-V15-1A-5): its main changes only through the merge queue,
+// and milestone/<M> is ape's. On main, a milestone branch or a detached
+// HEAD it switches to a new apex/project-init (-2, -3 … when taken) and
+// returns it with the branch it left; anywhere else, or in a project that
+// is not coordinated, nothing ("").
+func (p *Project) initBranch(ctx context.Context) (from, branch string, err error) {
+	if !p.coordinated() || !p.isWorkTree(ctx) {
+		return "", "", nil
+	}
+	cur := CurrentBranch(ctx, p.Root)
+	if cur != "" && cur != "main" && !strings.HasPrefix(cur, MilestoneBranchPrefix) {
+		return "", "", nil
+	}
+	from = cur
+	if from == "" {
+		from, _ = git(ctx, p.Root, "rev-parse", "HEAD")
+	}
+	for i := 1; i < 100; i++ {
+		branch = PRBranchPrefix + "project-init"
+		if i > 1 {
+			branch += "-" + strconv.Itoa(i)
+		}
+		if _, err := git(ctx, p.Root, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch); err == nil {
+			continue
+		}
+		if _, err := git(ctx, p.Root, "switch", "-q", "-c", branch); err != nil {
+			return "", "", err
+		}
+		return from, branch, nil
+	}
+	return "", "", errors.New("apex/project-init … apex/project-init-99 all exist: delete the landed ones")
 }
 
 // initSkeleton is Init without its commit: `ape project lift` lays the
