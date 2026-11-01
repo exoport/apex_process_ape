@@ -105,16 +105,23 @@ func (p *Project) lastConfigAcceptance(ctx context.Context, epoch string) string
 
 // lastConfigAcceptanceOn is lastConfigAcceptance on rev: the secret
 // scan's allow baseline for a commit on rev (R23).
+//
+// It is the newest commit whose subject is the acceptance, not the newest
+// whose message mentions it (1.4.4): an acceptance landed through a pull
+// request brings a merge commit whose body repeats the PR's title, and
+// that merge is no acceptance.
 func (p *Project) lastConfigAcceptanceOn(ctx context.Context, epoch, rev string) string {
-	out, err := git(ctx, p.Root, "log", "-1", "--format=%H", "--fixed-strings", "--grep="+configAcceptedSubject, epoch+".."+rev)
-	if err != nil || out == "" {
+	out, err := git(ctx, p.Root, "log", "--format=%H%x1f%s", "--fixed-strings", "--grep="+configAcceptedSubject, epoch+".."+rev)
+	if err != nil {
 		return ""
 	}
-	subject, err := git(ctx, p.Root, "log", "-1", "--format=%s", out)
-	if err != nil || !strings.HasPrefix(subject, configAcceptedSubject) {
-		return ""
+	for line := range strings.SplitSeq(out, "\n") {
+		sha, subject, ok := strings.Cut(line, "\x1f")
+		if ok && strings.HasPrefix(subject, configAcceptedSubject) {
+			return sha
+		}
 	}
-	return out
+	return ""
 }
 
 // guardedConfigDiff names the blocks of keys that differ between the
