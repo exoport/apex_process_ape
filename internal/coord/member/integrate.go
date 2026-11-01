@@ -3,6 +3,8 @@ package member
 import (
 	"context"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/exoport/apex_process_ape/internal/apexv1"
 	"github.com/exoport/apex_process_ape/internal/coord/github"
@@ -77,9 +79,29 @@ func (g ghIntegrator) OpenPR(ctx context.Context, head, base, title, body string
 	return apexv1.PRRef{Number: pr.Number, NodeID: pr.NodeID, URL: pr.URL}, nil
 }
 
+// Enqueue enqueues the PR, waiting out GitHub's mergeability computation
+// on a PR just opened or pushed (it refuses an enqueue until then, seen on
+// the mirror for PRs #1 and #2): retried every enqueueRetryEvery, at most
+// enqueueRetries times; any other refusal is returned at once.
 func (g ghIntegrator) Enqueue(ctx context.Context, pr apexv1.PRRef) (string, error) {
-	return g.c.Enqueue(ctx, &github.PR{Number: pr.Number, NodeID: pr.NodeID, URL: pr.URL})
+	for i := 0; ; i++ {
+		st, err := g.c.Enqueue(ctx, &github.PR{Number: pr.Number, NodeID: pr.NodeID, URL: pr.URL})
+		if err == nil || i == enqueueRetries || !strings.Contains(err.Error(), "has not yet completed") {
+			return st, err
+		}
+		select {
+		case <-ctx.Done():
+			return st, err
+		case <-time.After(enqueueRetryEvery):
+		}
+	}
 }
+
+// Enqueue's wait for GitHub's mergeability check: a minute at most.
+var (
+	enqueueRetries    = 12
+	enqueueRetryEvery = 5 * time.Second
+)
 
 func (g ghIntegrator) PRState(ctx context.Context, n int) (apexv1.PRState, error) {
 	s, err := g.c.PRState(ctx, n)

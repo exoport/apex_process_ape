@@ -12,10 +12,12 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/exoport/apex_process_ape/internal/apexv1"
+	"github.com/exoport/apex_process_ape/internal/coord/github"
 )
 
 // Stage 1a step 6: a member project's Integrator is ape's GitHub client on
@@ -75,4 +77,38 @@ func TestIntegrator_TheConfiguredRepository(t *testing.T) {
 	var fe *apexv1.FailError
 	require.ErrorAs(t, err, &fe, "no token")
 	require.Equal(t, apexv1.CodeCoordMembership, fe.Code)
+}
+
+// The mirror's PRs #1 and #2: GitHub refuses an enqueue until its
+// mergeability check completes; Enqueue waits it out, and refuses any
+// other error at once.
+func TestIntegrator_EnqueueWaitsForMergeability(t *testing.T) {
+	old, oldEvery := enqueueRetries, enqueueRetryEvery
+	enqueueRetries, enqueueRetryEvery = 5, 10*time.Millisecond
+	t.Cleanup(func() { enqueueRetries, enqueueRetryEvery = old, oldEvery })
+	var mu sync.Mutex
+	calls, notYet := 0, 2
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		calls++
+		if calls <= notYet {
+			_, _ = w.Write([]byte(`{"errors":[{"message":"Pull request mergeability check has not yet completed"}]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"data":{"enqueuePullRequest":{"mergeQueueEntry":{"state":"QUEUED"}}}}`))
+	}))
+	t.Cleanup(srv.Close)
+	g := ghIntegrator{github.New(srv.URL, "shop/notes", "t")}
+	st, err := g.Enqueue(context.Background(), apexv1.PRRef{Number: 2, NodeID: "PR_2"})
+	require.NoError(t, err)
+	require.Equal(t, "QUEUED", st)
+	require.Equal(t, 3, calls, "two refusals waited out")
+
+	mu.Lock()
+	calls, notYet = 0, 100
+	mu.Unlock()
+	_, err = g.Enqueue(context.Background(), apexv1.PRRef{Number: 2, NodeID: "PR_2"})
+	require.ErrorContains(t, err, "has not yet completed", "bounded")
+	require.Equal(t, 6, calls)
 }
