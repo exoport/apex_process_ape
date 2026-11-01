@@ -286,3 +286,66 @@ func FenceMilestone(ctx context.Context, p *apexv1.Project, ms string) error {
 	}
 	return nil
 }
+
+// HoldClose is a coordinated close's hold on the project's close lease,
+// close.<project> (D709): taken before the close fetches main, renewed
+// while it gates on the merge, enqueues and waits for the merge, and
+// released by the returned func. Another checkout's close holding it is
+// coord.close-busy (retry); this checkout's own live key (a close run
+// again) is kept. Nothing for a project in no ensemble.
+func HoldClose(ctx context.Context, p *apexv1.Project, log io.Writer) (release func(), err error) {
+	s, err := openMilestones(ctx, p)
+	if errors.Is(err, ErrNotMember) {
+		return func() {}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	key := layout.CloseKey(s.m.Project)
+	l, err := s.store.Claim(ctx, key, s.holder, MilestoneTTL)
+	if errors.Is(err, lease.ErrHeld) {
+		cur, tok, herr := s.store.Holder(ctx, key)
+		switch {
+		case herr != nil:
+			err = herr
+		case cur != s.holder:
+			s.close()
+			return nil, &apexv1.FailError{Code: apexv1.CodeCloseBusy, Action: apexv1.ActionRetry, Msg: fmt.Sprintf(
+				"another close of this project is in progress (%s holds %s): closes take main in, gate and merge one at a time — close again once it is done", cur, key)}
+		default:
+			l, err = s.store.Renew(ctx, lease.Lease{Key: key, Holder: s.holder, Token: tok, TTL: MilestoneTTL})
+		}
+	}
+	if err != nil {
+		s.close()
+		return nil, err
+	}
+	rctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		t := time.NewTicker(MilestoneRenewEvery)
+		defer t.Stop()
+		for {
+			select {
+			case <-rctx.Done():
+				return
+			case <-t.C:
+			}
+			next, err := s.store.Renew(rctx, l)
+			switch {
+			case errors.Is(err, lease.ErrStale):
+				fmt.Fprintf(log, "ape: the close lease %s was lost (%v)\n", key, err)
+				return
+			case err == nil:
+				l = next
+			}
+		}
+	}()
+	return func() {
+		cancel()
+		<-done
+		_ = s.store.Release(context.WithoutCancel(ctx), l)
+		s.close()
+	}, nil
+}

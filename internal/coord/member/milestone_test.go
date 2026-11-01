@@ -142,3 +142,43 @@ func TestMilestoneLease_LoopHoldRenews(t *testing.T) {
 	_, err = HoldMilestone(ctx, ann, "M1", io.Discard)
 	require.Equal(t, apexv1.CodeNotLeaseHolder, leaseCode(t, err), "ann's next run refuses, never takes it back")
 }
+
+// D709: one close of a project at a time — the close lease is held across
+// the close, renewed past its TTL, kept by the same checkout run again,
+// refused to another (coord.close-busy), and free once released.
+func TestHoldClose(t *testing.T) {
+	shortLeases(t, time.Second, 250*time.Millisecond)
+	ctx := context.Background()
+	url := leaseCluster(t)
+	ann, bob := checkout(t, url, "ann"), checkout(t, url, "bob")
+
+	release, err := HoldClose(ctx, ann, io.Discard)
+	require.NoError(t, err)
+	time.Sleep(3 * MilestoneTTL)
+	_, err = HoldClose(ctx, bob, io.Discard)
+	require.Equal(t, apexv1.CodeCloseBusy, leaseCode(t, err), "renewed while ann's close runs")
+	require.ErrorContains(t, err, "ann/")
+	again, err := HoldClose(ctx, ann, io.Discard)
+	require.NoError(t, err, "the same checkout's close run again keeps it")
+	again()
+	release()
+
+	r2, err := HoldClose(ctx, bob, io.Discard)
+	require.NoError(t, err, "released: bob's close takes it")
+	r2()
+	require.Empty(t, mustHolder(t, url, "close.notes-svc"), "released at the end")
+}
+
+func mustHolder(t *testing.T, url, key string) string {
+	t.Helper()
+	nc, err := nats.Connect(url)
+	require.NoError(t, err)
+	defer nc.Close()
+	js, err := jetstream.New(nc)
+	require.NoError(t, err)
+	s, err := lease.Open(context.Background(), js)
+	require.NoError(t, err)
+	h, _, err := s.Holder(context.Background(), key)
+	require.NoError(t, err)
+	return h
+}

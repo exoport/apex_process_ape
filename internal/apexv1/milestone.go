@@ -1022,7 +1022,7 @@ func (p *Project) closeMilestone(ctx context.Context, id string, opt RunOptions,
 	if coordinated {
 		// The close record is milestone/<M>'s last commit; it reaches main
 		// through the close PR, and milestone-done waits for its merge.
-		g.Integration, err = p.openClosePR(ctx, id, 1)
+		g.Integration, err = p.openClosePR(ctx, id, 1, opt)
 		return g, err
 	}
 	reason := "closed, gate green at " + short(g.Run.SHA)

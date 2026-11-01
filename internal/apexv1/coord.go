@@ -19,6 +19,10 @@ const CodeNotLeaseHolder = "session.not-lease-holder"
 // (v1.5 stage 1a, sections 5.2–5.3, OQ17).
 const CodeQueueSettings = "coord.queue-settings"
 
+// CodeCloseBusy: another member's close of this project holds the close
+// lease (D709).
+const CodeCloseBusy = "coord.close-busy"
+
 // CodeCoordMembership: the coordination: block cannot be used — a field
 // missing, an ensemble named as a member project (R8), or no credential
 // at hot/ape-nats.creds.
@@ -30,6 +34,7 @@ func init() {
 		CodeDoc{CodeNotLeaseHolder, 1, ActionPerson, "a project in an ensemble: `ape milestone claim <M>` found the milestone's lease held by another checkout, or an apex-loop run for M, `change new --milestone M` or `change start` of M's change found this checkout holding no lease on M (never claimed, released, or lapsed and taken by another member while no run renewed it) — a person claims M (`ape milestone claim <M>`), or agrees the handover with the holder the message names (v1.5 stage 1a, section 3.1)"},
 		CodeDoc{CodeMilestoneBranchMissing, 1, ActionPerson, "a coordinated project (coordination.github): change new --milestone M or change start of M's change needs milestone/<M>, the branch M's changes are based on, and this checkout has none — a person claims M (`ape milestone claim M` creates it from main on the remote, or tracks the remote's) (v1.5 stage 1a, section 5.1)"},
 		CodeDoc{CodeQueueSettings, 1, ActionPerson, "project check, a project integrating through GitHub (coordination.github): main or a milestone/<M> branch on the remote has no merge queue, or its queue merges by squash or rebase — main's must merge with a merge commit (the close PR's release point, OQ17), and a milestone's too (a take-in merges main, never squashed, section 5.2); a person sets the repository's rulesets (v1.5 stage 1a)"},
+		CodeDoc{CodeCloseBusy, 1, ActionRetry, "ape milestone close in a project integrating through GitHub: another checkout's close holds the project's close lease (close.<project>, D709), which serializes taking main in, gating on the merge, enqueuing and waiting for the merge — the message names the holder; close again once it is done"},
 		CodeDoc{CodeCoordMembership, 1, ActionPerson, "the project's coordination: block in _apex/config.yaml cannot be used (v1.5, OQ3, OQ4): it lacks ensemble, home or url, its ensemble is named as a member project (R8: both compared as subject tokens), the ensemble credential hot/ape-nats.creds is missing, or coordination.github names no <owner>/<name> repository or its token hot/github.token is missing (stage 1a) — a person fixes the block or places the credential"},
 		CodeDoc{CodeCoordNATSUnreachable, 1, ActionRetry, "a project in an ensemble (coordination: in _apex/config.yaml) needs NATS to start a milestone or a change and to integrate (claim, enqueue, elect), and NATS is unreachable (v1.5, OQ5): work already in flight continues; run the command again once NATS is back (`ape status` says since when it is down)"},
 	)

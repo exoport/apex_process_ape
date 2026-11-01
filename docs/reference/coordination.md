@@ -54,7 +54,7 @@ ensemble may not be named like one of its member projects' slugs.
 | Name | Type | Keys | Class | Single writer | Live retention |
 | ---- | ---- | ---- | ----- | ------------- | -------------- |
 | `ape-meta` | KV | `epoch` | native | the `sup.leader` holder | no TTL; rewritten at each rebuild |
-| `ape-leases` | KV, per-key TTL | `steward.<ens>`, `coord.<ens>`, `sup.leader`, `milestone.<project>.<M>`, `conductor.<user>.<ens>` | native | the claimant | TTL; deleted on release or close |
+| `ape-leases` | KV, per-key TTL | `steward.<ens>`, `coord.<ens>`, `sup.leader`, `milestone.<project>.<M>`, `close.<project>`, `conductor.<user>.<ens>` | native | the claimant | TTL; deleted on release or close |
 | `ape-slots` | KV, per-key TTL | `slot.<host>.<resource>.<n>` | native | the holder | TTL |
 | `ape-runs` | KV | `run.<project>.<run-id>` | native | the ape that ran it | 90 days |
 | `ape-attempts` | KV | `attempt.<project>.<change>.<n>` | native | the change's ape | deleted at milestone close |
@@ -88,6 +88,7 @@ release = delete at the last revision; expiry = the key's TTL.
 | Lease | Held by | TTL, renewal |
 | ----- | ------- | ------------ |
 | `milestone.<project>.<M>` | one checkout of the project, as `<user>/<checkout>`: taken by `ape milestone claim <M>`, renewed by the milestone's `apex-loop` run | 30 s, renewed every 10 s while the run lives |
+| `close.<project>` | the one close of the project in progress (D709): taken by `ape milestone close` before it fetches main, held while it gates on the merge, enqueues and waits for the merge, released then | 30 s, renewed every 10 s while the close runs |
 | `steward.<ens>` | the ensemble's steward, any eligible member's conductor | 30 s, renewed every 10 s |
 | `coord.<ens>` | the ensemble's coordinator | 30 s, renewed every 10 s |
 | `sup.leader` | the active supervisor; a standby takes over on expiry | 30 s, renewed every 10 s |
@@ -154,6 +155,14 @@ ape asks it over NATS, as the member's user, for a one-hour token narrowed to th
 passed only through git's `GIT_CONFIG_*` environment, never argv, a URL or disk. Without `app`, `hot/github.token`
 and git's own credentials are used, as before. The operator's set-up acts are `ape ghapp setup rulesets|workflow|
 secrets|runner-token`. `ape ghapp print-config` and `ape ghapp print-unit` print the files the operator installs.
+
+**Stage 1a has no self-hosted runner (D708).** The gate the queue's check would run, ape runs locally on
+`milestone/<M>` with the current main taken in before it enqueues the close PR. If main moves meanwhile, it takes it
+in and gates again. An ejected close PR is gated again before it goes back. Members learn merges by polling GitHub
+(every minute, `QueuePoll`), not through CI's events. R4 has no required status check, since nothing would report
+one, so main keeps pull requests only, its merge queue and no force-push. `ape ci check`'s refusal of a non-ape
+PR has no runner to enforce it in 1a: on the private mirror only ape and the operator can open PRs. The queue
+workflow (`ape ci workflow`) and its two secrets are not installed in 1a.
 
 `ape project check` reads main's merge queue. It must merge with a merge commit, or it is a `coord.queue-settings`
 finding.

@@ -5257,19 +5257,27 @@ done, gate green (exit 0) …", "close <M>: gate red, not closed (exit 1) …"; 
 `ape status --json` milestones[].last_gate); --json puts "exit" and "log" first and "verdict" last.
 
 Coordinated (v1.5 stage 1a; a project with coordination.github, section 5.3; D702): the
-close needs this checkout's lease on M and runs on milestone/<M>, fetched and synced.
+close needs this checkout's lease on M and runs on milestone/<M>, fetched and synced. It
+holds the project's close lease (close.<project>, D709) from before it fetches main to the
+merge, so closes take main in, gate and merge one at a time (another checkout's close in
+progress: coord.close-busy, retry).
 When main moved since the milestone last took it in, the close takes it in first
 (`ape milestone take-in --help`): its conflict or red regression is the close's refusal,
 laid out for apex-apply. The gate runs as above, and the close record, "apex: <M> done"
 (an accepted red recorded with its gate run), lands on the remote's milestone/<M> with
-archive's fenced fast-forward push. ape opens the close PR milestone/<M> → main and
-enqueues it; its required check, the milestone gate on the merge with the
+archive's fenced fast-forward push. Before the PR goes into main's queue, ape checks main
+did not move since that gate; if it did, it takes main in and runs the gate again, so the
+queue only ever gets the tree main will have (D708: stage 1a has no runner, so this local
+gate is the check). ape then opens the close PR milestone/<M> → main and enqueues it; its required check, the milestone gate on the merge with the
 current main, is `ape ci check` in CI (`ape ci --help`), and main's queue merges with a merge commit, the
-release point. The run waits for the queue as a coordinated archive does. Merged: main
+release point. The run waits for the queue, reading the PR from GitHub every minute (and
+at each member NATS event, when CI publishes one). Merged: main
 fast-forwards to the merge, milestone/<M> is deleted here and on the remote, the
 milestone's lease is released, and milestone-done names the release point; tagging stays
-a person's act (OQ20). Ejected: main is taken in again the same way, then the close PR is
-pushed and enqueued again, an attempt (limits.attempts: integration.ejections-exceeded).
+a person's act (OQ20). Ejected: main is taken in again the same way, the gate runs again on
+the branch (red refuses: gate.red; an accepted red passes only on its red set), and the
+close PR is pushed and enqueued again, an attempt (limits.attempts:
+integration.ejections-exceeded).
 
 Exit codes: 0 done · 1 gate red (without --accept-red), changes in flight, not approved,
 no approval record, a changed gate, an archived gate/ in the way, or HEAD on a change

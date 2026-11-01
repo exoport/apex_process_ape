@@ -46,7 +46,7 @@ const byRunner = "the ape that ran it"
 // the page lists them.
 var Stores = []Store{
 	{Name: "ape-meta", Type: "KV", Keys: []string{"epoch"}, Class: Native, Writer: "the `sup.leader` holder", Retention: "no TTL; rewritten at each rebuild"},
-	{Name: "ape-leases", Type: "KV, per-key TTL", Keys: []string{"steward.<ens>", "coord.<ens>", "sup.leader", "milestone.<project>.<M>", "conductor.<user>.<ens>"}, Class: Native, Writer: "the claimant", Retention: "TTL; deleted on release or close"},
+	{Name: "ape-leases", Type: "KV, per-key TTL", Keys: []string{"steward.<ens>", "coord.<ens>", "sup.leader", "milestone.<project>.<M>", "close.<project>", "conductor.<user>.<ens>"}, Class: Native, Writer: "the claimant", Retention: "TTL; deleted on release or close"},
 	{Name: "ape-slots", Type: "KV, per-key TTL", Keys: []string{"slot.<host>.<resource>.<n>"}, Class: Native, Writer: "the holder", Retention: "TTL"},
 	{Name: "ape-runs", Type: "KV", Keys: []string{"run.<project>.<run-id>"}, Class: Native, Writer: byRunner, Retention: "90 days"},
 	{Name: "ape-attempts", Type: "KV", Keys: []string{"attempt.<project>.<change>.<n>"}, Class: Native, Writer: "the change's ape", Retention: "deleted at milestone close"},
@@ -108,6 +108,10 @@ func CoordKey(ens string) string { return "coord." + ens }
 
 // MilestoneKey is a milestone's lease, held by its orchestrator.
 func MilestoneKey(project, m string) string { return "milestone." + project + "." + m }
+
+// CloseKey is a project's close lease (D709): held by the one close that
+// is taking main in, gating, enqueuing and waiting for its merge.
+func CloseKey(project string) string { return "close." + project }
 
 // ConductorKey is one person's conductor lease for an ensemble.
 func ConductorKey(user, ens string) string { return "conductor." + user + "." + ens }

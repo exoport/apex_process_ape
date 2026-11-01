@@ -2,6 +2,7 @@ package apexv1
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -114,4 +115,53 @@ func TestClosePR_TakeInConflictRefuses(t *testing.T) {
 	require.Equal(t, CodeConflicted, ce.Code)
 	require.Equal(t, "change/take-in-1", CurrentBranch(ctx(), p.Root))
 	require.Empty(t, f.opened, "no close PR before main is in")
+}
+
+// D708 (no runner in 1a): an ejected close PR goes back into main's queue
+// only after the gate ran again on the branch as it now is; red refuses.
+func TestClosePR_RedoRegatesAndRefusesRed(t *testing.T) {
+	files := baseFiles()
+	files["_apex/config.yaml"] = coordinatedConfig
+	files["gate.sh"] = "#!/bin/sh\ntest ! -f boom\n"
+	p := fixture(t, files)
+	bare := withOrigin(t, p)
+	_, _, err := p.PrepareMilestoneBranch(ctx(), "M1")
+	require.NoError(t, err)
+	f := &fakeIntegrator{states: map[int]PRState{}}
+	useIntegrator(t, f)
+	_, err = p.CloseMilestone(ctx(), "M1", RunOptions{})
+	require.NoError(t, err)
+	require.Len(t, f.enqueued, 1)
+
+	// Ejected; main brings what turns the gate red.
+	pushFile(t, bare, "main", "boom", "x\n")
+	f.states[7] = PRState{}
+	_, err = p.CloseMilestone(ctx(), "M1", RunOptions{})
+	require.Equal(t, "gate.red", failCode(t, err))
+	require.ErrorContains(t, err, "not enqueued")
+	require.Len(t, f.enqueued, 1, "not enqueued again on red")
+}
+
+// D708: main moving between the close's gate and its enqueue is taken in
+// and gated again before the PR goes into the queue.
+func TestClosePR_MainMovedDuringGate(t *testing.T) {
+	clone, mark := t.TempDir(), filepath.Join(t.TempDir(), "moved")
+	files := baseFiles()
+	files["_apex/config.yaml"] = coordinatedConfig
+	files["gate.sh"] = "#!/bin/sh\nif [ ! -f " + mark + " ]; then touch " + mark + "; cd " + clone +
+		" && echo moved >> notes.txt && git add notes.txt && git -c user.name=t -c user.email=t@t commit -qm 'elsewhere: main moved' && git push -q origin main; fi\nexit 0\n"
+	p := fixture(t, files)
+	bare := withOrigin(t, p)
+	run(t, clone, "clone", "-q", "--branch", "main", bare, ".")
+	_, _, err := p.PrepareMilestoneBranch(ctx(), "M1")
+	require.NoError(t, err)
+	f := &fakeIntegrator{states: map[int]PRState{}}
+	useIntegrator(t, f)
+
+	g, err := p.CloseMilestone(ctx(), "M1", RunOptions{})
+	require.NoError(t, err)
+	require.FileExists(t, mark, "the gate ran and moved main")
+	require.Len(t, f.enqueued, 1)
+	run(t, bare, "merge-base", "--is-ancestor", "main", "milestone/M1")
+	require.Equal(t, g.Integration.Commit, run(t, bare, "rev-parse", "milestone/M1"), "enqueued on the tree with the moved main")
 }

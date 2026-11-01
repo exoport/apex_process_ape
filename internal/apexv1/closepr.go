@@ -3,6 +3,7 @@ package apexv1
 import (
 	"context"
 	"fmt"
+	"slices"
 )
 
 // The close PR (v1.5 stage 1a, proposal sections 5.3 and 7): in a project
@@ -63,10 +64,74 @@ func (p *Project) prepareClose(ctx context.Context, ms string, opt RunOptions, p
 	return p.requireTakenIn(ctx, ms)
 }
 
+// closeRegateRounds bounds how often a close takes in a main that keeps
+// moving before it gives up (milestone.take-in-needed, retry).
+const closeRegateRounds = 3
+
+// regateClose runs ms's gate with its full run on milestone/<M> as it now
+// is — main taken in, so the tree main will have — before its close PR
+// goes into main's queue, which has no runner to check it in stage 1a
+// (D708). Red refuses, unless it is the red set a person accepted (OQ26).
+// A changed result is committed on the branch, as the close commits it.
+func (p *Project) regateClose(ctx context.Context, ms string, opt RunOptions) error {
+	g, err := p.runGate(ctx, ms, opt, true)
+	if err != nil {
+		return err
+	}
+	if g.ResultChanged {
+		if _, err := p.commitMilestone(context.WithoutCancel(ctx), nil, ms, "gate "+gateResult(&g.Run)); err != nil {
+			return err
+		}
+	}
+	if g.Run.Green() {
+		return nil
+	}
+	recs, err := p.LoadMilestoneRecords()
+	if err == nil {
+		if r := recs[ms]; r != nil && r.AcceptRed != nil && r.AcceptRed.Gate != nil && slices.Equal(gateRedSet(&g.Run), gateRedSet(r.AcceptRed.Gate)) {
+			return nil
+		}
+	}
+	return &FailError{Code: "gate.red", Msg: fmt.Sprintf("%s's gate is red on milestone/%s merged with the current main (%s): its close PR is not enqueued — main's queue has no runner to check it (D708); plan the next change toward it, then close again", ms, ms, g.Run.Why())}
+}
+
+// mainIn reports main's remote tip in the local milestone branch, fetched
+// first.
+func (p *Project) mainIn(ctx context.Context, ms string) (bool, error) {
+	if err := p.fetchCoordinated(ctx, "main"); err != nil {
+		return false, &FailError{Code: CodeFetchFailed, Msg: "the close of " + ms + " needs main fetched: " + err.Error()}
+	}
+	_, err := git(ctx, p.Root, "merge-base", "--is-ancestor", "refs/remotes/"+p.trunkRemote(ctx)+"/main", "refs/heads/"+MilestoneBranch(ms))
+	return err == nil, nil
+}
+
 // openClosePR lands milestone/<M>'s tip, close record last, on the
 // remote's milestone/<M> (the fenced fast-forward push, D702) and opens
-// and enqueues the PR milestone/<M> → main.
-func (p *Project) openClosePR(ctx context.Context, ms string, attempts int) (*Integration, error) {
+// and enqueues the PR milestone/<M> → main. First, when main moved since
+// the close's gate, it takes main in and gates again (D708), a few rounds
+// at most: the PR goes into the queue only on the tree main will have.
+func (p *Project) openClosePR(ctx context.Context, ms string, attempts int, opt RunOptions) (*Integration, error) {
+	for round := 0; ; round++ {
+		in, err := p.mainIn(ctx, ms)
+		if err != nil {
+			return nil, err
+		}
+		if in {
+			break
+		}
+		if round == closeRegateRounds {
+			return nil, &FailError{Code: CodeTakeInNeeded, Action: ActionRetry, Msg: fmt.Sprintf("main kept moving while %s's close took it in and gated it (%d rounds) — close again", ms, closeRegateRounds)}
+		}
+		if _, err := p.TakeIn(ctx, ms, opt); err != nil {
+			return nil, err
+		}
+		if err := p.switchBranch(ctx, MilestoneBranch(ms)); err != nil {
+			return nil, err
+		}
+		if err := p.regateClose(ctx, ms, opt); err != nil {
+			return nil, err
+		}
+	}
 	base, remote := MilestoneBranch(ms), p.trunkRemote(ctx)
 	tip, err := git(ctx, p.Root, "rev-parse", "refs/heads/"+base)
 	if err != nil {
@@ -143,7 +208,11 @@ func (p *Project) resolveClose(ctx context.Context, ms string, opt RunOptions, p
 	if err := p.prepareClose(ctx, ms, opt, progress); err != nil {
 		return g, true, err
 	}
-	in, err := p.openClosePR(ctx, ms, rec.Attempts+1)
+	// Ejected: the gate runs again on the branch as it now is (D708).
+	if err := p.regateClose(ctx, ms, opt); err != nil {
+		return g, true, err
+	}
+	in, err := p.openClosePR(ctx, ms, rec.Attempts+1, opt)
 	g.Integration = in
 	return g, true, err
 }

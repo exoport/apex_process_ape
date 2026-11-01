@@ -220,6 +220,7 @@ func ActionFor(code string) string {
 // fails when code and list disagree.
 var DiagnosticCodes = []CodeDoc{
 	// usage (exit 2)
+	{"usage.branch", 2, "stop", "ape ghapp land: the branch is milestone/<M> (ape's own: archive, take-in and close write it) or main (which takes pull requests only) — land a work branch"},
 	{"usage.by", 2, "stop", "--by is required: who approves or accepts"},
 	{"usage.change-id", 2, "stop", "the change id is not ^[a-z][a-z0-9-]{2,39}$"},
 	{"usage.decision-slug", 2, "stop", "the decision slug is not kebab-case"},

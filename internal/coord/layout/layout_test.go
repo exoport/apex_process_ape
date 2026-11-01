@@ -47,7 +47,7 @@ func TestKeysAndTokens(t *testing.T) {
 	require.True(t, Token{3, 18}.Newer(Token{3, 17}))
 	require.False(t, Token{3, 17}.Newer(Token{3, 17}))
 	// Every lease and slot key names a store that holds it.
-	for _, k := range []string{"steward.<ens>", "coord.<ens>", "sup.leader", "milestone.<project>.<M>", "conductor.<user>.<ens>"} {
+	for _, k := range []string{"steward.<ens>", "coord.<ens>", "sup.leader", "milestone.<project>.<M>", "close.<project>", "conductor.<user>.<ens>"} {
 		require.Contains(t, Stores[1].Keys, k)
 	}
 }
