@@ -118,25 +118,30 @@ func TestBehindUpstream_CoordinatedFetches(t *testing.T) {
 	run(t, p.Root, "switch", "-q", "milestone/M1")
 	addChange(t, p, "add-wave", changeDoc("add-wave", "greeting", addedWave, "- T1 wave — check: ./wave.sh"))
 	commitAll(t, p, "plan: add-wave")
-	// Another member's change merges into milestone/M1 on the remote.
-	before := run(t, p.Root, "rev-parse", "refs/remotes/origin/milestone/M1")
-	run(t, p.Root, "push", "-q", bare, run(t, p.Root, "commit-tree", "-p", before, "-m", "someone else's merge", before+"^{tree}")+":refs/heads/milestone/M1")
-	require.Equal(t, before, run(t, p.Root, "rev-parse", "refs/remotes/origin/milestone/M1"), "not fetched yet")
-	local := run(t, p.Root, "rev-parse", "milestone/M1")
-
-	_, err = p.Start(ctx(), "add-wave", RunOptions{})
-	require.Equal(t, CodeBehindUpstream, failCode(t, err), "the fetch saw the member's push")
-	require.ErrorContains(t, err, "milestone/M1 is 1 commit(s) behind its upstream origin/milestone/M1")
-	require.Equal(t, run(t, bare, "rev-parse", "milestone/M1"), run(t, p.Root, "rev-parse", "refs/remotes/origin/milestone/M1"))
-	require.Equal(t, "milestone/M1", CurrentBranch(ctx(), p.Root))
-	require.Equal(t, local, run(t, p.Root, "rev-parse", "milestone/M1"), "only the remote-tracking ref moved")
-
 	// A fetch that fails refuses, and writes nothing.
+	url := run(t, p.Root, "config", "remote.origin.url")
 	run(t, p.Root, "config", "remote.origin.url", "/nonexistent")
 	_, err = p.Start(ctx(), "add-wave", RunOptions{})
 	require.Equal(t, CodeFetchFailed, failCode(t, err))
 	require.ErrorContains(t, err, "git fetch origin refs/heads/milestone/M1 failed")
 	require.False(t, p.branchExists(ctx(), "change/add-wave"))
+	run(t, p.Root, "config", "remote.origin.url", url)
+
+	// Another member's change merges into milestone/M1 on the remote; the
+	// local base carries this checkout's unpushed plan commit.
+	before := run(t, p.Root, "rev-parse", "refs/remotes/origin/milestone/M1")
+	theirs := run(t, p.Root, "commit-tree", "-p", before, "-m", "someone else's merge", before+"^{tree}")
+	run(t, p.Root, "push", "-q", bare, theirs+":refs/heads/milestone/M1")
+	require.Equal(t, before, run(t, p.Root, "rev-parse", "refs/remotes/origin/milestone/M1"), "not fetched yet")
+
+	// The fetch sees it, and the plan commit is replayed onto it: the
+	// change starts from the merged tip.
+	_, err = p.Start(ctx(), "add-wave", RunOptions{})
+	require.NoError(t, err)
+	require.Equal(t, theirs, run(t, p.Root, "rev-parse", "refs/remotes/origin/milestone/M1"))
+	require.Equal(t, theirs, run(t, p.Root, "rev-parse", "milestone/M1^"), "the plan commit sits on the member's merge")
+	require.Equal(t, "plan: add-wave", run(t, p.Root, "log", "-1", "--format=%s", "milestone/M1"))
+	run(t, p.Root, "merge-base", "--is-ancestor", "milestone/M1", "change/add-wave")
 }
 
 func TestBehindUpstream_UncoordinatedNeverFetches(t *testing.T) {

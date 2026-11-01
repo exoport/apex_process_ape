@@ -47,7 +47,7 @@ func (p *Project) PrepareMilestoneBranch(ctx context.Context, ms string) (branch
 		return "", false, nil
 	}
 	remote := p.trunkRemote(ctx)
-	env := []string{"GIT_TERMINAL_PROMPT=0"}
+	env := noPromptEnv
 	fail := func(what string, err error) error {
 		return &FailError{Code: CodeFetchFailed, Msg: fmt.Sprintf("claiming %s needs %s on %s: %s failed: %v — fix the remote or its credentials, then claim again (the lease is held)", ms, branch, remote, what, err)}
 	}

@@ -1610,6 +1610,23 @@ Archive a reviewed change onto its base branch (trial decision D38):
 The base branch gets exactly one commit per archived change; ape's status commits stay on
 the change branch, squashed away.
 
+Coordinated (v1.5 stage 1a; a project with coordination.github, section 5.1): the base is
+milestone/<M>, fetched first. When the remote moved it, the local base fast-forwards, or
+its own unpushed commits (a planned change's records, which ride that change's PR) are
+replayed onto the remote tip, and the catch-up above follows. Step 7's one squash commit
+is then pushed to apex/<id> on main's remote (forced: it replaces an earlier attempt's),
+and the base goes back where it was: the change lands through its pull request. ape
+opens the PR into milestone/<M>, or reuses the open one, and enqueues it in the base's
+merge queue. Its record is kept in _apex/state/coord/prs.json; change/<id> is kept. The
+archive then waits for the queue, re-reading the PR every minute and at each of the
+member's NATS events. Merged: the local base moves to the merged tip, change/<id>'s tip is
+kept as refs/apex/archive/<id> and the branch deleted. Ejected (out of the queue, not
+merged): archived again from the catch-up, counted as an attempt; the ejection that
+reaches limits.attempts blocks the change (integration.ejections-exceeded). A push that
+fails rolls back like any failure on the base (integration.push-failed), and a PR that
+cannot open or enqueue is integration.pr-failed: archive again. While it waits, --wait
+returns 75 as for any detached run.
+
 A crash mid-archive (H28): archive keeps a journal, _apex/state/archive-journal.json
 (ignored; base, its sha before, the branch and its tip, the step), from before the
 catch-up until it returns. A journal that outlives its process is rolled back by the next

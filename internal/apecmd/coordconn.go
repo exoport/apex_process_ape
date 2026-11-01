@@ -71,5 +71,10 @@ func defaultCoordID(kind string) string {
 	return kind + "-" + natsconn.SubjectToken(host) + "-" + strconv.Itoa(os.Getpid())
 }
 
-// A member project's events are also published on NATS (v1.5).
-func init() { apexv1.EventSink = member.Publish }
+// A member project's events are also published on NATS (v1.5), and a
+// project integrating through GitHub opens its PRs with ape's own client
+// (stage 1a).
+func init() {
+	apexv1.EventSink = member.Publish
+	apexv1.NewIntegrator = member.Integrator
+}

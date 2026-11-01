@@ -293,6 +293,13 @@ func CoordTokensPath(projectRoot string) string {
 	return filepath.Join(V1StateDir(projectRoot), "coord", "tokens.json")
 }
 
+// CoordPRsPath records a coordinated checkout's change pull requests
+// (v1.5 stage 1a, section 5.1; apexv1.Integration): which PR each archive
+// opened and enqueued, and what came of it.
+func CoordPRsPath(projectRoot string) string {
+	return filepath.Join(V1StateDir(projectRoot), "coord", "prs.json")
+}
+
 // ConductorDir holds a project's orchestrator terminal (v1.4.2): the
 // supervisor's state, the conductor's queued messages, the last pane and
 // the supervisor's log.

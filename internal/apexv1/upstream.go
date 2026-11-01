@@ -66,6 +66,10 @@ func (u *BaseUpstream) Describe() string {
 	return s + " (the local " + u.Upstream + ", as last fetched)"
 }
 
+// noPromptEnv keeps git from asking for credentials: ape's fetches and
+// pushes run unattended, and fail instead.
+var noPromptEnv = []string{"GIT_TERMINAL_PROMPT=0"}
+
 // coordinated: the project integrates through a coordinated repository
 // (coordination.github, v1.5 stage 1a), so other members push to its
 // trunk and ape must fetch before judging the base.
@@ -90,12 +94,43 @@ func (p *Project) fetchUpstreams(ctx context.Context, base, what string) error {
 		if remote == "" || merge == "" || remote == "." {
 			continue
 		}
-		if _, err := gitWithEnv(ctx, p.Root, []string{"GIT_TERMINAL_PROMPT=0"}, "fetch", "--quiet", "--no-tags", remote, merge); err != nil {
+		if _, err := gitWithEnv(ctx, p.Root, noPromptEnv, "fetch", "--quiet", "--no-tags", remote, merge); err != nil {
 			return &FailError{Code: CodeFetchFailed, Msg: fmt.Sprintf("this project is coordinated, and %s needs %s's upstream fetched first: git fetch %s %s failed: %v — fix the remote or its credentials, then run this again; nothing was written",
 				what, b, remote, merge, err)}
 		}
 	}
 	return nil
+}
+
+// syncCoordinatedBase brings a coordinated project's base up to its
+// fetched upstream, which only merges move (section 5.1): behind only, it
+// fast-forwards; behind and ahead — this checkout's own unpushed records,
+// a planned change's commits, which ride that change's PR (5.4) — it
+// replays them onto the upstream tip. A replay that conflicts is aborted
+// and leaves the base as it was, for refuseBehindUpstream to refuse. The
+// tree must be clean, and the base free of other worktrees.
+func (p *Project) syncCoordinatedBase(ctx context.Context, base string) {
+	u := p.upstreamOf(ctx, base)
+	if u == nil || u.Behind == 0 || p.requireCleanTree(ctx, "sync") != nil || p.requireBranchFree(ctx, base, "sync") != nil {
+		return
+	}
+	cur := CurrentBranch(ctx, p.Root)
+	up := "refs/remotes/" + u.Upstream
+	if u.Ahead == 0 {
+		if cur == base {
+			_, _ = git(ctx, p.Root, "merge", "--ff-only", "-q", up)
+			return
+		}
+		old, _ := git(ctx, p.Root, "rev-parse", "refs/heads/"+base)
+		_, _ = git(ctx, p.Root, "update-ref", "refs/heads/"+base, up, old)
+		return
+	}
+	if _, err := git(ctx, p.Root, "rebase", "-q", up, base); err != nil {
+		_, _ = git(ctx, p.Root, "rebase", "--abort")
+	}
+	if cur != "" && CurrentBranch(ctx, p.Root) != cur {
+		_, _ = git(ctx, p.Root, "switch", "-q", cur)
+	}
 }
 
 // refuseBehindUpstream refuses starting a change from, or archiving one
@@ -107,6 +142,7 @@ func (p *Project) refuseBehindUpstream(ctx context.Context, base, what string) e
 		if err := p.fetchUpstreams(ctx, base, what); err != nil {
 			return err
 		}
+		p.syncCoordinatedBase(ctx, base)
 	}
 	u := p.upstreamOf(ctx, base)
 	if u == nil || u.Behind == 0 {
