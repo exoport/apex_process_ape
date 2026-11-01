@@ -245,8 +245,32 @@ func (c *Client) LatestFor(ctx context.Context, head, base string) (number int, 
 	return pr.Number, pr.URL, pr.State, merged, nil
 }
 
+// RulesFor is the rule types that apply to branch, as GitHub evaluates
+// them by name (the branch need not exist), with each merge_queue rule's
+// merge method.
+func (c *Client) RulesFor(ctx context.Context, branch string) ([]string, error) {
+	var rules []struct {
+		Type       string         `json:"type"`
+		Parameters map[string]any `json:"parameters"`
+	}
+	if err := c.do(ctx, http.MethodGet, c.API+"/repos/"+c.Repo+"/rules/branches/"+url2.PathEscape(branch), nil, &rules); err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(rules))
+	for _, r := range rules {
+		t := r.Type
+		if m, ok := r.Parameters["merge_method"].(string); ok {
+			t += "(" + m + ")"
+		}
+		out = append(out, t)
+	}
+	return out, nil
+}
+
 // FindOpen is the open pull request from head into base, nil for none.
-func (c *Client) FindOpen(ctx context.Context, head, base string) (*PR, error) { return c.findOpen(ctx, head, base) }
+func (c *Client) FindOpen(ctx context.Context, head, base string) (*PR, error) {
+	return c.findOpen(ctx, head, base)
+}
 
 // State is a pull request's state as the wait reads it.
 type State struct {
@@ -265,10 +289,14 @@ func (c *Client) PRState(ctx context.Context, number int) (State, error) {
 	var out struct {
 		Repository struct {
 			PullRequest struct {
-				State           string `json:"state"`
-				Merged          bool   `json:"merged"`
-				MergeCommit     *struct{ OID string `json:"oid"` } `json:"mergeCommit"`
-				MergeQueueEntry *struct{ State string `json:"state"` } `json:"mergeQueueEntry"`
+				State       string `json:"state"`
+				Merged      bool   `json:"merged"`
+				MergeCommit *struct {
+					OID string `json:"oid"`
+				} `json:"mergeCommit"`
+				MergeQueueEntry *struct {
+					State string `json:"state"`
+				} `json:"mergeQueueEntry"`
 			} `json:"pullRequest"`
 		} `json:"repository"`
 	}

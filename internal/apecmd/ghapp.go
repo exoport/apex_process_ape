@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strings"
 	"syscall"
@@ -39,7 +40,7 @@ Every request is logged (never a token or a secret's value); secrets and runner-
 run the operator's notify. ` + "`ape ghapp print-config`" + ` and ` + "`ape ghapp print-unit`" + ` print the files a
 person installs.`,
 	}
-	cmd.AddCommand(newGhappServeCmd(), newGhappPrintConfigCmd(), newGhappPrintUnitCmd(), newGhappSetupCmd(), newGhappLandCmd(), newGhappFetchCmd())
+	cmd.AddCommand(newGhappServeCmd(), newGhappPrintConfigCmd(), newGhappPrintUnitCmd(), newGhappSetupCmd(), newGhappLandCmd(), newGhappFetchCmd(), newGhappProbeCmd())
 	return cmd
 }
 
@@ -416,4 +417,72 @@ Exit codes: 0 fetched · 1 the fetch or a fast-forward failed · 2 usage.`,
 	}
 	addV1Flags(cmd, &f)
 	return cmd
+}
+
+func newGhappProbeCmd() *cobra.Command {
+	var f v1Flags
+	cmd := &cobra.Command{
+		Use:    "probe <milestone/M>",
+		Short:  "Research's mirror checks of R1–R4 (D706 C.5): rules for a branch and for main, the App's push and force push",
+		Hidden: true,
+		Long: `Run research's mirror checks against the coordinated repository: (1) the rules GitHub
+applies to <branch> by name (it need not exist); (2) the App's push creating <branch> at
+main's tip (R1's bypass: accepted); (3) the App's force push of a commit that does not
+descend from it (R2, no bypass: refused); (4) the rules on main (the merge queue, method
+MERGE). The pushed branch stays: R3 refuses its deletion, a person prunes it.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			p, err := v1Project(&f)
+			if err != nil {
+				return err
+			}
+			ctx, w, branch := cmd.Context(), cmd.OutOrStdout(), args[0]
+			show := func(b string) {
+				rules, err := member.RulesFor(ctx, p, b)
+				if err != nil {
+					fmt.Fprintf(w, "rules for %s: %v\n", b, err)
+					return
+				}
+				fmt.Fprintf(w, "rules for %s: %s\n", b, strings.Join(rules, ", "))
+			}
+			show(branch)
+			url, env, err := member.GitVia(ctx, p, "push")
+			if err != nil {
+				return failErr(fmt.Errorf("no App push path: %w", err))
+			}
+			if url == "" {
+				return failErr(errors.New("no App push path: coordination.github.app is off"))
+			}
+			if _, err := p.FetchAndSync(ctx, "main"); err != nil {
+				return v1Fail(cmd, &f, err, nil)
+			}
+			mainTip, _ := gitOut(ctx, p.Root, "rev-parse", "refs/remotes/origin/main")
+			mainTip = strings.TrimSpace(mainTip)
+			push := func(what string, args ...string) {
+				c := exec.CommandContext(ctx, "git", //nolint:gosec // fixed git verb; refspecs are ours
+					append([]string{"-C", p.Root, "push", "--porcelain", "--no-follow-tags"}, args...)...)
+				c.Env = append(os.Environ(), append(env, "GIT_TERMINAL_PROMPT=0")...)
+				out, err := c.CombinedOutput()
+				verdict := "accepted"
+				if err != nil {
+					verdict = "refused"
+				}
+				fmt.Fprintf(w, "%s: %s — %s\n", what, verdict, strings.TrimSpace(probeLastLine(string(out))))
+			}
+			push("the App's push creating "+branch+" at main "+mainTip[:min(7, len(mainTip))], url, mainTip+":refs/heads/"+branch)
+			orphan, err := gitOut(ctx, p.Root, "commit-tree", "-m", "probe: a commit not descending from "+branch, mainTip+"^{tree}")
+			if err == nil {
+				push("the App's force push of a non-descendant to "+branch, "--force", url, strings.TrimSpace(orphan)+":refs/heads/"+branch)
+			}
+			show("main")
+			return nil
+		},
+	}
+	addV1Flags(cmd, &f)
+	return cmd
+}
+
+func probeLastLine(s string) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	return lines[len(lines)-1]
 }

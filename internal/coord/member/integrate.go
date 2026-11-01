@@ -28,6 +28,20 @@ func Integrator(p *apexv1.Project) (apexv1.Integrator, error) {
 
 type ghIntegrator struct{ c *github.Client }
 
+// RulesFor is the rule types GitHub applies to branch on the coordinated
+// repository (a read token).
+func RulesFor(ctx context.Context, p *apexv1.Project, branch string) ([]string, error) {
+	m, err := Load(p)
+	if err != nil {
+		return nil, err
+	}
+	tok, err := m.GitHubTokenFor(ctx, "read")
+	if err != nil {
+		return nil, err
+	}
+	return github.New(m.GitHubAPI, m.GitHubRepo, tok).RulesFor(ctx, branch)
+}
+
 // PRStatus is the newest PR from head into base: one line.
 func PRStatus(ctx context.Context, p *apexv1.Project, head, base string) (string, error) {
 	m, err := Load(p)
