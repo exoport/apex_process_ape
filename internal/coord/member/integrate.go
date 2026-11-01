@@ -61,7 +61,31 @@ func PRStatus(ctx context.Context, p *apexv1.Project, head, base string) (string
 	case merged != "":
 		return fmt.Sprintf("#%d %s merged as %s", n, u, merged), nil
 	}
-	return fmt.Sprintf("#%d %s %s", n, u, state), nil
+	line := fmt.Sprintf("#%d %s %s", n, u, state)
+	if state != "open" {
+		return line, nil
+	}
+	// An open PR: its place in main's queue and how it got there or left
+	// (FINDING-V15-1A-7); a read that fails says so, never "not queued".
+	entry, ms, events, err := github.New(m.GitHubAPI, m.GitHubRepo, tok).QueueHistory(ctx, n)
+	if err != nil {
+		return line + "; its merge-queue entry could not be read (" + err.Error() + "): not judged", nil //nolint:nilerr // the PR's own state stands; the queue's is said to be unread
+	}
+	if entry == "" {
+		entry = "not in the queue"
+	}
+	var b strings.Builder
+	b.WriteString(line + "; queue: " + entry + "; mergeable state: " + ms)
+	for _, e := range events {
+		b.WriteString("; " + e.Kind + " " + e.At)
+		if e.Actor != "" {
+			b.WriteString(" by " + e.Actor)
+		}
+		if e.Reason != "" {
+			b.WriteString(": " + e.Reason)
+		}
+	}
+	return b.String(), nil
 }
 
 // Dequeue takes the open PR from head into base out of the merge queue.
@@ -93,11 +117,25 @@ func (g ghIntegrator) OpenPR(ctx context.Context, head, base, title, body string
 	return apexv1.PRRef{Number: pr.Number, NodeID: pr.NodeID, URL: pr.URL}, nil
 }
 
-// Enqueue enqueues the PR, waiting out GitHub's mergeability computation
-// on a PR just opened or pushed (it refuses an enqueue until then, seen on
-// the mirror for PRs #1 and #2): retried every enqueueRetryEvery, at most
-// enqueueRetries times; any other refusal is returned at once.
+// Enqueue enqueues the PR once GitHub knows its mergeability
+// (FINDING-V15-1A-7 a): enqueued while it is UNKNOWN, the queue may build
+// no merge commit and eject it at once (invalid_merge_commit, the mirror's
+// PR #9). It looks every enqueueRetryEvery, at most enqueueRetries times,
+// then enqueues all the same; GitHub's refusal of an enqueue before then
+// (PRs #1 and #2) is retried the same way, and any other refusal returned
+// at once.
 func (g ghIntegrator) Enqueue(ctx context.Context, pr apexv1.PRRef) (string, error) {
+	for range enqueueRetries {
+		_, ms, _, err := g.c.QueueHistory(ctx, pr.Number)
+		if err != nil || ms != "UNKNOWN" {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(enqueueRetryEvery):
+		}
+	}
 	for i := 0; ; i++ {
 		st, err := g.c.Enqueue(ctx, &github.PR{Number: pr.Number, NodeID: pr.NodeID, URL: pr.URL})
 		if err == nil || i == enqueueRetries || !strings.Contains(err.Error(), "has not yet completed") {
@@ -122,5 +160,23 @@ func (g ghIntegrator) PRState(ctx context.Context, n int) (apexv1.PRState, error
 	if err != nil {
 		return apexv1.PRState{}, err
 	}
-	return apexv1.PRState{Merged: s.Merged, Closed: s.Closed, Queue: s.Queue, MergeCommit: s.MergeCommit}, nil
+	out := apexv1.PRState{Merged: s.Merged, Closed: s.Closed, Queue: s.Queue, MergeCommit: s.MergeCommit}
+	if !s.Merged && !s.Closed && s.Queue == "" {
+		out.Removed = g.removedReason(ctx, n)
+	}
+	return out, nil
+}
+
+// removedReason is why an open PR out of the queue left it, from its
+// history (FINDING-V15-1A-7 b): its last queue event's reason when that
+// event removed it, else "" (never queued, re-added, or unreadable).
+func (g ghIntegrator) removedReason(ctx context.Context, n int) string {
+	_, _, events, err := g.c.QueueHistory(ctx, n)
+	if err != nil || len(events) == 0 || events[len(events)-1].Kind != "removed" {
+		return ""
+	}
+	if r := events[len(events)-1].Reason; r != "" {
+		return r
+	}
+	return "no reason given"
 }

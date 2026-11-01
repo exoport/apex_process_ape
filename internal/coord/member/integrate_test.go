@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -68,7 +69,7 @@ func TestIntegrator_TheConfiguredRepository(t *testing.T) {
 	s, err := in.PRState(ctx, 3)
 	require.NoError(t, err)
 	require.Equal(t, apexv1.PRState{Merged: true, MergeCommit: "abc"}, s)
-	require.Equal(t, []string{"shop"}, owners)
+	require.Equal(t, []string{"shop", "shop"}, owners, "the mergeability read before the enqueue, then the state")
 	for _, line := range seen {
 		require.True(t, strings.HasSuffix(line, " Bearer github_pat_t"), line)
 	}
@@ -88,7 +89,12 @@ func TestIntegrator_EnqueueWaitsForMergeability(t *testing.T) {
 	t.Cleanup(func() { enqueueRetries, enqueueRetryEvery = old, oldEvery })
 	var mu sync.Mutex
 	calls, notYet := 0, 2
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if !strings.Contains(string(body), "enqueuePullRequest") {
+			_, _ = w.Write([]byte(`{"data":{"repository":{"pullRequest":{"mergeStateStatus":"CLEAN","timelineItems":{"nodes":[]}}}}}`))
+			return
+		}
 		mu.Lock()
 		defer mu.Unlock()
 		calls++
@@ -111,4 +117,74 @@ func TestIntegrator_EnqueueWaitsForMergeability(t *testing.T) {
 	_, err = g.Enqueue(context.Background(), apexv1.PRRef{Number: 2, NodeID: "PR_2"})
 	require.ErrorContains(t, err, "has not yet completed", "bounded")
 	require.Equal(t, 6, calls)
+}
+
+// FINDING-V15-1A-7 (a): enqueued while GitHub's mergeability is UNKNOWN,
+// the queue ejected the mirror's PR #9 at once (invalid_merge_commit). The
+// enqueue waits until it is known; the control, a PR whose mergeability is
+// known already, is enqueued at once.
+func TestIntegrator_EnqueueOnlyOnceMergeabilityIsKnown(t *testing.T) {
+	old, oldEvery := enqueueRetries, enqueueRetryEvery
+	enqueueRetries, enqueueRetryEvery = 5, 10*time.Millisecond
+	t.Cleanup(func() { enqueueRetries, enqueueRetryEvery = old, oldEvery })
+	for _, tc := range []struct {
+		name    string
+		unknown int // reads answering UNKNOWN first
+	}{{"unknown-first", 2}, {"control-known", 0}} {
+		t.Run(tc.name, func(t *testing.T) {
+			var mu sync.Mutex
+			var seq []string
+			reads := 0
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				mu.Lock()
+				defer mu.Unlock()
+				if strings.Contains(string(body), "enqueuePullRequest") {
+					seq = append(seq, "enqueue")
+					_, _ = w.Write([]byte(`{"data":{"enqueuePullRequest":{"mergeQueueEntry":{"state":"QUEUED"}}}}`))
+					return
+				}
+				reads++
+				ms := "CLEAN"
+				if reads <= tc.unknown {
+					ms = "UNKNOWN"
+				}
+				seq = append(seq, ms)
+				_, _ = w.Write([]byte(`{"data":{"repository":{"pullRequest":{"mergeStateStatus":"` + ms + `","timelineItems":{"nodes":[]}}}}}`))
+			}))
+			t.Cleanup(srv.Close)
+			g := ghIntegrator{github.New(srv.URL, "shop/notes", "t")}
+			_, err := g.Enqueue(context.Background(), apexv1.PRRef{Number: 9, NodeID: "PR_9"})
+			require.NoError(t, err)
+			mu.Lock()
+			defer mu.Unlock()
+			want := append(slices.Repeat([]string{"UNKNOWN"}, tc.unknown), "CLEAN", "enqueue")
+			require.Equal(t, want, seq, "enqueued only after its mergeability is known")
+		})
+	}
+}
+
+// FINDING-V15-1A-7 (b): a PR out of the queue says why, from its history:
+// the last event a removal, its reason; re-added since, no reason.
+func TestIntegrator_PRStateNamesTheRemoval(t *testing.T) {
+	timeline := `[{"__typename":"AddedToMergeQueueEvent","createdAt":"2026-11-01T23:01:18Z","actor":{"login":"exoar-apex-pusher"}},{"__typename":"RemovedFromMergeQueueEvent","createdAt":"2026-11-01T23:01:21Z","actor":{"login":"github-merge-queue"},"reason":"invalid_merge_commit"}]`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if strings.Contains(string(body), "timelineItems") {
+			_, _ = w.Write([]byte(`{"data":{"repository":{"pullRequest":{"mergeStateStatus":"UNKNOWN","timelineItems":{"nodes":` + timeline + `}}}}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"data":{"repository":{"pullRequest":{"state":"OPEN","merged":false,"mergeQueueEntry":null}}}}`))
+	}))
+	t.Cleanup(srv.Close)
+	g := ghIntegrator{github.New(srv.URL, "shop/notes", "t")}
+	st, err := g.PRState(context.Background(), 9)
+	require.NoError(t, err)
+	require.Equal(t, "invalid_merge_commit", st.Removed)
+	require.Empty(t, st.Queue)
+
+	timeline = timeline[:len(timeline)-1] + `,{"__typename":"AddedToMergeQueueEvent","createdAt":"2026-11-01T23:30:00Z","actor":{"login":"exoar-apex-pusher"}}]`
+	st, err = g.PRState(context.Background(), 9)
+	require.NoError(t, err)
+	require.Empty(t, st.Removed, "re-added since: not removed")
 }

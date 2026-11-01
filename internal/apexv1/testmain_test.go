@@ -6,6 +6,7 @@ import (
 	"os"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/exoport/apex_process_ape/internal/gittest"
 	"github.com/exoport/apex_process_ape/internal/usercachetest"
@@ -24,6 +25,9 @@ func TestMain(m *testing.M) {
 	// No test repository runs git's auto-maintenance (D360).
 	gittest.QuietMaintenance()
 	cleanup := usercachetest.Isolate("ape-apexv1-cache-")
+	// A record command waits for its PR to merge (FINDING-V15-1A-7 b):
+	// a fake queue answers at once, and one that never merges fails fast.
+	recordWait, recordPoll = 3*time.Second, 10*time.Millisecond
 	code := m.Run()
 	cleanup()
 	// V11RC1-F1: on a whole-package run, each W5–W8 code's finding was

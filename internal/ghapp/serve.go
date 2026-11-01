@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
+	"net/http"
 	"os"
 	"os/exec"
 	"slices"
@@ -99,9 +101,10 @@ type Service struct {
 	pusherKey *rsa.PrivateKey
 	now       func() time.Time
 
-	mu    sync.Mutex
-	cache map[string]Token
-	logMu sync.Mutex
+	mu      sync.Mutex
+	cache   map[string]Token
+	missing map[string][]string // the optional permissions each cached token lacks
+	logMu   sync.Mutex
 }
 
 // NewService loads the two keys.
@@ -121,7 +124,7 @@ func NewService(cfg *Config) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Service{cfg: cfg, gh: NewClient(cfg.API), wardenKey: sk, pusherKey: mk, now: time.Now, cache: map[string]Token{}}, nil
+	return &Service{cfg: cfg, gh: NewClient(cfg.API), wardenKey: sk, pusherKey: mk, now: time.Now, cache: map[string]Token{}, missing: map[string][]string{}}, nil
 }
 
 // Request is a caller's request; Reply the service's answer.
@@ -142,6 +145,9 @@ type Reply struct {
 	Token     string    `json:"token,omitempty"`
 	ExpiresAt time.Time `json:"expires_at,omitzero"`
 	Result    []string  `json:"result,omitempty"`
+	// Missing are the optional permissions the token was minted without,
+	// as "<key>: <level>", because the App has not got them.
+	Missing []string `json:"missing,omitempty"`
 }
 
 // Serve subscribes the two subjects on nc until ctx ends.
@@ -190,21 +196,52 @@ func (s *Service) token(ctx context.Context, user string, req Request) Reply {
 	key := req.Repo + "|" + req.Purpose
 	s.mu.Lock()
 	t, cached := s.cache[key]
+	missing := s.missing[key]
 	s.mu.Unlock()
 	if !cached || t.ExpiresAt.Before(s.now().Add(10*time.Minute)) {
-		jwt, err := AppJWT(s.cfg.Pusher.AppID, s.pusherKey, s.now())
-		if err != nil {
-			return s.logged(user, "pusher", req, refuse("signing: %v", err))
-		}
-		_, name, _ := strings.Cut(req.Repo, "/")
-		if t, err = s.gh.InstallationToken(ctx, jwt, inst, name, perms); err != nil {
+		var err error
+		if t, missing, err = s.mintPusher(ctx, inst, req.Repo, perms); err != nil {
 			return s.logged(user, "pusher", req, refuse("%v", err))
 		}
 		s.mu.Lock()
-		s.cache[key] = t
+		s.cache[key], s.missing[key] = t, missing
 		s.mu.Unlock()
 	}
-	return s.logged(user, "pusher", req, Reply{OK: true, Token: t.Token, ExpiresAt: t.ExpiresAt})
+	return s.logged(user, "pusher", req, Reply{OK: true, Token: t.Token, ExpiresAt: t.ExpiresAt, Missing: missing})
+}
+
+// mintPusher mints a pusher token for repo with perms. An App that lacks
+// an optional permission (GitHub refuses the whole token then) gets one
+// without it, and missing names it (FINDING-V15-1A-7 c).
+func (s *Service) mintPusher(ctx context.Context, inst int64, repo string, perms map[string]string) (t Token, missing []string, err error) {
+	jwt, err := AppJWT(s.cfg.Pusher.AppID, s.pusherKey, s.now())
+	if err != nil {
+		return Token{}, nil, fmt.Errorf("signing: %w", err)
+	}
+	_, name, _ := strings.Cut(repo, "/")
+	t, err = s.gh.InstallationToken(ctx, jwt, inst, name, perms)
+	if !notGranted(err) {
+		return t, nil, err
+	}
+	fewer := maps.Clone(perms)
+	for _, k := range OptionalPermissions {
+		if lvl, ok := fewer[k]; ok {
+			delete(fewer, k)
+			missing = append(missing, k+": "+lvl)
+		}
+	}
+	if len(missing) == 0 {
+		return t, nil, err
+	}
+	t, err = s.gh.InstallationToken(ctx, jwt, inst, name, fewer)
+	return t, missing, err
+}
+
+// notGranted is GitHub's refusal of a token asking for a permission the
+// installation has not got (HTTP 422).
+func notGranted(err error) bool {
+	var ae *APIError
+	return errors.As(err, &ae) && ae.Status == http.StatusUnprocessableEntity && strings.Contains(strings.ToLower(ae.Message), "not granted")
 }
 
 // setupToken is an apex-warden token for repo.

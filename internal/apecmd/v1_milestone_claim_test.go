@@ -124,7 +124,7 @@ func TestMilestoneTakeIn_CLI(t *testing.T) {
 	stdout, _, err := v1Exec(t, newMilestoneCmd, "claim", "M1", "--cwd", root)
 	require.NoError(t, err, stdout)
 	require.Contains(t, stdout, "milestone/M1: cut from main and pushed")
-	require.Contains(t, stdout, "claim record: https://github.example/pull/1 in main's merge queue")
+	require.Contains(t, stdout, "claim record: https://github.example/pull/1 merged into main as merge-o")
 	require.Len(t, fake.opened, 1)
 	require.True(t, strings.HasPrefix(fake.opened[0], "apex/record-M1-claimed-by-dana-"), fake.opened[0])
 	require.Equal(t, v1Git(t, root, "rev-parse", "main"), v1Git(t, bare, "rev-parse", "milestone/M1"))
@@ -147,7 +147,12 @@ func (f *cliIntegrator) OpenPR(_ context.Context, head, base, _, _ string) (apex
 
 func (f *cliIntegrator) Enqueue(context.Context, apexv1.PRRef) (string, error) { return "QUEUED", nil }
 
-func (f *cliIntegrator) PRState(context.Context, int) (apexv1.PRState, error) {
+func (f *cliIntegrator) PRState(_ context.Context, n int) (apexv1.PRState, error) {
+	// A record PR merges, as GitHub's queue does one (record commands
+	// wait for it, FINDING-V15-1A-7 b); a close PR waits in the queue.
+	if n >= 1 && n <= len(f.opened) && strings.HasPrefix(f.opened[n-1], apexv1.PRBranchPrefix+"record-") {
+		return apexv1.PRState{Merged: true, MergeCommit: fmt.Sprintf("merge-of-%d", n)}, nil
+	}
 	return apexv1.PRState{Queue: "AWAITING_CHECKS"}, nil
 }
 

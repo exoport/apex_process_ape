@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/exoport/apex_process_ape/internal/apexv1"
@@ -23,9 +24,13 @@ func QueueFindings(ctx context.Context, p *apexv1.Project, note io.Writer) []ape
 	if err != nil || m.GitHubRepo == "" {
 		return nil
 	}
-	tok, err := m.GitHubTokenFor(ctx, "read")
+	tok, missing, err := m.gitHubToken(ctx, "read")
 	if err != nil {
 		fmt.Fprintf(note, "note: no GitHub token to read %s's merge queue (%v); not judged\n", m.GitHubRepo, err)
+		return nil
+	}
+	if slices.Contains(missing, "merge_queues: read") {
+		fmt.Fprintln(note, queueBlind(m.GitHubRepo, "the App service minted the read token without it"))
 		return nil
 	}
 	c := github.New(m.GitHubAPI, m.GitHubRepo, tok)
@@ -37,6 +42,8 @@ func QueueFindings(ctx context.Context, p *apexv1.Project, note io.Writer) []ape
 		switch {
 		case errors.Is(err, github.ErrNoQueue):
 			out = append(out, apexv1.Finding{File: "_apex/config.yaml", Message: fmt.Sprintf("merge queue: %s on %s has no merge queue — ape's pull requests merge only through one; a person adds it in the repository's rulesets, merging with a merge commit", b, m.GitHubRepo)})
+		case err != nil && strings.Contains(err.Error(), "Resource not accessible by integration"):
+			fmt.Fprintln(note, queueBlind(m.GitHubRepo, "GitHub: "+err.Error()))
 		case err != nil:
 			fmt.Fprintf(note, "note: the merge queue of %s on %s could not be read (%v); not judged\n", b, m.GitHubRepo, err)
 		case method != "MERGE":
@@ -44,6 +51,16 @@ func QueueFindings(ctx context.Context, p *apexv1.Project, note io.Writer) []ape
 		}
 	}
 	return out
+}
+
+// QueueBlindRoute is how a person gives the apex-pusher App the
+// permission main's queue configuration needs (FINDING-V15-1A-7 c).
+const QueueBlindRoute = "on GitHub, the apex-pusher App's settings (Settings → Developer settings → GitHub Apps → the App → Edit) → Permissions & events → Repository permissions → Merge queues: Read-only → Save changes; then the installation's owner accepts it (Settings → GitHub Apps → the App → Configure → Review request → Accept new permissions); the App service's next token carries it"
+
+// queueBlind is the loud note when main's queue configuration cannot be
+// read for want of the Merge queues permission.
+func queueBlind(repo, why string) string {
+	return "warning: main's merge-queue settings on " + repo + " are NOT judged: the App's token lacks Merge queues: read (" + why + ") — " + QueueBlindRoute
 }
 
 func queueWhy(string) string {

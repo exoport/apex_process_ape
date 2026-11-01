@@ -150,8 +150,20 @@ type Token struct {
 var Purposes = map[string]map[string]string{
 	"push": {"contents": "write", "metadata": "read"},
 	"pr":   {"contents": "write", "pull_requests": "write", "metadata": "read"},
-	"read": {"contents": "read", "pull_requests": "read", "metadata": "read"},
+	"read": {"contents": "read", "pull_requests": "read", "merge_queues": "read", "metadata": "read"},
 }
+
+// OptionalPermissions are asked for, but a token is still minted without
+// them when the App lacks them (FINDING-V15-1A-7 c): merge_queues is what
+// reading main's queue configuration needs, and an App registered before
+// it was asked for has not got it — GitHub refuses the whole token then.
+// The reply names what is missing (Reply.Missing), and the reads that
+// needed it say so.
+var OptionalPermissions = []string{"merge_queues"}
+
+// PermissionNames are the optional permissions as GitHub's App settings
+// page names them.
+var PermissionNames = map[string]string{"merge_queues": "Merge queues"}
 
 // InstallationToken mints a token of installation inst narrowed to one
 // repository (its name, without the owner) and perms.

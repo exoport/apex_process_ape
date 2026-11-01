@@ -102,3 +102,45 @@ func TestService(t *testing.T) {
 	require.Equal(t, 2, strings.Count(string(n), "\n"), "secrets and runner-token notify the operator")
 	require.NotContains(t, string(n), "RUNNER_TOKEN")
 }
+
+// FINDING-V15-1A-7 (c): a read token asks for Merge queues: read, which
+// reading main's queue configuration needs. An App that has not got it is
+// refused the whole token by GitHub; the service mints one without it and
+// says so (Missing), and a cached one keeps saying so. The control: the
+// App has it, and the token carries it.
+func TestService_ReadTokenAsksForMergeQueues(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		lacks   bool
+		missing []string
+		reqs    int
+	}{{"app-lacks-it", true, []string{"merge_queues: read"}, 2}, {"control-app-has-it", false, nil, 1}} {
+		t.Run(tc.name, func(t *testing.T) {
+			key, pemBytes := appKey(t)
+			f := newFake(t, &key.PublicKey)
+			f.noMergeQueues = tc.lacks
+			srv := httptest.NewServer(f)
+			t.Cleanup(srv.Close)
+			dir := t.TempDir()
+			keyPath := filepath.Join(dir, "key.pem")
+			require.NoError(t, os.WriteFile(keyPath, pemBytes, 0o600))
+			s, err := NewService(&Config{
+				API:    srv.URL,
+				Warden: AppConfig{AppID: 42, Key: keyPath, Installations: map[string]int64{"shop/notes": 8}},
+				Pusher: AppConfig{AppID: 42, Key: keyPath, Installations: map[string]int64{"shop/notes": 7}},
+				Repos:  map[string]RepoPolicy{"shop/notes": {Members: []string{"dana"}}},
+				Log:    filepath.Join(dir, "acts.jsonl"),
+			})
+			require.NoError(t, err)
+			for range 2 { // the second answer is the cached token's
+				rep := s.token(context.Background(), "dana", Request{Repo: "shop/notes", Purpose: "read"})
+				require.True(t, rep.OK, rep.Error)
+				require.Equal(t, "ghs_test", rep.Token)
+				require.Equal(t, tc.missing, rep.Missing)
+			}
+			require.Len(t, f.tokenReqs, tc.reqs)
+			first, _ := f.tokenReqs[0]["permissions"].(map[string]any)
+			require.Equal(t, "read", first["merge_queues"], "the read token asks for Merge queues: read")
+		})
+	}
+}

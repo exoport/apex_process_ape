@@ -317,6 +317,72 @@ func (c *Client) PRState(ctx context.Context, number int) (State, error) {
 	return s, nil
 }
 
+// QueueEvent is one entry of a pull request's merge-queue history: added
+// to the queue, or removed from it with GitHub's reason.
+type QueueEvent struct {
+	Kind   string // "added" or "removed"
+	At     string
+	Actor  string
+	Reason string
+}
+
+// QueueHistory is a pull request's queue entry now ("" when it is in no
+// queue, as far as the token can see) and its last added/removed events,
+// oldest first (FINDING-V15-1A-7: why a queued PR left the queue).
+func (c *Client) QueueHistory(ctx context.Context, number int) (entry, mergeState string, events []QueueEvent, err error) {
+	owner, name := c.owner()
+	type actor struct {
+		Login string `json:"login"`
+	}
+	var out struct {
+		Repository struct {
+			PullRequest struct {
+				MergeStateStatus string `json:"mergeStateStatus"`
+				MergeQueueEntry  *struct {
+					State string `json:"state"`
+				} `json:"mergeQueueEntry"`
+				TimelineItems struct {
+					Nodes []struct {
+						Type      string `json:"__typename"`
+						CreatedAt string `json:"createdAt"`
+						Actor     *actor `json:"actor"`
+						Reason    string `json:"reason"`
+					} `json:"nodes"`
+				} `json:"timelineItems"`
+			} `json:"pullRequest"`
+		} `json:"repository"`
+	}
+	err = c.graphql(ctx, `query($owner: String!, $name: String!, $n: Int!) { repository(owner: $owner, name: $name) {
+  pullRequest(number: $n) { mergeStateStatus mergeQueueEntry { state }
+    timelineItems(last: 20, itemTypes: [ADDED_TO_MERGE_QUEUE_EVENT, REMOVED_FROM_MERGE_QUEUE_EVENT]) { nodes { __typename
+      ... on AddedToMergeQueueEvent { createdAt actor { login } }
+      ... on RemovedFromMergeQueueEvent { createdAt actor { login } reason } } } } } }`,
+		map[string]any{"owner": owner, "name": name, "n": number}, &out)
+	if err != nil {
+		return "", "", nil, err
+	}
+	pr := out.Repository.PullRequest
+	if pr.MergeQueueEntry != nil {
+		entry = pr.MergeQueueEntry.State
+	}
+	for _, n := range pr.TimelineItems.Nodes {
+		e := QueueEvent{At: n.CreatedAt, Reason: n.Reason}
+		if n.Actor != nil {
+			e.Actor = n.Actor.Login
+		}
+		switch n.Type {
+		case "AddedToMergeQueueEvent":
+			e.Kind = "added"
+		case "RemovedFromMergeQueueEvent":
+			e.Kind = "removed"
+		default:
+			continue
+		}
+		events = append(events, e)
+	}
+	return entry, pr.MergeStateStatus, events, nil
+}
+
 // ErrNoQueue: the branch has no merge queue.
 var ErrNoQueue = errors.New("github: the branch has no merge queue")
 

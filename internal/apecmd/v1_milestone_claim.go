@@ -75,7 +75,7 @@ Exit codes: 0 claimed · 1 refused (held by another, no ensemble, NATS) · 2 usa
 			return v1Emit(cmd.OutOrStdout(), &f, out, func(w io.Writer) {
 				fmt.Fprintf(w, "%s claimed by %s (token %s); its loop keeps it: `ape task apex-loop --args %s`\n", args[0], l.Holder, l.Token, args[0])
 				if r := c.Record; r != nil {
-					fmt.Fprintf(w, "claim record: %s in main's merge queue\n", r.PR.URL)
+					fmt.Fprintln(w, "claim record: "+recordLine(r))
 				}
 				if c.Branch != "" {
 					verb := "tracks the remote's"

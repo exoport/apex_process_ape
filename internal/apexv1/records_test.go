@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -33,8 +34,10 @@ func TestRecordPRs(t *testing.T) {
 	require.Equal(t, "main", CurrentBranch(ctx(), p.Root))
 	tip := run(t, p.Root, "rev-parse", "main")
 	require.Equal(t, "apex: M2 proposed", run(t, p.Root, "log", "-1", "--format=%s", tip))
-	r := p.PendingRecord("M2")
+	r := p.LastRecord("M2")
 	require.NotNil(t, r)
+	require.Equal(t, IntegrationMerged, r.State, "the record command waited for its PR to merge")
+	require.Nil(t, p.PendingRecord("M2"))
 	require.Equal(t, "apex/record-M2-proposed-"+short(tip)+"→main", f.opened[0])
 	require.Equal(t, tip, run(t, bare, "rev-parse", r.Head))
 	require.Equal(t, remoteMain, run(t, bare, "rev-parse", "main"), "main moves only through its queue")
@@ -76,4 +79,78 @@ func TestRecordPRs_UncoordinatedSendsNone(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, c)
 	require.Empty(t, f.opened)
+}
+
+// FINDING-V15-1A-7 (b): a record command waits for its PR to merge. Its
+// queue ejects it for invalid_merge_commit (GitHub built no merge commit)
+// and it is enqueued again; for another reason it refuses
+// coord.record-ejected with GitHub's reason; a PR that never merges
+// refuses coord.record-pending, and running it again waits for the same
+// PR. The control: the queue merges it at once.
+func TestRecordPRs_WaitToMergedOrRefuse(t *testing.T) {
+	files := baseFiles()
+	files["_apex/config.yaml"] = coordinatedConfig
+	newRecord := func(t *testing.T, f *fakeIntegrator) (*Project, error) {
+		t.Helper()
+		p := fixture(t, files)
+		withOrigin(t, p)
+		useIntegrator(t, f)
+		_, err := p.NewMilestoneWith(ctx(), "Second", "./gate.sh", "", MilestoneBudgets{})
+		return p, err
+	}
+
+	t.Run("control", func(t *testing.T) {
+		f := &fakeIntegrator{states: map[int]PRState{}}
+		p, err := newRecord(t, f)
+		require.NoError(t, err)
+		require.Equal(t, IntegrationMerged, p.LastRecord("M2").State)
+		require.Len(t, f.enqueued, 1)
+	})
+	t.Run("invalid-merge-commit-requeued", func(t *testing.T) {
+		f := &fakeIntegrator{states: map[int]PRState{7: {Removed: "invalid_merge_commit"}}}
+		f.onEnqueue = func(_ string, n int) {
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			if len(f.enqueued) == 2 { // the second enqueue: the queue merges it
+				f.states[n] = PRState{Merged: true, MergeCommit: "m7"}
+			}
+		}
+		p, err := newRecord(t, f)
+		require.NoError(t, err)
+		r := p.LastRecord("M2")
+		require.Equal(t, IntegrationMerged, r.State)
+		require.Equal(t, 2, r.Attempts)
+		require.Equal(t, "m7", r.Merged)
+	})
+	t.Run("invalid-merge-commit-bounded", func(t *testing.T) {
+		f := &fakeIntegrator{states: map[int]PRState{7: {Removed: "invalid_merge_commit"}}}
+		p, err := newRecord(t, f)
+		require.Equal(t, CodeRecordEjected, failCode(t, err))
+		require.ErrorContains(t, err, "invalid_merge_commit")
+		require.Len(t, f.enqueued, recordAttempts)
+		require.Equal(t, IntegrationEjected, p.LastRecord("M2").State)
+	})
+	t.Run("other-reason", func(t *testing.T) {
+		f := &fakeIntegrator{states: map[int]PRState{7: {Removed: "failed_checks"}}}
+		_, err := newRecord(t, f)
+		require.Equal(t, CodeRecordEjected, failCode(t, err))
+		require.ErrorContains(t, err, "failed_checks")
+		require.Len(t, f.enqueued, 1, "never re-enqueued for a red check")
+	})
+	t.Run("never-merges", func(t *testing.T) {
+		old := recordWait
+		recordWait = 100 * time.Millisecond
+		t.Cleanup(func() { recordWait = old })
+		f := &fakeIntegrator{states: map[int]PRState{7: {Queue: "AWAITING_CHECKS"}}}
+		p, err := newRecord(t, f)
+		require.Equal(t, CodeRecordPending, failCode(t, err))
+		require.ErrorContains(t, err, "still in main's merge queue")
+		// Run again: it waits for the same PR, and it merges now.
+		f.mu.Lock()
+		f.states[7] = PRState{Merged: true, MergeCommit: "m7"}
+		f.mu.Unlock()
+		require.NoError(t, p.prepareRecordOnMain(ctx(), "test"))
+		require.Len(t, f.opened, 1, "the same PR, not another")
+		require.Equal(t, IntegrationMerged, p.LastRecord("M2").State)
+	})
 }

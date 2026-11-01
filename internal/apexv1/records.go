@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // Record PRs (v1.5 stage 1a, proposal section 5.4): in a project
@@ -14,6 +15,21 @@ import (
 
 // KindRecord marks an Integration that is a record PR.
 const KindRecord = "record"
+
+// The record waits' refusals (FINDING-V15-1A-7 b).
+const (
+	// CodeRecordEjected: a record PR left main's queue for good.
+	CodeRecordEjected = "coord.record-ejected"
+	// CodeRecordPending: a record PR had not merged when the wait ended.
+	CodeRecordPending = "coord.record-pending"
+)
+
+func init() {
+	DiagnosticCodes = append(DiagnosticCodes,
+		CodeDoc{CodeRecordEjected, 1, ActionPerson, "a coordinated project's record command (milestone new, approve, claim, any roadmap record; v1.5 stage 1a, section 5.4) waits for its record PR to merge into main, and the PR was closed, or removed from main's merge queue for a reason other than invalid_merge_commit, or for invalid_merge_commit after limits of 3 enqueues — the message gives GitHub's reason; the record is committed on this checkout's main but not on the remote's: a person reads why on the PR, then runs the record command again (a new record PR) or lands the branch with `ape ghapp land <branch>` (FINDING-V15-1A-7)"},
+		CodeDoc{CodeRecordPending, 1, ActionRetry, "a coordinated project's record command waited 20 minutes for its record PR to merge into main and it had not (still queued, or its queue entry never seen — the message says which; an entry never seen can mean the App's token lacks Merge queues: read) — run the command again: it waits for the same PR rather than send another (FINDING-V15-1A-7)"},
+	)
+}
 
 // prepareRecordOnMain puts a coordinated project's checkout on main,
 // fetched and synced, for a milestone record, and sends any record
@@ -52,7 +68,18 @@ func (p *Project) sendPendingRecords(ctx context.Context) error {
 		return err
 	}
 	for k := range all {
-		if in := all[k]; in.Kind == KindRecord && in.Commit == tip && in.State != IntegrationEjected {
+		in := all[k]
+		switch {
+		case in.Kind != KindRecord || in.Commit != tip:
+		case in.State == IntegrationQueued:
+			// Sent by an earlier call that did not see it merge: wait for
+			// it now (FINDING-V15-1A-7 b).
+			api, err := p.integrator()
+			if err != nil {
+				return err
+			}
+			return p.awaitRecord(ctx, api, &in)
+		case in.State != IntegrationEjected:
 			return nil
 		}
 	}
@@ -90,7 +117,69 @@ func (p *Project) sendRecord(ctx context.Context, commit, subject string) (*Inte
 	if err := p.saveIntegration(rec); err != nil {
 		return nil, err
 	}
-	return &rec, nil
+	return &rec, p.awaitRecord(ctx, api, &rec)
+}
+
+// A record command waits for its PR to merge (FINDING-V15-1A-7 b): up to
+// recordWait, looking every recordPoll; an ejection for invalid_merge_commit
+// (GitHub's queue built no merge commit, seen when it judges a PR before
+// its mergeability is known) is enqueued again, up to recordAttempts
+// enqueues in all. Vars so tests can wait fast.
+var (
+	recordWait     = 20 * time.Minute
+	recordPoll     = 10 * time.Second
+	recordAttempts = 3
+)
+
+// awaitRecord waits for rec's PR: merged (recorded, nil), or a refusal
+// that says why — ejected for another reason or too often
+// (coord.record-ejected), closed, or still queued at recordWait
+// (coord.record-pending, retry: the command waits for it again).
+func (p *Project) awaitRecord(ctx context.Context, api Integrator, rec *Integration) error {
+	deadline := time.Now().Add(recordWait)
+	seen := false
+	for {
+		st, err := api.PRState(ctx, rec.PR.Number)
+		if err == nil {
+			switch {
+			case st.Merged:
+				rec.State, rec.Merged = IntegrationMerged, st.MergeCommit
+				return p.saveIntegration(*rec)
+			case st.Closed:
+				rec.State = IntegrationEjected
+				_ = p.saveIntegration(*rec)
+				return &FailError{Code: CodeRecordEjected, Action: ActionPerson, Msg: fmt.Sprintf("the record %s (%s) was closed without merging — a person reopens it, or runs the record command again to send a new one", rec.PR.URL, rec.Head)}
+			case st.Queue != "":
+				seen = true
+			case st.Removed != "":
+				if st.Removed != "invalid_merge_commit" || rec.Attempts >= recordAttempts {
+					rec.State = IntegrationEjected
+					_ = p.saveIntegration(*rec)
+					return &FailError{Code: CodeRecordEjected, Action: ActionPerson, Msg: fmt.Sprintf(
+						"the record %s (%s) was removed from main's merge queue (%s) after %d enqueue(s), and has not reached main — a person reads why on the PR, then runs the record command again, or lands it with `ape ghapp land %s`",
+						rec.PR.URL, rec.Head, st.Removed, rec.Attempts, rec.Head)}
+				}
+				if _, err := api.Enqueue(ctx, rec.PR); err == nil {
+					rec.Attempts++
+					_ = p.saveIntegration(*rec)
+				}
+			}
+		}
+		if time.Now().After(deadline) {
+			why := "it is still in main's merge queue"
+			if !seen {
+				why = "its merge-queue entry was never seen (the App's token may lack Merge queues: read)"
+			}
+			return &FailError{Code: CodeRecordPending, Action: ActionRetry, Msg: fmt.Sprintf(
+				"the record %s (%s) has not merged into main after %s: %s — run the command again, which waits for this PR rather than send another",
+				rec.PR.URL, rec.Head, recordWait, why)}
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(recordPoll):
+		}
+	}
 }
 
 // recordSlug is a record subject as a branch name: "apex: M2 approved"
@@ -133,8 +222,25 @@ func (p *Project) RecordClaim(ctx context.Context, ms, holder string) (*Integrat
 	return p.sendRecord(ctx, sha, subject)
 }
 
+// LastRecord is the newest record PR for milestone ms, any state, nil for
+// none: what a record verb reports (merged, since it waits).
+func (p *Project) LastRecord(ms string) *Integration {
+	all, err := p.loadIntegrations()
+	if err != nil {
+		return nil
+	}
+	var out *Integration
+	for k := range all {
+		in := all[k]
+		if in.Kind == KindRecord && strings.HasPrefix(in.Change, "record-"+ms+"-") && (out == nil || in.At > out.At) {
+			out = &in
+		}
+	}
+	return out
+}
+
 // PendingRecord is the newest queued record PR for milestone ms, nil for
-// none: what a record verb reports.
+// none.
 func (p *Project) PendingRecord(ms string) *Integration {
 	all, err := p.loadIntegrations()
 	if err != nil {

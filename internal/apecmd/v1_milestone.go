@@ -95,8 +95,8 @@ Exit codes: 0 ok (prints the id) · 1 no roadmap.md, or HEAD on a change branch 
 			}
 			return v1Emit(cmd.OutOrStdout(), &f, map[string]any{"id": id, "title": args[0], "status": apexv1.MilestoneProposed}, func(w io.Writer) {
 				fmt.Fprintf(w, "%s — %s: proposed (a person approves with `ape milestone approve %s --by <who>`)\n", id, args[0], id)
-				if r := p.PendingRecord(id); r != nil {
-					fmt.Fprintf(w, "record PR: %s in main's merge queue\n", r.PR.URL)
+				if r := p.LastRecord(id); r != nil {
+					fmt.Fprintln(w, "record PR: "+recordLine(r))
 				}
 			})
 		},
@@ -249,7 +249,7 @@ with no grant.`,
 						out.Approval = "recorded"
 					}
 					out.Frozen, at = p.ApprovalFrozen(id)
-					out.RecordPR = p.PendingRecord(id)
+					out.RecordPR = p.LastRecord(id)
 				}
 				return func(cmd *cobra.Command, f *v1Flags) error {
 					if err != nil {
@@ -261,7 +261,7 @@ with no grant.`,
 							fmt.Fprintln(w, line)
 						}
 						if r := out.RecordPR; r != nil {
-							fmt.Fprintf(w, "record PR: %s in main's merge queue (the record reaches milestone/%s by a take-in)\n", r.PR.URL, m.ID)
+							fmt.Fprintf(w, "record PR: %s (the record reaches milestone/%s by a take-in)\n", recordLine(r), m.ID)
 						}
 					})
 				}
@@ -901,4 +901,13 @@ HEAD on a change branch, or session.by-mismatch · 2 usage, or a model session w
 	addV1Flags(cmd, &f)
 	cmd.Flags().StringVar(&by, "by", "", "who accepts (required)")
 	return cmd
+}
+
+// recordLine is a record PR as a record verb reports it: merged, since the
+// verb waits for it (FINDING-V15-1A-7 b), else where it is.
+func recordLine(r *apexv1.Integration) string {
+	if r.State == apexv1.IntegrationMerged {
+		return r.PR.URL + " merged into main as " + short(r.Merged)
+	}
+	return r.PR.URL + " " + r.State + " in main's merge queue"
 }

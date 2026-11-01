@@ -3,6 +3,7 @@ package apexv1
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 
@@ -63,7 +64,17 @@ func (f *fakeIntegrator) Enqueue(_ context.Context, pr PRRef) (string, error) {
 func (f *fakeIntegrator) PRState(_ context.Context, n int) (PRState, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.states[n], nil
+	if st, ok := f.states[n]; ok {
+		return st, nil
+	}
+	// A record PR the test set no state for: the queue merges it, as
+	// GitHub's does a record (FINDING-V15-1A-7 b, record commands wait).
+	for h, num := range f.numbers {
+		if num == n && strings.HasPrefix(h, PRBranchPrefix+"record-") {
+			return PRState{Merged: true, MergeCommit: fmt.Sprintf("merge-of-%d", n)}, nil
+		}
+	}
+	return PRState{}, nil
 }
 
 func useIntegrator(t *testing.T, f *fakeIntegrator) {

@@ -55,6 +55,10 @@ type PRState struct {
 	// Queue is the merge queue entry's state, "" when not in a queue.
 	Queue       string
 	MergeCommit string
+	// Removed is GitHub's reason when the PR's last queue event removed
+	// it (invalid_merge_commit, …): "" while it is queued, never was, or
+	// the history could not be read.
+	Removed string
 }
 
 // Integrator is the coordinated repository's API, as archive uses it
@@ -96,6 +100,9 @@ type Integration struct {
 	Attempts int    `json:"attempts"`
 	State    string `json:"state"`
 	At       string `json:"at"`
+	// Merged is the merge commit on Base once merged (a record's,
+	// FINDING-V15-1A-7).
+	Merged string `json:"merged,omitempty"`
 }
 
 func (p *Project) integrationsPath() string { return runlog.CoordPRsPath(p.Root) }

@@ -35,6 +35,9 @@ type fakeGitHub struct {
 	secrets   map[string]string
 	prs       []string
 	branch    bool
+	// noMergeQueues: the App has not got Merge queues (FINDING-V15-1A-7 c):
+	// a token asking for it is refused, as GitHub does.
+	noMergeQueues bool
 }
 
 func newFake(t *testing.T, appKey *rsa.PublicKey) *fakeGitHub {
@@ -60,6 +63,11 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		var req map[string]any
 		_ = json.Unmarshal(body, &req)
 		f.tokenReqs = append(f.tokenReqs, req)
+		if perms, _ := req["permissions"].(map[string]any); f.noMergeQueues && perms["merge_queues"] != nil {
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_, _ = w.Write([]byte(`{"message":"The permissions requested are not granted to this installation."}`))
+			return
+		}
 		_, _ = w.Write([]byte(`{"token":"ghs_test","expires_at":"2030-01-01T00:00:00Z","permissions":{"contents":"write"}}`))
 	case r.Method == http.MethodGet && strings.HasSuffix(path, "/contents/.github/workflows/apex-queue.yml"):
 		if !f.workflow {
