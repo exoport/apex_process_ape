@@ -3,6 +3,7 @@
 package apexv1
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -25,4 +26,26 @@ func lockFileExclusive(path string) (unlock func(), err error) {
 		_ = unix.Flock(int(f.Fd()), unix.LOCK_UN)
 		_ = f.Close()
 	}, nil
+}
+
+// tryLockFile takes an exclusive advisory lock on path without waiting:
+// ok false when another holds it. The file is made writable by every user
+// (the compose-leg lock is the host's, leglock.go).
+func tryLockFile(path string) (unlock func(), ok bool, err error) {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o666)
+	if err != nil {
+		return nil, false, fmt.Errorf("lock %s: %w", path, err)
+	}
+	_ = f.Chmod(0o666)
+	if err := unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
+		_ = f.Close()
+		if errors.Is(err, unix.EWOULDBLOCK) {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("lock %s: %w", path, err)
+	}
+	return func() {
+		_ = unix.Flock(int(f.Fd()), unix.LOCK_UN)
+		_ = f.Close()
+	}, true, nil
 }

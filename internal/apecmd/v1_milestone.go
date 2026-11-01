@@ -346,6 +346,9 @@ func gateHuman(g *apexv1.GateResult) func(io.Writer) {
 				n, strings.Join(g.Run.Leftovers, "; "))
 		}
 		printChecks(w, g.Run.SpecFailed, true)
+		if s := g.Run.LegLock.String(); s != "" {
+			fmt.Fprintln(w, "  "+s)
+		}
 		if n := g.Run.FullSkipped; n > 0 {
 			fmt.Fprintf(w, "  %d full scenario check(s) skipped: the Gate: command is red (close runs them)\n", n)
 		}

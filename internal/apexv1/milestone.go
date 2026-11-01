@@ -65,6 +65,11 @@ type GateRun struct {
 	// logs/gate-<M>.json (gateTimings); never in milestones.json, the
 	// gate's output or ape status.
 	ScenarioSecs map[string]float64 `json:"scenario_secs,omitempty"`
+	// LegLock sums the checks that held the host's compose-leg lock and
+	// their waits (v1.5, D705: leglock.go). In the gate's output and
+	// logs/gate-<M>.json; never in milestones.json, which a concurrent
+	// run's timing would otherwise change.
+	LegLock *LegLockUse `json:"leg_lock,omitempty"`
 	// Current is set by ape status alone (F1): whether this run still
 	// describes the project (GateRunCurrent) — no run in progress, HEAD
 	// and the working tree unchanged since it ended, the gate not changed
@@ -632,12 +637,16 @@ func (p *Project) runGate(ctx context.Context, id string, opt RunOptions, full b
 	if err := interrupted(ctx, "the gate run of "+id); err != nil {
 		return nil, err
 	}
+	ranNow := results // the lock's waits are this run's: not a reused full run's
 	if !skip {
 		var err error
 		if fr, err = p.gateFullRun(ctx, id, fr, fullChecks, regressionCmd, full, opt, &run); err != nil {
 			return nil, err
 		}
 		results = append(results, fr.Results...)
+		if run.FullRunReused == "" {
+			ranNow = results
+		}
 	}
 	ran := append([]CheckResult{gate}, results...)
 	if fr != nil && fr.Regression != nil {
@@ -660,6 +669,7 @@ func (p *Project) runGate(ctx context.Context, id string, opt RunOptions, full b
 			run.SpecFailed = append(run.SpecFailed, results[i])
 		}
 	}
+	run.LegLock = legLockUse(ranNow)
 	run.ScenarioSecs = map[string]float64{}
 	for i := range results {
 		run.ScenarioSecs[results[i].Task] = results[i].Secs
@@ -682,7 +692,9 @@ func (p *Project) runGate(ctx context.Context, id string, opt RunOptions, full b
 		rec = &MilestoneRecord{}
 		recs[id] = rec
 	}
-	rec.Result, rec.Since = result, &run
+	since := run
+	since.LegLock = nil
+	rec.Result, rec.Since = result, &since
 	if err := p.saveMilestoneRecords(recs); err != nil {
 		return nil, err
 	}

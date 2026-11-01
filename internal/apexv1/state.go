@@ -105,6 +105,13 @@ type CheckResult struct {
 	// observe.go): listeners, services, containers, a browser, outside
 	// connections. Absent off Linux.
 	Observed *Observed `json:"observed,omitempty"`
+	// LegLock: a compose leg, run holding the host's compose-leg lock
+	// (v1.5, D705: leglock.go); LegLockWaitSecs how long it waited for
+	// another run's leg first, LegLockHolder whose ("pid <pid> <check> in
+	// <dir>").
+	LegLock         bool    `json:"leg_lock,omitempty"`
+	LegLockWaitSecs float64 `json:"leg_lock_wait_secs,omitempty"`
+	LegLockHolder   string  `json:"leg_lock_holder,omitempty"`
 }
 
 // Red reports a result that fails its run: a non-zero exit that was not

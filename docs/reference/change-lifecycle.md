@@ -391,6 +391,16 @@ What else a check gets in v1.4:
   allocated`, `EADDRINUSE`) is unrun, `port-held`, when the port's holder is outside the check (a
   process, or a container publishing it): not ready, never red for the product. Held by the check
   itself, it stays red.
+- **The host's compose-leg lock** (v1.5): a check that is a compose leg runs holding a lock shared by
+  every ape on the host. A compose leg is a `check (full):` check, or a check whose command names a
+  container runtime (`docker`, `docker-compose`, `podman`, `nerdctl`, `testcontainers`), or one that
+  sets a `*_LIVE` variable on (`X_LIVE=1`). Two gates, closes or verifies on one host (two milestones'
+  members) therefore take their legs one at a time: their own compose projects do not separate a
+  fixed host port or a fixed container name. The lock is a file in the system temporary folder
+  (`ape-compose-legs.lock`). A leg that waited records `leg_lock_wait_secs` and whose run it waited
+  for (`leg_lock_holder`); every leg records `leg_lock: true`. A gate's output ends its checks with
+  one line summing them (JSON `leg_lock`: `checks`, `waited`, `wait_secs`), never written to
+  `milestones.json`.
 
 ### Advise files and unmatched tools
 
