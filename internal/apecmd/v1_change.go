@@ -1538,7 +1538,8 @@ func coordMilestone(cmd *cobra.Command, p *apexv1.Project, id string) string {
 	case "new":
 		m, _ := cmd.Flags().GetString("milestone")
 		return m
-	case "start":
+	case "start", "archive":
+		// D702: archive lands on milestone/<M>, so it needs M's lease too.
 		return p.ChangeTarget(cmd.Context(), id)
 	}
 	return ""

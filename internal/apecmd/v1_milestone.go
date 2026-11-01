@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/exoport/apex_process_ape/internal/apexv1"
 	"github.com/exoport/apex_process_ape/internal/coord/member"
@@ -655,6 +656,11 @@ branch · 2 usage, or --accept-red from a model session.`,
 				return v1Fail(cmd, &f, &apexv1.UsageError{Code: "usage.by", Msg: "--by goes with --accept-red — drop it, or give the reason the red gate is accepted"}, nil)
 			}
 			id, accepting := args[0], cmd.Flags().Changed("accept-red")
+			// D702: a coordinated close writes milestone/<M> and main's
+			// queue, so it needs NATS and M's lease (single writer).
+			if err := member.Gate(cmd.Context(), p, "milestone close", id, time.Now()); err != nil {
+				return v1Fail(cmd, &f, err, nil)
+			}
 			f.person = personCallOf(cmd, args)
 			return runLong(cmd, &f, p, id, func(ctx context.Context, opt apexv1.RunOptions) renderFn {
 				var g *apexv1.GateResult

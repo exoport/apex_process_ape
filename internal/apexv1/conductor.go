@@ -538,6 +538,11 @@ func (p *Project) pushBranch(ctx context.Context, branch string) ([]string, erro
 	if b == "main" || b == "master" {
 		return nil, refused("never main or master: a conductor pushes work branches only")
 	}
+	// D702: a milestone's branch has one writer, its lease holder's ape;
+	// apex/* heads are ape's integration branches.
+	if strings.HasPrefix(b, MilestoneBranchPrefix) || strings.HasPrefix(b, PRBranchPrefix) {
+		return nil, refused("never " + MilestoneBranchPrefix + "* or " + PRBranchPrefix + "*: those are ape's, written only by the milestone's lease holder")
+	}
 	if base, err := p.baseBranch(ctx); err == nil && b == base {
 		return nil, refused("never the base branch")
 	}

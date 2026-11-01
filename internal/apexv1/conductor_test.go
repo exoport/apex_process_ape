@@ -191,3 +191,19 @@ func TestConductorAct_Rechecks(t *testing.T) {
 	require.NotEmpty(t, res.Evidence, "the self-test's log is evidence")
 	require.Equal(t, MilestoneApproved, p.roadmap().Find("M1").Status)
 }
+
+// D702: the conductor's push-branch never pushes a milestone's branch or
+// an apex/* head (one writer: the milestone's lease holder's ape); the
+// control, a work branch, gets as far as git push.
+func TestPushBranch_RefusesApeBranches(t *testing.T) {
+	p := fixture(t, baseFiles())
+	for _, b := range []string{"milestone/M1", "apex/add-wave", "feat/x"} {
+		run(t, p.Root, "branch", b)
+	}
+	for _, b := range []string{"milestone/M1", "apex/add-wave"} {
+		_, err := p.pushBranch(ctx(), b)
+		require.ErrorContains(t, err, "never milestone/* or apex/*", b)
+	}
+	_, err := p.pushBranch(ctx(), "feat/x")
+	require.ErrorContains(t, err, "git push failed", "a work branch reaches git push (no remote here)")
+}

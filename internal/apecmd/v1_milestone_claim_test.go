@@ -150,3 +150,54 @@ func (f *cliIntegrator) Enqueue(context.Context, apexv1.PRRef) (string, error) {
 func (f *cliIntegrator) PRState(context.Context, int) (apexv1.PRState, error) {
 	return apexv1.PRState{Queue: "AWAITING_CHECKS"}, nil
 }
+
+// D702: archive and close write milestone/<M>, so in an ensemble's
+// project both need this checkout's lease on M, as change new and start
+// do; claimed, they pass the gate (and refuse later for their own
+// reasons).
+func TestCoordinatedArchiveAndCloseNeedTheLease(t *testing.T) {
+	root := v1Repo(t)
+	_, _, err := v1Exec(t, newChangeCmd, "new", "add-wave", "--milestone", "M1", "--touches", "greeting", "--cwd", root)
+	require.NoError(t, err, "change new commits its draft")
+
+	url := natstest.RunJetStreamServer(t)
+	nc, err := nats.Connect(url)
+	require.NoError(t, err)
+	t.Cleanup(nc.Close)
+	js, err := jetstream.New(nc)
+	require.NoError(t, err)
+	ctx := context.Background()
+	require.NoError(t, lease.Declare(ctx, js, 1))
+	ls, err := lease.Open(ctx, js)
+	require.NoError(t, err)
+	require.NoError(t, ls.SetEpoch(ctx, 1))
+	cfg, err := os.ReadFile(apexv1.ConfigPath(root))
+	require.NoError(t, err)
+	block := "coordination:\n  ensemble: shop\n  home: git@example.invalid:shop/home.git\n  url: " + url + "\n"
+	require.NoError(t, os.WriteFile(apexv1.ConfigPath(root), append(cfg, []byte(block)...), 0o644))
+	creds, _ := natstest.MintStandaloneCreds(t, "dana")
+	data, err := os.ReadFile(creds)
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "hot"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "hot", "ape-nats.creds"), data, 0o600))
+
+	for _, args := range [][]string{{"change", "archive", "add-wave"}, {"milestone", "close", "M1"}} {
+		cmd := newChangeCmd
+		if args[0] == "milestone" {
+			cmd = newMilestoneCmd
+		}
+		stdout, _, err := v1Exec(t, cmd, append(args[1:], "--json", "--cwd", root)...)
+		require.Error(t, err, "%v", args)
+		require.Contains(t, stdout, apexv1.CodeNotLeaseHolder, "%v: no lease on M1", args)
+	}
+	_, _, err = v1Exec(t, newMilestoneCmd, "claim", "M1", "--cwd", root)
+	require.NoError(t, err)
+	for _, args := range [][]string{{"change", "archive", "add-wave"}, {"milestone", "close", "M1"}} {
+		cmd := newChangeCmd
+		if args[0] == "milestone" {
+			cmd = newMilestoneCmd
+		}
+		stdout, _, _ := v1Exec(t, cmd, append(args[1:], "--json", "--cwd", root)...)
+		require.NotContains(t, stdout, apexv1.CodeNotLeaseHolder, "%v: claimed, past the gate", args)
+	}
+}
