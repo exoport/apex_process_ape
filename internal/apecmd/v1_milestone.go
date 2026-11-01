@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/exoport/apex_process_ape/internal/apexv1"
+	"github.com/exoport/apex_process_ape/internal/coord/member"
 	"github.com/spf13/cobra"
 )
 
@@ -608,6 +609,19 @@ A close whose gate ran ends with its verdict line, as ` + "`ape milestone gate`"
 done, gate green (exit 0) …", "close <M>: gate red, not closed (exit 1) …"; re-read through
 ` + "`ape status --json`" + ` milestones[].last_gate); --json puts "exit" and "log" first and "verdict" last.
 
+Coordinated (v1.5 stage 1a; a project with coordination.github, section 5.3): the close
+runs on milestone/<M>, fetched and synced, and is refused until main is taken in
+(milestone.take-in-needed: ` + "`ape milestone take-in <M>`" + `). The gate runs as above, and the
+close record, "apex: <M> done" (an accepted red recorded with its gate run), is
+milestone/<M>'s last commit. ape pushes that tip to apex/close-<M>, opens the close PR into
+main and enqueues it; its required check, the milestone gate on the merge with the
+current main, runs in CI (the project's merge-queue workflow), and main's queue merges with a merge commit, the
+release point. The run waits for the queue as a coordinated archive does. Merged: main
+fast-forwards to the merge, milestone/<M> is deleted here and on the remote, the
+milestone's lease is released, and milestone-done names the release point; tagging stays
+a person's act (OQ20). Ejected: once main is taken in again, the close PR is pushed and
+enqueued again, an attempt (limits.attempts: integration.ejections-exceeded).
+
 Exit codes: 0 done · 1 gate red (without --accept-red), changes in flight, not approved,
 no approval record, a changed gate, an archived gate/ in the way, or HEAD on a change
 branch · 2 usage, or --accept-red from a model session.`,
@@ -634,6 +648,7 @@ branch · 2 usage, or --accept-red from a model session.`,
 				} else {
 					g, err = p.CloseMilestone(ctx, id, opt)
 				}
+				g, err = awaitClosePR(ctx, p, id, opt, g, err)
 				return func(cmd *cobra.Command, f *v1Flags) error {
 					// A gate that ran ends the output with its verdict (F1c).
 					ran := g != nil && g.Run.Cmd != ""
@@ -652,9 +667,14 @@ branch · 2 usage, or --accept-red from a model session.`,
 						fr = gateFrame("close", g, nil)(0)
 					}
 					return v1EmitFramed(cmd.OutOrStdout(), f, g, func(w io.Writer) {
-						if ran {
+						switch in := g.Integration; {
+						case ran:
 							gateHuman(g)(w)
-						} else {
+						case in != nil && in.State == apexv1.IntegrationMerged:
+							fmt.Fprintf(w, "%s closed into main through %s: merge %.7s, the release point (a person tags it)\n", g.Milestone, in.PR.URL, g.Commit)
+						case in != nil:
+							fmt.Fprintf(w, "%s: its close PR %s waits in main's merge queue (attempt %d)\n", g.Milestone, in.PR.URL, in.Attempts)
+						default:
 							fmt.Fprintf(w, "%s is already done\n", g.Milestone)
 						}
 						if a := g.AcceptRed; a != nil {
@@ -677,6 +697,34 @@ branch · 2 usage, or --accept-red from a model session.`,
 	cmd.Flags().StringVar(&acceptRed, "accept-red", "", "close although the gate is red, for this reason (a person only; with --by)")
 	cmd.Flags().StringVar(&by, "by", "", "who accepts the red gate (with --accept-red)")
 	return cmd
+}
+
+// awaitClosePR is a coordinated close's wait (v1.5 stage 1a, section 5.3):
+// while its close PR is queued, the close is read again at each member
+// NATS event or every apexv1.QueuePoll; once it merged, the milestone's
+// lease is released, its live key deleted. Any other close is returned as
+// it is.
+func awaitClosePR(ctx context.Context, p *apexv1.Project, id string, opt apexv1.RunOptions, g *apexv1.GateResult, err error) (*apexv1.GateResult, error) {
+	queued := func() bool {
+		return err == nil && g != nil && g.Integration != nil && g.Integration.State == apexv1.IntegrationQueued
+	}
+	if queued() {
+		wake, stop, _ := member.Watch(ctx, p)
+		defer stop()
+		for queued() {
+			if opt.Progress != nil {
+				fmt.Fprintf(opt.Progress, "queued: %s (attempt %d) in main's merge queue; waiting for merged or ejected\n", g.Integration.PR.URL, g.Integration.Attempts)
+			}
+			if !apexv1.WaitQueue(ctx, wake) {
+				return g, err
+			}
+			g, err = p.CloseMilestone(ctx, id, opt)
+		}
+	}
+	if err == nil && g != nil && g.Integration != nil && g.Integration.State == apexv1.IntegrationMerged {
+		_, _ = member.ReleaseMilestone(context.WithoutCancel(ctx), p, id)
+	}
+	return g, err
 }
 
 func newDecisionCmd() *cobra.Command {

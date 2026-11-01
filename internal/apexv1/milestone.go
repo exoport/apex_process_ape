@@ -514,6 +514,10 @@ type GateResult struct {
 	// GateArchived: the gate folders a close moved to the archive (D155
 	// Q74), as milestones.json records them.
 	GateArchived []GateArchive `json:"gate_archived,omitempty"`
+	// Integration is a coordinated close's PR into main (v1.5 stage 1a,
+	// section 5.3): the milestone is done on milestone/<M> and lands on
+	// main when it merges.
+	Integration *Integration `json:"integration,omitempty"`
 }
 
 // RunGate runs a milestone's gate and records it; the committed record
@@ -883,6 +887,18 @@ func (p *Project) closeMilestone(ctx context.Context, id string, opt RunOptions,
 	if err := p.refuseOnChangeBranch(ctx, "closing a milestone"); err != nil {
 		return nil, err
 	}
+	// Coordinated: a recorded close PR is read (merged, queued, or redone
+	// after an ejection); else the close runs on milestone/<M>, synced,
+	// with main taken in (section 5.3).
+	coordinated := p.MilestoneBase(id) != ""
+	if coordinated {
+		if g, done, err := p.resolveClose(ctx, id); done || err != nil {
+			return g, err
+		}
+		if err := p.prepareClose(ctx, id); err != nil {
+			return nil, err
+		}
+	}
 	_, rm, err := p.loadRoadmapDoc()
 	if err != nil {
 		return nil, err
@@ -991,6 +1007,12 @@ func (p *Project) closeMilestone(ctx context.Context, id string, opt RunOptions,
 		return g, err
 	}
 	p.emitGateGreen(ctx, g)
+	if coordinated {
+		// The close record is milestone/<M>'s last commit; it reaches main
+		// through the close PR, and milestone-done waits for its merge.
+		g.Integration, err = p.openClosePR(ctx, id, 1)
+		return g, err
+	}
 	reason := "closed, gate green at " + short(g.Run.SHA)
 	if red != nil {
 		reason = "closed with its gate red, accepted by " + red.By + ": " + red.Reason

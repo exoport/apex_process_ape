@@ -307,14 +307,22 @@ func (p *Project) ArchiveUntilMerged(ctx context.Context, id string, allowPendin
 		if opt.Progress != nil {
 			fmt.Fprintf(opt.Progress, "queued: %s (attempt %d) in %s's merge queue; waiting for merged or ejected\n", res.Integration.PR.URL, res.Integration.Attempts, res.Integration.Base)
 		}
-		t := time.NewTimer(QueuePoll)
-		select {
-		case <-ctx.Done():
-			t.Stop()
+		if !WaitQueue(ctx, wake) {
 			return res, nil
-		case <-wake:
-		case <-t.C:
 		}
-		t.Stop()
 	}
+}
+
+// WaitQueue waits for the next look at a queued PR: a wake, or QueuePoll.
+// false when ctx ended first.
+func WaitQueue(ctx context.Context, wake <-chan struct{}) bool {
+	t := time.NewTimer(QueuePoll)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-wake:
+	case <-t.C:
+	}
+	return true
 }

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"time"
 )
 
 // Take-in (v1.5 stage 1a, proposal section 5.2, OQ18): when main moves,
@@ -235,14 +234,8 @@ func (p *Project) TakeInUntilMerged(ctx context.Context, ms string, progress fun
 		if progress != nil {
 			progress(fmt.Sprintf("queued: %s (attempt %d) in %s's merge queue; waiting for merged or ejected", res.Integration.PR.URL, res.Integration.Attempts, res.Branch))
 		}
-		t := time.NewTimer(QueuePoll)
-		select {
-		case <-ctx.Done():
-			t.Stop()
+		if !WaitQueue(ctx, wake) {
 			return res, nil
-		case <-wake:
-		case <-t.C:
 		}
-		t.Stop()
 	}
 }

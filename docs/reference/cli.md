@@ -4941,6 +4941,19 @@ A close whose gate ran ends with its verdict line, as `ape milestone gate`'s doe
 done, gate green (exit 0) …", "close <M>: gate red, not closed (exit 1) …"; re-read through
 `ape status --json` milestones[].last_gate); --json puts "exit" and "log" first and "verdict" last.
 
+Coordinated (v1.5 stage 1a; a project with coordination.github, section 5.3): the close
+runs on milestone/<M>, fetched and synced, and is refused until main is taken in
+(milestone.take-in-needed: `ape milestone take-in <M>`). The gate runs as above, and the
+close record, "apex: <M> done" (an accepted red recorded with its gate run), is
+milestone/<M>'s last commit. ape pushes that tip to apex/close-<M>, opens the close PR into
+main and enqueues it; its required check, the milestone gate on the merge with the
+current main, runs in CI (the project's merge-queue workflow), and main's queue merges with a merge commit, the
+release point. The run waits for the queue as a coordinated archive does. Merged: main
+fast-forwards to the merge, milestone/<M> is deleted here and on the remote, the
+milestone's lease is released, and milestone-done names the release point; tagging stays
+a person's act (OQ20). Ejected: once main is taken in again, the close PR is pushed and
+enqueued again, an attempt (limits.attempts: integration.ejections-exceeded).
+
 Exit codes: 0 done · 1 gate red (without --accept-red), changes in flight, not approved,
 no approval record, a changed gate, an archived gate/ in the way, or HEAD on a change
 branch · 2 usage, or --accept-red from a model session.
