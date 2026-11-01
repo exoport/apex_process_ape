@@ -115,7 +115,7 @@ type Config struct {
 	// SubmitWait how long each Enter is given to submit it (1.4.3 PDFA-6;
 	// defaults 300 ms and 3 s).
 	SubmitSettle, SubmitWait time.Duration
-	Now      func() time.Time
+	Now                      func() time.Time
 	// Log reports what the watcher did (stderr in production).
 	Log func(format string, a ...any)
 }
