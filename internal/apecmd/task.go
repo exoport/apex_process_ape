@@ -447,10 +447,7 @@ func newTaskCmd() *cobra.Command {
 			if err != nil {
 				return sessionRefusal(err)
 			}
-			launch.withScope(projectRoot, argsFlag)
-			// 1.4.3 PDFA-5: the session's registry row says a person's
-			// --usage-ok started it, for its children to carry.
-			launch.usageOK = usageOKFlag
+			launch.forTask(projectRoot, argsFlag, usageOKFlag)
 			jsonMode := jsonAlias || outputFormat == "json"
 			if !jsonMode && outputFormat != "human" {
 				fmt.Fprintf(os.Stderr, "Error: --output-format must be human or json, got %q\n", outputFormat)

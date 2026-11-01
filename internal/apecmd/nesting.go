@@ -410,6 +410,14 @@ func (l *sessionLaunch) acquireAndHold(ctx context.Context, projectRoot, token s
 	return func() { stop(); l.release() }, nil
 }
 
+// forTask sets what `ape task` knows about its launch: the loop's lock
+// scope (withScope) and, 1.4.3 PDFA-5, whether a person's --usage-ok
+// started it, which the session's registry row records for its children.
+func (l *sessionLaunch) forTask(projectRoot, args string, usageOK bool) {
+	l.withScope(projectRoot, args)
+	l.usageOK = usageOK
+}
+
 // holdMilestone is a scoped loop's hold on its milestone's lease
 // (member.HoldMilestone): taken at launch, renewed for the run's life,
 // stopped by the returned func. A scope that is not a milestone (a tweak)
