@@ -1,9 +1,10 @@
 # CHANGELOG
 
-## v1.4.3 (unreleased — draft)
+## v1.4.3 (2026-11-01)
 
 APEX v1.4.3, on v1.4.2: fixes found by the v1.4.2 update of a real project (pdfa) and the
-v1.4.2 release.
+v1.4.2 release. The framework's v1.4.3 payload declares `min_ape_version: "1.4.3"`. Measured on
+Claude Code 2.1.311 and 2.1.312. What it fixes:
 
 - **`ape conductor send`, `stop`, `status` and `read` no longer fail during the supervisor's
   rewrite of its record on Windows.** The record is read again for up to about 200 ms; a missing
