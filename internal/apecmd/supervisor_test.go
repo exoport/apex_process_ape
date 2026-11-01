@@ -34,7 +34,7 @@ func TestSupervisorEnsure(t *testing.T) {
 	t.Cleanup(nc.Close)
 	var mu sync.Mutex
 	var started []string
-	start := func(_ context.Context, ens string) (supervisor.Handle, error) {
+	var start supervisor.Starter = func(_ context.Context, ens string) (supervisor.Handle, error) {
 		mu.Lock()
 		started = append(started, ens)
 		mu.Unlock()
