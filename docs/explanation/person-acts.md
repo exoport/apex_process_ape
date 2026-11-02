@@ -81,6 +81,13 @@ ape milestone close M3 --accept-red "ships with the known RF drift; fixed in M4"
 `--by` is required there, except on `ape change archive --allow-pending-human`, which has no
 `--by`.
 
+Some acts have **no phrase at all, only a terminal**, because nothing a model session could
+carry should ever stand in for them. They are `ape task --usage-ok` and, in a coordinated
+project, `ape milestone claim` itself and its `--adopt` (v1.5). `--adopt` takes a remote
+`milestone/<M>` holding work of its own that no recorded claim explains. In a model session each
+refuses `session.person-only` whatever was typed, and no standing order can delegate `--adopt`:
+it is `milestone-adopt` among the acts orders never name.
+
 ## In your own Claude Code session
 
 In a Claude Code session you started yourself (plain `claude` in the project, usually with

@@ -61,7 +61,7 @@ func TestOrderTiers(t *testing.T) {
 	require.Equal(t, TierNamed, OrderTierOf(OrderMilestoneApprove))
 	require.Equal(t, TierNamed, OrderTierOf(OrderAcceptTask))
 	require.Equal(t, TierNamed, OrderTierOf(OrderDecisionAccept))
-	for _, a := range []string{OrderAcceptConfig, OrderAcceptRed, OrderAllowPending, OrderPush, OrderTag, OrderRelease, OrderOrders} {
+	for _, a := range []string{OrderAcceptConfig, OrderAcceptRed, OrderAllowPending, OrderMilestoneAdopt, OrderPush, OrderTag, OrderRelease, OrderOrders} {
 		require.Equal(t, TierNever, OrderTierOf(a), a)
 	}
 	require.Zero(t, OrderTierOf("deploy"))
@@ -193,4 +193,16 @@ func TestActOrder(t *testing.T) {
 	for _, a := range []string{OrderQuestionAnswer, OrderPrepareRelease, OrderPushBranch, OrderOpenPR} {
 		require.Contains(t, DelegableActs(), a)
 	}
+}
+
+// D736+: `ape milestone claim --adopt` is never delegated: orders naming
+// milestone-adopt are refused exactly as orders naming accept-config are.
+func TestParseOrders_MilestoneAdoptIsNeverDelegated(t *testing.T) {
+	_, refErr := ParseOrders([]byte("---\nperson: d@x\nacts: [accept-config]\n---\n"))
+	_, err := ParseOrders([]byte("---\nperson: d@x\nacts: [milestone-adopt]\n---\n"))
+	require.Error(t, refErr, "the reference: a never act in orders")
+	require.Error(t, err)
+	require.Equal(t, Diagnostics(refErr)[0].Code, Diagnostics(err)[0].Code)
+	require.Contains(t, NeverActs(), OrderMilestoneAdopt)
+	require.NotContains(t, DelegableActs(), OrderMilestoneAdopt)
 }

@@ -42,7 +42,7 @@ the remote's main and pushed there, with a local milestone/<M> tracking it. A re
 milestone/<M> that no claim of M recorded on main explains is judged first (D736): with
 nothing of its own (an ancestor of main, such as a leftover probe) it is fast-forwarded
 to main, so M starts from main; with commits main lacks the claim refuses
-(milestone.branch-exists) unless --adopt takes it as it is. change new
+(milestone.branch-exists) unless --adopt, a person's act from a terminal only, takes it as it is. change new
 --milestone M and change start of M's changes then run on milestone/<M>, switching to it
 from another base branch when the tree is clean (milestone.branch-missing in a checkout
 that never claimed M). A failed fetch or push is base.fetch-failed; the lease stays held,
@@ -55,6 +55,13 @@ Exit codes: 0 claimed · 1 refused (held by another, no ensemble, NATS) · 2 usa
 		Example: `  ape milestone claim M3`,
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// D736+: --adopt is a person's act of its own, from a terminal
+			// only, never granted or ordered (orders: milestone-adopt, never).
+			if adopt {
+				if err := apexv1.RequirePersonFlag("ape milestone claim --adopt"); err != nil {
+					return usageErr(err)
+				}
+			}
 			if err := apexv1.RequirePersonFlag("ape milestone claim"); err != nil {
 				return usageErr(err)
 			}
@@ -99,7 +106,7 @@ Exit codes: 0 claimed · 1 refused (held by another, no ensemble, NATS) · 2 usa
 		},
 	}
 	addV1Flags(cmd, &f)
-	cmd.Flags().BoolVar(&adopt, "adopt", false, "take a milestone/<M> the remote already has, with commits main lacks and no claim of M recorded on main, as it is (a person's decision; without it the claim refuses milestone.branch-exists)")
+	cmd.Flags().BoolVar(&adopt, "adopt", false, "take a milestone/<M> the remote already has, with commits main lacks and no claim of M recorded on main, as it is: a person's act, from a terminal only (session.person-only in a model session; never delegated by orders); without it the claim refuses milestone.branch-exists")
 	return cmd
 }
 

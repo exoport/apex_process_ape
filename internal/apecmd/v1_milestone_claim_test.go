@@ -274,3 +274,26 @@ func TestMilestoneClose_HoldsTheLeaseWhileItsGateRuns(t *testing.T) {
 	_, _, err = v1Exec(t, newMilestoneCmd, "claim", "M1", "--cwd", eve)
 	require.NoError(t, err, "the close ended: no keeper, the lease lapsed, and eve may claim")
 }
+
+// D736+: --adopt is a person's act, from a terminal only: in a model
+// session — an ape-launched one (APE_SESSION) or a person's own Claude
+// Code session (CLAUDECODE), where no typed phrase grants it — the claim
+// refuses session.person-only naming --adopt. The control: at a terminal
+// it gets past that check (and fails here only for its own reasons).
+func TestMilestoneClaim_AdoptIsTerminalOnly(t *testing.T) {
+	root := v1Repo(t)
+	for _, env := range []string{"APE_SESSION", "CLAUDECODE"} {
+		t.Run(env, func(t *testing.T) {
+			t.Setenv(env, "1")
+			stdout, stderr, err := v1Exec(t, newMilestoneCmd, "claim", "M1", "--adopt", "--cwd", root)
+			require.Equal(t, ExitUsage, exitCodeOf(t, err), stdout+stderr)
+			require.Contains(t, stdout+stderr+err.Error(), "ape milestone claim --adopt is for a person")
+			require.Contains(t, apexv1.Diagnostics(err)[0].Code, apexv1.CodePersonOnly)
+		})
+	}
+	t.Run("control-terminal", func(t *testing.T) {
+		stdout, stderr, err := v1Exec(t, newMilestoneCmd, "claim", "M1", "--adopt", "--cwd", root)
+		require.Error(t, err, "no ensemble here")
+		require.NotContains(t, stdout+stderr+err.Error(), "is for a person", "past the person check")
+	})
+}

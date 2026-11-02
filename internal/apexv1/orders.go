@@ -62,7 +62,7 @@ func init() {
 		CodeDoc{CodeOrdersInvalid, 1, ActionPerson, "a standing orders file's frontmatter does not parse, names an act ape does not know, or its person does not match its file name: a person fixes it and accepts it again (`ape orders accept`)"},
 		CodeDoc{CodeOrdersUnaccepted, 1, ActionPerson, "the standing orders changed since a person last accepted them, or were never accepted: no delegated act runs under them until the person runs `ape orders accept --by <person>` from a terminal"},
 		CodeDoc{CodeOrdersRevoked, 1, ActionPerson, "the person revoked their standing orders (`ape orders revoke`): no delegated act runs under them until they accept them again"},
-		CodeDoc{CodeOrdersNonDelegable, 1, ActionPerson, "the act is never delegated (accept the config, accept red, allow a pending human-review task, push, tag, release, the orders themselves): only the person does it, from a terminal or in their own words"},
+		CodeDoc{CodeOrdersNonDelegable, 1, ActionPerson, "the act is never delegated (accept the config, accept red, allow a pending human-review task, adopt a milestone branch with `ape milestone claim --adopt`, push, tag, release, the orders themselves): only the person does it, from a terminal or in their own words"},
 		CodeDoc{CodeOrdersNotNamed, 1, ActionPerson, "the act is delegated only when the person's orders name it under acts: (every act, D664+), and these orders do not"},
 		CodeDoc{CodeOrdersCondition, 1, ActionPerson, "a condition the person's orders set for this act does not hold (a tweak's type, a milestone's change count, its last gate, an answer only for a change blocked on a question): the conductor relays it to the person"},
 		CodeDoc{CodeOrdersNoReason, 2, ActionStop, "`ape conductor act` needs --reason: what the act rests on, quoting the evidence the conductor read (D660)"},
@@ -98,6 +98,10 @@ const (
 	OrderTag              = "tag"
 	OrderRelease          = "release"
 	OrderOrders           = "orders"
+	// OrderMilestoneAdopt is `ape milestone claim <M> --adopt`: taking a
+	// milestone branch with work of its own that no recorded claim
+	// explains (D736). A person's act, from a terminal only.
+	OrderMilestoneAdopt = "milestone-adopt"
 )
 
 // OrderTier is how far an act can be delegated (D659 A2).
@@ -137,6 +141,7 @@ var orderActs = map[string]struct {
 	OrderTag:              {TierNever, ""},
 	OrderRelease:          {TierNever, ""},
 	OrderOrders:           {TierNever, ""},
+	OrderMilestoneAdopt:   {TierNever, ""},
 }
 
 // actOrder is every act in the order ape lists them — the accept table,
@@ -146,7 +151,7 @@ var orderActs = map[string]struct {
 var actOrder = []string{
 	OrderAnswer, OrderQuestionAnswer, OrderTweakApprove,
 	OrderMilestoneApprove, OrderAcceptTask, OrderDecisionAccept, OrderPrepareRelease, OrderPushBranch, OrderOpenPR,
-	OrderAcceptConfig, OrderAcceptRed, OrderAllowPending, OrderPush, OrderTag, OrderRelease, OrderOrders,
+	OrderAcceptConfig, OrderAcceptRed, OrderAllowPending, OrderMilestoneAdopt, OrderPush, OrderTag, OrderRelease, OrderOrders,
 }
 
 // DelegableActs are the acts orders may name, in actOrder's order.
