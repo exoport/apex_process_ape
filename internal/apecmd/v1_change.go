@@ -1446,6 +1446,12 @@ moved since the fetch (another writer) refuses it (milestone.moved, retry). Refu
 squash is rolled back as any failure on the base is: nothing lands, change/<id> is checked
 out again; archive again, which fetches and catches up. Needs this checkout's lease on M.
 
+Landed, it takes main in when main moved since the milestone last did (the boundary
+take-in, ape's own; the JSON "take_in" is `+"`ape milestone take-in`"+`'s result). Its conflict
+(exit 3, change.conflicted) or red regression (milestone.take-in-red) names take-in-<n>,
+laid out on change/take-in-<n>; the change stays archived. After apex-apply, archive the
+same change again: it lands the take-in and does nothing else ("already_archived").
+
 A crash mid-archive (H28): archive keeps a journal, _apex/state/archive-journal.json
 (ignored; base, its sha before, the branch and its tip, the step), from before the
 catch-up until it returns. A journal that outlives its process is rolled back by the next
@@ -1488,6 +1494,11 @@ func renderArchive(cmd *cobra.Command, f *v1Flags, id string, res *apexv1.Archiv
 		return v1Fail(cmd, f, err, res)
 	}
 	return v1Emit(cmd.OutOrStdout(), f, res, func(w io.Writer) {
+		if res.AlreadyArchived {
+			fmt.Fprintf(w, "%s is archived (%s); only the take-in ran\n", id, res.ArchivedTo)
+			printArchiveTakeIn(w, res)
+			return
+		}
 		for _, s := range res.Specs {
 			verb := "updated"
 			if s.Created {
@@ -1509,7 +1520,19 @@ func renderArchive(cmd *cobra.Command, f *v1Flags, id string, res *apexv1.Archiv
 		if res.AllowPendingHuman {
 			fmt.Fprintf(w, "recorded: archived with human-review pending (%s)\n", strings.Join(res.PendingHuman, ", "))
 		}
+		printArchiveTakeIn(w, res)
 	})
+}
+
+// printArchiveTakeIn is the boundary take-in's line (B4).
+func printArchiveTakeIn(w io.Writer, res *apexv1.ArchiveResult) {
+	switch t := res.TakeIn; {
+	case t == nil:
+	case t.UpToDate:
+		fmt.Fprintf(w, "%s is up to date with main (%.7s): nothing to take in\n", t.Branch, t.Main)
+	default:
+		fmt.Fprintf(w, "took main (%.7s) into %s: %s landed as %.7s\n", t.Main, t.Branch, t.ID, t.Commit)
+	}
 }
 
 // coordMilestone is the milestone a coordinated verb's pause check reads:
@@ -1520,8 +1543,12 @@ func coordMilestone(cmd *cobra.Command, p *apexv1.Project, id string) string {
 		m, _ := cmd.Flags().GetString("milestone")
 		return m
 	case "start", "archive":
-		// D702: archive lands on milestone/<M>, so it needs M's lease too.
-		return p.ChangeTarget(cmd.Context(), id)
+		// D702: archive lands on milestone/<M>, so it needs M's lease too;
+		// an archived change's take-in (B4) as well.
+		if m := p.ChangeTarget(cmd.Context(), id); m != "" {
+			return m
+		}
+		return p.ArchivedChangeMilestone(id)
 	}
 	return ""
 }

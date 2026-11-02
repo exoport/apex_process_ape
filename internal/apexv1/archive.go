@@ -191,6 +191,13 @@ type ArchiveResult struct {
 	Verify            *VerifyResult `json:"verify,omitempty"`
 	AllowPendingHuman bool          `json:"allow_pending_human,omitempty"`
 	PendingHuman      []string      `json:"pending_human,omitempty"`
+	// TakeIn is the take-in a coordinated archive ran once it landed
+	// (FINDING-V15-1B-3, B4): main taken into milestone/<M> when it moved.
+	TakeIn *TakeInResult `json:"take_in,omitempty"`
+	// AlreadyArchived: archive was called again for a change it had
+	// landed; only the take-in ran.
+	AlreadyArchived bool `json:"already_archived,omitempty"`
+	takeInErr       error
 }
 
 // Archive lands a reviewed change on its base branch (D38): it catches
@@ -214,6 +221,9 @@ func (p *Project) Archive(ctx context.Context, id string, allowPendingHuman bool
 	}
 	ci, err := p.requireChange(ctx, id)
 	if err != nil {
+		if res, ok := p.archivedTakeIn(ctx, id, opt, err); ok {
+			return res, res.takeInErr
+		}
 		return nil, err
 	}
 	pending, err := p.archivable(ctx, ci, allowPendingHuman)
@@ -281,7 +291,72 @@ func (p *Project) Archive(ctx context.Context, id string, allowPendingHuman bool
 	}
 	res.Subject = archiveSubject(tmpl, ci.Doc, id)
 	res.Hooks = cc.RunHooks()
-	return res, p.squashOntoBase(ctx, ci, updates, dest, pending, res, j)
+	if err := p.squashOntoBase(ctx, ci, updates, dest, pending, res, j); err != nil {
+		return res, err
+	}
+	// Landed: nothing is left to roll back, so the journal goes before
+	// the take-in, whose crash must not undo a pushed archive.
+	p.removeJournal()
+	return res, p.takeInAtLanding(ctx, base, opt, res)
+}
+
+// takeInAtLanding is the boundary take-in, ape's own (FINDING-V15-1B-3,
+// B4): once a coordinated change landed on milestone/<M>, main is taken
+// in when it moved since the milestone last took it in. A conflict or a
+// red regression is the take-in's own error (take-in-<n>, laid out for
+// apex-apply); archiving the change again lands its resolution.
+func (p *Project) takeInAtLanding(ctx context.Context, base string, opt RunOptions, res *ArchiveResult) error {
+	ms, ok := strings.CutPrefix(base, MilestoneBranchPrefix)
+	if !ok || !p.coordinated() {
+		return nil
+	}
+	tr, err := p.TakeIn(ctx, ms, opt)
+	res.TakeIn = tr
+	return err
+}
+
+// archivedState is an archived change's state.json; nil when it is not
+// archived or does not load.
+func (p *Project) archivedState(id string) *State {
+	folder, ok := p.ArchivedIDs()[id]
+	if !ok {
+		return nil
+	}
+	st, err := LoadState(filepath.Join(p.archivedPath(folder), "state.json"))
+	if err != nil {
+		return nil
+	}
+	return st
+}
+
+// ArchivedChangeMilestone is the milestone an archived coordinated change
+// landed on (its base milestone/<M>), "" otherwise.
+func (p *Project) ArchivedChangeMilestone(id string) string {
+	if st := p.archivedState(id); st != nil {
+		if ms, ok := strings.CutPrefix(st.BaseBranch, MilestoneBranchPrefix); ok {
+			return ms
+		}
+	}
+	return ""
+}
+
+// archivedTakeIn is archive called again for a coordinated change it
+// already landed (the loop's "apex-apply take-in-<n>, then the same command
+// again"): only the boundary take-in runs, landing apex-apply's resolution
+// or taking main in; ok is false for anything else, which keeps notFound's
+// refusal (change.archived in a project not integrating through GitHub).
+func (p *Project) archivedTakeIn(ctx context.Context, id string, opt RunOptions, notFound error) (res *ArchiveResult, ok bool) {
+	var fe *FailError
+	if !p.coordinated() || !errors.As(notFound, &fe) || fe.Code != "change.archived" {
+		return nil, false
+	}
+	st := p.archivedState(id)
+	if st == nil || !strings.HasPrefix(st.BaseBranch, MilestoneBranchPrefix) {
+		return nil, false
+	}
+	res = &ArchiveResult{ID: id, ArchivedTo: st.ArchivedTo, BaseBranch: st.BaseBranch, BranchTip: st.BranchTip, TipRef: st.TipRef, AlreadyArchived: true}
+	res.takeInErr = p.takeInAtLanding(ctx, st.BaseBranch, opt, res)
+	return res, true
 }
 
 // archivable checks what archive needs before it touches git: a review

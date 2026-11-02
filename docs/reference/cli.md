@@ -1633,6 +1633,12 @@ moved since the fetch (another writer) refuses it (milestone.moved, retry). Refu
 squash is rolled back as any failure on the base is: nothing lands, change/<id> is checked
 out again; archive again, which fetches and catches up. Needs this checkout's lease on M.
 
+Landed, it takes main in when main moved since the milestone last did (the boundary
+take-in, ape's own; the JSON "take_in" is `ape milestone take-in`'s result). Its conflict
+(exit 3, change.conflicted) or red regression (milestone.take-in-red) names take-in-<n>,
+laid out on change/take-in-<n>; the change stays archived. After apex-apply, archive the
+same change again: it lands the take-in and does nothing else ("already_archived").
+
 A crash mid-archive (H28): archive keeps a journal, _apex/state/archive-journal.json
 (ignored; base, its sha before, the branch and its tip, the step), from before the
 catch-up until it returns. A journal that outlives its process is rolled back by the next
