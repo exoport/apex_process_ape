@@ -57,6 +57,19 @@ func TestSupervisorEnsure(t *testing.T) {
 	mu.Lock()
 	require.Contains(t, started, "shop")
 	mu.Unlock()
+
+	// status is read-only: a supervisor leads, but the stub coordinator
+	// never answers its ping — exit 1, and nothing more is started.
+	mu.Lock()
+	n := len(started)
+	mu.Unlock()
+	stdout, _, err := v1Exec(t, newSupervisorCmd, "status", "--nats-url", url, "--ensemble", "shop")
+	require.Equal(t, ExitRunFailed, exitCodeOf(t, err))
+	require.Contains(t, stdout, "supervisor: sup-t leads")
+	require.Contains(t, stdout, "shop: no coordinator answers")
+	mu.Lock()
+	require.Len(t, started, n, "status starts nothing")
+	mu.Unlock()
 }
 
 // The coordinator a supervisor starts watches the member projects'

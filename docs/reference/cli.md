@@ -9589,6 +9589,7 @@ SIGINT/SIGTERM stops its coordinators and exits 0.
 Subcommands:
 
 - `ensure` — Ask the leading supervisor to run the ensemble's coordinator, starting it if none answers
+- `status` — Which supervisor leads, and whether the ensemble's coordinator answers (read-only: starts nothing)
 
 Flags:
 
@@ -9618,6 +9619,35 @@ Examples:
 ```
   ape supervisor ensure
   ape supervisor ensure --ensemble atomix-1a --nats-url nats://127.0.0.1:14222
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | the project whose coordination: block and hot/ape-nats.creds to use (default: the current directory) |
+| `--ensemble` | string | `—` | the ensemble (default: the project's) |
+| `--nats-creds` | string | `—` | NATS credentials file, instead of the project's hot/ape-nats.creds (env APE_NATS_CREDS) |
+| `--nats-url` | string | `—` | NATS URL, instead of the project's (env APE_NATS_URL) |
+
+## ape supervisor status
+
+Which supervisor leads, and whether the ensemble's coordinator answers (read-only: starts nothing)
+
+```
+ape supervisor status [--ensemble <name>] [flags]
+```
+
+Ask ape.sup.status which supervisor leads, and ape.coord.<ensemble>.status whether the
+ensemble's coordinator answers, each within the health deadline. Unlike ensure, it never starts a
+coordinator: a drill waits on it to see the supervisor bring one back by itself. Exit 0 when a
+supervisor leads and the coordinator answers, 1 otherwise.
+
+Examples:
+
+```
+  ape supervisor status
+  ape supervisor status --ensemble atomix-1a --nats-url nats://127.0.0.1:14222
 ```
 
 Flags:

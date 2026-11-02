@@ -65,7 +65,7 @@ SIGINT/SIGTERM stops its coordinators and exits 0.`,
 	cmd.Flags().DurationVar(&heartbeat, "heartbeat", time.Minute, "how often each held conductor lease gets a heartbeat event (0: none)")
 	cmd.Flags().StringSliceVar(&projects, "project", nil, "a member project whose milestone leases its coordinators watch (repeatable; default: the member project it runs in)")
 	_ = cmd.Flags().MarkHidden("no-verify")
-	cmd.AddCommand(newSupervisorEnsureCmd())
+	cmd.AddCommand(newSupervisorEnsureCmd(), newSupervisorStatusCmd())
 	return cmd
 }
 
@@ -153,4 +153,57 @@ func (f *coordFlags) coordinatorProcess(ctx context.Context, ens string, project
 		return nil, err
 	}
 	return coordProcess{cmd: c}, nil
+}
+
+func newSupervisorStatusCmd() *cobra.Command {
+	var f coordFlags
+	var ensemble string
+	cmd := &cobra.Command{
+		Use:   "status [--ensemble <name>]",
+		Short: "Which supervisor leads, and whether the ensemble's coordinator answers (read-only: starts nothing)",
+		Long: `Ask ape.sup.status which supervisor leads, and ape.coord.<ensemble>.status whether the
+ensemble's coordinator answers, each within the health deadline. Unlike ensure, it never starts a
+coordinator: a drill waits on it to see the supervisor bring one back by itself. Exit 0 when a
+supervisor leads and the coordinator answers, 1 otherwise.`,
+		Example: "  ape supervisor status\n  ape supervisor status --ensemble atomix-1a --nats-url nats://127.0.0.1:14222",
+		Args:    cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			nc, m, err := f.connect(cmd.Context(), "ape-supervisor-status")
+			if err != nil {
+				return err
+			}
+			defer nc.Close()
+			if ensemble == "" && m != nil {
+				ensemble = m.Ensemble
+			}
+			if ensemble == "" {
+				return usageErr(errors.New("--ensemble is required outside a member project"))
+			}
+			w := cmd.OutOrStdout()
+			ok := true
+			var sup map[string]string
+			if msg, err := nc.Request("ape.sup.status", nil, layout.HealthDeadline); err == nil && json.Unmarshal(msg.Data, &sup) == nil && sup["id"] != "" {
+				fmt.Fprintf(w, "supervisor: %s leads\n", sup["id"])
+			} else {
+				ok = false
+				fmt.Fprintln(w, "supervisor: none leads (no answer on ape.sup.status)")
+			}
+			var st struct {
+				ID string `json:"id"`
+			}
+			if msg, err := nc.Request("ape.coord."+ensemble+".status", nil, layout.HealthDeadline); err == nil && json.Unmarshal(msg.Data, &st) == nil && st.ID != "" {
+				fmt.Fprintf(w, "%s: coordinator %s answers\n", ensemble, st.ID)
+			} else {
+				ok = false
+				fmt.Fprintf(w, "%s: no coordinator answers\n", ensemble)
+			}
+			if !ok {
+				return failErr(errors.New("the supervisor or the coordinator did not answer"))
+			}
+			return nil
+		},
+	}
+	f.add(cmd)
+	cmd.Flags().StringVar(&ensemble, "ensemble", "", "the ensemble (default: the project's)")
+	return cmd
 }
