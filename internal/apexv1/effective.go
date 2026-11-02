@@ -224,7 +224,7 @@ func (p *Project) RunChecks(ctx context.Context, logDir, prefix string, checks [
 				r.Log = p.Rel(logPath)
 			} else {
 				progressf(opt.Progress, "%s %s started: %s (output: %s)", Stamp(), pc.Ref, pc.Cmd, p.Rel(logPath))
-				r = withLegLock(ctx, p.Root, pc, opt.Progress, func() CheckResult {
+				r = withLegLock(ctx, p.Root, pc, cfg.Checks.Containers, opt.Progress, func() CheckResult {
 					return p.runWithRetries(ctx, pc, logPath, timeouts.Limits(pc.Kind, opt.Timeout), vacuous, int(cfg.Retries), inGit)
 				})
 				verdict := "green"

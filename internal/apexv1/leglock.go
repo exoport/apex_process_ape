@@ -44,9 +44,20 @@ var (
 	legLiveRe    = regexp.MustCompile(`(?:^|[^A-Za-z0-9_])[A-Z][A-Z0-9_]*_LIVE=(?:1|true|yes|on)(?:[^A-Za-z0-9_]|$)`)
 )
 
-// composeLeg reports a check that holds the compose-leg lock.
-func composeLeg(pc *PlannedCheck) bool {
-	return pc.Full || legRuntimeRe.MatchString(pc.Cmd) || legLiveRe.MatchString(pc.Cmd)
+// composeLeg reports a check that holds the compose-leg lock: by its line,
+// or because its command holds one the project declares as starting
+// containers (checks.containers, FINDING-V15-1A-12) — the regression
+// command's `make smoke`, a Gate: script's own live leg.
+func composeLeg(pc *PlannedCheck, declared []string) bool {
+	if pc.Full || legRuntimeRe.MatchString(pc.Cmd) || legLiveRe.MatchString(pc.Cmd) {
+		return true
+	}
+	for _, d := range declared {
+		if strings.Contains(pc.Cmd, d) {
+			return true
+		}
+	}
+	return false
 }
 
 // LegLockUse sums a run's compose-leg lock: how many checks held it, how
@@ -58,6 +69,16 @@ type LegLockUse struct {
 	Waited   int       `json:"waited"`
 	WaitSecs float64   `json:"wait_secs"`
 	Waits    []LegWait `json:"waits,omitempty"`
+	// HeldSecs is how long this run held the lock in all, Holds each leg's
+	// hold (its own run, retries included; FINDING-V15-1A-12).
+	HeldSecs float64   `json:"held_secs"`
+	Holds    []LegHold `json:"holds,omitempty"`
+}
+
+// LegHold is one leg's hold of the lock: the check and how long it ran.
+type LegHold struct {
+	Check string  `json:"check"`
+	Secs  float64 `json:"secs"`
 }
 
 // LegWait is one leg's wait for the lock: the check, how long, and whose
@@ -76,6 +97,8 @@ func legLockUse(results []CheckResult) *LegLockUse {
 			continue
 		}
 		u.Checks++
+		u.HeldSecs += results[i].Secs
+		u.Holds = append(u.Holds, LegHold{Check: results[i].Task, Secs: roundTenth(results[i].Secs)})
 		if results[i].LegLockWaitSecs > 0 {
 			u.Waited++
 			u.WaitSecs += results[i].LegLockWaitSecs
@@ -85,7 +108,7 @@ func legLockUse(results []CheckResult) *LegLockUse {
 	if u.Checks == 0 {
 		return nil
 	}
-	u.WaitSecs = roundTenth(u.WaitSecs)
+	u.WaitSecs, u.HeldSecs = roundTenth(u.WaitSecs), roundTenth(u.HeldSecs)
 	return &u
 }
 
@@ -96,8 +119,8 @@ func roundTenth(f float64) float64 { return math.Round(f*10) / 10 }
 // whose run it waited for. Interrupted while waiting, the check is not run.
 // A lock that cannot be taken at all (the folder unwritable) runs the
 // check unlocked and says so in progress.
-func withLegLock(ctx context.Context, root string, pc *PlannedCheck, progress io.Writer, run func() CheckResult) CheckResult {
-	if !composeLeg(pc) {
+func withLegLock(ctx context.Context, root string, pc *PlannedCheck, declared []string, progress io.Writer, run func() CheckResult) CheckResult {
+	if !composeLeg(pc, declared) {
 		return run()
 	}
 	start := time.Now()
@@ -160,7 +183,7 @@ func (u *LegLockUse) String() string {
 		return ""
 	}
 	if u.Waited == 0 {
-		return fmt.Sprintf("%d compose leg(s) held the host's compose-leg lock; none waited", u.Checks)
+		return fmt.Sprintf("%d compose leg(s) held the host's compose-leg lock for %.1fs in all; none waited", u.Checks, u.HeldSecs)
 	}
-	return fmt.Sprintf("%d compose leg(s) held the host's compose-leg lock; %d waited %.1fs in all for another run's legs", u.Checks, u.Waited, u.WaitSecs)
+	return fmt.Sprintf("%d compose leg(s) held the host's compose-leg lock for %.1fs in all; %d waited %.1fs in all for another run's legs", u.Checks, u.HeldSecs, u.Waited, u.WaitSecs)
 }

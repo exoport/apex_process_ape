@@ -337,6 +337,7 @@ const DefaultSlowRegression = 5 * time.Minute
 //	  vacuous_output_extra: ["harness unavailable"]        # appended to the list in force (v1.4)
 //	  slow_regression: 10m                                 # regression.slow's threshold (W2)
 //	  full_min_secs: 60                                    # check.tag-mismatch's bound (v1.4)
+//	  containers: ["make smoke", "./scripts/relay-live.sh"] # commands that start containers (v1.5)
 //
 // Absent, the rule uses DefaultVacuousOutput, and slow_regression is
 // DefaultSlowRegression. vacuous_output_extra (v1.4, T4) adds a project's
@@ -352,6 +353,14 @@ type ChecksConfig struct {
 	// longer is no check.tag-mismatch — "long" is a reason for (full)
 	// (v1.4, D623); 0 is unset.
 	FullMinSecs int
+	// Containers are the commands that start containers (v1.5,
+	// FINDING-V15-1A-12): a check whose command holds one of them — a
+	// scenario's, a task's, the Gate: command, the regression command —
+	// is a compose leg, and runs holding the host's compose-leg lock for
+	// its own duration (leglock.go). The line rule (a container runtime
+	// named, a *_LIVE variable set) still applies beside it; this names
+	// what no line says, such as a make target.
+	Containers []string
 	// vacuousSet: vacuous_output: was given (an empty list turns the rule
 	// off), as opposed to absent (the default list).
 	vacuousSet bool
@@ -359,7 +368,7 @@ type ChecksConfig struct {
 
 // UnmarshalYAML parses and validates the block.
 func (c *ChecksConfig) UnmarshalYAML(n *yaml.Node) error {
-	if err := checkKeys(n, "checks", "vacuous_output", "vacuous_output_extra", "slow_regression", "full_min_secs"); err != nil {
+	if err := checkKeys(n, "checks", "vacuous_output", "vacuous_output_extra", "slow_regression", "full_min_secs", "containers"); err != nil {
 		return err
 	}
 	var raw struct {
@@ -367,9 +376,16 @@ func (c *ChecksConfig) UnmarshalYAML(n *yaml.Node) error {
 		VacuousOutputExtra []string  `yaml:"vacuous_output_extra"`
 		SlowRegression     string    `yaml:"slow_regression"`
 		FullMinSecs        *int      `yaml:"full_min_secs"`
+		Containers         []string  `yaml:"containers"`
 	}
 	if err := n.Decode(&raw); err != nil {
-		return fmt.Errorf("checks: %w — vacuous_output and vacuous_output_extra are lists of phrases, slow_regression a Go duration, full_min_secs a number of seconds", err)
+		return fmt.Errorf("checks: %w — vacuous_output, vacuous_output_extra and containers are lists of strings, slow_regression a Go duration, full_min_secs a number of seconds", err)
+	}
+	for _, c0 := range raw.Containers {
+		if strings.TrimSpace(c0) == "" {
+			return fmt.Errorf("checks.containers: an empty command would name every check")
+		}
+		c.Containers = append(c.Containers, strings.TrimSpace(c0))
 	}
 	for _, ph := range raw.VacuousOutputExtra {
 		if strings.TrimSpace(ph) == "" {

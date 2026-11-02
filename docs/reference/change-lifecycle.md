@@ -408,13 +408,16 @@ What else a check gets in v1.4:
   process, or a container publishing it): not ready, never red for the product. Held by the check
   itself, it stays red.
 - **The host's compose-leg lock** (v1.5): a check that is a compose leg runs holding a lock shared by
-  every ape on the host. A compose leg is a `check (full):` check, or a check whose command names a
-  container runtime (`docker`, `docker-compose`, `podman`, `nerdctl`, `testcontainers`), or one that
-  sets a `*_LIVE` variable on (`X_LIVE=1`). Two gates, closes or verifies on one host (two milestones'
+  every ape on the host. A compose leg is a `check (full):` check, a check whose command names a
+  container runtime (`docker`, `docker-compose`, `podman`, `nerdctl`, `testcontainers`), one that
+  sets a `*_LIVE` variable on (`X_LIVE=1`), or any check, the Gate: command and the regression
+  command included, whose command contains one the project lists in
+  [`checks.containers`](config-yaml.md#checks). Two gates, closes or verifies on one host (two milestones'
   members) therefore take their legs one at a time: their own compose projects do not separate a
   fixed host port or a fixed container name. The lock is a file in the system temporary folder
-  (`ape-compose-legs.lock`). A gate sums it in JSON `leg_lock` — `checks`, `waited`, `wait_secs`, and
-  `waits`, one `{check, secs, holder}` per leg that waited, `holder` naming the run that held the lock —
+  (`ape-compose-legs.lock`). A gate sums it in JSON `leg_lock` — `checks`, `waited`, `wait_secs`,
+  `waits`, one `{check, secs, holder}` per leg that waited, `holder` naming the run that held the lock,
+  and `held_secs` and `holds`, one `{check, secs}` per leg: how long each held it —
   in its `--json` result and `_apex/state/logs/gate-<M>.json`, never in `milestones.json`; its human
   output prints one line summing it. A check result also carries `leg_lock`, `leg_lock_wait_secs`
   and `leg_lock_holder`, but a gate keeps whole results only for its red checks (`spec_failed`).
