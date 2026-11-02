@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats-server/v2/server"
 	natsserver "github.com/nats-io/nats-server/v2/test"
 )
@@ -46,6 +47,51 @@ func RunJetStreamServer(t *testing.T) string {
 		t.Fatal("natstest: JetStream server not ready in time")
 	}
 	return s.ClientURL()
+}
+
+// StartOperatorJetStream is StartOperator with JetStream enabled and the
+// account's JetStream limits unlimited: credentials meet the JetStream API
+// as a deployed cluster's do (C1, D757).
+func StartOperatorJetStream(t *testing.T) (url string, accountKey KeyPair) {
+	t.Helper()
+	okp := createOperator(t)
+	akp := createAccount(t)
+	apub := publicKey(t, akp)
+	ac := jwt.NewAccountClaims(apub)
+	ac.Name = "APP"
+	ac.Limits.JetStreamLimits = jwt.JetStreamLimits{MemoryStorage: -1, DiskStorage: -1, Streams: -1, Consumer: -1}
+	ajwt, err := ac.Encode(okp)
+	if err != nil {
+		t.Fatalf("natstest: encode account jwt: %v", err)
+	}
+	// JetStream in operator mode needs a system account.
+	skp := createAccount(t)
+	spub := publicKey(t, skp)
+	sc := jwt.NewAccountClaims(spub)
+	sc.Name = "SYS"
+	sjwt, err := sc.Encode(okp)
+	if err != nil {
+		t.Fatalf("natstest: encode system account jwt: %v", err)
+	}
+	opts := &server.Options{Host: "127.0.0.1", Port: -1, JetStream: true, StoreDir: t.TempDir(), SystemAccount: spub}
+	opts.TrustedKeys = []string{publicKey(t, okp)}
+	res := &server.MemAccResolver{}
+	for pub, j := range map[string]string{apub: ajwt, spub: sjwt} {
+		if err := res.Store(pub, j); err != nil {
+			t.Fatalf("natstest: store account jwt: %v", err)
+		}
+	}
+	opts.AccountResolver = res
+	s, err := server.NewServer(opts)
+	if err != nil {
+		t.Fatalf("natstest: new operator server: %v", err)
+	}
+	go s.Start()
+	t.Cleanup(s.Shutdown)
+	if !s.ReadyForConnections(5 * time.Second) {
+		t.Fatal("natstest: operator server not ready in time")
+	}
+	return s.ClientURL(), KeyPair{akp}
 }
 
 // StartOperator starts an embedded nats-server in operator/JWT mode with a
