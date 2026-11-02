@@ -369,3 +369,25 @@ func TestDrill_SupervisorRidesOutANATSOutage(t *testing.T) {
 		return false
 	}, 10*time.Second, 50*time.Millisecond, "the restart is logged")
 }
+
+type termHandle struct{ stopped, terminated *bool }
+
+func (h termHandle) Stop()      { *h.stopped = true }
+func (h termHandle) Terminate() { *h.terminated = true }
+
+type stopHandle struct{ stopped *bool }
+
+func (h stopHandle) Stop() { *h.stopped = true }
+
+// D736: the supervisor's exit ends each coordinator gracefully when its
+// handle can (Terminate: it releases its lease); a handle that cannot is
+// stopped as before (the control).
+func TestStopAll_TerminatesWhenItCan(t *testing.T) {
+	var s1, t1, s2 bool
+	s := &Supervisor{handles: map[string]Handle{"a": termHandle{&s1, &t1}, "b": stopHandle{&s2}}}
+	s.stopAll()
+	require.True(t, t1, "terminated")
+	require.False(t, s1, "not killed")
+	require.True(t, s2, "the control: a plain handle is stopped")
+	require.Empty(t, s.handles)
+}

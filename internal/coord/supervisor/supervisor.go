@@ -30,8 +30,17 @@ const Owner = "sup"
 
 // Handle is a started coordinator.
 type Handle interface {
-	// Stop ends the coordinator; for a process, a kill.
+	// Stop ends the coordinator; for a process, a kill (a coordinator
+	// judged dead is replaced at once).
 	Stop()
+}
+
+// Terminator is a Handle that can also end gracefully: asked to stop, the
+// coordinator releases coord.<ens> on its clean exit, so a successor
+// supervisor's coordinator claims it at once rather than one TTL later
+// (D736). The supervisor's own exit uses it.
+type Terminator interface {
+	Terminate()
 }
 
 // Starter starts a coordinator for an ensemble: a process on this host in
@@ -389,7 +398,11 @@ func (s *Supervisor) stopAll() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for ens, h := range s.handles {
-		h.Stop()
+		if t, ok := h.(Terminator); ok {
+			t.Terminate()
+		} else {
+			h.Stop()
+		}
 		delete(s.handles, ens)
 	}
 }

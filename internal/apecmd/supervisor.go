@@ -119,10 +119,34 @@ could not start one.`,
 // coordProcess is a coordinator child process; Stop kills it.
 type coordProcess struct{ cmd *exec.Cmd }
 
+// Stop kills the coordinator: one judged dead is replaced at once.
 func (p coordProcess) Stop() {
 	if p.cmd.Process != nil {
 		_ = p.cmd.Process.Kill()
 		_ = p.cmd.Wait()
+	}
+}
+
+// coordTermGrace is how long a coordinator asked to stop has to release
+// its lease and exit before it is killed. A var so tests can wait less.
+var coordTermGrace = 5 * time.Second
+
+// Terminate asks the coordinator to stop (SIGTERM; on Windows a kill),
+// so it releases coord.<ens> on its clean exit, and kills it after
+// coordTermGrace (D736): a successor supervisor's coordinator then claims
+// the lease at once instead of one TTL later.
+func (p coordProcess) Terminate() {
+	if p.cmd.Process == nil {
+		return
+	}
+	done := make(chan struct{})
+	go func() { _ = p.cmd.Wait(); close(done) }()
+	forwardTerm(p.cmd.Process)
+	select {
+	case <-done:
+	case <-time.After(coordTermGrace):
+		_ = p.cmd.Process.Kill()
+		<-done
 	}
 }
 
