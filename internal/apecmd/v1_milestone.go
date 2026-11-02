@@ -489,6 +489,10 @@ with ` + "`ape status --json`" + ` (milestone.gate_last) or the log, not by runn
 returned results included; --json puts "exit" and "log" (the gate's log) first and that line,
 "verdict", last. Never run the gate again to read a result: the next call runs it.
 
+In a project integrating through GitHub the gate runs on milestone/<M> and its record is
+committed there: from main (where a claim leaves HEAD) it switches to milestone/<M> on a
+clean tree, and refuses with the paths in the way otherwise.
+
 Exit codes: 0 gate green (--spec-only: every scenario passed) · 1 gate red (last output
 lines shown), a red scenario under --spec-only, no such milestone, a done milestone, no
 approval record, a changed gate, or HEAD on a change branch · 2 usage · 3 run.busy (--spec-only).`,

@@ -539,6 +539,13 @@ func (p *Project) RunGate(ctx context.Context, id string, opt RunOptions) (*Gate
 	if err := p.recoverArchive(ctx); err != nil {
 		return nil, err
 	}
+	// A coordinated project's gate runs on milestone/<M>, and its record
+	// is committed there (FINDING-V15-1B-2, D747+ (a)): after a claim HEAD
+	// is on main, and a gate run there committed its record on a main the
+	// remote lacks.
+	if err := p.enterMilestoneBase(ctx, id, "gate "+id); err != nil {
+		return nil, err
+	}
 	if err := p.GatePreflight(ctx, id); err != nil {
 		return nil, err
 	}

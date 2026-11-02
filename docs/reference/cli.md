@@ -5520,6 +5520,10 @@ with `ape status --json` (milestone.gate_last) or the log, not by running the ga
 returned results included; --json puts "exit" and "log" (the gate's log) first and that line,
 "verdict", last. Never run the gate again to read a result: the next call runs it.
 
+In a project integrating through GitHub the gate runs on milestone/<M> and its record is
+committed there: from main (where a claim leaves HEAD) it switches to milestone/<M> on a
+clean tree, and refuses with the paths in the way otherwise.
+
 Exit codes: 0 gate green (--spec-only: every scenario passed) · 1 gate red (last output
 lines shown), a red scenario under --spec-only, no such milestone, a done milestone, no
 approval record, a changed gate, or HEAD on a change branch · 2 usage · 3 run.busy (--spec-only).
@@ -5743,7 +5747,8 @@ before its close (the close does it itself). Records that reach main through rec
 (a milestone's approval, section 5.4) reach milestone/<M> the same way: a milestone
 claimed before its approval merged starts its changes once a take-in brought it.
 
-Needs this checkout's lease on M (`ape milestone claim`) and NATS.
+Needs this checkout's lease on M (`ape milestone claim`) and NATS. From main (where a
+claim leaves HEAD) it switches to milestone/<M> on a clean tree, and refuses otherwise.
 
 Exit codes: 0 up to date, or landed · 1 refused (no lease, NATS, a red regression, the
 branch moved, a push) · 2 usage, or a project not integrating through GitHub · 3 conflict ·

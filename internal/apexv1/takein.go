@@ -79,6 +79,11 @@ func (p *Project) TakeIn(ctx context.Context, ms string, opt RunOptions) (*TakeI
 		return nil, &UsageError{Code: "usage.not-coordinated", Msg: "take-in is for a project integrating through GitHub (coordination.github): its milestones live on milestone/<M> branches; elsewhere main is the only trunk"}
 	}
 	res := &TakeInResult{Milestone: ms, Branch: base}
+	// Taken in on milestone/<M>, switched to on a clean tree, as the gate
+	// and close are (FINDING-V15-1B-2).
+	if err := p.enterMilestoneBase(ctx, ms, "take-in "+ms); err != nil {
+		return res, err
+	}
 	remote := p.trunkRemote(ctx)
 	if err := p.fetchUpstreams(ctx, base, "take-in of "+ms); err != nil {
 		return res, err

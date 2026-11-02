@@ -155,6 +155,14 @@ func stillRunning(cmd *cobra.Command, f *v1Flags, payload any, msg string) error
 // this process is one, else under the scope's run lock — attached to a
 // run of the same verb, detached (the default), or in this process.
 func runLong(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, scope string, compute longCompute) error {
+	return runLongArg(cmd, f, p, scope, scope, compute)
+}
+
+// runLongArg is runLong for a verb whose lock scope is not its argument:
+// the detached worker re-runs the verb on arg (FINDING-V15-1B-1: take-in
+// M locks take-in-M, and a worker given the scope gated a milestone
+// named take-in-M).
+func runLongArg(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, scope, arg string, compute longCompute) error {
 	verb := cmd.Parent().Name() + " " + cmd.Name()
 	ctx := cmd.Context()
 	if id, ok := ctx.Value(workerKey{}).(string); ok {
@@ -218,7 +226,7 @@ func runLong(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, scope string, co
 		r, _ := runHere(cmd, f, p, lock, compute, nil, nil) // printed here: a record that failed to save is not needed
 		return deliverRun(cmd, f, p, r)
 	}
-	if err := launchWorker(cmd, p, lock, workerArgv(cmd, p, scope)); err != nil {
+	if err := launchWorker(cmd, p, lock, workerArgv(cmd, p, arg)); err != nil {
 		p.ReleaseRunLock(lock)
 		return v1Fail(cmd, f, &apexv1.FailError{Code: "run.start-failed", Msg: "could not start the detached worker of `ape " + verb + " " + scope + "`: " + err.Error() +
 			" — run the command again"}, nil)
@@ -434,10 +442,11 @@ func newLogLines(p *apexv1.Project, scope string) []string {
 	return strings.Split(string(chunk[:end]), "\n")
 }
 
-// workerArgv is the command line the worker re-runs: the verb, its scope,
-// and every flag this call set but the wait's, with --cwd the project.
-func workerArgv(cmd *cobra.Command, p *apexv1.Project, scope string) []string {
-	argv := []string{cmd.Parent().Name(), cmd.Name(), scope}
+// workerArgv is the command line the worker re-runs: the verb, its
+// argument, and every flag this call set but the wait's, with --cwd the
+// project.
+func workerArgv(cmd *cobra.Command, p *apexv1.Project, arg string) []string {
+	argv := []string{cmd.Parent().Name(), cmd.Name(), arg}
 	cmd.Flags().Visit(func(fl *pflag.Flag) {
 		switch fl.Name {
 		case "wait", "no-detach", "cwd":

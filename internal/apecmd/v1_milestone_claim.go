@@ -174,7 +174,8 @@ before its close (the close does it itself). Records that reach main through rec
 (a milestone's approval, section 5.4) reach milestone/<M> the same way: a milestone
 claimed before its approval merged starts its changes once a take-in brought it.
 
-Needs this checkout's lease on M (` + "`ape milestone claim`" + `) and NATS.
+Needs this checkout's lease on M (` + "`ape milestone claim`" + `) and NATS. From main (where a
+claim leaves HEAD) it switches to milestone/<M> on a clean tree, and refuses otherwise.
 
 Exit codes: 0 up to date, or landed · 1 refused (no lease, NATS, a red regression, the
 branch moved, a push) · 2 usage, or a project not integrating through GitHub · 3 conflict ·
@@ -193,7 +194,7 @@ branch moved, a push) · 2 usage, or a project not integrating through GitHub ·
 			if err := member.Gate(cmd.Context(), p, "milestone take-in", ms, time.Now()); err != nil {
 				return v1Fail(cmd, &f, err, nil)
 			}
-			return runLong(cmd, &f, p, apexv1.TakeInPrefix+ms, func(ctx context.Context, opt apexv1.RunOptions) renderFn {
+			return runLongArg(cmd, &f, p, apexv1.TakeInPrefix+ms, ms, func(ctx context.Context, opt apexv1.RunOptions) renderFn {
 				res, err := p.TakeIn(ctx, ms, opt)
 				return func(cmd *cobra.Command, f *v1Flags) error {
 					if err != nil {
