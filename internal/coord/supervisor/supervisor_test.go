@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -281,4 +282,88 @@ func TestHeartbeat(t *testing.T) {
 	var ids atomic.Int32
 	runSup(t, url, "sup-a", Config{Start: starter(t, url, &ids), HeartbeatEvery: 300 * time.Millisecond})
 	require.Eventually(t, func() bool { return has(got, mu, "atomix.coord.conductor-ann-atomix.heartbeat") }, 5*time.Second, 50*time.Millisecond)
+}
+
+// FINDING-V15-1A-10: the 1a run's outage (all three nodes down past the
+// claim's deadline) ended the supervisor, and its coordinator with it; and
+// nothing brought a coordinator back. Now a failed claim is tried again
+// (a), and the leader restarts a coordinator whose lease is stale and
+// whose ping goes unanswered (b): after the outage the supervisor still
+// runs and the ensemble has a coordinator again, unasked.
+func TestDrill_SupervisorRidesOutANATSOutage(t *testing.T) {
+	c := natstest.RunCluster(t, 3)
+	url := c.URLs()
+	nc, err := nats.Connect(url, nats.MaxReconnects(-1), nats.ReconnectWait(200*time.Millisecond))
+	require.NoError(t, err)
+	t.Cleanup(nc.Close)
+	js, err := jetstream.New(nc)
+	require.NoError(t, err)
+	ctx := context.Background()
+	require.NoError(t, lease.Declare(ctx, js, 3))
+	require.NoError(t, slots.Declare(ctx, js, 3))
+	require.NoError(t, events.Declare(ctx, js, 3))
+	ls, err := lease.Open(ctx, js)
+	require.NoError(t, err)
+	require.NoError(t, ls.SetEpoch(ctx, 1))
+
+	snc, err := nats.Connect(url, nats.MaxReconnects(-1), nats.ReconnectWait(200*time.Millisecond))
+	require.NoError(t, err)
+	t.Cleanup(snc.Close)
+	var ids atomic.Int32
+	var logMu sync.Mutex
+	var logged []string
+	sctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- Run(sctx, snc, Config{
+			ID: "sup-a", Start: starter(t, url, &ids), Verify: true, TTL: ttl, Renew: renew, HealthDeadline: 500 * time.Millisecond,
+			Logf: func(f string, a ...any) { logMu.Lock(); logged = append(logged, fmt.Sprintf(f, a...)); logMu.Unlock() },
+		})
+	}()
+	t.Cleanup(func() { cancel(); <-done })
+	waitLeader(t, nc)
+	require.Equal(t, "started", request[map[string]string](t, nc, "ape.sup.ensure", EnsureRequest{Ensemble: "atomix"})["action"])
+	require.Eventually(t, func() bool { return coordID(t, nc) == "coord-1" }, 10*time.Second, 50*time.Millisecond)
+
+	// The outage: every node down, well past the claim's deadline and the
+	// leases' TTL, then back on their data.
+	for i := range c.Servers {
+		c.Stop(i)
+	}
+	time.Sleep(3 * ttl)
+	select {
+	case err := <-done:
+		t.Fatalf("the supervisor ended during the outage: %v", err)
+	default:
+	}
+	for i := range c.Servers {
+		c.Restart(i)
+	}
+	c.WaitMetaLeader(30 * time.Second)
+
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		select {
+		case err := <-done:
+			t.Fatalf("(a) the supervisor ended after the outage: %v", err)
+		default:
+		}
+		if id := coordID(t, nc); id != "" && id != "coord-1" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("(b) the supervisor runs, but no coordinator came back: nothing started one unasked")
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	logMu.Lock()
+	defer logMu.Unlock()
+	require.Condition(t, func() bool {
+		for _, l := range logged {
+			if strings.Contains(l, "coordinator was gone (lease stale, ping unanswered); restarted") {
+				return true
+			}
+		}
+		return false
+	}, "the restart is logged: %v", logged)
 }

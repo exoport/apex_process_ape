@@ -10,6 +10,10 @@
 #   natslocal.sh urls    print the client URLs, comma-joined
 #   natslocal.sh status  one line per node
 #
+# NATSLOCAL_CLIENT_BASE and NATSLOCAL_ROUTE_BASE (default 14221 and 16221)
+# move the ports — node N listens on BASE+N — so a second cluster (a drill's)
+# runs beside the first in its own NATSLOCAL_DIR.
+#
 # NATSLOCAL_DIR (default ${TMPDIR:-/tmp}/ape-natslocal) holds configs, data,
 # logs and pids. NATS_SERVER (default: nats-server on PATH) picks the binary.
 set -euo pipefail
@@ -18,8 +22,8 @@ DIR=${NATSLOCAL_DIR:-${TMPDIR:-/tmp}/ape-natslocal}
 BIN=${NATS_SERVER:-$(command -v nats-server || true)}
 WANT=v2.14.5
 
-client_port() { echo $((14221 + $1)); }
-route_port() { echo $((16221 + $1)); }
+client_port() { echo $((${NATSLOCAL_CLIENT_BASE:-14221} + $1)); }
+route_port() { echo $((${NATSLOCAL_ROUTE_BASE:-16221} + $1)); }
 
 need_bin() {
   [ -n "$BIN" ] && [ -x "$BIN" ] || { echo "natslocal: nats-server not found (set NATS_SERVER)" >&2; exit 2; }

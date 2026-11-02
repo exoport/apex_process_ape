@@ -54,6 +54,9 @@ type Config struct {
 	// lease a heartbeat event it must acknowledge (§3.1 requirement 2);
 	// zero sends none.
 	HeartbeatEvery time.Duration
+	// Logf, when set, gets one line for what the supervisor rides out
+	// (a NATS outage) or does unasked (a coordinator restarted).
+	Logf func(format string, args ...any)
 }
 
 func (c *Config) defaults() {
@@ -130,8 +133,9 @@ func Run(ctx context.Context, nc *nats.Conn, cfg Config) error {
 	var lead leadership
 	lastBeat := time.Time{}
 	for {
-		if err := s.contend(ctx, &lead); err != nil {
-			return err
+		s.contend(ctx, &lead)
+		if lead.svc != nil {
+			s.keepAlive() //nolint:contextcheck // its two reads are bounded by HealthDeadline, as a health report's are
 		}
 		if lead.svc != nil && cfg.HeartbeatEvery > 0 && time.Since(lastBeat) >= cfg.HeartbeatEvery {
 			s.heartbeat(ctx)
@@ -157,33 +161,76 @@ type leadership struct {
 
 // contend is one tick: a standby tries to claim sup.leader and serve; the
 // leader renews, and stops serving when the renewal fails (the lease
-// expired or was fenced off).
-func (s *Supervisor) contend(ctx context.Context, lead *leadership) error {
+// expired or was fenced off). A claim or serve that fails for any other
+// reason than another's lead — NATS unreachable, a timed-out read — is
+// tried again next tick (FINDING-V15-1A-10): before, it ended the
+// supervisor, and its coordinators with it, in the 1a run's outage.
+func (s *Supervisor) contend(ctx context.Context, lead *leadership) {
 	if lead.svc != nil {
 		l, err := s.leases.Renew(ctx, lead.held)
 		if err == nil {
 			lead.held = l
-			return nil
+			return
 		}
 		_ = lead.svc.Stop()
 		lead.svc = nil
 		s.setLeader(false)
-		return nil
+		s.logf("supervisor %s: lost sup.leader (%v); contending again", s.cfg.ID, err)
+		return
 	}
 	l, err := s.leases.Claim(ctx, layout.SupLeaderKey, s.cfg.ID, s.cfg.TTL)
 	if errors.Is(err, lease.ErrHeld) {
-		return nil
+		return
 	}
 	if err != nil {
-		return err
+		s.logf("supervisor %s: cannot claim sup.leader (%v); trying again", s.cfg.ID, err)
+		return
 	}
 	svc, err := s.serve()
 	if err != nil {
-		return err
+		_ = s.leases.Release(ctx, l)
+		s.logf("supervisor %s: cannot serve ape.sup.* (%v); trying again", s.cfg.ID, err)
+		return
 	}
 	lead.held, lead.svc = l, svc
 	s.setLeader(true)
-	return nil
+	s.logf("supervisor %s: leads", s.cfg.ID)
+}
+
+// keepAlive is the leader's tick for each ensemble whose coordinator it
+// started (FINDING-V15-1A-10): one whose lease is stale and whose ping goes
+// unanswered — a health report's own two checks — is replaced, within the
+// restart budget. A coordinator that lost its lease in a NATS outage exits;
+// once the leader leads again (NATS is back), it is started again without
+// anyone asking. A standby does nothing: its NATS may be the one down.
+func (s *Supervisor) keepAlive() {
+	s.mu.Lock()
+	ensembles := make([]string, 0, len(s.handles))
+	for ens := range s.handles {
+		// A coordinator started within its lease TTL may not have claimed
+		// its lease yet: not judged until it had the time.
+		if st := s.starts[ens]; len(st) > 0 && time.Since(st[len(st)-1]) < s.cfg.TTL {
+			continue
+		}
+		ensembles = append(ensembles, ens)
+	}
+	s.mu.Unlock()
+	for _, ens := range ensembles {
+		if s.leaseFresh(ens) || s.ping(ens) {
+			continue
+		}
+		if err := s.replace(ens); err != nil {
+			s.logf("supervisor %s: %s's coordinator is gone and was not restarted: %v", s.cfg.ID, ens, err)
+			continue
+		}
+		s.logf("supervisor %s: %s's coordinator was gone (lease stale, ping unanswered); restarted", s.cfg.ID, ens)
+	}
+}
+
+func (s *Supervisor) logf(format string, args ...any) {
+	if s.cfg.Logf != nil {
+		s.cfg.Logf(format, args...)
+	}
 }
 
 // Leader reports whether this supervisor leads (for tests and status).

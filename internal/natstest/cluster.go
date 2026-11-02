@@ -47,6 +47,11 @@ func RunCluster(t *testing.T, n int) *Cluster {
 		}
 		c.opts = append(c.opts, o)
 		c.Servers = append(c.Servers, c.start(o))
+		// Restart comes back on the same client port, as a real node
+		// does, so a client's URLs still reach it after an outage.
+		if a, ok := c.Servers[i].Addr().(*net.TCPAddr); ok {
+			o.Port = a.Port
+		}
 	}
 	t.Cleanup(c.Shutdown)
 	c.WaitMetaLeader(30 * time.Second)

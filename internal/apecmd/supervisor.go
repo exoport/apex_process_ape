@@ -53,7 +53,10 @@ SIGINT/SIGTERM stops its coordinators and exits 0.`,
 			start := func(ctx context.Context, ens string) (supervisor.Handle, error) {
 				return f.coordinatorProcess(ctx, ens, projects)
 			}
-			return supervisor.Run(ctx, nc, supervisor.Config{ID: id, Start: start, Verify: !noVerify, HeartbeatEvery: heartbeat})
+			logf := func(format string, args ...any) {
+				fmt.Fprintf(cmd.ErrOrStderr(), "%s "+format+"\n", append([]any{time.Now().UTC().Format(time.RFC3339)}, args...)...)
+			}
+			return supervisor.Run(ctx, nc, supervisor.Config{ID: id, Start: start, Verify: !noVerify, HeartbeatEvery: heartbeat, Logf: logf})
 		},
 	}
 	f.add(cmd)
