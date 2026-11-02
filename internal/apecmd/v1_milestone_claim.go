@@ -19,6 +19,7 @@ var errNotInEnsemble = errors.New("this project is in no ensemble (no coordinati
 
 func newMilestoneClaimCmd() *cobra.Command {
 	var f v1Flags
+	var adopt bool
 	cmd := &cobra.Command{
 		Use:   "claim <M>",
 		Short: "Take a milestone's lease for this checkout (a project in an ensemble)",
@@ -37,7 +38,11 @@ start of M's changes refuse without it.
 
 In a project integrating through GitHub (coordination.github), the claim also prepares
 milestone/<M> (section 5.1): fetched from main's remote when it has one, else cut from
-the remote's main and pushed there, with a local milestone/<M> tracking it. change new
+the remote's main and pushed there, with a local milestone/<M> tracking it. A remote
+milestone/<M> that no claim of M recorded on main explains is judged first (D736): with
+nothing of its own (an ancestor of main, such as a leftover probe) it is fast-forwarded
+to main, so M starts from main; with commits main lacks the claim refuses
+(milestone.branch-exists) unless --adopt takes it as it is. change new
 --milestone M and change start of M's changes then run on milestone/<M>, switching to it
 from another base branch when the tree is clean (milestone.branch-missing in a checkout
 that never claimed M). A failed fetch or push is base.fetch-failed; the lease stays held,
@@ -57,7 +62,7 @@ Exit codes: 0 claimed · 1 refused (held by another, no ensemble, NATS) · 2 usa
 			if err != nil {
 				return err
 			}
-			c, err := member.ClaimMilestone(cmd.Context(), p, args[0])
+			c, err := member.ClaimMilestoneAdopt(cmd.Context(), p, args[0], adopt)
 			if errors.Is(err, member.ErrNotMember) {
 				return usageErr(errNotInEnsemble)
 			}
@@ -68,6 +73,9 @@ Exit codes: 0 claimed · 1 refused (held by another, no ensemble, NATS) · 2 usa
 			out := map[string]any{"milestone": args[0], "key": l.Key, "holder": l.Holder, "token": l.Token.String()}
 			if c.Branch != "" {
 				out["branch"], out["branch_created"] = c.Branch, c.Created
+				if c.Note != "" {
+					out["branch_note"] = c.Note
+				}
 			}
 			if c.Record != nil {
 				out["record_pr"] = c.Record.PR
@@ -76,6 +84,9 @@ Exit codes: 0 claimed · 1 refused (held by another, no ensemble, NATS) · 2 usa
 				fmt.Fprintf(w, "%s claimed by %s (token %s); its loop keeps it: `ape task apex-loop --args %s`\n", args[0], l.Holder, l.Token, args[0])
 				if r := c.Record; r != nil {
 					fmt.Fprintln(w, "claim record: "+recordLine(r))
+				}
+				if c.Note != "" {
+					fmt.Fprintln(w, c.Note)
 				}
 				if c.Branch != "" {
 					verb := "tracks the remote's"
@@ -88,6 +99,7 @@ Exit codes: 0 claimed · 1 refused (held by another, no ensemble, NATS) · 2 usa
 		},
 	}
 	addV1Flags(cmd, &f)
+	cmd.Flags().BoolVar(&adopt, "adopt", false, "take a milestone/<M> the remote already has, with commits main lacks and no claim of M recorded on main, as it is (a person's decision; without it the claim refuses milestone.branch-exists)")
 	return cmd
 }
 

@@ -142,6 +142,19 @@ to `apex/record-<M>-<what>-<sha>`, open its PR into main and enqueue it. The cla
 sent by the next record verb. Once the queue merged it, main fast-forwards at the next fetch. A record reaches a
 milestone's branch by its next take-in.
 
+**A claim judges a milestone branch it did not cut** (D736). When the remote already has
+`milestone/<M>` and no claim of M is recorded on main (`apex: <M> claimed by …`), the claim checks
+what the branch holds:
+- nothing of its own (an ancestor of main, such as a leftover probe): fast-forwarded to main, so M
+  starts from main;
+- commits main lacks: refused with `milestone.branch-exists`. A person prunes the branch, or
+  claims it knowingly with `ape milestone claim <M> --adopt`.
+
+A re-claim, or a handover, of a milestone whose claim is on main adopts its branch as it is.
+
+A supervisor stopping asks its coordinators to stop (SIGTERM; a kill after 5 s), so each releases
+`coord.<ens>` and a successor's coordinator claims it at once (D736).
+
 **Milestone branches are ape's (D702); GitHub's merge queue is main's only.** A change's archive and a take-in land
 on `milestone/<M>` with one push: this checkout's lease on M is fenced right before it, and the push only
 fast-forwards. A branch that moved since the fetch, which means another writer, refuses the push (`milestone.moved`);

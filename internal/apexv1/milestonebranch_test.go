@@ -55,8 +55,10 @@ func TestMilestoneBranch_ClaimCutsItAndChangesUseIt(t *testing.T) {
 	require.Equal(t, "milestone/M1", st.BaseBranch, "its base is the milestone's branch")
 
 	// Another member's push to milestone/M1; a second checkout's claim
-	// tracks the remote's branch as it is.
+	// tracks the remote's branch as it is — M1's claim is recorded on
+	// main (D736: a re-claim or a handover adopts).
 	run(t, p.Root, "push", "-q", bare, run(t, p.Root, "commit-tree", "-p", "milestone/M1", "-m", "a merged change", "milestone/M1^{tree}")+":refs/heads/milestone/M1")
+	run(t, p.Root, "push", "-q", bare, run(t, p.Root, "commit-tree", "-p", "main", "-m", "apex: M1 claimed by dana/abc123", "main^{tree}")+":refs/heads/main")
 	q := fixture(t, files)
 	run(t, q.Root, "remote", "add", "origin", bare)
 	run(t, q.Root, "fetch", "-q", "origin")
@@ -86,4 +88,47 @@ func TestMilestoneBranch_UncoordinatedPreparesNothing(t *testing.T) {
 	require.Equal(t, "main", CurrentBranch(ctx(), p.Root))
 	_, err = gitRaw(ctx(), bare, "rev-parse", "--verify", "--quiet", "refs/heads/milestone/M1")
 	require.Error(t, err, "nothing pushed")
+}
+
+// D736: a claim judges a milestone/<M> the remote already has when no claim
+// of M is recorded on main. (a) A leftover with nothing of its own (an
+// ancestor of main, such as the mirror's R3 probe milestone/M9) is
+// fast-forwarded to main, so M starts from main. (b) One with commits main
+// lacks is refused, milestone.branch-exists, and nothing moves. (c)
+// --adopt takes it as it is. The control: M1's recorded claim adopts its
+// branch as it is (TestMilestoneBranch_ClaimCutsItAndChangesUseIt).
+func TestMilestoneBranch_ExistingBranchJudged(t *testing.T) {
+	files := baseFiles()
+	files["_apex/config.yaml"] = coordinatedConfig
+	p := fixture(t, files)
+	bare := withOrigin(t, p)
+	probe := run(t, bare, "rev-parse", "main")
+	run(t, bare, "branch", "milestone/M9", "main") // the leftover, at main's old tip
+	pushFile(t, bare, "main", "later.txt", "main moved on\n")
+	mainTip := run(t, bare, "rev-parse", "main")
+
+	// (a)
+	branch, created, note, err := p.PrepareMilestoneBranchAdopt(ctx(), "M9", false)
+	require.NoError(t, err)
+	require.Equal(t, "milestone/M9", branch)
+	require.False(t, created)
+	require.Contains(t, note, "existed on origin at "+short(probe)+" with nothing of its own")
+	require.Equal(t, mainTip, run(t, bare, "rev-parse", "milestone/M9"), "fast-forwarded to main on the remote")
+	require.Equal(t, mainTip, run(t, p.Root, "rev-parse", "milestone/M9"), "and here")
+
+	// (b)
+	run(t, bare, "branch", "milestone/M5", "main")
+	own := pushFile(t, bare, "milestone/M5", "old-work.txt", "an earlier milestone's work\n")
+	_, created, _, err = p.PrepareMilestoneBranchAdopt(ctx(), "M5", false)
+	require.Equal(t, CodeMilestoneBranchExists, failCode(t, err))
+	require.False(t, created)
+	require.ErrorContains(t, err, "1 commit(s) main lacks")
+	require.ErrorContains(t, err, "--adopt")
+	require.Equal(t, own, run(t, bare, "rev-parse", "milestone/M5"), "nothing moved")
+
+	// (c)
+	_, _, note, err = p.PrepareMilestoneBranchAdopt(ctx(), "M5", true)
+	require.NoError(t, err)
+	require.Empty(t, note)
+	require.Equal(t, own, run(t, p.Root, "rev-parse", "milestone/M5"), "adopted as it is")
 }

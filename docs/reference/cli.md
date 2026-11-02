@@ -5203,7 +5203,11 @@ start of M's changes refuse without it.
 
 In a project integrating through GitHub (coordination.github), the claim also prepares
 milestone/<M> (section 5.1): fetched from main's remote when it has one, else cut from
-the remote's main and pushed there, with a local milestone/<M> tracking it. change new
+the remote's main and pushed there, with a local milestone/<M> tracking it. A remote
+milestone/<M> that no claim of M recorded on main explains is judged first (D736): with
+nothing of its own (an ancestor of main, such as a leftover probe) it is fast-forwarded
+to main, so M starts from main; with commits main lacks the claim refuses
+(milestone.branch-exists) unless --adopt takes it as it is. change new
 --milestone M and change start of M's changes then run on milestone/<M>, switching to it
 from another base branch when the tree is clean (milestone.branch-missing in a checkout
 that never claimed M). A failed fetch or push is base.fetch-failed; the lease stays held,
@@ -5224,6 +5228,7 @@ Flags:
 
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
+| `--adopt` | bool | `false` | take a milestone/<M> the remote already has, with commits main lacks and no claim of M recorded on main, as it is (a person's decision; without it the claim refuses milestone.branch-exists) |
 | `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
 | `--json` | bool | `false` | machine output (JSON on stdout) |
 

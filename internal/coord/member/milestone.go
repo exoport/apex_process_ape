@@ -134,6 +134,10 @@ type Claim struct {
 	// Record is the claim record's PR into main (section 5.4), sent on a
 	// fresh claim in a project integrating through GitHub.
 	Record *apexv1.Integration
+	// Note says what the claim did to a milestone/<M> the remote already
+	// had: a leftover with nothing of its own fast-forwarded to main
+	// (D736); "" otherwise.
+	Note string
 }
 
 // ClaimMilestone is `ape milestone claim <M>`: the person's act that takes
@@ -144,6 +148,14 @@ type Claim struct {
 // (apexv1.PrepareMilestoneBranch, section 5.1), after the lease: only the
 // holder cuts the branch.
 func ClaimMilestone(ctx context.Context, p *apexv1.Project, ms string) (Claim, error) {
+	return ClaimMilestoneAdopt(ctx, p, ms, false)
+}
+
+// ClaimMilestoneAdopt is ClaimMilestone; adopt takes an existing remote
+// milestone/<M> with commits of its own as it is (D736: `--adopt`, a
+// person's decision), which a claim otherwise refuses
+// (milestone.branch-exists) unless a claim of M is recorded on main.
+func ClaimMilestoneAdopt(ctx context.Context, p *apexv1.Project, ms string, adopt bool) (Claim, error) {
 	s, err := openMilestones(ctx, p, nats.NoReconnect())
 	if err != nil {
 		return Claim{}, err
@@ -153,8 +165,8 @@ func ClaimMilestone(ctx context.Context, p *apexv1.Project, ms string) (Claim, e
 	if err != nil {
 		return Claim{}, err
 	}
-	branch, created, err := p.PrepareMilestoneBranch(ctx, ms)
-	c := Claim{Lease: l, Branch: branch, Created: created}
+	branch, created, note, err := p.PrepareMilestoneBranchAdopt(ctx, ms, adopt)
+	c := Claim{Lease: l, Branch: branch, Created: created, Note: note}
 	if err != nil || !fresh {
 		return c, err
 	}
