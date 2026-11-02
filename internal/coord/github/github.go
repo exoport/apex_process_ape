@@ -388,9 +388,20 @@ var ErrNoQueue = errors.New("github: the branch has no merge queue")
 
 // QueueMergeMethod is the merge method of branch's merge queue (MERGE,
 // SQUASH or REBASE); ErrNoQueue when it has none. `ape project check`
-// requires a queue on main and on milestone branches, and "MERGE" on main
-// (section 5.3, OQ17).
+// requires "MERGE" on main (section 5.3, OQ17).
+//
+// It reads the merge_queue rule of the rulesets that apply to branch
+// first (REST rules/branches, Metadata: read): measured on the mirror
+// (FINDING-V15-1B-PRE-2), GitHub's GraphQL refuses an App token
+// mergeQueue.configuration even with Merge queues: read, and the
+// rulesets answer. GraphQL stays the fallback for a queue no ruleset
+// carries; its refusal then comes back with why the rulesets did not
+// answer.
 func (c *Client) QueueMergeMethod(ctx context.Context, branch string) (string, error) {
+	method, rulesErr := c.rulesetQueueMethod(ctx, branch)
+	if rulesErr == nil {
+		return method, nil
+	}
 	owner, name := c.owner()
 	var out struct {
 		Repository struct {
@@ -405,11 +416,35 @@ func (c *Client) QueueMergeMethod(ctx context.Context, branch string) (string, e
   mergeQueue(branch: $b) { configuration { mergeMethod } } } }`,
 		map[string]any{"owner": owner, "name": name, "b": branch}, &out)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%w; GraphQL: %w", rulesErr, err)
 	}
 	mq := out.Repository.MergeQueue
 	if mq == nil || mq.Configuration == nil {
 		return "", ErrNoQueue
 	}
 	return mq.Configuration.MergeMethod, nil
+}
+
+// errNoQueueRule: no ruleset applying to the branch carries a merge_queue
+// rule (a queue may still be set outside the rulesets).
+var errNoQueueRule = errors.New("no merge_queue rule in the rulesets that apply to it")
+
+// rulesetQueueMethod is the merge_method of the merge_queue rule among the
+// rules that apply to branch, upper-cased as GraphQL spells it.
+func (c *Client) rulesetQueueMethod(ctx context.Context, branch string) (string, error) {
+	var rules []struct {
+		Type       string `json:"type"`
+		Parameters struct {
+			MergeMethod string `json:"merge_method"`
+		} `json:"parameters"`
+	}
+	if err := c.do(ctx, http.MethodGet, c.API+"/repos/"+c.Repo+"/rules/branches/"+branch, nil, &rules); err != nil {
+		return "", fmt.Errorf("rulesets: %w", err)
+	}
+	for _, r := range rules {
+		if r.Type == "merge_queue" && r.Parameters.MergeMethod != "" {
+			return strings.ToUpper(r.Parameters.MergeMethod), nil
+		}
+	}
+	return "", errNoQueueRule
 }

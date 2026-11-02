@@ -198,6 +198,10 @@ workflow (`ape ci workflow`) and its two secrets are not installed in 1a.
 `ape project check` reads main's merge queue. It must merge with a merge commit, or it is a `coord.queue-settings`
 finding.
 
+It reads the merge method from the `merge_queue` rule of the rulesets that apply to main (REST `rules/branches/main`,
+Metadata: read, which every App token has). GitHub's GraphQL refuses an App token the queue's configuration, even with
+Merge queues: read, so a queue set outside a ruleset is reported NOT judged, with the route: set it in a ruleset.
+
 A conductor receives its ensemble's events through the durable consumer **`conductor-<user>-<ens>`** on `APE_EVENTS`.
 Only the holder of `conductor.<user>.<ens>` binds it, so a conductor that takes the lease over inherits the events the
 last one left unacknowledged, and its acknowledgements are what renews the lease.

@@ -17,17 +17,23 @@ import (
 // fake is the slice of GitHub's API the client calls: pulls (list, create)
 // and GraphQL (enqueue, PR state, queue settings).
 type fake struct {
-	mu      sync.Mutex
-	prs     []map[string]any
-	queued  map[string]string
-	merged  map[float64]string
-	queues  map[string]string
-	limited bool
-	auth    []string
+	mu     sync.Mutex
+	prs    []map[string]any
+	queued map[string]string
+	merged map[float64]string
+	queues map[string]string
+	// rules are the merge_queue rules of the rulesets applying to a
+	// branch (REST rules/branches), branch → merge method; gqlRefuses is
+	// GitHub's GraphQL refusing an App token the queue's configuration,
+	// as it does on the mirror (FINDING-V15-1B-PRE-2).
+	rules      map[string]string
+	gqlRefuses bool
+	limited    bool
+	auth       []string
 }
 
 func newFake() *fake {
-	return &fake{queued: map[string]string{}, merged: map[float64]string{}, queues: map[string]string{"main": "MERGE", "milestone/M1": "SQUASH"}}
+	return &fake{queued: map[string]string{}, merged: map[float64]string{}, queues: map[string]string{"main": "MERGE", "milestone/M1": "SQUASH"}, rules: map[string]string{}}
 }
 
 func (f *fake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -64,6 +70,12 @@ func (f *fake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.prs = append(f.prs, p)
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(p)
+	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/repos/shop/notes/rules/branches/"):
+		rules := []map[string]any{{"type": "pull_request", "ruleset_id": 9}}
+		if m, ok := f.rules[strings.TrimPrefix(r.URL.Path, "/repos/shop/notes/rules/branches/")]; ok {
+			rules = append(rules, map[string]any{"type": "merge_queue", "ruleset_id": 9, "parameters": map[string]any{"merge_method": m, "grouping_strategy": "ALLGREEN"}})
+		}
+		_ = json.NewEncoder(w).Encode(rules)
 	case r.Method == http.MethodPost && r.URL.Path == "/graphql":
 		var q struct {
 			Query     string         `json:"query"`
@@ -89,6 +101,8 @@ func (f *fake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			_, _ = w.Write([]byte(`{"data":{"repository":{"pullRequest":{"state":"OPEN","merged":false,"mergeCommit":null,"mergeQueueEntry":{"state":"AWAITING_CHECKS"}}}}}`))
+		case strings.Contains(q.Query, "mergeQueue(branch") && f.gqlRefuses:
+			_, _ = w.Write([]byte(`{"errors":[{"type":"FORBIDDEN","message":"Resource not accessible by integration"}]}`))
 		case strings.Contains(q.Query, "mergeQueue(branch"):
 			m, ok := f.queues[q.Variables["b"].(string)]
 			if !ok {
@@ -159,6 +173,38 @@ func TestClient_QueueSettingsAndRateLimit(t *testing.T) {
 	var rl *ErrRateLimited
 	require.True(t, errors.As(err, &rl), "%v", err)
 	require.Equal(t, int64(1893456000), rl.Reset.Unix())
+}
+
+// FINDING-V15-1B-PRE-2, measured on the mirror with the App's read token:
+// REST rules/branches/main answers (X-Accepted-GitHub-Permissions:
+// metadata=read) with the merge_queue rule's merge_method, while GraphQL
+// refuses mergeQueue.configuration ("Resource not accessible by
+// integration"). The rulesets are read first; GraphQL is the fallback for
+// a queue no ruleset carries. The control: no rule and GraphQL refusing —
+// the refusal comes back, not a guess.
+func TestClient_QueueMergeMethodFromRulesets(t *testing.T) {
+	c, f := client(t)
+	ctx := context.Background()
+	f.gqlRefuses = true
+	f.rules["main"] = "MERGE"
+	m, err := c.QueueMergeMethod(ctx, "main")
+	require.NoError(t, err, "the rulesets answer though GraphQL refuses")
+	require.Equal(t, "MERGE", m)
+	f.rules["main"] = "squash"
+	m, err = c.QueueMergeMethod(ctx, "main")
+	require.NoError(t, err)
+	require.Equal(t, "SQUASH", m, "GraphQL's spelling, whatever the case")
+
+	delete(f.rules, "main")
+	_, err = c.QueueMergeMethod(ctx, "main")
+	require.ErrorContains(t, err, "Resource not accessible by integration", "control: no rule, GraphQL refuses")
+	require.ErrorContains(t, err, "no merge_queue rule")
+	require.NotErrorIs(t, err, ErrNoQueue)
+
+	f.gqlRefuses = false
+	m, err = c.QueueMergeMethod(ctx, "main")
+	require.NoError(t, err)
+	require.Equal(t, "MERGE", m, "no rule: GraphQL's configuration, as before")
 }
 
 func TestClient_GraphQLURL(t *testing.T) {

@@ -18,29 +18,42 @@ import (
 	"github.com/exoport/apex_process_ape/internal/natstest"
 )
 
-// FINDING-V15-1A-7 (c): main's queue configuration needs Merge queues:
-// read. When the token lacks it — the App service says so (Missing), or an
-// older service's token is refused by GitHub — project check does not
-// judge the settings, and says so loudly with the route. The control: a
-// token with it judges them (a MERGE queue, no finding, no warning).
-func TestQueueFindings_BlindReadIsLoud(t *testing.T) {
+// FINDING-V15-1B-PRE-2 (correcting FINDING-V15-1A-7 c): on the mirror the
+// App's read token was minted WITH Merge queues: read and GitHub's GraphQL
+// still refused mergeQueue.configuration; REST rules/branches/main, which
+// needs only Metadata: read, answered with the merge_queue rule. So
+// project check reads main's rulesets first:
+//
+//   - the mirror's shape (a ruleset carries the queue, GraphQL refuses):
+//     judged, with or without the service's Missing — no warning;
+//   - a ruleset whose queue squashes: judged, a finding;
+//   - the control, a queue no ruleset carries and GraphQL refusing: NOT
+//     judged, loudly, with a route that names no permission (the one it
+//     named is already granted and does not help).
+func TestQueueFindings_RulesetsFirst(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		missing []string
-		refuse  bool // GitHub refuses the query, as it did on the mirror
+		rule    string // the merge_queue rule's method on main; "" none
+		finding bool
 		loud    bool
 	}{
-		{"service-says-missing", []string{"merge_queues: read"}, false, true},
-		{"github-refuses", nil, true, true},
-		{"control", nil, false, false},
+		{"mirror-shape", nil, "MERGE", false, false},
+		{"mirror-shape-service-says-missing", []string{"merge_queues: read"}, "MERGE", false, false},
+		{"ruleset-squashes", nil, "SQUASH", true, false},
+		{"control-no-rule-graphql-refuses", nil, "", false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				if tc.refuse {
-					_, _ = w.Write([]byte(`{"errors":[{"type":"FORBIDDEN","message":"Resource not accessible by integration"}]}`))
+			gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet && r.URL.Path == "/repos/shop/notes/rules/branches/main" {
+					rules := []map[string]any{{"type": "non_fast_forward"}}
+					if tc.rule != "" {
+						rules = append(rules, map[string]any{"type": "merge_queue", "parameters": map[string]any{"merge_method": tc.rule}})
+					}
+					_ = json.NewEncoder(w).Encode(rules)
 					return
 				}
-				_, _ = w.Write([]byte(`{"data":{"repository":{"mergeQueue":{"configuration":{"mergeMethod":"MERGE"}}}}}`))
+				_, _ = w.Write([]byte(`{"errors":[{"type":"FORBIDDEN","message":"Resource not accessible by integration"}]}`))
 			}))
 			t.Cleanup(gh.Close)
 			url := natstest.RunServer(t)
@@ -63,13 +76,20 @@ func TestQueueFindings_BlindReadIsLoud(t *testing.T) {
 
 			var note bytes.Buffer
 			fs := QueueFindings(context.Background(), p, &note)
-			require.Empty(t, fs)
+			if tc.finding {
+				require.Len(t, fs, 1)
+				require.Contains(t, fs[0].Message, "merges by squash")
+			} else {
+				require.Empty(t, fs)
+			}
 			if !tc.loud {
 				require.Empty(t, note.String(), "judged: nothing to say")
 				return
 			}
-			require.Contains(t, note.String(), "warning: main's merge-queue settings on shop/notes are NOT judged: the App's token lacks Merge queues: read")
+			require.Contains(t, note.String(), "warning: main's merge-queue settings on shop/notes are NOT judged")
+			require.Contains(t, note.String(), "Resource not accessible by integration")
 			require.Contains(t, note.String(), QueueBlindRoute)
+			require.NotContains(t, note.String(), "Merge queues: Read-only", "it does not send a person to grant a permission already granted")
 		})
 	}
 }

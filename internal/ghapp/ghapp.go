@@ -154,11 +154,11 @@ var Purposes = map[string]map[string]string{
 }
 
 // OptionalPermissions are asked for, but a token is still minted without
-// them when the App lacks them (FINDING-V15-1A-7 c): merge_queues is what
-// reading main's queue configuration needs, and an App registered before
-// it was asked for has not got it — GitHub refuses the whole token then.
-// The reply names what is missing (Reply.Missing), and the reads that
-// needed it say so.
+// them when the App lacks them (FINDING-V15-1A-7 c) — GitHub refuses the
+// whole token then. The reply names what is missing (Reply.Missing).
+// merge_queues was asked for to read main's queue configuration; measured
+// on the mirror (FINDING-V15-1B-PRE-2), GraphQL refuses that even with
+// it, and project check reads the rulesets instead (Metadata: read).
 var OptionalPermissions = []string{"merge_queues"}
 
 // PermissionNames are the optional permissions as GitHub's App settings

@@ -23,34 +23,26 @@ const askTimeout = 30 * time.Second
 // an installation token narrowed to the repository and the purpose,
 // asked over NATS as this member's user — else hot/github.token.
 func (m Membership) GitHubTokenFor(ctx context.Context, purpose string) (string, error) {
-	tok, _, err := m.gitHubToken(ctx, purpose)
-	return tok, err
-}
-
-// gitHubToken is GitHubTokenFor with the optional permissions the App
-// service minted the token without (FINDING-V15-1A-7 c), as
-// "<key>: <level>".
-func (m Membership) gitHubToken(ctx context.Context, purpose string) (tok string, missing []string, err error) {
 	if !m.GitHubApp {
 		tok, err := m.ReadGitHubToken()
-		return tok, nil, err
+		return tok, err
 	}
 	id, err := natsconn.DecodeIdentity(m.Creds)
 	if err != nil {
-		return "", nil, err
+		return "", err
 	}
 	ctx, cancel := context.WithTimeout(ctx, askTimeout)
 	defer cancel()
 	nc, err := natsconn.Connect(ctx, natsconn.Config{URL: m.URL, CredsFile: m.Creds}, "ape-ghapp-client", nats.NoReconnect())
 	if err != nil {
-		return "", nil, err
+		return "", err
 	}
 	defer nc.Close()
 	rep, err := ghapp.Ask(ctx, nc, ghapp.TokenSubject, id.SubjectToken, ghapp.Request{Repo: m.GitHubRepo, Purpose: purpose})
 	if err != nil {
-		return "", nil, err
+		return "", err
 	}
-	return rep.Token, rep.Missing, nil
+	return rep.Token, nil
 }
 
 // webHost is the git host beside the API: github.com for api.github.com,
