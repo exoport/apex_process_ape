@@ -116,6 +116,23 @@ func TestClosePR_TakeInConflictRefuses(t *testing.T) {
 	require.Equal(t, CodeConflicted, ce.Code)
 	require.Equal(t, "change/take-in-1", CurrentBranch(ctx(), p.Root))
 	require.Empty(t, f.opened, "no close PR before main is in")
+	// FINDING-V15-1A-13: the take-in, its branch and files as fields; the
+	// control: the message byte for byte as before, no conflicts list.
+	require.Equal(t, "take-in-1", ce.Change)
+	require.Equal(t, "change/take-in-1", ce.Branch)
+	require.Equal(t, "take-in", ce.Kind)
+	require.Equal(t, []string{"greet.sh"}, ce.Files)
+	require.Empty(t, ce.Conflicts)
+	want := "main does not merge cleanly into milestone/M1: take-in take-in-1 is laid out on change/take-in-1 with the conflict markers in greet.sh — apex-apply resolves them, `git add` and `git commit --no-edit`, then run the take-in again"
+	require.Equal(t, want, ce.Msg)
+	require.Equal(t, want, ce.Error())
+
+	// The take-in again, before it is resolved: the same fields.
+	_, err = p.TakeIn(ctx(), "M1", RunOptions{})
+	require.ErrorAs(t, err, &ce)
+	require.Equal(t, "take-in-1", ce.Change)
+	require.Equal(t, []string{"greet.sh"}, ce.Files, "still unmerged in the tree")
+	require.Equal(t, "take-in take-in-1 is still being resolved on change/take-in-1 — resolve the markers, `git add` and `git commit --no-edit`, then run the take-in again", ce.Error())
 }
 
 // D708 (no runner in 1a): an ejected close PR goes back into main's queue

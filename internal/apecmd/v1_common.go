@@ -255,6 +255,7 @@ func v1FailFramed(cmd *cobra.Command, f *v1Flags, err error, partial any, extra 
 		if len(conflicts) > 0 {
 			out["conflicts"] = conflicts
 		}
+		addConflictFields(out, ce, conflicts)
 		if partial != nil {
 			out["result"] = partial
 		}
@@ -387,4 +388,22 @@ func lastLinesOf(xs []string, n int) []string {
 		return xs[len(xs)-n:]
 	}
 	return xs
+}
+
+// addConflictFields adds where a conflict is laid out to a --json refusal
+// (FINDING-V15-1A-13): conflict {change, branch, kind, files}, and the
+// files as conflicts when the error carried none. A conflict with no place
+// (a busy run) adds nothing.
+func addConflictFields(out map[string]any, ce *apexv1.ConflictError, conflicts []string) {
+	if ce == nil || ce.Change == "" {
+		return
+	}
+	files := ce.Files
+	if files == nil {
+		files = []string{}
+	}
+	out["conflict"] = map[string]any{"change": ce.Change, "branch": ce.Branch, "kind": ce.Kind, "files": files}
+	if len(conflicts) == 0 && len(files) > 0 {
+		out["conflicts"] = files
+	}
 }

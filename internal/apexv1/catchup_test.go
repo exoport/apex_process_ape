@@ -155,6 +155,14 @@ func TestCatchUp_ConflictLeftOnTheBranch(t *testing.T) {
 	require.Equal(t, CodeConflicted, ce.Code)
 	require.Equal(t, []string{"wave.sh"}, ce.Conflicts)
 	require.Equal(t, ActionApply, ActionFor(ce.Code))
+	// FINDING-V15-1A-13: where it is laid out, as fields; the message is
+	// as before (the control: Error() is still Msg and the conflicts).
+	require.Equal(t, "add-wave", ce.Change)
+	require.Equal(t, "change/add-wave", ce.Branch)
+	require.Equal(t, "rebase", ce.Kind)
+	require.Equal(t, []string{"wave.sh"}, ce.Files)
+	require.Equal(t, ce.Msg+": wave.sh", ce.Error())
+	require.True(t, strings.HasPrefix(ce.Msg, "main moved, and change add-wave does not rebase onto it: the conflict is left on change/add-wave (markers in the tree"))
 
 	// HEAD on the branch, recreated at main's tip plus ape's state commit.
 	require.Equal(t, "change/add-wave", CurrentBranch(ctx(), p.Root), "HEAD is attached")

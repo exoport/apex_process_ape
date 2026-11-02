@@ -167,6 +167,13 @@ the trailer `Change: <id>`. Verify refuses until no unmerged path or marker rema
 (`change.unresolved-conflict`), and the review runs again. When apex-apply cannot resolve them, it
 blocks the change and the loop re-plans it.
 
+With `--json`, the refusal names where the conflict is laid out as fields as well as in its text (v1.5,
+FINDING-V15-1A-13), so a skill need not parse the sentence:
+`"conflict": {"change": "<id>", "branch": "change/<id>", "kind": "rebase", "files": [...]}` and
+`"conflicts": [...]`. A milestone take-in's conflict has the same shape, with `"kind": "take-in"`, the
+take-in's id (`take-in-<n>`) and its branch. Run again before it is resolved, it still lists the
+unmerged files. The `error` text is unchanged.
+
 `start` and `archive` also refuse while the base branch is behind its upstream
 (`base.behind-upstream`: pull). ape compares with the local remote-tracking ref. It fetches that ref first only in a
 coordinated project (`coordination.github`): the upstreams of the base and of `main`, failing

@@ -34,6 +34,12 @@ type ConflictError struct {
 	Msg       string
 	Conflicts []string
 	Action    string
+	// Where, for a conflict laid out for apex-apply (FINDING-V15-1A-13):
+	// the change or take-in it is, its branch, the conflicted files and
+	// kind ("rebase" or "take-in"). Fields of the --json refusal, so a
+	// skill need not parse Msg; Msg and Error() are unchanged by them.
+	Change, Branch, Kind string
+	Files                []string
 }
 
 func (e *ConflictError) Error() string {

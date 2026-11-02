@@ -288,9 +288,12 @@ func (p *Project) layOutConflict(ctx context.Context, ci ChangeInfo, cu *CatchUp
 	if _, err := git(ctx, p.Root, "add", "--", p.Rel(p.StateFile(id))); err != nil {
 		return ci, cu, fail("staging state.json", err)
 	}
-	return ci, cu, &ConflictError{Code: CodeConflicted, Msg: base + " moved, and change " + id + " does not rebase onto it: the conflict is left on " + branch +
-		" (markers in the tree, HEAD on the branch, the change in-progress) — apex-apply resolves the markers (edit, `git add`, commit with trailer `Change: " + id +
-		"`), then `ape change verify " + id + "` and the review run again; the old tip is kept as " + ref, Conflicts: unmerged}
+	return ci, cu, &ConflictError{
+		Code: CodeConflicted, Msg: base + " moved, and change " + id + " does not rebase onto it: the conflict is left on " + branch +
+			" (markers in the tree, HEAD on the branch, the change in-progress) — apex-apply resolves the markers (edit, `git add`, commit with trailer `Change: " + id +
+			"`), then `ape change verify " + id + "` and the review run again; the old tip is kept as " + ref, Conflicts: unmerged,
+		Change: id, Branch: branch, Kind: "rebase", Files: unmerged,
+	}
 }
 
 // commitAppliedNetDiff commits a net diff that cherry-picked cleanly as

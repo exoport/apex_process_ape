@@ -157,7 +157,10 @@ func (p *Project) takeInMerge(ctx context.Context, id, base, baseTip, mainTip st
 	branch := ChangeBranch(id)
 	if tip, err := git(ctx, p.Root, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch); err == nil {
 		if _, err := git(ctx, p.Root, "rev-parse", "--verify", "--quiet", "MERGE_HEAD"); err == nil && CurrentBranch(ctx, p.Root) == branch {
-			return "", &ConflictError{Code: CodeConflicted, Action: ActionApply, Msg: "take-in " + id + " is still being resolved on " + branch + " — resolve the markers, `git add` and `git commit --no-edit`, then run the take-in again"}
+			return "", &ConflictError{
+				Code: CodeConflicted, Action: ActionApply, Msg: "take-in " + id + " is still being resolved on " + branch + " — resolve the markers, `git add` and `git commit --no-edit`, then run the take-in again",
+				Change: id, Branch: branch, Kind: "take-in", Files: p.unmergedPaths(ctx),
+			}
 		}
 		_, e1 := git(ctx, p.Root, "merge-base", "--is-ancestor", mainTip, tip)
 		_, e2 := git(ctx, p.Root, "merge-base", "--is-ancestor", baseTip, tip)
@@ -179,7 +182,10 @@ func (p *Project) takeInMerge(ctx context.Context, id, base, baseTip, mainTip st
 		return "", &FailError{Code: CodeBranchFailed, Msg: "cannot create " + branch + ": " + err.Error()}
 	}
 	_, _ = git(ctx, p.Root, "merge", "--no-ff", "-q", "-m", msg, mainTip)
-	return "", &ConflictError{Code: CodeConflicted, Action: ActionApply, Msg: fmt.Sprintf(
-		"main does not merge cleanly into %s: take-in %s is laid out on %s with the conflict markers in %s — apex-apply resolves them, `git add` and `git commit --no-edit`, then run the take-in again",
-		base, id, branch, strings.Join(limit(conflicts, 8), ", "))}
+	return "", &ConflictError{
+		Code: CodeConflicted, Action: ActionApply, Msg: fmt.Sprintf(
+			"main does not merge cleanly into %s: take-in %s is laid out on %s with the conflict markers in %s — apex-apply resolves them, `git add` and `git commit --no-edit`, then run the take-in again",
+			base, id, branch, strings.Join(limit(conflicts, 8), ", ")),
+		Change: id, Branch: branch, Kind: "take-in", Files: conflicts,
+	}
 }
