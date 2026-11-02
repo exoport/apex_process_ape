@@ -2,6 +2,7 @@ package apecmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -679,11 +680,27 @@ branch · 2 usage, or --accept-red from a model session.`,
 				var err error
 				// D709: one close of the project at a time, from taking
 				// main in to the merge (close.<project>).
-				release, err := member.HoldClose(ctx, p, os.Stderr)
+				// FINDING-V15-1A-11: held by another checkout after a lapse,
+				// the close is cancelled before it enqueues anything.
+				ctx, cancelClose := context.WithCancel(ctx)
+				defer cancelClose()
+				release, err := member.HoldClose(ctx, p, os.Stderr, cancelClose)
 				if err != nil {
 					return func(cmd *cobra.Command, f *v1Flags) error { return v1Fail(cmd, f, err, nil) }
 				}
 				defer release()
+				// FINDING-V15-1A-11: M's lease is renewed for the whole close,
+				// whose gate runs far past the lease's TTL before the fenced
+				// push — run from a loop (whose own keeper it then shares) or
+				// from a person's terminal. A project in no ensemble has none.
+				stopHold, err := member.HoldMilestone(ctx, p, id, os.Stderr)
+				switch {
+				case errors.Is(err, member.ErrNotMember):
+				case err != nil:
+					return func(cmd *cobra.Command, f *v1Flags) error { return v1Fail(cmd, f, err, nil) }
+				default:
+					defer stopHold()
+				}
 				if accepting {
 					g, err = p.CloseMilestoneAcceptRed(ctx, id, acceptRed, personBy(ctx, by), opt)
 				} else {

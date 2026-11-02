@@ -31,6 +31,13 @@ func init() {
 // checked.
 var FenceMilestone func(ctx context.Context, p *Project, ms string) error
 
+// FenceClose, when set, refuses unless this close holds close.<project>
+// now (member.FenceClose, FINDING-V15-1A-11): checked right before the
+// close PR is enqueued. It returns how many times the lease was taken again
+// after lapsing; when that changed since the close last checked main, main
+// is checked (and taken in, and gated) again first. Unset, nothing.
+var FenceClose func(ctx context.Context, p *Project) (retakes int, err error)
+
 // GitVia, when set, is how ape reaches the coordinated repository for a
 // purpose — "push", or "read" for a fetch (PLAN-V15-GHAPP §5): to url, the
 // repository over https, with env carrying the App service's installation

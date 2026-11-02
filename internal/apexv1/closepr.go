@@ -113,59 +113,89 @@ func (p *Project) mainIn(ctx context.Context, ms string) (bool, error) {
 // the close's gate, it takes main in and gates again (D708), a few rounds
 // at most: the PR goes into the queue only on the tree main will have.
 func (p *Project) openClosePR(ctx context.Context, ms string, attempts int, opt RunOptions) (*Integration, error) {
-	for round := 0; ; round++ {
-		in, err := p.mainIn(ctx, ms)
+	retakes, err := p.fenceClose(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for recheck := 0; ; recheck++ {
+		for round := 0; ; round++ {
+			in, err := p.mainIn(ctx, ms)
+			if err != nil {
+				return nil, err
+			}
+			if in {
+				break
+			}
+			if round == closeRegateRounds {
+				return nil, &FailError{Code: CodeTakeInNeeded, Action: ActionRetry, Msg: fmt.Sprintf("main kept moving while %s's close took it in and gated it (%d rounds) — close again", ms, closeRegateRounds)}
+			}
+			if _, err := p.TakeIn(ctx, ms, opt); err != nil {
+				return nil, err
+			}
+			if err := p.switchBranch(ctx, MilestoneBranch(ms)); err != nil {
+				return nil, err
+			}
+			if err := p.regateClose(ctx, ms, opt); err != nil {
+				return nil, err
+			}
+		}
+		base, remote := MilestoneBranch(ms), p.trunkRemote(ctx)
+		tip, err := git(ctx, p.Root, "rev-parse", "refs/heads/"+base)
 		if err != nil {
 			return nil, err
 		}
-		if in {
-			break
-		}
-		if round == closeRegateRounds {
-			return nil, &FailError{Code: CodeTakeInNeeded, Action: ActionRetry, Msg: fmt.Sprintf("main kept moving while %s's close took it in and gated it (%d rounds) — close again", ms, closeRegateRounds)}
-		}
-		if _, err := p.TakeIn(ctx, ms, opt); err != nil {
+		head := base
+		if err := p.pushMilestone(ctx, base, tip); err != nil {
 			return nil, err
 		}
-		if err := p.switchBranch(ctx, MilestoneBranch(ms)); err != nil {
+		api, err := p.integrator()
+		if err != nil {
 			return nil, err
 		}
-		if err := p.regateClose(ctx, ms, opt); err != nil {
+		title := "Close " + ms
+		if rm := p.roadmap(); rm != nil {
+			if m := rm.Find(ms); m != nil && m.Title != "" {
+				title += ": " + m.Title
+			}
+		}
+		pr, err := api.OpenPR(ctx, head, "main", title, "Milestone: "+ms+"\n\nThe close PR of "+base+" (APEX v1.5, section 5.3): its required check is the milestone gate on the merge with the current main; it merges with a merge commit, the release point.")
+		if err != nil {
+			return nil, &FailError{Code: CodeIntegrationPR, Action: ActionRetry, Msg: fmt.Sprintf("pushed %s, but opening its pull request into main failed: %v — close again", head, err)}
+		}
+		// FINDING-V15-1A-11 (research's close-lease finding): the close lease
+		// is fenced right before the enqueue — held by another checkout,
+		// nothing is enqueued — and, when it lapsed and was taken again since
+		// main was checked, main is checked again (and taken in and gated if
+		// it moved) first.
+		now, err := p.fenceClose(ctx)
+		if err != nil {
 			return nil, err
 		}
-	}
-	base, remote := MilestoneBranch(ms), p.trunkRemote(ctx)
-	tip, err := git(ctx, p.Root, "rev-parse", "refs/heads/"+base)
-	if err != nil {
-		return nil, err
-	}
-	head := base
-	if err := p.pushMilestone(ctx, base, tip); err != nil {
-		return nil, err
-	}
-	api, err := p.integrator()
-	if err != nil {
-		return nil, err
-	}
-	title := "Close " + ms
-	if rm := p.roadmap(); rm != nil {
-		if m := rm.Find(ms); m != nil && m.Title != "" {
-			title += ": " + m.Title
+		if now != retakes {
+			if recheck == closeRegateRounds {
+				return nil, &FailError{Code: CodeCloseLost, Action: ActionRetry, Msg: fmt.Sprintf("the close lease of %s's close kept lapsing (%d times) while it checked main — close again once NATS is steady", ms, now)}
+			}
+			retakes = now
+			continue
 		}
+		if _, err := api.Enqueue(ctx, pr); err != nil {
+			return nil, &FailError{Code: CodeIntegrationPR, Action: ActionRetry, Msg: fmt.Sprintf("opened %s, but enqueuing it in main's merge queue failed: %v — close again", pr.URL, err)}
+		}
+		baseSHA, _ := git(ctx, p.Root, "rev-parse", "refs/remotes/"+remote+"/"+base)
+		rec := Integration{Change: closeID(ms), Kind: KindClose, Head: head, Base: "main", Commit: tip, BaseSHA: baseSHA, PR: pr, Attempts: attempts, State: IntegrationQueued}
+		if err := p.saveIntegration(rec); err != nil {
+			return nil, err
+		}
+		return &rec, nil
 	}
-	pr, err := api.OpenPR(ctx, head, "main", title, "Milestone: "+ms+"\n\nThe close PR of "+base+" (APEX v1.5, section 5.3): its required check is the milestone gate on the merge with the current main; it merges with a merge commit, the release point.")
-	if err != nil {
-		return nil, &FailError{Code: CodeIntegrationPR, Action: ActionRetry, Msg: fmt.Sprintf("pushed %s, but opening its pull request into main failed: %v — close again", head, err)}
+}
+
+// fenceClose is FenceClose: 0 and nil when unset.
+func (p *Project) fenceClose(ctx context.Context) (int, error) {
+	if FenceClose == nil {
+		return 0, nil
 	}
-	if _, err := api.Enqueue(ctx, pr); err != nil {
-		return nil, &FailError{Code: CodeIntegrationPR, Action: ActionRetry, Msg: fmt.Sprintf("opened %s, but enqueuing it in main's merge queue failed: %v — close again", pr.URL, err)}
-	}
-	baseSHA, _ := git(ctx, p.Root, "rev-parse", "refs/remotes/"+remote+"/"+base)
-	rec := Integration{Change: closeID(ms), Kind: KindClose, Head: head, Base: "main", Commit: tip, BaseSHA: baseSHA, PR: pr, Attempts: attempts, State: IntegrationQueued}
-	if err := p.saveIntegration(rec); err != nil {
-		return nil, err
-	}
-	return &rec, nil
+	return FenceClose(ctx, p)
 }
 
 // resolveClose reads a recorded close PR: done when it merged (main

@@ -1,6 +1,7 @@
 package apexv1
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -164,4 +165,79 @@ func TestClosePR_MainMovedDuringGate(t *testing.T) {
 	require.Len(t, f.enqueued, 1)
 	run(t, bare, "merge-base", "--is-ancestor", "main", "milestone/M1")
 	require.Equal(t, g.Integration.Commit, run(t, bare, "rev-parse", "milestone/M1"), "enqueued on the tree with the moved main")
+}
+
+// useFenceClose sets FenceClose for a test.
+func useFenceClose(t *testing.T, f func(context.Context, *Project) (int, error)) {
+	t.Helper()
+	old := FenceClose
+	FenceClose = f
+	t.Cleanup(func() { FenceClose = old })
+}
+
+// FINDING-V15-1A-11, research's close-lease finding: right before the
+// enqueue the close lease is fenced. Held by another checkout, the close
+// refuses coord.close-lost and enqueues nothing. Taken again after a lapse
+// (the re-take count changed) while main moved, the close checks main
+// again, takes it in and gates before the one enqueue — on the tree with
+// the moved main. The control: no re-take, one main check, enqueued as
+// before (TestClosePR).
+func TestClosePR_FencedBeforeTheEnqueue(t *testing.T) {
+	setup := func(t *testing.T, gate string) (*Project, string, *fakeIntegrator) {
+		t.Helper()
+		files := baseFiles()
+		files["_apex/config.yaml"] = coordinatedConfig
+		files["gate.sh"] = gate
+		p := fixture(t, files)
+		bare := withOrigin(t, p)
+		_, _, err := p.PrepareMilestoneBranch(ctx(), "M1")
+		require.NoError(t, err)
+		f := &fakeIntegrator{states: map[int]PRState{}}
+		useIntegrator(t, f)
+		return p, bare, f
+	}
+
+	t.Run("held-by-another", func(t *testing.T) {
+		p, _, f := setup(t, "#!/bin/sh\nexit 0\n")
+		calls := 0
+		useFenceClose(t, func(context.Context, *Project) (int, error) {
+			calls++
+			if calls == 1 {
+				return 0, nil // the close begins holding it
+			}
+			return 0, &FailError{Code: CodeCloseLost, Msg: "the close lease close.notes is held by bob/x, not this close"}
+		})
+		_, err := p.CloseMilestone(ctx(), "M1", RunOptions{})
+		require.Equal(t, CodeCloseLost, failCode(t, err))
+		require.Empty(t, f.enqueued, "nothing enqueued")
+		require.Len(t, f.opened, 1, "the PR may be open; it is not in the queue")
+	})
+	t.Run("retaken-main-moved", func(t *testing.T) {
+		clone := t.TempDir()
+		p, bare, f := setup(t, "#!/bin/sh\nexit 0\n")
+		run(t, clone, "clone", "-q", "--branch", "main", bare, ".")
+		calls := 0
+		useFenceClose(t, func(context.Context, *Project) (int, error) {
+			calls++
+			if calls == 2 {
+				// The lease lapsed and was taken again while another close
+				// merged: main moved.
+				require.NoError(t, os.WriteFile(filepath.Join(clone, "notes.txt"), []byte("moved\n"), 0o644))
+				run(t, clone, "add", "notes.txt")
+				run(t, clone, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "elsewhere: main moved")
+				run(t, clone, "push", "-q", "origin", "main")
+				return 1, nil
+			}
+			if calls > 2 {
+				return 1, nil
+			}
+			return 0, nil
+		})
+		g, err := p.CloseMilestone(ctx(), "M1", RunOptions{})
+		require.NoError(t, err)
+		require.Len(t, f.enqueued, 1, "enqueued once, after main was checked again")
+		run(t, bare, "merge-base", "--is-ancestor", "main", "milestone/M1")
+		require.Equal(t, g.Integration.Commit, run(t, bare, "rev-parse", "milestone/M1"), "the enqueued tree has the moved main")
+		require.GreaterOrEqual(t, calls, 3, "fenced again before the enqueue after the re-check")
+	})
 }

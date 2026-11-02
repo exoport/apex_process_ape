@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -55,10 +57,12 @@ func leaseCode(t *testing.T, err error) string {
 	return fe.Code
 }
 
-func shortLeases(t *testing.T, ttl, every time.Duration) {
+// shortLeases gives the test's milestone and close leases a 1 s TTL,
+// renewed every every.
+func shortLeases(t *testing.T, every time.Duration) {
 	t.Helper()
 	oldTTL, oldEvery := MilestoneTTL, MilestoneRenewEvery
-	MilestoneTTL, MilestoneRenewEvery = ttl, every
+	MilestoneTTL, MilestoneRenewEvery = time.Second, every
 	t.Cleanup(func() { MilestoneTTL, MilestoneRenewEvery = oldTTL, oldEvery })
 }
 
@@ -67,7 +71,7 @@ func shortLeases(t *testing.T, ttl, every time.Duration) {
 // renewing it and is taken again by its own checkout, never by another's
 // gate; a release ends it.
 func TestMilestoneLease_ClaimGateRelease(t *testing.T) {
-	shortLeases(t, time.Second, 300*time.Millisecond)
+	shortLeases(t, 300*time.Millisecond)
 	ctx := context.Background()
 	now := time.Now()
 	url := leaseCluster(t)
@@ -115,7 +119,7 @@ func TestMilestoneLease_ClaimGateRelease(t *testing.T) {
 // run lives (the control: the same claim with no hold lapses, above); free
 // again once the run stops and the TTL passes.
 func TestMilestoneLease_LoopHoldRenews(t *testing.T) {
-	shortLeases(t, time.Second, 250*time.Millisecond)
+	shortLeases(t, 250*time.Millisecond)
 	ctx := context.Background()
 	now := time.Now()
 	url := leaseCluster(t)
@@ -147,23 +151,23 @@ func TestMilestoneLease_LoopHoldRenews(t *testing.T) {
 // the close, renewed past its TTL, kept by the same checkout run again,
 // refused to another (coord.close-busy), and free once released.
 func TestHoldClose(t *testing.T) {
-	shortLeases(t, time.Second, 250*time.Millisecond)
+	shortLeases(t, 250*time.Millisecond)
 	ctx := context.Background()
 	url := leaseCluster(t)
 	ann, bob := checkout(t, url, "ann"), checkout(t, url, "bob")
 
-	release, err := HoldClose(ctx, ann, io.Discard)
+	release, err := HoldClose(ctx, ann, io.Discard, nil)
 	require.NoError(t, err)
 	time.Sleep(3 * MilestoneTTL)
-	_, err = HoldClose(ctx, bob, io.Discard)
+	_, err = HoldClose(ctx, bob, io.Discard, nil)
 	require.Equal(t, apexv1.CodeCloseBusy, leaseCode(t, err), "renewed while ann's close runs")
 	require.ErrorContains(t, err, "ann/")
-	again, err := HoldClose(ctx, ann, io.Discard)
+	again, err := HoldClose(ctx, ann, io.Discard, nil)
 	require.NoError(t, err, "the same checkout's close run again keeps it")
 	again()
 	release()
 
-	r2, err := HoldClose(ctx, bob, io.Discard)
+	r2, err := HoldClose(ctx, bob, io.Discard, nil)
 	require.NoError(t, err, "released: bob's close takes it")
 	r2()
 	require.Empty(t, mustHolder(t, url, "close.notes-svc"), "released at the end")
@@ -181,4 +185,146 @@ func mustHolder(t *testing.T, url, key string) string {
 	h, _, err := s.Holder(context.Background(), key)
 	require.NoError(t, err)
 	return h
+}
+
+// FINDING-V15-1A-11: a NATS outage longer than the TTL made a run's renewal
+// stale, and its keeper quit, so its close later found the lease lapsed and
+// refused to push. Now the keeper takes a lapsed lease again while this
+// checkout's claim stands. The control: another member claimed the lapsed
+// lease first, and the keeper stops, naming them.
+func TestMilestoneLease_LoopHoldRetakesALapsedLease(t *testing.T) {
+	shortLeases(t, 250*time.Millisecond)
+	ctx := context.Background()
+	url := leaseCluster(t)
+	lapse := func(t *testing.T, p *apexv1.Project, ms string) {
+		t.Helper()
+		s, err := openMilestones(ctx, p)
+		require.NoError(t, err)
+		defer s.close()
+		js, err := jetstream.New(s.nc)
+		require.NoError(t, err)
+		kv, err := js.KeyValue(ctx, lease.LeasesBucket)
+		require.NoError(t, err)
+		require.NoError(t, kv.Delete(ctx, s.key(ms)))
+	}
+	holder := func(t *testing.T, p *apexv1.Project) string {
+		t.Helper()
+		s, err := openMilestones(ctx, p)
+		require.NoError(t, err)
+		defer s.close()
+		cur, _, err := s.store.Holder(ctx, s.key("M1"))
+		require.NoError(t, err)
+		return cur
+	}
+
+	t.Run("retaken", func(t *testing.T) {
+		ann, bob := checkout(t, url, "ann"), checkout(t, url, "bob")
+		_, err := ClaimMilestone(ctx, ann, "M1")
+		require.NoError(t, err)
+		var log syncBuf
+		stop, err := HoldMilestone(ctx, ann, "M1", &log)
+		require.NoError(t, err)
+		defer stop()
+		annID := holder(t, ann)
+		lapse(t, ann, "M1")
+		require.Eventually(t, func() bool { return strings.Contains(log.String(), "was taken again") }, 10*time.Second, 50*time.Millisecond, log.String())
+		require.Equal(t, annID, holder(t, ann))
+		time.Sleep(3 * MilestoneTTL)
+		_, err = ClaimMilestone(ctx, bob, "M1")
+		require.Equal(t, apexv1.CodeNotLeaseHolder, leaseCode(t, err), "renewed again after the re-take")
+		require.NoError(t, FenceMilestone(ctx, ann, "M1"), "a close's fenced push goes through")
+	})
+	t.Run("control-taken-by-another", func(t *testing.T) {
+		ann, bob := checkout(t, url, "ann2"), checkout(t, url, "bob2")
+		_, err := ClaimMilestone(ctx, ann, "M2")
+		require.NoError(t, err)
+		var log syncBuf
+		stop, err := HoldMilestone(ctx, ann, "M2", &log)
+		require.NoError(t, err)
+		defer stop()
+		lapse(t, ann, "M2")
+		_, err = ClaimMilestone(ctx, bob, "M2")
+		require.NoError(t, err, "bob takes the lapsed lease first")
+		require.Eventually(t, func() bool { return strings.Contains(log.String(), "holds it now") }, 10*time.Second, 50*time.Millisecond, log.String())
+		require.Contains(t, log.String(), "bob2/")
+		require.ErrorContains(t, FenceMilestone(ctx, ann, "M2"), "bob2/", "ann does not push")
+	})
+}
+
+// syncBuf is a goroutine-safe log.
+type syncBuf struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (s *syncBuf) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuf) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
+}
+
+// FINDING-V15-1A-11, research's close-lease finding: a close's lease that
+// lapses mid-close (a NATS outage) is taken again when nobody holds it —
+// counted, so the close checks main again — and its fence passes. The
+// second-claimant case: another close took the lapsed lease first; the
+// first close's keeper cancels it (onLost) and its fence right before the
+// enqueue refuses coord.close-lost, so it enqueues nothing.
+func TestHoldClose_LapseRetakenOrLostToASecondClose(t *testing.T) {
+	shortLeases(t, 250*time.Millisecond)
+	ctx := context.Background()
+	url := leaseCluster(t)
+	lapse := func(t *testing.T, h *closeHold) {
+		t.Helper()
+		js, err := jetstream.New(h.s.nc)
+		require.NoError(t, err)
+		kv, err := js.KeyValue(ctx, lease.LeasesBucket)
+		require.NoError(t, err)
+		require.NoError(t, kv.Delete(ctx, h.key))
+	}
+
+	t.Run("control-retaken", func(t *testing.T) {
+		ann := checkout(t, url, "ann")
+		var log syncBuf
+		var lost atomic.Bool
+		release, err := HoldClose(ctx, ann, &log, func() { lost.Store(true) })
+		require.NoError(t, err)
+		defer release()
+		h := activeClose.Load()
+		lapse(t, h)
+		require.Eventually(t, func() bool { return strings.Contains(log.String(), "was taken again") }, 10*time.Second, 50*time.Millisecond, log.String())
+		n, err := h.fence(ctx)
+		require.NoError(t, err, "nobody else holds it: the close goes on")
+		require.Equal(t, 1, n, "one re-take: the close checks main again before it enqueues")
+		require.False(t, lost.Load())
+	})
+	t.Run("second-claimant", func(t *testing.T) {
+		ann, bob := checkout(t, url, "ann3"), checkout(t, url, "bob3")
+		// A project of their own, so control-retaken's lease is not in the way.
+		for _, p := range []*apexv1.Project{ann, bob} {
+			cfg, err := os.ReadFile(apexv1.ConfigPath(p.Root))
+			require.NoError(t, err)
+			require.NoError(t, os.WriteFile(apexv1.ConfigPath(p.Root), []byte(strings.Replace(string(cfg), "Notes Svc", "Cart Svc", 1)), 0o644))
+		}
+		var log syncBuf
+		var lost atomic.Bool
+		release, err := HoldClose(ctx, ann, &log, func() { lost.Store(true) })
+		require.NoError(t, err)
+		defer release()
+		h := activeClose.Load()
+		lapse(t, h)
+		releaseBob, err := HoldClose(ctx, bob, io.Discard, nil)
+		require.NoError(t, err, "bob's close takes the lapsed lease")
+		defer releaseBob()
+		require.Eventually(t, lost.Load, 10*time.Second, 50*time.Millisecond, "ann's close is cancelled: %s", log.String())
+		require.Contains(t, log.String(), "bob3/")
+		_, err = h.fence(ctx)
+		require.Equal(t, apexv1.CodeCloseLost, leaseCode(t, err), "ann enqueues nothing")
+		require.ErrorContains(t, err, "bob3/")
+	})
 }

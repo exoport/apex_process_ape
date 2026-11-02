@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
@@ -15,6 +17,7 @@ import (
 
 	"github.com/exoport/apex_process_ape/internal/apexv1"
 	"github.com/exoport/apex_process_ape/internal/coord/lease"
+	"github.com/exoport/apex_process_ape/internal/coord/member"
 	"github.com/exoport/apex_process_ape/internal/natstest"
 )
 
@@ -205,4 +208,69 @@ func TestCoordinatedArchiveAndCloseNeedTheLease(t *testing.T) {
 		stdout, _, _ := v1Exec(t, cmd, append(args[1:], "--json", "--cwd", root)...)
 		require.NotContains(t, stdout, apexv1.CodeNotLeaseHolder, "%v: claimed, past the gate", args)
 	}
+}
+
+// FINDING-V15-1A-11 (widened, D729): a close's gate runs far past the
+// milestone lease's TTL before its fenced push. close now renews M's lease
+// for its whole duration: while its gate runs (3 s here, against a 1 s
+// TTL) another member's claim of M1 is refused, and it may claim once the
+// close has ended and the TTL passed.
+func TestMilestoneClose_HoldsTheLeaseWhileItsGateRuns(t *testing.T) {
+	oldTTL, oldEvery := member.MilestoneTTL, member.MilestoneRenewEvery
+	member.MilestoneTTL, member.MilestoneRenewEvery = time.Second, 250*time.Millisecond
+	t.Cleanup(func() { member.MilestoneTTL, member.MilestoneRenewEvery = oldTTL, oldEvery })
+
+	url := natstest.RunJetStreamServer(t)
+	nc, err := nats.Connect(url)
+	require.NoError(t, err)
+	t.Cleanup(nc.Close)
+	js, err := jetstream.New(nc)
+	require.NoError(t, err)
+	ctx := context.Background()
+	require.NoError(t, lease.Declare(ctx, js, 1))
+	ls, err := lease.Open(ctx, js)
+	require.NoError(t, err)
+	require.NoError(t, ls.SetEpoch(ctx, 1))
+	checkoutOf := func(user string, slowGate bool) string {
+		root := v1Repo(t)
+		if slowGate {
+			// dana's gate takes 3 s, three TTLs; approved as it is now.
+			require.NoError(t, os.WriteFile(filepath.Join(root, "gate.sh"), []byte("#!/bin/sh\nsleep 3\ntest -f done.flag\n"), 0o755))
+			v1Git(t, root, "commit", "-q", "-am", "slow gate")
+			_, _, err := v1Exec(t, newMilestoneCmd, "approve", "M1", "--by", "eval", "--cwd", root)
+			require.NoError(t, err)
+		}
+		cfg, err := os.ReadFile(apexv1.ConfigPath(root))
+		require.NoError(t, err)
+		// One project, two checkouts: the same project_name, so M1 is one
+		// lease key (init named each after its directory).
+		cfg = regexp.MustCompile(`(?m)^project_name:.*$`).ReplaceAll(cfg, []byte("project_name: notes"))
+		block := "coordination:\n  ensemble: shop\n  home: git@example.invalid:shop/home.git\n  url: " + url + "\n"
+		require.NoError(t, os.WriteFile(apexv1.ConfigPath(root), append(cfg, []byte(block)...), 0o644))
+		creds, _ := natstest.MintStandaloneCreds(t, user)
+		data, err := os.ReadFile(creds)
+		require.NoError(t, err)
+		require.NoError(t, os.MkdirAll(filepath.Join(root, "hot"), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(root, "hot", "ape-nats.creds"), data, 0o600))
+		return root
+	}
+	dana, eve := checkoutOf("dana", true), checkoutOf("eve", false)
+	_, _, err = v1Exec(t, newMilestoneCmd, "claim", "M1", "--cwd", dana)
+	require.NoError(t, err)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		out, errOut, err := v1Exec(t, newMilestoneCmd, "close", "M1", "--cwd", dana)
+		t.Logf("close: %v\n%s\n%s", err, out, errOut)
+	}()
+	time.Sleep(2 * time.Second) // past the TTL, inside the gate
+	stdout, _, err := v1Exec(t, newMilestoneCmd, "claim", "M1", "--json", "--cwd", eve)
+	<-done
+	require.Error(t, err, "the close renews dana's lease while its gate runs")
+	require.Contains(t, stdout, apexv1.CodeNotLeaseHolder)
+	require.Contains(t, stdout, "dana/")
+	time.Sleep(2 * time.Second)
+	_, _, err = v1Exec(t, newMilestoneCmd, "claim", "M1", "--cwd", eve)
+	require.NoError(t, err, "the close ended: no keeper, the lease lapsed, and eve may claim")
 }
