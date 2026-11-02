@@ -383,6 +383,22 @@ What else a check gets in v1.4:
   overrides the project's `name:`, its `.env` and the person's environment; only `-p` on the
   command line opts out. A gate that started the dev stack's services gets its own, and a fixed
   host port the dev stack holds then shows as `port-held` (below).
+
+  Every check inherits it, the Gate: command and the regression command included, so a test
+  that runs `docker compose` sees a project name the person's shell never set. **Some compose
+  verbs then ignore `-f`.** Docker Compose v5 (measured on 5.6.0) resolves `down` by the
+  project's name and never opens its compose files: `docker compose -f missing.yml down` exits 0
+  ("No resource found to remove") instead of failing on the missing file. `config` and `up` still
+  read the files. A test that relies on compose failing for a missing or broken file passes in a
+  plain shell and fails under a gate (FINDING-V15-1A-8). In Go the fix is one line in that test:
+
+  ```go
+  t.Setenv("COMPOSE_PROJECT_NAME", "") // a gate's check sets it; compose's down then ignores -f
+  ```
+
+  An empty value works as unset. In a shell script, run that command under
+  `env -u COMPOSE_PROJECT_NAME`. Keep the variable everywhere else: it is what keeps two checks'
+  stacks apart.
 - **Containers**, where `docker` is on `PATH` and its daemon answers: each container the check
   created is recorded in `containers` (`secs` alive, its own `memory_peak`, `owner`). Those of the
   check's compose project are removed with their networks and volumes (`removed: true`);
