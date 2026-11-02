@@ -356,14 +356,16 @@ func TestDrill_SupervisorRidesOutANATSOutage(t *testing.T) {
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	logMu.Lock()
-	defer logMu.Unlock()
-	require.Condition(t, func() bool {
+	// The supervisor logs the restart once replace returns, which can be
+	// after the new coordinator already answers: wait for the line.
+	require.Eventually(t, func() bool {
+		logMu.Lock()
+		defer logMu.Unlock()
 		for _, l := range logged {
 			if strings.Contains(l, "coordinator was gone (lease stale, ping unanswered); restarted") {
 				return true
 			}
 		}
 		return false
-	}, "the restart is logged: %v", logged)
+	}, 10*time.Second, 50*time.Millisecond, "the restart is logged")
 }
