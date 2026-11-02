@@ -217,10 +217,18 @@ func HoldMilestone(ctx context.Context, p *apexv1.Project, ms string, log io.Wri
 		}
 		return nil, err
 	}
-	l, err := s.claim(ctx, ms)
+	before, _, _ := s.book.Last(s.key(ms))
+	l, fresh, err := s.claimFresh(ctx, ms)
 	if err != nil {
 		s.close()
 		return nil, err
+	}
+	// B3 (ANSWER-D751): claimed by this checkout, but the key was gone —
+	// it lapsed between runs, free to another member meanwhile. Said, as
+	// a lapse during a hold is (retake).
+	if fresh && log != nil {
+		fmt.Fprintf(log, "ape: %s's lease had lapsed (last renewed by this checkout %s, so free from about %s); claimed again\n",
+			ms, before.At.UTC().Format(time.RFC3339), before.At.Add(MilestoneTTL).UTC().Format(time.RFC3339))
 	}
 	rctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	done := make(chan struct{})
