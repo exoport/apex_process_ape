@@ -47,9 +47,12 @@ type RunLock struct {
 	PIDStart string `json:"pid_start,omitempty"`
 	Verb     string `json:"verb"`
 	Scope    string `json:"scope"`
-	SHA      string `json:"sha"`
-	Started  string `json:"started"`
-	Log      string `json:"log"`
+	// Arg is the verb's argument when it is not the scope (B2: take-in M
+	// locks take-in-M); what the run's messages name it by.
+	Arg     string `json:"arg,omitempty"`
+	SHA     string `json:"sha"`
+	Started string `json:"started"`
+	Log     string `json:"log"`
 	// PersonAct is the person act the run carries out (D179, OI-12):
 	// what a re-run attaches by, and what its worker acts on.
 	PersonAct *PersonAct `json:"person_act,omitempty"`
@@ -295,19 +298,29 @@ func (p *Project) RemoveStaleRunLock(l *RunLock) error {
 	return RunGone(l)
 }
 
+// Command is the run's command as typed, `ape <verb> <argument>`: its
+// Arg when the scope is not the argument (B2), else its scope.
+func (l *RunLock) Command() string {
+	arg := l.Scope
+	if l.Arg != "" {
+		arg = l.Arg
+	}
+	return "`ape " + l.Verb + " " + arg + "`"
+}
+
 // RunBusy is run.busy for a call of another verb on l's scope.
 func RunBusy(l *RunLock) error {
 	return &ConflictError{Code: CodeRunBusy, Action: ActionRetry, Msg: fmt.Sprintf(
-		"%s: `ape %s %s` is running on it since %s (pid %d, log %s) — one run per change or milestone; wait for it (`ape %s %s` attaches to it), then run this command again",
-		l.Scope, l.Verb, l.Scope, l.Started, l.PID, l.Log, l.Verb, l.Scope)}
+		"%s: %s is running on it since %s (pid %d, log %s) — one run per change or milestone; wait for it (%s attaches to it), then run this command again",
+		l.Scope, l.Command(), l.Started, l.PID, l.Log, l.Command())}
 }
 
 // RunGone is run.interrupted for a run whose process ended without a
 // result.
 func RunGone(l *RunLock) error {
 	return &FailError{Code: CodeRunInterrupted, Msg: fmt.Sprintf(
-		"the run of `ape %s %s` started %s (pid %d) ended without a result — killed, or the machine restarted; its log is %s. Nothing was recorded and no attempt counted — run the same command again",
-		l.Verb, l.Scope, l.Started, l.PID, l.Log)}
+		"the run of %s started %s (pid %d) ended without a result — killed, or the machine restarted; its log is %s. Nothing was recorded and no attempt counted — run the same command again",
+		l.Command(), l.Started, l.PID, l.Log)}
 }
 
 // RunOutput is one rendering of a run's outcome: what the command prints

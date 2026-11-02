@@ -175,6 +175,10 @@ func runLongArg(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, scope, arg st
 	if err != nil {
 		return v1Fail(cmd, f, err, nil)
 	}
+	if lock != nil && arg != scope {
+		lock.Arg = arg // B2: its messages name the command as typed
+		p.UpdateRunLock(lock)
+	}
 	if held != nil {
 		if held.Verb != verb {
 			return v1Fail(cmd, f, apexv1.RunBusy(held), nil)
@@ -412,8 +416,8 @@ func longStillRunning(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, l *apex
 			fmt.Fprintln(cmd.ErrOrStderr(), line)
 		}
 	}
-	msg := fmt.Sprintf("`ape %s %s` is still running since %s (pid %d, log %s) — run the same command again to attach",
-		l.Verb, l.Scope, l.Started, l.PID, l.Log)
+	msg := fmt.Sprintf("%s is still running since %s (pid %d, log %s) — run the same command again to attach",
+		l.Command(), l.Started, l.PID, l.Log)
 	if l.Verb == apexv1.VerbMilestoneGate {
 		msg += "; once it has finished, the next call returns its result once, while nothing changed (`--rerun` runs the gate again)"
 	}
@@ -520,7 +524,7 @@ func runAsWorker(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, verb, scope,
 			cmd.SetContext(apexv1.WithPersonAct(cmd.Context(), a))
 		}
 	}
-	fmt.Fprintf(cmd.ErrOrStderr(), "[ape] %s `ape %s %s` started (run %s, pid %d, at %.7s)\n", apexv1.Stamp(), verb, scope, id, os.Getpid(), lock.SHA)
+	fmt.Fprintf(cmd.ErrOrStderr(), "[ape] %s %s started (run %s, pid %d, at %.7s)\n", apexv1.Stamp(), lock.Command(), id, os.Getpid(), lock.SHA)
 	// The log says how the run ended before its lock is released (D380):
 	// a call that sees the lock gone — and prints the result — reads a log
 	// that already ends with it.

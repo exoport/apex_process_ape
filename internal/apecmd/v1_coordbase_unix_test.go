@@ -99,6 +99,8 @@ func TestMilestoneTakeIn_DetachedWorkerTakesTheMilestone(t *testing.T) {
 	log, _ := os.ReadFile(p.RunLogPath(scope))
 	require.NoError(t, err, "stdout %s\nstderr %s\nworker log %s", stdout, stderr, log)
 	require.NotContains(t, stdout+string(log), "take-in-M1 (never claimed", "the worker gated M1, not a milestone named take-in-M1")
+	require.Contains(t, string(log), "`ape milestone take-in M1` started", "B2: the banner names the argument")
+	require.NotContains(t, string(log), "take-in take-in-M1", "B2: never the scope as the command")
 	var res map[string]any
 	require.NoError(t, json.Unmarshal([]byte(stdout), &res), stdout)
 	require.Equal(t, true, res["up_to_date"], stdout)

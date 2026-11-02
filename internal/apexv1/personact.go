@@ -775,8 +775,8 @@ func RunBusyPersonAct(l *RunLock, c PersonCall) error {
 		what = "a run without this person act"
 	}
 	return &ConflictError{Code: CodeRunBusy, Action: ActionRetry, Msg: fmt.Sprintf(
-		"%s: `ape %s %s` is running on it since %s (pid %d, log %s), %s — wait for it to end (`ape %s %s` attaches to it), then run %s: a new run, which needs the person's own words again",
-		l.Scope, l.Verb, l.Scope, l.Started, l.PID, l.Log, what, l.Verb, l.Scope, "`"+c.Line+"`")}
+		"%s: %s is running on it since %s (pid %d, log %s), %s — wait for it to end (%s attaches to it), then run %s: a new run, which needs the person's own words again",
+		l.Scope, l.Command(), l.Started, l.PID, l.Log, what, l.Command(), "`"+c.Line+"`")}
 }
 
 // grantVerdict grants c when the prompt that opened this turn asks for it
