@@ -9,8 +9,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/exoport/apex_process_ape/internal/runlog"
@@ -80,9 +82,82 @@ func (p *Project) RunLockPath(scope string) string {
 	return filepath.Join(p.RunsDir(), scope+".json")
 }
 
-// RunLogPath is the log a scope's detached run writes.
+// RunLogPathFor is the log run id of a scope writes (B1, D755 (a)):
+// runs/<scope>.<id>.log, its own, so a later run of the scope does not
+// truncate it.
+func (p *Project) RunLogPathFor(scope, id string) string {
+	return filepath.Join(p.RunsDir(), scope+"."+id+".log")
+}
+
+// RunLogPath is the scope's newest run log (the last written; ids begun in
+// one second do not order by time); a log written before B1
+// (runs/<scope>.log) while there is none.
 func (p *Project) RunLogPath(scope string) string {
+	if logs := p.runLogs(scope); len(logs) > 0 {
+		return logs[len(logs)-1]
+	}
 	return filepath.Join(p.RunsDir(), scope+".log")
+}
+
+// runLogs are a scope's per-run logs, oldest first: by modification time,
+// then name.
+func (p *Project) runLogs(scope string) []string {
+	matches, _ := filepath.Glob(filepath.Join(p.RunsDir(), globEscape(scope)+".[0-9]*.log"))
+	mod := make(map[string]time.Time, len(matches))
+	for _, m := range matches {
+		if fi, err := os.Stat(m); err == nil {
+			mod[m] = fi.ModTime()
+		}
+	}
+	sort.SliceStable(matches, func(i, j int) bool {
+		if a, b := mod[matches[i]], mod[matches[j]]; !a.Equal(b) {
+			return a.Before(b)
+		}
+		return matches[i] < matches[j]
+	})
+	return matches
+}
+
+// globEscape quotes a scope for filepath.Glob (ids are plain, but a
+// gate-test scope is a folder name).
+func globEscape(s string) string {
+	return strings.NewReplacer(`\`, `\\`, "*", `\*`, "?", `\?`, "[", `\[`).Replace(s)
+}
+
+// RunLogsKept is how many of a scope's per-run logs PruneRunLogs keeps.
+const RunLogsKept = 10
+
+// PruneRunLogs removes a scope's per-run logs but the newest RunLogsKept.
+func (p *Project) PruneRunLogs(scope string) {
+	logs := p.runLogs(scope)
+	for len(logs) > RunLogsKept {
+		_ = os.Remove(logs[0])
+		logs = logs[1:]
+	}
+}
+
+// The fence lines this process wrote since they were last taken (B1):
+// member.FenceMilestone notes each, and a long run's result records its
+// own (result.json "fences").
+var (
+	fenceMu    sync.Mutex
+	fenceLines []string
+)
+
+// NoteFence keeps one fence line for the run's result.
+func NoteFence(line string) {
+	fenceMu.Lock()
+	fenceLines = append(fenceLines, line)
+	fenceMu.Unlock()
+}
+
+// TakeFences returns the lines noted since the last take, and forgets them.
+func TakeFences() []string {
+	fenceMu.Lock()
+	defer fenceMu.Unlock()
+	out := fenceLines
+	fenceLines = nil
+	return out
 }
 
 func (p *Project) runResultPath(scope string) string {
@@ -115,8 +190,9 @@ func (p *Project) TakeRunLock(ctx context.Context, verb, scope string) (lock, he
 	l := &RunLock{
 		ID:  time.Now().UTC().Format("20060102-150405") + "-" + strconv.Itoa(os.Getpid()) + "-" + randomHex(3),
 		PID: os.Getpid(), PGID: ProcessGroup(), PIDStart: selfStart(), Verb: verb, Scope: scope,
-		SHA: HeadSHA(ctx, p.Root), Started: Stamp(), Log: p.Rel(p.RunLogPath(scope)),
+		SHA: HeadSHA(ctx, p.Root), Started: Stamp(),
 	}
+	l.Log = p.Rel(p.RunLogPathFor(scope, l.ID))
 	for range 3 {
 		err := p.linkLock(l)
 		if err == nil {
@@ -271,6 +347,10 @@ type RunResult struct {
 	// the next call runs the gate again (D455). Absent from ape v1.1's
 	// records.
 	Tree string `json:"tree,omitempty"`
+	// Log is the run's own log (B1); Fences the fence lines its pushes
+	// wrote (D732), kept here as the log they are in may be pruned.
+	Log    string   `json:"log,omitempty"`
+	Fences []string `json:"fences,omitempty"`
 }
 
 // SaveRunResult writes a run's result.

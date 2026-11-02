@@ -349,8 +349,10 @@ func FenceMilestone(ctx context.Context, p *apexv1.Project, ms string) error {
 var FenceLog io.Writer = os.Stderr
 
 func fenceLogf(format string, args ...any) {
+	line := fmt.Sprintf("%s ape: fence: "+format, append([]any{time.Now().UTC().Format(time.RFC3339)}, args...)...)
+	apexv1.NoteFence(line) // B1: the run's result.json keeps it too
 	if FenceLog != nil {
-		fmt.Fprintf(FenceLog, "%s ape: fence: "+format+"\n", append([]any{time.Now().UTC().Format(time.RFC3339)}, args...)...)
+		fmt.Fprintln(FenceLog, line)
 	}
 }
 

@@ -94,7 +94,7 @@ func TestGateVerdict_StillRunning75(t *testing.T) {
 	last = lastLine(stdout)
 	require.True(t, strings.HasPrefix(last, "`ape milestone gate M1` is still running since "), stdout)
 	require.Contains(t, last, "run the same command again to attach")
-	require.Contains(t, last, "log _apex/state/runs/M1.log")
+	require.Contains(t, last, "log _apex/state/runs/M1.2", "the run's own log (B1): runs/M1.<run-id>.log")
 
 	lock := p.LoadRunLock("M1")
 	require.NotNil(t, lock)

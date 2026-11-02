@@ -130,9 +130,9 @@ func TestLongRun_Exit75ThenAttach(t *testing.T) {
 	require.Equal(t, "change verify", running.Verb)
 	require.Equal(t, "add-wave", running.Scope)
 	require.NotEmpty(t, running.Since)
-	require.Equal(t, "_apex/state/runs/add-wave.log", running.Log)
 	lock := p.LoadRunLock("add-wave")
 	require.NotNil(t, lock)
+	require.Equal(t, p.Rel(p.RunLogPathFor("add-wave", lock.ID)), running.Log, "the run's own log (B1)")
 	require.NotEqual(t, os.Getpid(), lock.PID, "the checks run in the worker, not in the call")
 
 	stdout, stderr, err := v1Exec(t, newChangeCmd, "verify", "add-wave", "--wait", "0", "--cwd", root)

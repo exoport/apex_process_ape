@@ -388,7 +388,8 @@ Tagging the release is a person's act, after the close.
 ## Long runs and exit 75
 
 `approve`, `gate` and `close` run in a detached worker that holds the milestone's run lock,
-`_apex/state/runs/<M>.json`, with its output in `_apex/state/runs/<M>.log`. The call waits up to
+`_apex/state/runs/<M>.json`, with its output in `_apex/state/runs/<M>.<run-id>.log` (each run its own; the newest 10 kept;
+the result's `log` names it, and its `fences` hold the run's fence lines). The call waits up to
 `--wait` (default 9m, at most 9m30s; `0` returns at once). A run that ends in time prints its
 result with its usual exit code.
 

@@ -373,10 +373,15 @@ func TestFenceMilestone_ClientSideExpiry(t *testing.T) {
 	require.ErrorContains(t, err, lease.ExpirySkew.String())
 	require.Empty(t, log.String(), "no push, no fence line")
 
-	put(time.Now()) // the control: written now
+	put(time.Now())     // the control: written now
+	apexv1.TakeFences() // only this push's line below (the collector is process-wide)
 	require.NoError(t, FenceMilestone(ctx, ann, "M1"))
 	require.Contains(t, log.String(), "ape: fence: milestone/M1: pushing under "+s.key("M1")+", held by this checkout (epoch 1, revision ")
 	require.Equal(t, 1, strings.Count(log.String(), "\n"), "one line per fenced push")
+	// B1: the same line is noted for the run's result.json.
+	noted := apexv1.TakeFences()
+	require.Len(t, noted, 1)
+	require.Equal(t, strings.TrimSuffix(log.String(), "\n"), noted[0])
 }
 
 // D732: a run's keeper whose lease this checkout released (a close, at its

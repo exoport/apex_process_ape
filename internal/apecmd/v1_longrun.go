@@ -33,7 +33,7 @@ import (
 //  2. it starts `ape __run --spawn`, which starts the worker `ape __run
 //     <run-id> <verb> <scope> …` in its own session (setsid; on Windows
 //     CREATE_NEW_PROCESS_GROUP|DETACHED_PROCESS), stdout and stderr to
-//     _apex/state/runs/<scope>.log, and exits at once — so the worker is
+//     _apex/state/runs/<scope>.<run-id>.log (B1), and exits at once — so the worker is
 //     an orphan, no descendant of the call: killing the call, or the shell
 //     around it, stops nothing. Called from inside a model session, the
 //     worker carries its own APE_SESSION, the session's with its run
@@ -246,11 +246,16 @@ func runHere(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, lock *apexv1.Run
 	f.ranHere = true
 	opt := f.runOptions()
 	opt.Progress = progress
+	apexv1.TakeFences() // this run's own lines only
 	render := compute(cmd.Context(), opt)
 	r := &apexv1.RunResult{
 		ID: lock.ID, Verb: lock.Verb, Scope: lock.Scope, SHA: lock.SHA, Started: lock.Started,
 		Ended: apexv1.Stamp(), HeadAfter: apexv1.HeadSHA(context.WithoutCancel(cmd.Context()), p.Root),
-		PersonAct: lock.PersonAct,
+		PersonAct: lock.PersonAct, Fences: apexv1.TakeFences(),
+	}
+	// A detached run's own log; one in this process wrote none.
+	if _, err := os.Stat(filepath.Join(p.Root, lock.Log)); err == nil {
+		r.Log = lock.Log
 	}
 	// A gate that ran records the tree it left, after its own commit: what
 	// a later call compares to return this result (F1). A refusal records
@@ -461,10 +466,11 @@ func workerArgv(cmd *cobra.Command, p *apexv1.Project, arg string) []string {
 // which starts it in its own session and exits, and records the worker's
 // pid in the lock.
 func launchWorker(cmd *cobra.Command, p *apexv1.Project, lock *apexv1.RunLock, argv []string) error {
-	logPath := p.RunLogPath(lock.Scope)
+	logPath := p.RunLogPathFor(lock.Scope, lock.ID)
 	if err := os.WriteFile(logPath, nil, 0o644); err != nil { //nolint:gosec // the run's log, ignored
 		return err
 	}
+	p.PruneRunLogs(lock.Scope)
 	_ = os.Remove(filepath.Join(p.RunsDir(), lock.Scope+".attached"))
 	exe, err := os.Executable()
 	if err != nil {

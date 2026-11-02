@@ -32,7 +32,7 @@ func TestRunLock_AttachBusyStale(t *testing.T) {
 	require.Nil(t, held)
 	require.Equal(t, os.Getpid(), lock.PID)
 	require.Equal(t, "change verify", lock.Verb)
-	require.Equal(t, "_apex/state/runs/add-wave.log", lock.Log)
+	require.Equal(t, "_apex/state/runs/add-wave."+lock.ID+".log", lock.Log, "the run's own log (B1)")
 	require.Equal(t, HeadSHA(ctx(), p.Root), lock.SHA)
 	require.True(t, AnyRunLive(p.Root), "a live lock is work in progress")
 
