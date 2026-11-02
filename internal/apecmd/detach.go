@@ -16,6 +16,7 @@ package apecmd
 // through os.Exit, which no in-process hook could observe.
 
 import (
+	"bufio"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -817,7 +818,20 @@ func supervise(ctx context.Context, path string) error {
 	}
 	child := exec.Command(exe, h.Argv...) //nolint:noctx // this binary, with the arguments --detach recorded; a signal is forwarded below, not a context kill
 	child.Dir = h.Dir
-	child.Stdout, child.Stderr = stdout, logf
+	// D732: every log line carries its UTC time, so a line inside a long
+	// step (a lease's keeper, a fenced push) is dated. Through a pipe of
+	// this supervisor's own, never exec's copy: a process the run left
+	// holding stderr must not delay the exit being recorded (F15).
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		return usageErr(err)
+	}
+	stamped := make(chan struct{})
+	go func() {
+		defer close(stamped)
+		stampLines(logf, pr, time.Now)
+	}()
+	child.Stdout, child.Stderr = stdout, pw
 	child.Env = append(os.Environ(), envDetachedID+"="+h.ID)
 	// The session locks the run holds under this handle's id are released
 	// before its exit is recorded, so a caller that saw the exit may start
@@ -828,9 +842,20 @@ func supervise(ctx context.Context, path string) error {
 		}
 	}
 	if err := child.Start(); err != nil {
+		_ = pw.Close()
+		<-stamped
 		releaseLocks()
 		return recordExitAndEmit(ctx, path, h, ExitRunFailed, err.Error())
 	}
+	_ = pw.Close() // the child's copies hold it now
+	defer func() {
+		select {
+		case <-stamped:
+		case <-time.After(stampDrain):
+			_ = pr.Close()
+			<-stamped
+		}
+	}()
 	h.ChildPID = child.Process.Pid
 	_ = recordChildPID(path, os.Getpid(), h.ChildPID)
 
@@ -975,3 +1000,27 @@ func recordExit(path string, h *detachedHandle, code int, msg string) error {
 	}
 	return nil
 }
+
+// stampLines copies r to w line by line, each line prefixed with its UTC
+// time when it was read (D732): the detached run log dates what happens
+// inside a step. A last line without a newline is written as it is.
+func stampLines(w io.Writer, r io.Reader, now func() time.Time) {
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 0, 64*1024), maxLogLine)
+	for sc.Scan() {
+		_, _ = fmt.Fprintf(w, "%s %s\n", now().UTC().Format(time.RFC3339), sc.Bytes())
+	}
+	if sc.Err() != nil {
+		// A line longer than the buffer: the rest goes as it is, so the
+		// run never blocks on a full pipe.
+		_, _ = io.Copy(w, r)
+	}
+}
+
+// maxLogLine is the longest log line stamped whole (transcript readers
+// meet lines over 100 KB); a longer one, and the rest, goes unstamped.
+const maxLogLine = 4 << 20
+
+// stampDrain is how long the supervisor reads the run's log after its exit
+// is recorded, for what a process the run left still writes.
+const stampDrain = 5 * time.Second

@@ -97,6 +97,24 @@ release = delete at the last revision; expiry = the key's TTL.
 A credential may create, renew and delete only its own `conductor.<own user>.*` keys; the other kinds are claimable
 by any member.
 
+**A lapse is not the end of a hold** (FINDING-V15-1A-11). When a renewal comes back stale, for example after a NATS
+outage longer than the TTL, the keeper of a milestone lease or a close lease reads the holder:
+- nobody holds it, and this checkout's claim stands: it takes the lease again and logs that;
+- this checkout holds it through another keeper of its own: it adopts it quietly;
+- another member holds it: it stops and names them, and a close's keeper also cancels the close.
+
+`ape milestone close` holds a renewing keeper on M's lease for its whole run, whether it runs from a loop or from a
+person's terminal. A release by this checkout, such as close's after the merge, is logged as "released by this
+checkout", not as a loss.
+
+**Fences fail safe.** A lease's value records its TTL (`{holder, at, ttl_secs}`). The fences before a push of
+`milestone/<M>` and before a close PR's enqueue treat `now > at + ttl − skew` as not held, whatever the server still
+has. The skew margin is 2 s (`lease.ExpirySkew`), at most a fifth of the TTL, and it allows for clocks that disagree
+once members run on other hosts. Claims read the server's value. Each fenced push or enqueue logs one line: the
+lease, its holder and token, and when it was last renewed. Right before the enqueue the close lease is fenced
+(`coord.close-lost`: nothing enqueued). If it was taken again since main was checked, main is checked again, and
+taken in and gated if it moved.
+
 A milestone's lease is a person's claim kept alive by a run (stage 1a). `ape milestone claim <M>` takes it for this
 checkout, or keeps it when this checkout already holds it. When another checkout holds it, the claim is refused with
 `session.not-lease-holder`, naming the holder. The milestone's loop, `ape task apex-loop --args <M>`, re-takes the lease

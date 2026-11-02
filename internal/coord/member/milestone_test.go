@@ -2,6 +2,7 @@ package member
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -327,4 +328,75 @@ func TestHoldClose_LapseRetakenOrLostToASecondClose(t *testing.T) {
 		require.Equal(t, apexv1.CodeCloseLost, leaseCode(t, err), "ann enqueues nothing")
 		require.ErrorContains(t, err, "bob3/")
 	})
+}
+
+// D732 / FINDING-V15-1A-11, research's defence in depth: a lease value
+// carries its TTL, and a fence treats now > at+ttl−ExpirySkew as not held,
+// whatever the server still has — the fence fails safe if the server's
+// expiry lags. A value written 40 s ago with a 30 s TTL, still on the
+// server, refuses the push and names the skew margin; the control, the
+// same holder written now, passes and logs its one fence line.
+func TestFenceMilestone_ClientSideExpiry(t *testing.T) {
+	ctx := context.Background()
+	url := leaseCluster(t)
+	ann := checkout(t, url, "ann4")
+	for _, p := range []*apexv1.Project{ann} {
+		cfg, err := os.ReadFile(apexv1.ConfigPath(p.Root))
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(apexv1.ConfigPath(p.Root), []byte(strings.Replace(string(cfg), "Notes Svc", "Fence Svc", 1)), 0o644))
+	}
+	_, err := ClaimMilestone(ctx, ann, "M1")
+	require.NoError(t, err)
+	s, err := openMilestones(ctx, ann)
+	require.NoError(t, err)
+	defer s.close()
+	js, err := jetstream.New(s.nc)
+	require.NoError(t, err)
+	kv, err := js.KeyValue(ctx, lease.LeasesBucket)
+	require.NoError(t, err)
+	put := func(at time.Time) {
+		t.Helper()
+		v, err := json.Marshal(lease.Value{Holder: s.holder, At: at, TTLSecs: 30})
+		require.NoError(t, err)
+		_, err = kv.Put(ctx, s.key("M1"), v)
+		require.NoError(t, err)
+	}
+	var log syncBuf
+	old := FenceLog
+	FenceLog = &log
+	t.Cleanup(func() { FenceLog = old })
+
+	put(time.Now().Add(-40 * time.Second))
+	err = FenceMilestone(ctx, ann, "M1")
+	require.Equal(t, apexv1.CodeNotLeaseHolder, leaseCode(t, err), "past at+ttl: not held, though the server has it")
+	require.ErrorContains(t, err, "at+ttl has passed")
+	require.ErrorContains(t, err, lease.ExpirySkew.String())
+	require.Empty(t, log.String(), "no push, no fence line")
+
+	put(time.Now()) // the control: written now
+	require.NoError(t, FenceMilestone(ctx, ann, "M1"))
+	require.Contains(t, log.String(), "ape: fence: milestone/M1: pushing under "+s.key("M1")+", held by this checkout (epoch 1, revision ")
+	require.Equal(t, 1, strings.Count(log.String(), "\n"), "one line per fenced push")
+}
+
+// D732: a run's keeper whose lease this checkout released (a close, at its
+// merge) says so — "released by this checkout", not "lost".
+func TestMilestoneLease_ReleasedByThisCheckoutIsNoLoss(t *testing.T) {
+	shortLeases(t, 250*time.Millisecond)
+	ctx := context.Background()
+	url := leaseCluster(t)
+	ann := checkout(t, url, "ann5")
+	cfg, err := os.ReadFile(apexv1.ConfigPath(ann.Root))
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(apexv1.ConfigPath(ann.Root), []byte(strings.Replace(string(cfg), "Notes Svc", "Release Svc", 1)), 0o644))
+	_, err = ClaimMilestone(ctx, ann, "M1")
+	require.NoError(t, err)
+	var log syncBuf
+	stop, err := HoldMilestone(ctx, ann, "M1", &log)
+	require.NoError(t, err)
+	defer stop()
+	_, err = ReleaseMilestone(ctx, ann, "M1")
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return strings.Contains(log.String(), "released by this checkout (the milestone closed)") }, 10*time.Second, 50*time.Millisecond, log.String())
+	require.NotContains(t, log.String(), "was lost")
 }

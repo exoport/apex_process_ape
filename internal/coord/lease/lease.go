@@ -40,6 +40,24 @@ var (
 type Value struct {
 	Holder string    `json:"holder"`
 	At     time.Time `json:"at"`
+	// TTLSecs is the lease's TTL when it was written (FINDING-V15-1A-11,
+	// research's defence in depth): a fence treats now > At+TTL−ExpirySkew
+	// as not held, whatever the server still has. Absent (a value written
+	// before), no client-side check.
+	TTLSecs float64 `json:"ttl_secs,omitempty"` //nolint:tagliatelle // ape's NATS payloads are snake_case (events.md)
+}
+
+// ExpirySkew is the margin a fence gives clocks that disagree: a lease
+// whose At+TTL is less than the margin away counts as already expired.
+// The margin is ExpirySkew, at most a fifth of the lease's TTL (skewFor):
+// 2 s against the milestone and close leases' 30 s TTL. It matters once
+// members and the cluster run on other hosts (stage 2), where a member's
+// clock may run behind the one that wrote At.
+var ExpirySkew = 2 * time.Second
+
+// skewFor is the expiry margin for a lease of ttl.
+func skewFor(ttl time.Duration) time.Duration {
+	return min(ExpirySkew, ttl/5)
 }
 
 // Lease is a held lease: its key, holder and current token.
@@ -130,7 +148,7 @@ func (s *Store) Claim(ctx context.Context, key, holder string, ttl time.Duration
 	if err != nil {
 		return Lease{}, err
 	}
-	val, err := json.Marshal(Value{Holder: holder, At: s.now().UTC()})
+	val, err := json.Marshal(Value{Holder: holder, At: s.now().UTC(), TTLSecs: ttl.Seconds()})
 	if err != nil {
 		return Lease{}, err
 	}
@@ -163,7 +181,7 @@ func (s *Store) write(ctx context.Context, l Lease, holder string) (Lease, error
 	if err := s.Fence(ctx, l.Key, l.Token); err != nil {
 		return Lease{}, err
 	}
-	val, err := json.Marshal(Value{Holder: holder, At: s.now().UTC()})
+	val, err := json.Marshal(Value{Holder: holder, At: s.now().UTC(), TTLSecs: l.TTL.Seconds()})
 	if err != nil {
 		return Lease{}, err
 	}
@@ -213,6 +231,43 @@ func (s *Store) Fence(ctx context.Context, key string, tok layout.Token) error {
 		return fmt.Errorf("%w: %s is at revision %d, the token says %d", ErrStale, key, e.Revision(), tok.Revision)
 	}
 	return nil
+}
+
+// Live is a fence's reading of a lease: who holds it, its token, when it
+// was last written, and whether it is past At+TTL−ExpirySkew though the
+// server still has it (then Holder is "").
+type Live struct {
+	Holder  string
+	Token   layout.Token
+	At      time.Time
+	Expired bool
+}
+
+// LiveHolder is Holder for a fence (FINDING-V15-1A-11): a lease whose
+// At+TTL−ExpirySkew has passed is not held, whatever the server still
+// has — a fence fails safe if the server's expiry lags or a member's
+// clock is ahead. Claims read Holder, the server's truth.
+func (s *Store) LiveHolder(ctx context.Context, key string) (Live, error) {
+	e, err := s.leases.Get(ctx, key)
+	if errors.Is(err, jetstream.ErrKeyNotFound) {
+		return Live{}, nil
+	}
+	if err != nil {
+		return Live{}, err
+	}
+	var v Value
+	if err := json.Unmarshal(e.Value(), &v); err != nil {
+		return Live{}, fmt.Errorf("lease: %s value: %w", key, err)
+	}
+	epoch, err := s.Epoch(ctx)
+	if err != nil {
+		return Live{}, err
+	}
+	l := Live{Holder: v.Holder, Token: layout.Token{Epoch: epoch, Revision: e.Revision()}, At: v.At}
+	if ttl := time.Duration(v.TTLSecs * float64(time.Second)); ttl > 0 && s.now().After(v.At.Add(ttl-skewFor(ttl))) {
+		l.Holder, l.Expired = "", true
+	}
+	return l, nil
 }
 
 // Holder reads key's holder, "" when nobody holds it.

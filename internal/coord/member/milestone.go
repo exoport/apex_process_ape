@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -258,6 +259,10 @@ func (s *milestones) retake(ctx context.Context, ms string, stale error, log io.
 	case err != nil:
 		return nil, true
 	case !claimed:
+		if e, ok, _ := s.book.Last(s.key(ms)); ok && e.State == lease.Released && e.Holder == s.holder {
+			fmt.Fprintf(log, "%s ape: the lease on %s was released by this checkout (the milestone closed): the run stops renewing it\n", time.Now().UTC().Format(time.RFC3339), ms)
+			return nil, false
+		}
 		fmt.Fprintf(log, "ape: the lease on %s was lost (%v) and this checkout no longer claims it: the run's next change new or start refuses\n", ms, stale)
 		return nil, false
 	case cur != "" && cur != s.holder:
@@ -315,18 +320,41 @@ func FenceMilestone(ctx context.Context, p *apexv1.Project, ms string) error {
 		return err
 	}
 	defer s.close()
-	cur, _, err := s.store.Holder(ctx, s.key(ms))
+	l, err := s.store.LiveHolder(ctx, s.key(ms))
 	if err != nil {
 		return err
 	}
-	if cur != s.holder {
-		who := cur
-		if who == "" {
-			who = "nobody (it lapsed)"
-		}
-		return notHolder(fmt.Sprintf("%s's lease is held by %s, not this checkout, so ape does not push milestone/%s: nothing landed — `ape milestone claim %s` if it is still yours to drive", ms, who, ms, ms))
+	if l.Holder != s.holder {
+		return notHolder(fmt.Sprintf("%s's lease is held by %s, not this checkout, so ape does not push milestone/%s: nothing landed — `ape milestone claim %s` if it is still yours to drive", ms, whoHolds(l), ms, ms))
 	}
+	fenceLogf("milestone/%s: pushing under %s, held by this checkout (%s), last renewed %s", ms, s.key(ms), tokenText(l.Token), l.At.UTC().Format(time.RFC3339))
 	return nil
+}
+
+// FenceLog gets one line per fenced push or enqueue (D732): the lease, its
+// holder and token, when it was last renewed — so a question about a push
+// is read off the run's log. A var so tests can read it.
+var FenceLog io.Writer = os.Stderr
+
+func fenceLogf(format string, args ...any) {
+	if FenceLog != nil {
+		fmt.Fprintf(FenceLog, "%s ape: fence: "+format+"\n", append([]any{time.Now().UTC().Format(time.RFC3339)}, args...)...)
+	}
+}
+
+// whoHolds names a fence's reading of a lease that is not this checkout's.
+func whoHolds(l lease.Live) string {
+	switch {
+	case l.Expired:
+		return "nobody (its at+ttl has passed, with a clock skew margin of up to " + lease.ExpirySkew.String() + ", though the server still has it)"
+	case l.Holder == "":
+		return "nobody (it lapsed)"
+	}
+	return l.Holder
+}
+
+func tokenText(t layout.Token) string {
+	return fmt.Sprintf("epoch %d, revision %d", t.Epoch, t.Revision)
 }
 
 // HoldClose is a coordinated close's hold on the project's close lease,
@@ -463,18 +491,15 @@ func FenceClose(ctx context.Context, _ *apexv1.Project) (retakes int, err error)
 
 // fence is FenceClose for this hold.
 func (h *closeHold) fence(ctx context.Context) (retakes int, err error) {
-	cur, _, err := h.s.store.Holder(ctx, h.key)
+	l, err := h.s.store.LiveHolder(ctx, h.key)
 	if err != nil {
 		return 0, &apexv1.FailError{Code: apexv1.CodeCloseLost, Action: apexv1.ActionRetry, Msg: fmt.Sprintf("the close lease %s could not be read before the enqueue (%v): nothing was enqueued — close again", h.key, err)}
 	}
-	if cur != h.s.holder {
-		who := cur
-		if who == "" {
-			who = "nobody (it lapsed)"
-		}
+	if l.Holder != h.s.holder {
 		return 0, &apexv1.FailError{Code: apexv1.CodeCloseLost, Action: apexv1.ActionRetry, Msg: fmt.Sprintf(
-			"the close lease %s is held by %s, not this close, so its PR was not enqueued: closes merge one at a time onto the main they gated (D709) — close again once that close is done", h.key, who)}
+			"the close lease %s is held by %s, not this close, so its PR was not enqueued: closes merge one at a time onto the main they gated (D709) — close again once that close is done", h.key, whoHolds(l))}
 	}
+	fenceLogf("close PR: enqueueing under %s, held by this checkout (%s), last renewed %s", h.key, tokenText(l.Token), l.At.UTC().Format(time.RFC3339))
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.retakes, nil

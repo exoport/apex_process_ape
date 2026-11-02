@@ -24,7 +24,10 @@ instead.
 
 The run's stdout goes to its own file (`.out`) and its stderr to the log
 (`.log`), so a detached `ape task --output-format json` leaves its result
-envelope in the `.out` file as one clean document.
+envelope in the `.out` file as one clean document. Since v1.5 every line of
+the log starts with the UTC time it was written (`2026-11-02T04:19:51Z …`), so
+a line inside a long step can be dated. Before, only the step's start and end
+lines carried elapsed times.
 
 ape starts a supervisor in its own session and exits straight away, so the
 supervisor belongs to nothing that is later stopped. The supervisor runs the
