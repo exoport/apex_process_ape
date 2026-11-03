@@ -40,6 +40,7 @@ var (
 	PersonOrdersAcceptFrom = personOnly("ape orders accept --from", "--from", "orders", "accept")
 	PersonOrdersAccept     = personOnly("ape orders accept", "", "orders", "accept")
 	PersonOrdersRevoke     = personOnly("ape orders revoke", "", "orders", "revoke")
+	PersonCoordNoticeAck   = personOnly("ape coord notice ack", "", "coord", "notice", "ack")
 )
 
 // matches reports whether an ape invocation's arguments run v: its path as

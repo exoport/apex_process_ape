@@ -36,60 +36,76 @@ func Notices(ctx context.Context, m *Membership) (map[string][]apexv1.NoticeLine
 	return ReadNotices(ctx, js, m.Ensemble, m.Project)
 }
 
-// ReadNotices is Notices on an open JetStream context.
+// ReadNotices is Notices on an open JetStream context: the notices to
+// the project's milestones that no ack names (step 6).
 func ReadNotices(ctx context.Context, js jetstream.JetStream, ensemble, project string) (map[string][]apexv1.NoticeLine, bool) {
+	acks, ok := ReadAcks(ctx, js, project)
+	if !ok {
+		return nil, false
+	}
+	out := map[string][]apexv1.NoticeLine{}
 	// By hand: events.Subject would make the wildcard a literal token.
 	filter := "ape.evt.coord." + natsconn.SubjectToken(ensemble) + "." + events.KindCoord + ".*.impact-notice"
-	// How many there are, from the stream's own count per subject: an
-	// ordered consumer's pending count is not known before its first fetch.
+	ok = readAll(ctx, js, filter, func(data []byte) {
+		var ev struct {
+			ID       string   `json:"id"`
+			Target   string   `json:"target"`
+			Reason   string   `json:"reason"`
+			Evidence []string `json:"evidence"`
+			Hold     bool     `json:"hold"`
+			At       string   `json:"at"`
+		}
+		if json.Unmarshal(data, &ev) != nil {
+			return
+		}
+		if _, acked := acks[ev.ID]; acked {
+			return
+		}
+		p, ms, found := strings.Cut(ev.Target, "/")
+		if found && natsconn.SubjectToken(p) == project {
+			out[ms] = append(out[ms], apexv1.NoticeLine{ID: ev.ID, Reason: ev.Reason, Evidence: ev.Evidence, Hold: ev.Hold, At: ev.At})
+		}
+	})
+	return out, ok
+}
+
+// readAll hands fn every stored message on filter, oldest first. The
+// count comes from the stream's own per-subject state: an ordered
+// consumer's pending count is not known before its first fetch.
+func readAll(ctx context.Context, js jetstream.JetStream, filter string, fn func([]byte)) bool {
 	st, err := js.Stream(ctx, events.EventsStream)
 	if err != nil {
-		return nil, false
+		return false
 	}
 	info, err := st.Info(ctx, jetstream.WithSubjectFilter(filter))
 	if err != nil {
-		return nil, false
+		return false
 	}
 	var left uint64
 	for _, n := range info.State.Subjects {
 		left += n
 	}
-	out := map[string][]apexv1.NoticeLine{}
 	if left == 0 {
-		return out, true
+		return true
 	}
 	cons, err := js.OrderedConsumer(ctx, events.EventsStream, jetstream.OrderedConsumerConfig{FilterSubjects: []string{filter}, DeliverPolicy: jetstream.DeliverAllPolicy})
 	if err != nil {
-		return nil, false
+		return false
 	}
 	for left > 0 && ctx.Err() == nil {
 		batch, err := cons.Fetch(int(min(left, 256)), jetstream.FetchMaxWait(time.Second))
 		if err != nil {
-			return out, false
+			return false
 		}
 		n := uint64(0)
 		for msg := range batch.Messages() {
 			n++
-			var ev struct {
-				ID       string   `json:"id"`
-				Target   string   `json:"target"`
-				Reason   string   `json:"reason"`
-				Evidence []string `json:"evidence"`
-				Hold     bool     `json:"hold"`
-				At       string   `json:"at"`
-			}
-			if json.Unmarshal(msg.Data(), &ev) != nil {
-				continue
-			}
-			p, ms, ok := strings.Cut(ev.Target, "/")
-			if ok && natsconn.SubjectToken(p) == project {
-				out[ms] = append(out[ms], apexv1.NoticeLine{ID: ev.ID, Reason: ev.Reason, Evidence: ev.Evidence, Hold: ev.Hold, At: ev.At})
-			}
+			fn(msg.Data())
 		}
 		if n == 0 {
 			break
 		}
 		left -= min(n, left)
 	}
-	return out, true
+	return true
 }

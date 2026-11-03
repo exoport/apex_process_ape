@@ -57,6 +57,9 @@ const (
 	EventQuestionEscalated = "question-escalated"
 	EventMilestonePaused   = "milestone-paused"
 	EventMilestoneResumed  = "milestone-resumed"
+	// EventNoticeAcked is a person's ack of an impact notice (PLAN-V15-
+	// ASSESSOR step 6: `ape coord notice ack`).
+	EventNoticeAcked = "notice-acked"
 )
 
 // EventNames are every event, in the order the docs list them.

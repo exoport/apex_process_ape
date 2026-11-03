@@ -73,7 +73,7 @@ var Subjects = []Subject{
 		"person", "gate-green", "milestone-done", "run-end", "run-lost", "stop", "block",
 		"plan-approved", "change-archived", "gate-red", "milestone-claimed", "milestone-released",
 		"close-queued", "close-merged", "act-requested",
-		"question-escalated", "milestone-paused", "milestone-resumed",
+		"question-escalated", "milestone-paused", "milestone-resumed", "notice-acked",
 	}},
 	{Pattern: "ape.evt.<user>.<project>.change.<change-id>.<event>", Kind: "change", Names: []string{
 		"pr-opened", "queued", "ejected", "merged", "rebased", "conflicted",

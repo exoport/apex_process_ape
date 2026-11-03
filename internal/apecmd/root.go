@@ -130,6 +130,7 @@ func rootSubcommands() []*cobra.Command {
 		newCICmd(),
 		newGhappCmd(),
 		newCoordinatorCmd(),
+		newCoordCmd(),
 		newSupervisorCmd(),
 		newHealthCmd(),
 		newGenDocsCmd(),

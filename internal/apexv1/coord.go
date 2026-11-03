@@ -37,6 +37,14 @@ const CodeCoordMembership = "coord.membership"
 // call would not go where its token is for (FINDING-V15-1A-6).
 const CodeCoordURLRewritten = "coord.url-rewritten"
 
+// CodeNoticeUnknown and CodeNoticeAcked: `ape coord notice ack` of a
+// notice the ensemble has none of, or one acknowledged already
+// (PLAN-V15-ASSESSOR step 6).
+const (
+	CodeNoticeUnknown = "coord.notice-unknown"
+	CodeNoticeAcked   = "coord.notice-acked"
+)
+
 func init() {
 	DiagnosticCodes = append(DiagnosticCodes,
 		CodeDoc{CodeCoordMilestonePaused, 1, ActionPerson, "the milestone is paused (v1.5): a question to the ensemble's conductor went unanswered past the pause age (OQ24), or a person paused it with `ape milestone pause` (the message names who and why); change new, start and archive of that milestone, its take-in and its close refuse, and other milestones go on — the conductor's answer resumes an OQ24 pause, and `ape milestone resume <M>` from the checkout holding its claim resumes either (milestone-resumed)"},
@@ -47,6 +55,8 @@ func init() {
 		CodeDoc{CodeCloseBusy, 1, ActionRetry, "ape milestone close in a project integrating through GitHub: another checkout's close holds the project's close lease (close.<project>, D709), which serializes taking main in, gating on the merge, enqueuing and waiting for the merge — the message names the holder; close again once it is done"},
 		CodeDoc{CodeCoordMembership, 1, ActionPerson, "the project's coordination: block in _apex/config.yaml cannot be used (v1.5, OQ3, OQ4): it lacks ensemble, home or url, its ensemble is named as a member project (R8: both compared as subject tokens), the ensemble credential hot/ape-nats.creds is missing, or coordination.github names no <owner>/<name> repository or its token hot/github.token is missing (stage 1a) — a person fixes the block or places the credential. In a project whose GitHub access is the App service's (coordination.github.app), every git call to the coordinated repository refuses with it rather than fall back to the remote with git's own credentials, which may be a person's (FINDING-V15-1A-6)"},
 		CodeDoc{CodeCoordURLRewritten, 1, ActionPerson, "a project whose GitHub access is the App service's (coordination.github.app): the checkout's own git config (.git/config) rewrites the coordinated repository's https URL with url.<base>.insteadOf, so ape's fetch or push would go elsewhere than its token is for, and refuses (FINDING-V15-1A-6) — the person's global and system config are never read for these calls; a person removes the rule from .git/config (`git config --unset url.<base>.insteadOf`)"},
+		CodeDoc{CodeNoticeUnknown, 1, ActionPerson, "`ape coord notice ack <id>` (v1.5, PLAN-V15-ASSESSOR step 6): the ensemble's coordinator published no impact notice with that id — the ids are in `ape status --json`'s milestones[].notices and in the conductor's delivery"},
+		CodeDoc{CodeNoticeAcked, 1, ActionPerson, "`ape coord notice ack <id>` (v1.5, PLAN-V15-ASSESSOR step 6): the notice was acknowledged already (the message says how, by whom and when); an ack is recorded once"},
 		CodeDoc{CodeCoordNATSUnreachable, 1, ActionRetry, "a project in an ensemble (coordination: in _apex/config.yaml) needs NATS to start a milestone or a change and to integrate (claim, enqueue, elect), and NATS is unreachable (v1.5, OQ5): work already in flight continues; run the command again once NATS is back (`ape status` says since when it is down). In a project whose GitHub access is the App service's, a git call to the coordinated repository whose token the service did not give refuses with it too, never falling back to git's own credentials (FINDING-V15-1A-6)"},
 	)
 }

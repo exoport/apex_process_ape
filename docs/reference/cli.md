@@ -39,6 +39,7 @@ Subcommands:
 - `ci` — The merge queue's check and events, run in CI (a project integrating through GitHub)
 - `conductor` — A person's delegated conductor: act under standing orders, keep its decision log
 - `config` — Resolve the project's APEX configuration
+- `coord` — APEX v1.5 (in development): a member's acts on its ensemble's coordination
 - `coordinator` — APEX v1.5 (in development): run an ensemble's coordinator until stopped
 - `costs` — Show this project's Claude cost rollup
 - `decision` — Record architecture decisions (ADR-NNNN) in development/decisions/
@@ -3244,6 +3245,63 @@ Flags:
 | ---- | ---- | ------- | ----------- |
 | `--cwd` | string | `—` | Project root to resolve from (default: current working dir) |
 | `--output-format` | string | `human` | Output format: human\|json\|yaml |
+
+## ape coord
+
+APEX v1.5 (in development): a member's acts on its ensemble's coordination
+
+```
+ape coord
+```
+
+Subcommands:
+
+- `notice` — The assessor's impact notices
+
+## ape coord notice
+
+The assessor's impact notices
+
+```
+ape coord notice
+```
+
+Subcommands:
+
+- `ack` — Record what the person did about an impact notice (a person's act, from the checkout holding its milestone)
+
+## ape coord notice ack
+
+Record what the person did about an impact notice (a person's act, from the checkout holding its milestone)
+
+```
+ape coord notice ack <notice-id> acted|dismissed [flags]
+```
+
+Record that an impact notice (the assessor's: does a change elsewhere affect this
+milestone?) was acted on or dismissed (v1.5 §3.2, Q3). It publishes notice-acked for the
+notice's milestone, by the credential's user (no --by), once per notice; `ape status` then
+no longer lists the notice among the milestone's open ones. Only the person whose
+checkout holds the notice's milestone records it, from that checkout and at a terminal:
+a model session is refused (session.person-only), a loop never acks, and no standing
+order covers it. The ids are in `ape status --json`'s milestones[].notices and in the
+conductor's delivery.
+
+Exit codes: 0 recorded · 1 refused (not this checkout's claim, an unknown or already
+acknowledged notice, NATS) · 2 usage, or a model session.
+
+Examples:
+
+```
+  ape coord notice ack 20261103T040000Z-1-atomix-M1 acted
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
 
 ## ape coordinator
 

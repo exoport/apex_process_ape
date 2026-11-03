@@ -26,7 +26,7 @@ in the `<user>` position, which its credential enforces as a developer's does.
 <!-- BEGIN generated:subjects -->
 | Subject | Kind | Events or verbs |
 | ------- | ---- | --------------- |
-| `ape.evt.<user>.<project>.project.<milestone>.<event>` | project | `person`, `gate-green`, `milestone-done`, `run-end`, `run-lost`, `stop`, `block`, `plan-approved`, `change-archived`, `gate-red`, `milestone-claimed`, `milestone-released`, `close-queued`, `close-merged`, `act-requested`, `question-escalated`, `milestone-paused`, `milestone-resumed` |
+| `ape.evt.<user>.<project>.project.<milestone>.<event>` | project | `person`, `gate-green`, `milestone-done`, `run-end`, `run-lost`, `stop`, `block`, `plan-approved`, `change-archived`, `gate-red`, `milestone-claimed`, `milestone-released`, `close-queued`, `close-merged`, `act-requested`, `question-escalated`, `milestone-paused`, `milestone-resumed`, `notice-acked` |
 | `ape.evt.<user>.<project>.change.<change-id>.<event>` | change | `pr-opened`, `queued`, `ejected`, `merged`, `rebased`, `conflicted` |
 | `ape.evt.<user>.<ensemble>.contract.<name>.<event>` | contract | `drafted`, `frozen`, `fulfilled`, `version-proposed`, `version-accepted` |
 | `ape.evt.coord.<ensemble>.coord.<id>.<event>` | coord | `lease-expired`, `slot-granted`, `slot-reclaimed`, `impact-notice`, `hold-requested`, `assessor-failed`, `coordinator-replaced`, `health-unconfirmed`, `nats-paused`, `nats-resumed`, `heartbeat` |
@@ -86,7 +86,14 @@ Leases are not requests: claiming, renewing and releasing one is a compare-and-s
   `result.json` holds the outcome (`published`, `refused`, `assessor-failed` or `fenced`), the reason, the ids
   published and the sha256 of the `SKILL.md` that ran. The snapshot itself is removed. A batch id already recorded is
   not run again.
-- `ape status --json` in a member project lists the notices to each milestone as `milestones[].notices`
+- **The ack (Q3):** `ape coord notice ack <id> acted|dismissed` is a person's act, from a terminal only, in the same
+  person-only list as `ape milestone pause` (pre-tool denies it in a model session in any form). It is accepted only
+  from the checkout whose lease book holds the notice's milestone, and is recorded once, with the credential's user
+  and no `--by`. It publishes `notice-acked` (kind `project`) on `ape.evt.<user>.<project>.project.<M>.notice-acked`,
+  with payload `{id, target, milestone, outcome, kind: "person", by, user, at}` and message id
+  `<user>/<checkout>/notice-acked/<id>`. An unknown id is refused with `coord.notice-unknown`, a second ack with
+  `coord.notice-acked`, and a checkout that does not hold the milestone with `session.not-lease-holder`.
+- `ape status --json` in a member project lists the open (not yet acknowledged) notices to each milestone as `milestones[].notices`
   (`{id, reason, evidence, hold, at}`), read from NATS within 3 s. The field is left out when there are none, or when
   NATS cannot be read.
 - `milestone-paused` / `milestone-resumed` (kind `project`) come from the conductor's ape (OQ24: a question left
