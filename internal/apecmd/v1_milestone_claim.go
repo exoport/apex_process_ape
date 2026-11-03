@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -146,6 +147,80 @@ Exit codes: 0 released · 1 refused (no ensemble, NATS) · 2 usage.`,
 				fmt.Fprintf(w, "%s was not held by this checkout; the book marks it released\n", args[0])
 			})
 		},
+	}
+	addV1Flags(cmd, &f)
+	return cmd
+}
+
+func newMilestonePauseCmd() *cobra.Command { return milestonePauseCmd(true) }
+
+func newMilestoneResumeCmd() *cobra.Command { return milestonePauseCmd(false) }
+
+// milestonePauseCmd is `ape milestone pause|resume` (Q-1C-1, D758).
+func milestonePauseCmd(pause bool) *cobra.Command {
+	var f v1Flags
+	var reason string
+	use, short, long, example := "resume <M>", "Resume a paused milestone (a person's act; a project in an ensemble)",
+		`Publish milestone-resumed for M: the gate that refuses a paused milestone's change new,
+start and archive, its take-in and its close (coord.milestone-paused) lets them through
+again. It resumes a person's pause (`+"`ape milestone pause`"+`) and OQ24's (a question the
+conductor left unanswered) alike. From the checkout whose lease book holds M's claim
+(OQ6), at a terminal: a model session is refused (session.person-only). A stopped loop
+does not restart itself: start it again (`+"`ape task apex-loop --args <M>`"+`).
+
+Exit codes: 0 resumed · 1 refused (not this checkout's claim, NATS) · 2 usage, or a model session.`,
+		"  ape milestone resume M3"
+	if pause {
+		use, short, long, example = `pause <M> --reason "…"`, "Pause a milestone: its next change, take-in and close wait (a person's act; a project in an ensemble)",
+			`Publish milestone-paused for M, with who paused it (the credential's user) and the
+reason: the gate (coord.milestone-paused, action person) then refuses M's change new,
+start and archive, its take-in and its close, naming both, until `+"`ape milestone resume <M>`"+`.
+A run under way is not stopped: it stops at its next such step, and a loop ends there.
+Nothing else changes: no lease, no branch, no other milestone. OQ6: a hold on one
+milestone is a person's act of the person whose checkout holds it, so only from the
+checkout whose lease book holds M's claim, and at a terminal: a model session is refused
+(session.person-only), and no standing order may do it.
+
+Exit codes: 0 paused · 1 refused (not this checkout's claim, NATS) · 2 usage (no
+--reason), or a model session.`,
+			`  ape milestone pause M3 --reason "wait for M4's gate"`
+	}
+	verb := "ape milestone resume"
+	if pause {
+		verb = "ape milestone pause"
+	}
+	cmd := &cobra.Command{
+		Use: use, Short: short, Long: long, Example: example,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := apexv1.RequirePersonFlag(verb); err != nil {
+				return usageErr(err)
+			}
+			if pause && strings.TrimSpace(reason) == "" {
+				return usageErr(errors.New(`ape milestone pause needs --reason "…": what the milestone waits for`))
+			}
+			p, err := v1Project(&f)
+			if err != nil {
+				return err
+			}
+			res, err := member.PauseMilestone(cmd.Context(), p, args[0], strings.TrimSpace(reason), pause)
+			if errors.Is(err, member.ErrNotMember) {
+				return usageErr(errNotInEnsemble)
+			}
+			if err != nil {
+				return v1Fail(cmd, &f, err, nil)
+			}
+			return v1Emit(cmd.OutOrStdout(), &f, res, func(w io.Writer) {
+				if res.Paused {
+					fmt.Fprintf(w, "%s paused by %s: %s — `ape milestone resume %s` resumes it\n", res.Milestone, res.By, res.Reason, res.Milestone)
+					return
+				}
+				fmt.Fprintf(w, "%s resumed by %s; a loop that stopped on the pause starts again with `ape task apex-loop --args %s`\n", res.Milestone, res.By, res.Milestone)
+			})
+		},
+	}
+	if pause {
+		cmd.Flags().StringVar(&reason, "reason", "", "what the milestone waits for (required)")
 	}
 	addV1Flags(cmd, &f)
 	return cmd

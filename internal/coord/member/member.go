@@ -179,9 +179,14 @@ func Gate(ctx context.Context, p *apexv1.Project, op, milestone string, now time
 	}
 	pctx, cancel := context.WithTimeout(ctx, pauseCheckTimeout)
 	defer cancel()
-	if paused, err := conductor.Paused(pctx, js, m.Project, milestone); err == nil && paused {
-		return &apexv1.FailError{Code: apexv1.CodeCoordMilestonePaused, Msg: fmt.Sprintf(
-			"%s is paused: a question to the conductor went unanswered (OQ24), so %s waits — the conductor's answer resumes it", milestone, op)}
+	if paused, why, err := conductor.PausedWith(pctx, js, m.Project, milestone); err == nil && paused {
+		if why.Kind == conductor.PausePerson {
+			return &apexv1.FailError{Code: apexv1.CodeCoordMilestonePaused, Action: apexv1.ActionPerson, Msg: fmt.Sprintf(
+				"%s is paused by %s since %s: %s — so %s waits; `ape milestone resume %s`, from the checkout holding its claim, resumes it",
+				milestone, why.By, why.At, why.Reason, op, milestone)}
+		}
+		return &apexv1.FailError{Code: apexv1.CodeCoordMilestonePaused, Action: apexv1.ActionPerson, Msg: fmt.Sprintf(
+			"%s is paused: a question to the conductor went unanswered (OQ24), so %s waits — the conductor's answer resumes it, or `ape milestone resume %s` from the checkout holding its claim", milestone, op, milestone)}
 	}
 	// Stage 1a: a change of a milestone is this checkout's to start only
 	// while it holds the milestone's lease (section 3.1).

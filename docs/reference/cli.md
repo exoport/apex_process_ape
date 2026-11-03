@@ -5029,7 +5029,9 @@ Subcommands:
 - `gate` — Run the milestone's gate and record the result
 - `gate-test` — Self-test a gate folder before its milestone exists: the stub run passes, the plain gate is red
 - `new` — Append a milestone (Status: proposed) to roadmap.md
+- `pause` — Pause a milestone: its next change, take-in and close wait (a person's act; a project in an ensemble)
 - `release` — Give up a milestone's lease (a project in an ensemble)
+- `resume` — Resume a paused milestone (a person's act; a project in an ensemble)
 - `take-in` — Take main into milestone/<M>: the merge, checked by the regression, landed on the branch (a project integrating through GitHub)
 
 ## ape milestone approve
@@ -5699,6 +5701,40 @@ Flags:
 | `--goal` | string | `—` | the Goal: paragraph (else a placeholder to fill in) |
 | `--json` | bool | `false` | machine output (JSON on stdout) |
 
+## ape milestone pause
+
+Pause a milestone: its next change, take-in and close wait (a person's act; a project in an ensemble)
+
+```
+ape milestone pause <M> --reason "…" [flags]
+```
+
+Publish milestone-paused for M, with who paused it (the credential's user) and the
+reason: the gate (coord.milestone-paused, action person) then refuses M's change new,
+start and archive, its take-in and its close, naming both, until `ape milestone resume <M>`.
+A run under way is not stopped: it stops at its next such step, and a loop ends there.
+Nothing else changes: no lease, no branch, no other milestone. OQ6: a hold on one
+milestone is a person's act of the person whose checkout holds it, so only from the
+checkout whose lease book holds M's claim, and at a terminal: a model session is refused
+(session.person-only), and no standing order may do it.
+
+Exit codes: 0 paused · 1 refused (not this checkout's claim, NATS) · 2 usage (no
+--reason), or a model session.
+
+Examples:
+
+```
+  ape milestone pause M3 --reason "wait for M4's gate"
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+| `--reason` | string | `—` | what the milestone waits for (required) |
+
 ## ape milestone release
 
 Give up a milestone's lease (a project in an ensemble)
@@ -5718,6 +5754,36 @@ Examples:
 
 ```
   ape milestone release M3
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+
+## ape milestone resume
+
+Resume a paused milestone (a person's act; a project in an ensemble)
+
+```
+ape milestone resume <M> [flags]
+```
+
+Publish milestone-resumed for M: the gate that refuses a paused milestone's change new,
+start and archive, its take-in and its close (coord.milestone-paused) lets them through
+again. It resumes a person's pause (`ape milestone pause`) and OQ24's (a question the
+conductor left unanswered) alike. From the checkout whose lease book holds M's claim
+(OQ6), at a terminal: a model session is refused (session.person-only). A stopped loop
+does not restart itself: start it again (`ape task apex-loop --args <M>`).
+
+Exit codes: 0 resumed · 1 refused (not this checkout's claim, NATS) · 2 usage, or a model session.
+
+Examples:
+
+```
+  ape milestone resume M3
 ```
 
 Flags:

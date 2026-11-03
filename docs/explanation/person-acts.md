@@ -86,7 +86,9 @@ carry should ever stand in for them. They are `ape task --usage-ok` and, in a co
 project, `ape milestone claim` itself and its `--adopt` (v1.5). `--adopt` takes a remote
 `milestone/<M>` holding work of its own that no recorded claim explains. In a model session each
 refuses `session.person-only` whatever was typed, and no standing order can delegate `--adopt`:
-it is `milestone-adopt` among the acts orders never name.
+it is `milestone-adopt` among the acts orders never name. `ape milestone pause <M> --reason "…"` and
+`ape milestone resume <M>` are terminal-only too, and only from the checkout whose lease book holds
+M's claim (OQ6: a hold on one milestone is that person's act).
 
 ## In your own Claude Code session
 

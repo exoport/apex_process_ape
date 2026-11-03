@@ -60,6 +60,8 @@ var boardSkipVerbs = map[string]bool{
 	// v1.5 stage 1a: a milestone's lease lives in NATS, which status
 	// does not report yet.
 	"milestone claim": true, "milestone release": true,
+	// D758: a pause is a NATS event, which status does not report yet.
+	"milestone pause": true, "milestone resume": true,
 	// A take-in moves milestone/<M> only through its queue.
 	"milestone take-in": true,
 	// v1.4 (B10): a check that writes nothing.

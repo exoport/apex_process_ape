@@ -297,21 +297,47 @@ func pausedNow(ctx context.Context, js jetstream.JetStream, project, milestone s
 }
 
 // Paused reports whether a milestone is paused: its newest milestone-paused
-// event is newer than its newest milestone-resumed (OQ24). change new and
-// change start refuse on it (step 9 wires them).
+// event is newer than its newest milestone-resumed (OQ24, or a person's
+// `ape milestone pause`). change new and change start refuse on it (step
+// 9 wires them).
 func Paused(ctx context.Context, js jetstream.JetStream, project, milestone string) (bool, error) {
+	paused, _, err := PausedWith(ctx, js, project, milestone)
+	return paused, err
+}
+
+// Pause is a milestone-paused event's payload: the conductor's (OQ24: by,
+// user) or a person's (kind "person", with the reason).
+type Pause struct {
+	Kind   string `json:"kind,omitempty"`
+	By     string `json:"by"`
+	User   string `json:"user,omitempty"`
+	Reason string `json:"reason,omitempty"`
+	At     string `json:"at,omitempty"`
+}
+
+// PausePerson is a person's pause's Kind.
+const PausePerson = "person"
+
+// PausedWith is Paused with the newest pause's payload.
+func PausedWith(ctx context.Context, js jetstream.JetStream, project, milestone string) (bool, Pause, error) {
 	s, err := js.Stream(ctx, events.EventsStream)
 	if err != nil {
-		return false, err
+		return false, Pause{}, err
 	}
-	last := func(event string) uint64 {
+	last := func(event string) *jetstream.RawStreamMsg {
 		m, err := s.GetLastMsgForSubject(ctx, "ape.evt.*."+tok(project)+".project."+milestone+"."+event)
 		if err != nil {
-			return 0
+			return nil
 		}
-		return m.Sequence
+		return m
 	}
-	return last(apexv1.EventMilestonePaused) > last(apexv1.EventMilestoneResumed), nil
+	p, r := last(apexv1.EventMilestonePaused), last(apexv1.EventMilestoneResumed)
+	if p == nil || r != nil && r.Sequence > p.Sequence {
+		return false, Pause{}, nil
+	}
+	var pause Pause
+	_ = json.Unmarshal(p.Data, &pause)
+	return true, pause, nil
 }
 
 func tok(s string) string {

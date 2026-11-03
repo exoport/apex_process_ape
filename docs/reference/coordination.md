@@ -42,6 +42,10 @@ Leases are not requests: claiming, renewing and releasing one is a compare-and-s
   it; kind `project` has no take-in events of its own.
 - `heartbeat` (kind `coord`) is the supervisor's liveness event; its `<id>` is the conductor lease it targets, and the
   conductor acknowledges it like any other delivery.
+- `milestone-paused` / `milestone-resumed` (kind `project`) come from the conductor's ape (OQ24: a question left
+  unanswered past the pause age; payload `{by, user}`) or from a person's `ape milestone pause|resume` (payload
+  `{kind: "person", by, user, reason, at}`). While the newest is a pause, the milestone's change new, start and archive,
+  its take-in and its close refuse `coord.milestone-paused` (action `person`), naming who paused it and why.
 
 **Tokens and names.** `<user>`, `<host>` and `<ensemble>` are slugged by one rule, ape's subject token: lowercased,
 and `.`, `*`, `>` and whitespace become `-`. The tokens `coord` and `sup`, and any token starting `vm-` (aped's
