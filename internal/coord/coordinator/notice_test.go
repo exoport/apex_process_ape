@@ -240,3 +240,37 @@ func TestPublisher_RenewBetweenCopyAndFencePublishes(t *testing.T) {
 	require.Len(t, published, 1)
 	require.Equal(t, 1, renewed)
 }
+
+// S8-1: Published finds what a batch's project already published — its
+// notices (and hold requests), its assessor-failed, its assessor-skipped.
+// The controls: another batch's outcomes, even one whose id starts the
+// same (b-1 against b-10), and a batch with none, give nothing.
+func TestPublisher_PublishedFindsABatchsOutcomes(t *testing.T) {
+	nc, js, ls := noticeRig(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	pub, stop, done := startAssessing(ctx, t, nc, js, ls, "c1")
+	defer func() { stop(); <-done }()
+	_, _, err := pub.Notices(ctx, "b-1", "atomix", nil, []Notice{{Target: "atomix/M1", Reason: "r", Evidence: []string{"x.go"}, Hold: true}})
+	require.NoError(t, err)
+	_, _, err = pub.Notices(ctx, "b-10", "atomix", nil, []Notice{{Target: "atomix/M1", Reason: "r", Evidence: []string{"x.go"}}})
+	require.NoError(t, err)
+	require.NoError(t, pub.Failed(ctx, "b-2", "atomix", "x", nil))
+	require.NoError(t, pub.Skipped(ctx, Skip{Batch: "b-4", Project: "atomix", Reason: "budget"}))
+
+	got, err := pub.Published(ctx, "b-1", "atomix")
+	require.NoError(t, err)
+	require.Equal(t, []string{"ape.evt.coord.ens.coord.b-1-atomix-M1.hold-requested", "ape.evt.coord.ens.coord.b-1-atomix-M1.impact-notice"}, got)
+	got, err = pub.Published(ctx, "b-2", "atomix")
+	require.NoError(t, err)
+	require.Equal(t, []string{"ape.evt.coord.ens.coord.b-2-atomix.assessor-failed"}, got)
+	got, err = pub.Published(ctx, "b-4", "atomix")
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	got, err = pub.Published(ctx, "b-3", "atomix")
+	require.NoError(t, err)
+	require.Empty(t, got, "control: nothing published")
+	got, err = pub.Published(ctx, "b-1", "other")
+	require.NoError(t, err)
+	require.Empty(t, got, "control: another project's")
+}

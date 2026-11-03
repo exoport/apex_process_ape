@@ -206,6 +206,11 @@ type Publisher interface {
 	// (step 7): reason is budget or usage; first marks a stage's first
 	// skip, which the conductor surfaces to the person once.
 	Skipped(ctx context.Context, s Skip) error
+	// Published are the subjects of the batch's project's outcomes
+	// already on the stream — its notices, hold requests, assessor-failed
+	// or assessor-skipped (S8-1: a replay whose answer went out is not
+	// run again).
+	Published(ctx context.Context, batch, project string) ([]string, error)
 	// Metrics publishes a session's tokens on ape.metrics.coord.<ens>.
 	// <batch>-<project> (core NATS, as ape.metrics is; informational).
 	Metrics(batch, project string, m AssessMetrics) error
@@ -368,4 +373,33 @@ func (p publisher) Metrics(batch, project string, m AssessMetrics) error {
 		return err
 	}
 	return p.c.nc.Publish("ape.metrics."+Owner+"."+natsconn.SubjectToken(p.c.cfg.Ensemble)+"."+natsconn.SubjectToken(batch+"-"+project), data)
+}
+
+func (p publisher) Published(ctx context.Context, batch, project string) ([]string, error) {
+	st, err := p.c.js.Stream(ctx, events.EventsStream)
+	if err != nil {
+		return nil, err
+	}
+	prefix := "ape.evt." + Owner + "." + natsconn.SubjectToken(p.c.cfg.Ensemble) + "." + events.KindCoord + "."
+	info, err := st.Info(ctx, jetstream.WithSubjectFilter(prefix+"*.*"))
+	if err != nil {
+		return nil, err
+	}
+	base := batch + "-" + natsconn.SubjectToken(project)
+	var out []string
+	for subj := range info.State.Subjects {
+		id, event, _ := strings.Cut(strings.TrimPrefix(subj, prefix), ".")
+		switch event {
+		case EventImpactNotice, EventHoldRequested:
+			if strings.HasPrefix(id, base+"-") {
+				out = append(out, subj)
+			}
+		case EventAssessorFailed, EventAssessorSkipped:
+			if id == base {
+				out = append(out, subj)
+			}
+		}
+	}
+	slices.Sort(out)
+	return out, nil
 }

@@ -43,6 +43,10 @@ releases the lease and exits 0.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
+			// A name from the coordination block was checked by its Load.
+			if err := member.CheckEnsemble(ensemble, projects); ensemble != "" && err != nil {
+				return usageErr(err)
+			}
 			nc, m, err := f.connect(ctx, "ape-coordinator")
 			if err != nil {
 				return err

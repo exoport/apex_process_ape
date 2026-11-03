@@ -137,7 +137,11 @@ coordinator judges that file and publishes it. Why it is built this way is in
   reads the triggers after the newest sequence a recorded batch, or the start, covers, so a batch still open at a kill
   is batched again. The per-subject dedupe means a second session of one batch publishes nothing twice, and the old
   coordinator's late publish is fenced. A folder that a killed session left with no record is cleared and run afresh.
-  A recorded batch is not run again.
+  A recorded batch is not run again. **A replayed batch any outcome of which was already published** (a notice, a hold
+  request, `assessor-failed` or `assessor-skipped`) runs no session: it is kept as `answered-before` and recorded
+  done. A second session would be a second answer. An ensemble may not be named with the `-assessor` suffix
+  (`coordination.ensemble` and `ape coordinator --ensemble` refuse it), so no ensemble's conductors are delivered
+  another's records.
 - **The ack (Q3):** `ape coord notice ack <id> acted|dismissed` is a person's act, from a terminal only, in the same
   person-only list as `ape milestone pause` (pre-tool denies it in a model session in any form). It is accepted only
   from the checkout whose lease book holds the notice's milestone, and is recorded once, with the credential's user

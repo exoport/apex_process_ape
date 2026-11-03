@@ -153,8 +153,11 @@ const (
 	assessorStartedID    = "assessor"
 )
 
-// recordScope is the assessor's records' scope token.
-func (c *Coordinator) recordScope() string { return c.cfg.Ensemble + "-assessor" }
+// AssessorScope is ensemble ens's assessor records' scope token; an
+// ensemble may not be named like one (member.CheckEnsemble).
+func AssessorScope(ens string) string { return ens + "-assessor" }
+
+func (c *Coordinator) recordScope() string { return AssessorScope(c.cfg.Ensemble) }
 
 // record publishes one of the assessor's records once.
 func (c *Coordinator) record(ctx context.Context, id, event string, payload any) error {

@@ -55,6 +55,11 @@ func TestLoad(t *testing.T) {
 func TestCheckEnsemble(t *testing.T) {
 	require.NoError(t, CheckEnsemble("shop", []string{"notes", "cart"}))
 	require.ErrorIs(t, CheckEnsemble("Cart", []string{"notes", "cart"}), ErrNameClash)
+	// D764+: -assessor is another ensemble's assessor records' scope.
+	require.ErrorIs(t, CheckEnsemble("shop-assessor", []string{"notes"}), ErrReservedEnsemble)
+	require.ErrorIs(t, CheckEnsemble("Shop-Assessor", []string{"notes"}), ErrReservedEnsemble)
+	require.NoError(t, CheckEnsemble("assessor-shop", []string{"notes"}), "control: only the suffix is reserved")
+	require.NoError(t, CheckEnsemble("shop-assessors", []string{"notes"}))
 }
 
 // §4.5 / OQ5: a start needs NATS; the outage is recorded from its first

@@ -71,11 +71,15 @@ coordinator re-runs a batch after the session and the restart have both taken ti
   ensemble has a budget per stage. Past the budget, or when the plan's usage would not allow a launch, a batch is
   skipped and said to be skipped. Nothing waits on the assessor.
 - A **replaced coordinator** picks up where its predecessor stopped: the assessor records each batch on the stream
-  before running it and marks it done after, so the replacement runs what was left, and the dedupe keeps a second
-  session from publishing twice.
+  before running it and marks it done after, so the replacement runs what was left. **A batch whose answer went out
+  is not run again**: a second session is a new answer, which could name a target the first did not, so a replayed
+  batch with any outcome already published is marked done instead.
 
 ## What it does not do yet
 
+- **Answer integrity:** a model session on the coordinator's host can still edit the installed `apex-assess` body.
+  That changes what the assessor answers, though it cannot make it run code (the frontmatter and `` !` `` checks).
+  The `skill_sha256` in every kept batch record is how a read-out shows which skill ran.
 - A notice targets a milestone of the batch's own project: one snapshot is of one project.
 - Contracts between milestones (what one consumes of another) come in stage 2; the input says so.
 - On a cluster that enforces no permissions (1c's), the coordinator's identity is not checked, so a forged notice

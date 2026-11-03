@@ -29,12 +29,20 @@ var (
 	ErrIncomplete = errors.New("member: the coordination: block is incomplete")
 	// ErrNameClash: the ensemble's token equals a member project's (R8).
 	ErrNameClash = errors.New("member: the ensemble's name is a member project's")
+	// ErrReservedEnsemble: the ensemble's name ends in -assessor, the
+	// scope of another ensemble's assessor records (step 8): its
+	// conductors would be delivered them.
+	ErrReservedEnsemble = errors.New("member: an ensemble's name may not end in -assessor")
 	// ErrNoCreds: hot/ape-nats.creds is missing.
 	ErrNoCreds = errors.New("member: no NATS credential at " + apexv1.NATSCredsRel)
 	// ErrGitHub: coordination.github names no <owner>/<name> repository,
 	// or hot/github.token is missing or empty (stage 1a).
 	ErrGitHub = errors.New("member: coordination.github cannot be used")
 )
+
+// AssessorScopeSuffix ends the scope token of an ensemble's assessor
+// records (coordinator's recordScope).
+const AssessorScopeSuffix = "-assessor"
 
 // DefaultGitHubAPI is coordination.github.api when unset.
 const DefaultGitHubAPI = "https://api.github.com"
@@ -131,9 +139,15 @@ func (m Membership) ReadGitHubToken() (string, error) {
 }
 
 // CheckEnsemble refuses an ensemble whose token equals a member project's
-// token (R8): `ape.<kind>.<user>.<x>` would not say which it names.
+// token (R8): `ape.<kind>.<user>.<x>` would not say which it names. It
+// refuses one ending in -assessor too: ape.evt.coord.<ens>-assessor.> is
+// ensemble <ens>'s assessor records, which an ensemble of that name's
+// conductors (ape.evt.coord.<name>.>) would be delivered.
 func CheckEnsemble(ens string, members []string) error {
 	ens = natsconn.SubjectToken(ens)
+	if strings.HasSuffix(ens, AssessorScopeSuffix) {
+		return fmt.Errorf("%w: %q — rename the ensemble in coordination.ensemble", ErrReservedEnsemble, ens)
+	}
 	for _, p := range members {
 		if natsconn.SubjectToken(p) == ens {
 			return fmt.Errorf("%w: %q — rename the ensemble in coordination.ensemble", ErrNameClash, ens)

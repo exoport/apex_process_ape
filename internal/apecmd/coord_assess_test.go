@@ -11,11 +11,19 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 	"github.com/stretchr/testify/require"
 
 	"github.com/exoport/apex_process_ape/internal/apexv1"
 	"github.com/exoport/apex_process_ape/internal/coord/coordinator"
+	"github.com/exoport/apex_process_ape/internal/coord/events"
+	"github.com/exoport/apex_process_ape/internal/coord/lease"
+	"github.com/exoport/apex_process_ape/internal/coord/member"
+	"github.com/exoport/apex_process_ape/internal/coord/rebuild"
+	"github.com/exoport/apex_process_ape/internal/natstest"
 )
 
 // fakePublisher records what a batch published.
@@ -25,6 +33,7 @@ type fakePublisher struct {
 	failed  []string
 	skipped []coordinator.Skip
 	metrics []coordinator.AssessMetrics
+	prior   []string
 	fenced  bool
 }
 
@@ -47,6 +56,12 @@ func (f *fakePublisher) Skipped(_ context.Context, s coordinator.Skip) error {
 	defer f.mu.Unlock()
 	f.skipped = append(f.skipped, s)
 	return nil
+}
+
+func (f *fakePublisher) Published(context.Context, string, string) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.prior, nil
 }
 
 func (f *fakePublisher) Metrics(_, _ string, m coordinator.AssessMetrics) error {
@@ -392,4 +407,113 @@ func TestAssessRunner_MakesItsStateDir(t *testing.T) {
 	r.onBatch(context.Background(), assessBatch("s-1"), &fakePublisher{})
 	res := readResult(t, r.keptDir("s-1", "atomix"))
 	require.Equal(t, assessPublished, res.Outcome, "%s %s", res.Reason, res.Detail)
+}
+
+// D764+: an ensemble named like another's assessor scope is refused, by
+// ape coordinator as by the coordination block; the scope is the one the
+// coordinator records under. The control: an ordinary name runs.
+func TestCoordinator_RefusesAnAssessorScopeName(t *testing.T) {
+	require.Equal(t, "shop"+member.AssessorScopeSuffix, coordinator.AssessorScope("shop"))
+	_, _, err := v1Exec(t, newCoordinatorCmd, "--ensemble", "shop-assessor", "--nats-url", "nats://127.0.0.1:1")
+	require.Equal(t, ExitUsage, exitCodeOf(t, err))
+	require.ErrorIs(t, err, member.ErrReservedEnsemble)
+	_, _, err = v1Exec(t, newCoordinatorCmd, "--ensemble", "shop", "--nats-url", "nats://127.0.0.1:1")
+	require.Error(t, err, "control: past the name check (no NATS there)")
+	require.NotErrorIs(t, err, member.ErrReservedEnsemble)
+}
+
+// S8-1 end to end (research's T1): c1's batch publishes its notice to M1
+// and c1 stops before recording the batch done; c2 replays the batch, and
+// since its answer went out, records it done and runs no session — so the
+// new session's different answer (M2) never appears. The control is
+// TestAssessRunner_ReplayAfterAKill and §4's kill case: a batch killed
+// before any publish runs once more.
+func TestAssessor_ReplayAfterAPublishRunsNoSession(t *testing.T) {
+	url := natstest.RunJetStreamServer(t)
+	nc, err := nats.Connect(url)
+	require.NoError(t, err)
+	t.Cleanup(nc.Close)
+	js, err := jetstream.New(nc)
+	require.NoError(t, err)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	require.NoError(t, rebuild.Declare(ctx, js, 1))
+	ls, err := lease.Open(ctx, js)
+	require.NoError(t, err)
+	require.NoError(t, ls.SetEpoch(ctx, 1))
+	holds := func(id string) func() bool {
+		return func() bool { h, _, err := ls.Holder(ctx, "coord.ens"); return err == nil && h == id }
+	}
+
+	published := make(chan string, 1)
+	c1ctx, stop1 := context.WithCancel(ctx)
+	c1done := make(chan struct{})
+	go func() {
+		defer close(c1done)
+		_ = coordinator.Run(c1ctx, nc, coordinator.Config{
+			Ensemble: "ens", ID: "c1", TTL: 3 * time.Second, Renew: 500 * time.Millisecond, Projects: []string{"atomix"},
+			Assessor: &coordinator.AssessorConfig{Quiet: 200 * time.Millisecond, Ceiling: 2 * time.Second, OnBatch: func(_ context.Context, b coordinator.Batch, p coordinator.Publisher) {
+				if _, _, err := p.Notices(ctx, b.ID, "atomix", nil, []coordinator.Notice{{Target: "atomix/M1", Reason: "first answer", Evidence: []string{"internal/leader/sweep.go"}}}); err == nil {
+					published <- b.ID
+				}
+				<-c1ctx.Done() // killed before the batch is recorded done
+			}},
+		})
+	}()
+	require.Eventually(t, holds("c1"), 10*time.Second, 50*time.Millisecond)
+	time.Sleep(300 * time.Millisecond)
+	// Of M9, so both answers (M1, then M2) would be valid targets.
+	_, err = js.Publish(ctx, "ape.evt.dana.atomix.project.M9.plan-approved", []byte(`{"event":"plan-approved","milestone":"M9","key":"k1"}`), jetstream.WithMsgID("atomix/ck/plan-approved/M9/k1"))
+	require.NoError(t, err)
+	var batch string
+	select {
+	case batch = <-published:
+	case <-time.After(10 * time.Second):
+		t.Fatal("c1 ran no batch")
+	}
+	stop1()
+	<-c1done
+
+	checkout, _ := assessCheckout(t)
+	sessions := 0
+	r := &assessRunner{
+		dir: t.TempDir(), checkouts: map[string]string{"atomix": checkout}, budget: -1, logf: t.Logf,
+		session: func(_ context.Context, folder, _ string) ([]byte, error) {
+			sessions++
+			require.NoError(t, os.WriteFile(filepath.Join(folder, apexv1.AssessNotice), []byte(`{"notices":[{"target":"atomix/M2","reason":"a second answer","evidence":["internal/leader/sweep.go"]}]}`), 0o600))
+			return []byte(`{"success":true}`), nil
+		},
+	}
+	ran := make(chan string, 4)
+	c2ctx, stop2 := context.WithCancel(ctx)
+	defer stop2()
+	go func() {
+		_ = coordinator.Run(c2ctx, nc, coordinator.Config{
+			Ensemble: "ens", ID: "c2", TTL: 3 * time.Second, Renew: 500 * time.Millisecond, Projects: []string{"atomix"},
+			Assessor: &coordinator.AssessorConfig{Quiet: 200 * time.Millisecond, Ceiling: 2 * time.Second, OnBatch: func(c context.Context, b coordinator.Batch, p coordinator.Publisher) {
+				r.onBatch(c, b, p)
+				ran <- b.ID
+			}},
+		})
+	}()
+	select {
+	case id := <-ran:
+		require.Equal(t, batch, id, "c2 replays c1's batch")
+	case <-time.After(15 * time.Second):
+		t.Fatal("c2 replayed nothing")
+	}
+	res := readResult(t, r.keptDir(batch, "atomix"))
+	require.Equal(t, assessAnswered, res.Outcome)
+	require.Zero(t, sessions, "its answer went out: no session")
+	st, err := js.Stream(ctx, events.EventsStream)
+	require.NoError(t, err)
+	_, err = st.GetLastMsgForSubject(ctx, "ape.evt.coord.ens.coord."+batch+"-atomix-M2.impact-notice")
+	require.ErrorIs(t, err, jetstream.ErrMsgNotFound, "the second answer never appears")
+	m, err := st.GetLastMsgForSubject(ctx, "ape.evt.coord.ens.coord."+batch+"-atomix-M1.impact-notice")
+	require.NoError(t, err)
+	require.Contains(t, string(m.Data), "first answer")
+	require.Eventually(t, func() bool {
+		_, err := st.GetLastMsgForSubject(ctx, "ape.evt.coord.ens-assessor.coord."+batch+".assessor-done")
+		return err == nil
+	}, 5*time.Second, 100*time.Millisecond, "the batch is recorded done")
 }

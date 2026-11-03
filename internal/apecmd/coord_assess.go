@@ -57,6 +57,9 @@ const (
 	assessFenced    = "fenced"
 	assessLimit     = "limit"
 	assessSkipped   = "skipped"
+	// assessAnswered: a replayed batch whose answer went out before its
+	// coordinator stopped (S8-1); done, no session.
+	assessAnswered = "answered-before"
 )
 
 // assessRunner runs the coordinator's batches.
@@ -201,6 +204,18 @@ func (r *assessRunner) runProject(ctx context.Context, b coordinator.Batch, proj
 			res.Detail = strings.TrimSpace(res.Detail + "; assessor-failed not published: " + err.Error())
 		}
 		return res
+	}
+	if b.Replay {
+		// S8-1: a new session is a new answer, which could name a target
+		// the first did not. A batch whose answer went out is done.
+		prior, err := pub.Published(ctx, b.ID, project)
+		if err != nil {
+			return fail(assessFailed, "a replayed batch's earlier outcome could not be read", err.Error())
+		}
+		if len(prior) > 0 {
+			res.Outcome, res.Reason, res.Published = assessAnswered, "its answer went out before its coordinator stopped: done, no session", prior
+			return res
+		}
 	}
 	checkout := r.checkouts[project]
 	if checkout == "" {
