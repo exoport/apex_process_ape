@@ -56,6 +56,8 @@ Leases are not requests: claiming, renewing and releasing one is a compare-and-s
   a commit on `milestone/<M>` that `main` lacks: the event's commit when it is one, else the commit there whose
   `Change:` trailer names the change, else none, and the input says which. `input.md` is cut at 256 KiB and each diff
   at 64 KiB, saying so.
+  The snapshot is extracted as `git archive` streams it: a file over 4 MiB, and every file once 512 MiB are
+  written, is left out and listed in `input.md`, and the batch still runs.
 - The assessor session runs in that folder as `ape task apex-assess`, confined to reading it and writing its
   `notice.json` ([the hook's allow-list](hooks.md#the-assessors-session)).
 - `milestone-paused` / `milestone-resumed` (kind `project`) come from the conductor's ape (OQ24: a question left

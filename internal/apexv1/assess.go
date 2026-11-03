@@ -9,6 +9,7 @@ import (
 	"io"
 	"maps"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -42,6 +43,11 @@ const (
 	// Past either the text is cut, and says so.
 	AssessInputCap = 256 << 10
 	AssessDiffCap  = 64 << 10
+	// AssessFileCap and AssessSnapshotCap bound the snapshot (S3-1): a
+	// file over the first, or one that would take the folder past the
+	// second, is not extracted, and is listed; the batch still runs.
+	AssessFileCap     = 4 << 20
+	AssessSnapshotCap = 512 << 20
 )
 
 // AssessEvent is one trigger of the batch, as the coordinator received
@@ -62,7 +68,8 @@ type AssessRequest struct {
 	Project string
 	Events  []AssessEvent
 	// InputCap and DiffCap override the caps (tests); 0 is the default.
-	InputCap, DiffCap int
+	InputCap, DiffCap    int
+	FileCap, SnapshotCap int64
 }
 
 // AssessFolder is what BuildAssessFolder made.
@@ -113,7 +120,7 @@ func (p *Project) BuildAssessFolder(ctx context.Context, dir string, req AssessR
 	fmt.Fprintf(w, "# Assessor batch %s, project %s\n\n", req.Batch, req.Project)
 	fmt.Fprintf(w, "This folder is the project's `main` at %s, files only: no `.git`, no `hot/`, and no symbolic link (dropped at extraction).", b.out.Main)
 	if len(b.out.Dropped) > 0 {
-		fmt.Fprintf(w, " Not extracted: %s.", strings.Join(limit(b.out.Dropped, 20), ", "))
+		fmt.Fprintf(w, " Not extracted (%d): %s.", len(b.out.Dropped), strings.Join(limit(b.out.Dropped, 20), ", "))
 	}
 	w.WriteString(" Paths below are relative to this folder.\n\n")
 	for _, n := range b.notes {
@@ -179,12 +186,15 @@ func (b *assessBuild) snapshot(ctx context.Context, dir string) error {
 		return err
 	}
 	b.out = &AssessFolder{Dir: dir, Main: mainSHA, Diffs: map[string]string{}, DiffNotes: map[string]string{}}
-	tarball, err := gitRaw(ctx, p.Root, "archive", "--format=tar", mainSHA)
-	if err != nil {
-		return fmt.Errorf("git archive of main %s: %w", short(mainSHA), err)
+	caps := snapshotCaps{file: b.req.FileCap, total: b.req.SnapshotCap}
+	if caps.file <= 0 {
+		caps.file = AssessFileCap
 	}
-	if b.out.Dropped, err = extractSnapshot(dir, []byte(tarball)); err != nil {
-		return err
+	if caps.total <= 0 {
+		caps.total = AssessSnapshotCap
+	}
+	if b.out.Dropped, err = streamSnapshot(ctx, p.Root, mainSHA, dir, caps); err != nil {
+		return fmt.Errorf("git archive of main %s: %w", short(mainSHA), err)
 	}
 	if b.snap, err = Open(dir); err != nil {
 		return err
@@ -440,11 +450,46 @@ func roadmapSection(r *Roadmap, m *Milestone) string {
 	return strings.TrimRight(strings.Join(r.lines[m.Line-1:end], "\n"), "\n")
 }
 
+// snapshotCaps are a snapshot's per-file and total caps, in bytes.
+type snapshotCaps struct{ file, total int64 }
+
+// streamSnapshot extracts `git archive` of commit into dir as it is read
+// (S3-1: a large tree is never held in memory), and returns what it left
+// out.
+func streamSnapshot(ctx context.Context, repo, commit, dir string, caps snapshotCaps) (dropped []string, err error) {
+	c := exec.CommandContext(ctx, "git", "archive", "--format=tar", commit)
+	c.Dir = repo
+	var stderr bytes.Buffer
+	c.Stderr = &stderr
+	out, err := c.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	if err := c.Start(); err != nil {
+		return nil, err
+	}
+	dropped, xerr := extractSnapshot(dir, out, caps)
+	if xerr != nil {
+		_ = c.Process.Kill()
+	}
+	_, _ = io.Copy(io.Discard, out)
+	werr := c.Wait()
+	if xerr != nil {
+		return dropped, xerr
+	}
+	if werr != nil {
+		return dropped, fmt.Errorf("%w: %s", werr, strings.TrimSpace(stderr.String()))
+	}
+	return dropped, nil
+}
+
 // extractSnapshot writes the tar stream's regular files and directories
 // under dir and returns what it did not: links and other entries (R1),
-// hot/ and .git/, and a top-level file named like the folder's own.
-func extractSnapshot(dir string, data []byte) (dropped []string, err error) {
-	tr := tar.NewReader(bytes.NewReader(data))
+// hot/ and .git/, a top-level file named like the folder's own, and a file
+// over caps (S3-1).
+func extractSnapshot(dir string, r io.Reader, caps snapshotCaps) (dropped []string, err error) {
+	tr := tar.NewReader(r)
+	var written int64
 	for {
 		h, err := tr.Next()
 		if errors.Is(err, io.EOF) {
@@ -478,22 +523,40 @@ func extractSnapshot(dir string, data []byte) (dropped []string, err error) {
 				return dropped, err
 			}
 		case tar.TypeReg:
-			if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+			switch {
+			case h.Size > caps.file:
+				dropped = append(dropped, fmt.Sprintf("%s (%d bytes, over the %d-byte file cap)", name, h.Size, caps.file))
+				continue
+			case written+h.Size > caps.total:
+				dropped = append(dropped, fmt.Sprintf("%s (%d bytes, past the snapshot's %d-byte cap)", name, h.Size, caps.total))
+				continue
+			}
+			if err := writeSnapshotFile(p, tr, h.Size); err != nil {
 				return dropped, err
 			}
-			content, err := io.ReadAll(tr)
-			if err != nil {
-				return dropped, err
-			}
-			if err := os.WriteFile(p, content, 0o600); err != nil {
-				return dropped, err
-			}
+			written += h.Size
 		case tar.TypeSymlink:
 			dropped = append(dropped, name+" (a symbolic link)")
 		default:
 			dropped = append(dropped, name+" (not a regular file)")
 		}
 	}
+}
+
+// writeSnapshotFile copies one entry's n bytes to file.
+func writeSnapshotFile(file string, r io.Reader, n int64) error {
+	if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(file, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	_, err = io.CopyN(f, r, n)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	return err
 }
 
 // fenced is s in a code fence longer than any backtick run in it, so a

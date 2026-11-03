@@ -143,3 +143,43 @@ func TestAssessFolder_ForgedCommitAndCaps(t *testing.T) {
 	require.True(t, f2.Truncated)
 	require.True(t, strings.HasSuffix(in2, "the first 300 are shown]\n"))
 }
+
+// S3-1: the snapshot is extracted as git archive streams it, and capped:
+// a file over the per-file cap, and every file once the total cap is
+// reached, is not extracted but listed, and the batch is still built. The
+// control: under the default caps the same file is extracted.
+func TestAssessFolder_SnapshotCaps(t *testing.T) {
+	p, _, _ := assessFixture(t)
+	run(t, p.Root, "switch", "-q", "-c", "big", "main")
+	write(t, p, "big.bin", strings.Repeat("x", 5000))
+	commitAll(t, p, "chore: a big file")
+	run(t, p.Root, "push", "-q", "origin", "big:main")
+	run(t, p.Root, "switch", "-q", "main")
+	run(t, p.Root, "reset", "-q", "--hard", "big")
+
+	dir := filepath.Join(t.TempDir(), "batch")
+	f, err := p.BuildAssessFolder(ctx(), dir, AssessRequest{Batch: "b-caps", Project: "notes", FileCap: 4096})
+	require.NoError(t, err)
+	require.NoFileExists(t, filepath.Join(dir, "big.bin"))
+	require.Contains(t, f.Dropped, "big.bin (5000 bytes, over the 4096-byte file cap)")
+	require.FileExists(t, filepath.Join(dir, "greet.sh"), "the rest is extracted")
+	in := read(t, &Project{Root: dir}, AssessInput)
+	require.Contains(t, in, "big.bin (5000 bytes, over the 4096-byte file cap)")
+
+	dir2 := filepath.Join(t.TempDir(), "batch")
+	f2, err := p.BuildAssessFolder(ctx(), dir2, AssessRequest{Batch: "b-total", Project: "notes", SnapshotCap: 1000})
+	require.NoError(t, err)
+	past := 0
+	for _, d := range f2.Dropped {
+		if strings.Contains(d, "past the snapshot's 1000-byte cap") {
+			past++
+		}
+	}
+	require.Positive(t, past, "files past the total cap are listed: %v", f2.Dropped)
+	require.FileExists(t, filepath.Join(dir2, AssessInput), "the batch still runs")
+
+	dir3 := filepath.Join(t.TempDir(), "batch")
+	_, err = p.BuildAssessFolder(ctx(), dir3, AssessRequest{Batch: "b-ctl", Project: "notes"})
+	require.NoError(t, err)
+	require.FileExists(t, filepath.Join(dir3, "big.bin"), "control: under the default caps it is extracted")
+}
