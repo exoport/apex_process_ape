@@ -235,6 +235,9 @@ func (r *assessRunner) runProject(ctx context.Context, b coordinator.Batch, proj
 	for _, e := range evs {
 		ms[e.Milestone] = true
 	}
+	if err := os.MkdirAll(r.dir, 0o700); err != nil {
+		return fail(assessFailed, "the assessor's state dir could not be made", err.Error())
+	}
 	f, err := p.BuildAssessFolder(ctx, folder, apexv1.AssessRequest{Batch: b.ID, Project: project, Events: evs})
 	res.Folder = f
 	if err != nil {

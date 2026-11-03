@@ -375,3 +375,21 @@ func TestAssessBudgetFlag(t *testing.T) {
 	require.Len(t, pub.skipped, 1)
 	require.True(t, pub.skipped[0].First)
 }
+
+// Found by the §4 stub check: on a host whose state dir does not exist yet
+// (the coordinator's first batch), the runner makes it. The T1: a dir
+// that does not exist → the batch runs and publishes.
+func TestAssessRunner_MakesItsStateDir(t *testing.T) {
+	checkout, _ := assessCheckout(t)
+	dir := filepath.Join(t.TempDir(), "state", "ape", "coord", "ens", "assess")
+	r := &assessRunner{
+		dir: dir, checkouts: map[string]string{"atomix": checkout}, budget: -1, logf: t.Logf,
+		session: func(_ context.Context, folder, _ string) ([]byte, error) {
+			require.NoError(t, os.WriteFile(filepath.Join(folder, apexv1.AssessNotice), []byte(`{"notices":[]}`), 0o600))
+			return []byte(`{"success":true}`), nil
+		},
+	}
+	r.onBatch(context.Background(), assessBatch("s-1"), &fakePublisher{})
+	res := readResult(t, r.keptDir("s-1", "atomix"))
+	require.Equal(t, assessPublished, res.Outcome, "%s %s", res.Reason, res.Detail)
+}

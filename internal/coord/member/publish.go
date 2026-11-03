@@ -92,11 +92,7 @@ func PublishTrigger(ctx context.Context, p *apexv1.Project, t apexv1.Trigger) {
 	if err != nil {
 		return
 	}
-	payload, err := json.Marshal(struct {
-		apexv1.Trigger
-		Project string `json:"project"`
-		At      string `json:"at"`
-	}{t, m.Project, time.Now().UTC().Format(time.RFC3339)})
+	subject, msgID, payload, err := TriggerMessage(id.SubjectToken, m.Project, checkout, t, time.Now())
 	if err != nil {
 		return
 	}
@@ -112,6 +108,19 @@ func PublishTrigger(ctx context.Context, p *apexv1.Project, t apexv1.Trigger) {
 	}
 	pctx, cancel := context.WithTimeout(ctx, publishTimeout)
 	defer cancel()
-	msgID := natsconn.SubjectToken(m.Project) + "/" + checkout + "/" + t.Event + "/" + t.Milestone + "/" + t.Key
-	_, _ = events.Publish(pctx, js, events.Subject(id.SubjectToken, m.Project, events.KindProject, t.Milestone, t.Event), msgID, payload)
+	_, _ = events.Publish(pctx, js, subject, msgID, payload)
+}
+
+// TriggerMessage is a trigger as PublishTrigger publishes it: the subject
+// ape.evt.<user>.<project>.project.<M>.<event>, the message id
+// <project>/<checkout>/<event>/<M>/<key> and the payload {event, milestone,
+// change, commit, paths, gate, key, project, at}.
+func TriggerMessage(user, project, checkout string, t apexv1.Trigger, at time.Time) (subject, msgID string, payload []byte, err error) {
+	payload, err = json.Marshal(struct {
+		apexv1.Trigger
+		Project string `json:"project"`
+		At      string `json:"at"`
+	}{t, project, at.UTC().Format(time.RFC3339)})
+	msgID = natsconn.SubjectToken(project) + "/" + checkout + "/" + t.Event + "/" + t.Milestone + "/" + t.Key
+	return events.Subject(user, project, events.KindProject, t.Milestone, t.Event), msgID, payload, err
 }

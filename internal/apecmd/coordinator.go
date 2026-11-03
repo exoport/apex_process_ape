@@ -23,6 +23,7 @@ func newCoordinatorCmd() *cobra.Command {
 	var projects, assessFrom []string
 	var assess bool
 	var assessBudget string
+	var assessWindow assessWindowFlags
 	cmd := &cobra.Command{
 		Use:   "coordinator --ensemble <name> [--id <id>] [--project <slug>]...",
 		Short: "APEX v1.5 (in development): run an ensemble's coordinator until stopped",
@@ -58,7 +59,7 @@ releases the lease and exits 0.`,
 			}
 			cfg := coordinator.Config{Ensemble: ensemble, ID: id, Projects: projects}
 			if assess {
-				if cfg.Assessor, err = f.assessorConfig(cmd, ensemble, assessFrom, assessBudget); err != nil {
+				if cfg.Assessor, err = f.assessorConfig(cmd, ensemble, assessFrom, assessBudget, assessWindow); err != nil {
 					return err
 				}
 			}
@@ -71,13 +72,20 @@ releases the lease and exits 0.`,
 	cmd.Flags().StringSliceVar(&projects, "project", nil, "a member project whose milestone leases it watches (repeatable)")
 	cmd.Flags().BoolVar(&assess, "assess", false, "run the assessor (v1.5 §3.2): batch the --project members' triggers and run apex-assess on each batch")
 	cmd.Flags().StringVar(&assessBudget, "assess-budget", apexv1.FormatTokens(assessBudgetDefault), "the assessor's tokens for this stage (tokens_total, kept in the state dir's spent.json): once spent, each batch is skipped (assessor-skipped); 0 skips every batch, off sets no budget")
+	cmd.Flags().DurationVar(&assessWindow.quiet, "assess-quiet", assessQuiet, "the batching window's quiet time (Q2; a drill's or stub check's scale only)")
+	cmd.Flags().DurationVar(&assessWindow.ceiling, "assess-ceiling", assessCeiling, "the batching window's ceiling (Q2; a drill's or stub check's scale only)")
+	_ = cmd.Flags().MarkHidden("assess-quiet")
+	_ = cmd.Flags().MarkHidden("assess-ceiling")
 	cmd.Flags().StringArrayVar(&assessFrom, "assess-checkout", nil, "<project>=<path>: the checkout of a member the assessor reads it from, and runs its installed apex-assess (repeatable; default: the project of --cwd)")
 	return cmd
 }
 
 // assessorConfig is --assess's: the checkouts, the state dir and the
 // runner, with the production batching window (Q2).
-func (f *coordFlags) assessorConfig(cmd *cobra.Command, ens string, specs []string, budgetFlag string) (*coordinator.AssessorConfig, error) {
+// assessWindowFlags are the hidden batching-window flags.
+type assessWindowFlags struct{ quiet, ceiling time.Duration }
+
+func (f *coordFlags) assessorConfig(cmd *cobra.Command, ens string, specs []string, budgetFlag string, w assessWindowFlags) (*coordinator.AssessorConfig, error) {
 	checkouts, err := assessCheckouts(specs)
 	if err != nil {
 		return nil, usageErr(err)
@@ -108,7 +116,10 @@ func (f *coordFlags) assessorConfig(cmd *cobra.Command, ens string, specs []stri
 	r := &assessRunner{dir: dir, checkouts: checkouts, session: taskSession(self), budget: budget, usageSkip: assessUsageSkip, logf: func(format string, args ...any) {
 		fmt.Fprintf(cmd.ErrOrStderr(), "%s "+format+"\n", append([]any{time.Now().UTC().Format(time.RFC3339)}, args...)...)
 	}}
-	return &coordinator.AssessorConfig{Quiet: assessQuiet, Ceiling: assessCeiling, OnBatch: r.onBatch}, nil
+	if w.quiet <= 0 || w.ceiling < w.quiet {
+		return nil, usageErr(errors.New("--assess-quiet must be positive and --assess-ceiling at least as long"))
+	}
+	return &coordinator.AssessorConfig{Quiet: w.quiet, Ceiling: w.ceiling, OnBatch: r.onBatch}, nil
 }
 
 // The assessor's batching window (Q2, D756).
