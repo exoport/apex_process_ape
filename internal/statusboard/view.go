@@ -318,7 +318,8 @@ func roadmapCard(r *apexv1.StatusReport) map[string]any {
 		return card("Roadmap", "", []any{caption("No milestone in roadmap.md.")})
 	}
 	rows := make([]any, 0, len(r.Milestones))
-	for _, m := range r.Milestones {
+	for i := range r.Milestones {
+		m := &r.Milestones[i]
 		note := ""
 		if a := m.AcceptRed; a != nil {
 			note = fmt.Sprintf("accepted red by %s: %s", a.By, a.Reason)

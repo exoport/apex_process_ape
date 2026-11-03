@@ -191,6 +191,25 @@ func (p *Project) openClosePR(ctx context.Context, ms string, attempts int, opt 
 	}
 }
 
+// deliverDone is a coordinated close of a milestone already done (V8f,
+// FINDING-V15-1C-4): one whose close wrote done and then failed before
+// its PR was enqueued — no close-PR record (resolveClose found none) and
+// milestone/<M> off main — is delivered now: the close PR is opened and
+// enqueued, main taken in and gated first when it moved, as the close
+// would have. Any other is already done.
+func (p *Project) deliverDone(ctx context.Context, ms string, opt RunOptions) (*GateResult, error) {
+	g := &GateResult{Milestone: ms, Status: MilestoneDone}
+	if !p.closeUndelivered(ctx, ms) {
+		return g, nil
+	}
+	if opt.Progress != nil {
+		fmt.Fprintf(opt.Progress, "%s is done on %s but its close PR was never enqueued: opening it now\n", ms, MilestoneBranch(ms))
+	}
+	var err error
+	g.Integration, err = p.openClosePR(ctx, ms, 1, opt)
+	return g, err
+}
+
 // closeUndelivered reports a coordinated milestone whose close wrote it
 // done but never got its close PR into main's queue (V8f): no close-PR
 // record, and milestone/<M>, here, not in the remote's main as last

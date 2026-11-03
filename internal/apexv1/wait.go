@@ -102,8 +102,8 @@ func AllMilestonesDone(r *StatusReport) bool {
 	if len(r.Milestones) == 0 {
 		return false
 	}
-	for _, m := range r.Milestones {
-		if m.Status != MilestoneDone {
+	for i := range r.Milestones {
+		if r.Milestones[i].Status != MilestoneDone {
 			return false
 		}
 	}

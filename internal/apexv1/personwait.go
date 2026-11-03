@@ -58,7 +58,8 @@ func (p *Project) PersonActionsOf(ctx context.Context, r *StatusReport) []Person
 	if r == nil || !r.Initialized {
 		return out
 	}
-	for _, m := range r.Milestones {
+	for i := range r.Milestones {
+		m := &r.Milestones[i]
 		if m.Status == MilestoneProposed {
 			out = append(out, PersonAction{
 				Kind: ActMilestoneApprove, Ref: m.ID, Milestone: m.ID, Action: "approve " + m.ID,

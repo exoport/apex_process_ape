@@ -62,6 +62,30 @@ func (f *fakeSession) Type(text string) error {
 	return nil
 }
 
+// typedWith reports a delivery whose text holds s.
+func (f *fakeSession) typedWith(s string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, t := range f.typed {
+		if strings.Contains(t, s) {
+			return true
+		}
+	}
+	return false
+}
+
+// ackedWith reports a delivery whose text holds s, acknowledged.
+func (f *fakeSession) ackedWith(s string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, t := range f.typed {
+		if strings.Contains(t, s) && f.acked[seqRe.FindStringSubmatch(t)[1]] {
+			return true
+		}
+	}
+	return false
+}
+
 func (f *fakeSession) seqs() map[string]int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -356,7 +380,7 @@ func TestFormat_TheAckSurvivesARealShell(t *testing.T) {
 
 // outageRig is rig on a three-node cluster whose nodes a test can stop and
 // restart on their data, with the buckets and stream at R3.
-func outageRig(t *testing.T) (*natstest.Cluster, *nats.Conn, jetstream.JetStream) {
+func outageRig(t *testing.T) (*natstest.Cluster, jetstream.JetStream) {
 	t.Helper()
 	c := natstest.RunCluster(t, 3)
 	nc, err := nats.Connect(c.URLs(), nats.MaxReconnects(-1), nats.ReconnectWait(200*time.Millisecond))
@@ -371,7 +395,7 @@ func outageRig(t *testing.T) (*natstest.Cluster, *nats.Conn, jetstream.JetStream
 	ls, err := lease.Open(ctx, js)
 	require.NoError(t, err)
 	require.NoError(t, ls.SetEpoch(ctx, 1))
-	return c, nc, js
+	return c, js
 }
 
 func outage(t *testing.T, c *natstest.Cluster, d time.Duration) {
@@ -395,7 +419,7 @@ func outage(t *testing.T, c *natstest.Cluster, d time.Duration) {
 // lapsed lease before this one was back, and it stops (ErrLost).
 func TestDrill_ConductorRidesOutANATSOutage(t *testing.T) {
 	t.Run("rides-it-out", func(t *testing.T) {
-		c, _, js := outageRig(t)
+		c, js := outageRig(t)
 		ctx := t.Context()
 		anc, err := nats.Connect(c.URLs(), nats.MaxReconnects(-1), nats.ReconnectWait(200*time.Millisecond))
 		require.NoError(t, err)
@@ -406,9 +430,16 @@ func TestDrill_ConductorRidesOutANATSOutage(t *testing.T) {
 		cfg := scaled("ann", "cond-a", a)
 		cfg.Log = func(f string, args ...any) {
 			logMu.Lock()
-			logged = append(logged, fmt.Sprintf(f, args...))
+			logged = append(logged, time.Now().Format("15:04:05.000 ")+fmt.Sprintf(f, args...))
 			logMu.Unlock()
 		}
+		t.Cleanup(func() {
+			if t.Failed() {
+				logMu.Lock()
+				t.Log(strings.Join(logged, ""))
+				logMu.Unlock()
+			}
+		})
 		errA := make(chan error, 1)
 		go func() { errA <- Run(ctx, anc, cfg) }()
 		time.Sleep(500 * time.Millisecond)
@@ -419,8 +450,9 @@ func TestDrill_ConductorRidesOutANATSOutage(t *testing.T) {
 		// production: no acknowledgement could be made while NATS was
 		// down, so the conductor is not judged silent for it.
 		a.hold.Store(true)
-		publish(t, js, "question", 2)
-		require.Eventually(t, func() bool { return a.seqs()["2"] >= 1 }, 5*time.Second, 50*time.Millisecond, "delivered, not yet acknowledged")
+		_, err = events.Publish(ctx, js, events.Subject("bob", "taskforge", events.KindProject, "M2", "question"), events.MessageID("taskforge", "c1", 2), []byte(`{"q":"held across"}`))
+		require.NoError(t, err)
+		require.Eventually(t, func() bool { return a.typedWith("held across") }, 5*time.Second, 50*time.Millisecond, "delivered, not yet acknowledged")
 
 		outage(t, c, 3*cfg.LeaseTTL)
 		select {
@@ -429,12 +461,12 @@ func TestDrill_ConductorRidesOutANATSOutage(t *testing.T) {
 		default:
 		}
 		a.hold.Store(false)
-		require.Eventually(t, func() bool { return a.done.Load() == 2 }, 20*time.Second, 100*time.Millisecond, "redelivered to the same conductor after the outage, acknowledged")
+		require.Eventually(t, func() bool { return a.ackedWith("held across") }, 20*time.Second, 100*time.Millisecond, "redelivered to the same conductor after the outage, acknowledged")
 		require.Eventually(t, func() bool {
 			_, err := events.Publish(context.Background(), js, events.Subject("bob", "taskforge", events.KindProject, "M2", "question"), events.MessageID("taskforge", "c1", 3), []byte(`{"q":"after"}`))
 			return err == nil
 		}, 30*time.Second, 200*time.Millisecond)
-		require.Eventually(t, func() bool { return a.done.Load() == 3 }, 20*time.Second, 100*time.Millisecond, "the next event reaches it too")
+		require.Eventually(t, func() bool { return a.ackedWith(`"after"`) }, 20*time.Second, 100*time.Millisecond, "the next event reaches it too, acknowledged")
 		select {
 		case err := <-errA:
 			t.Fatalf("attach ended after the outage: %v", err)
@@ -454,7 +486,7 @@ func TestDrill_ConductorRidesOutANATSOutage(t *testing.T) {
 		require.True(t, strings.Contains(all, "riding it out") || strings.Contains(all, "claimed again"), "the outage is said: %q", all)
 	})
 	t.Run("another-conductor-took-it", func(t *testing.T) {
-		c, _, js := outageRig(t)
+		c, js := outageRig(t)
 		ctx := t.Context()
 		// This conductor comes back slowly, after the other claimed.
 		anc, err := nats.Connect(c.URLs(), nats.MaxReconnects(-1), nats.ReconnectWait(8*time.Second))

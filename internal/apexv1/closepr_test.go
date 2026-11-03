@@ -307,7 +307,7 @@ func TestClosePR_DoneButUndeliveredIsDeliveredOnRerun(t *testing.T) {
 		require.Equal(t, IntegrationMerged, g.Integration.State)
 		events, _ := os.ReadFile(p.EventsPath())
 		require.Equal(t, 1, strings.Count(string(events), `"milestone-done"`), "milestone-done once, at the merge")
-		g, err = p.CloseMilestone(ctx(), "M1", RunOptions{})
+		_, err = p.CloseMilestone(ctx(), "M1", RunOptions{})
 		require.NoError(t, err, "the control: delivered, a close is a no-op")
 		require.Equal(t, []int{7}, f.enqueued, "nothing enqueued again")
 		require.False(t, p.Status().Milestones[0].Undelivered)

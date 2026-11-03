@@ -1283,7 +1283,8 @@ func statusLong(r *apexv1.StatusReport) string {
 	}
 	if len(r.Milestones) > 0 {
 		b.WriteString("\nRoadmap:\n")
-		for _, m := range r.Milestones {
+		for i := range r.Milestones {
+			m := &r.Milestones[i]
 			fmt.Fprintf(&b, "  %-4s %-9s %s", m.ID, m.Status, m.Title)
 			if a := m.AcceptRed; a != nil {
 				fmt.Fprintf(&b, " — accepted red by %s: %s", a.By, a.Reason)

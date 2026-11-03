@@ -188,6 +188,19 @@ func Run(ctx context.Context, nc *nats.Conn, cfg Config) error {
 	}
 }
 
+type runner struct {
+	cfg     Config
+	js      jetstream.JetStream
+	mu      sync.Mutex
+	cons    jetstream.Consumer
+	pend    map[uint64]*pending
+	lastAck time.Time
+	// down: the lease could not be kept at the last tick, or NATS was
+	// away since (said once); reconnects is the connection's count.
+	down       bool
+	reconnects uint64
+}
+
 // bind creates or binds the conductor's durable consumer.
 func (r *runner) bind(ctx context.Context) (jetstream.Consumer, error) {
 	return r.js.CreateOrUpdateConsumer(ctx, events.EventsStream, jetstream.ConsumerConfig{
@@ -289,19 +302,6 @@ func (r *runner) reachable() {
 		r.mu.Unlock()
 		r.logf("conductor: the conductor lease is renewed again\n")
 	}
-}
-
-type runner struct {
-	cfg     Config
-	js      jetstream.JetStream
-	mu      sync.Mutex
-	cons    jetstream.Consumer
-	pend    map[uint64]*pending
-	lastAck time.Time
-	// down: the lease could not be kept at the last tick, or NATS was
-	// away since (said once); reconnects is the connection's count.
-	down       bool
-	reconnects uint64
 }
 
 // deliver types each event when the session is idle; a redelivery of an

@@ -514,9 +514,7 @@ func (p *Project) Status() *StatusReport {
 				line.LastGate = &GateSummary{SHA: run.SHA, Exit: run.Exit, At: run.At, Log: run.Log}
 			}
 			line.ApprovalSelfCheck = approvalSelfCheck(recs[line.ID])
-			if line.Status == MilestoneDone && p.MilestoneBase(line.ID) != "" {
-				line.Undelivered = p.closeUndelivered(ctx, line.ID)
-			}
+			line.Undelivered = line.Status == MilestoneDone && p.MilestoneBase(line.ID) != "" && p.closeUndelivered(ctx, line.ID)
 			r.Milestones = append(r.Milestones, line)
 		}
 		if m := rm.Current(); m != nil {

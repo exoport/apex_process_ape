@@ -86,7 +86,7 @@ func TestConductorAck_RefusesAStrippedTokenAndAnUnknownID(t *testing.T) {
 	acks := func() []string {
 		t.Helper()
 		es, _ := os.ReadDir(filepath.Join(dir, "acks"))
-		var names []string
+		names := make([]string, 0, len(es))
 		for _, e := range es {
 			names = append(names, e.Name())
 		}
