@@ -5387,7 +5387,11 @@ release point. The run waits for the queue, reading the PR from GitHub every min
 at each member NATS event, when CI publishes one). Merged: main
 fast-forwards to the merge, milestone/<M> is deleted here and on the remote, the
 milestone's lease is released, and milestone-done names the release point; tagging stays
-a person's act (OQ20). Ejected: main is taken in again the same way, the gate runs again on
+a person's act (OQ20). A close that wrote the milestone done but failed before its PR was enqueued
+(a transient fault at the fetch, push, PR or enqueue; V8f) leaves it undelivered: `ape status`
+marks it ("undelivered": true) and names this command first, and running it again opens and
+enqueues the close PR without running the gate again (main taken in and gated first if it
+moved), then waits for the merge as above. Ejected: main is taken in again the same way, the gate runs again on
 the branch (red refuses: gate.red; an accepted red passes only on its red set), and the
 close PR is pushed and enqueued again, an attempt (limits.attempts:
 integration.ejections-exceeded).

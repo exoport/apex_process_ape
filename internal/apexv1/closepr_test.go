@@ -2,6 +2,7 @@ package apexv1
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -256,5 +257,81 @@ func TestClosePR_FencedBeforeTheEnqueue(t *testing.T) {
 		run(t, bare, "merge-base", "--is-ancestor", "main", "milestone/M1")
 		require.Equal(t, g.Integration.Commit, run(t, bare, "rev-parse", "milestone/M1"), "the enqueued tree has the moved main")
 		require.GreaterOrEqual(t, calls, 3, "fenced again before the enqueue after the re-check")
+	})
+}
+
+// V8f (FINDING-V15-1C-4): a close wrote its milestone done, then failed
+// before the close PR was enqueued (1c: the App-token fetch timed out),
+// and every re-run returned "already done", opening nothing. Now status
+// marks the milestone undelivered and names the close, and the re-run
+// opens and enqueues the PR — the gate not run again, main unchanged —
+// so the merge delivers it. Two fault points: the close's first step
+// after done (its fence, where 1c's fetch failed), and opening the PR.
+// The control: once merged it is delivered, and a close is a no-op.
+func TestClosePR_DoneButUndeliveredIsDeliveredOnRerun(t *testing.T) {
+	setup := func(t *testing.T) (*Project, string, *fakeIntegrator) {
+		t.Helper()
+		files := baseFiles()
+		files["_apex/config.yaml"] = coordinatedConfig
+		files["gate.sh"] = "#!/bin/sh\nexit 0\n"
+		p := fixture(t, files)
+		bare := withOrigin(t, p)
+		_, _, err := p.PrepareMilestoneBranch(ctx(), "M1")
+		require.NoError(t, err)
+		f := &fakeIntegrator{states: map[int]PRState{}}
+		useIntegrator(t, f)
+		return p, bare, f
+	}
+	deliver := func(t *testing.T, p *Project, bare string, f *fakeIntegrator) {
+		t.Helper()
+		st := p.Status()
+		require.True(t, st.Milestones[0].Undelivered, "status marks it undelivered")
+		require.Contains(t, nextStep(st), "deliver M1")
+		require.Contains(t, nextStep(st), "`ape milestone close M1`")
+		done := run(t, p.Root, "rev-parse", "milestone/M1")
+		require.Equal(t, "apex: M1 done", run(t, p.Root, "log", "-1", "--format=%s", done))
+
+		g, err := p.CloseMilestone(ctx(), "M1", RunOptions{})
+		require.NoError(t, err, "the re-run delivers it")
+		require.Empty(t, g.Run.Cmd, "the gate is not run again")
+		require.NotNil(t, g.Integration)
+		require.Equal(t, IntegrationQueued, g.Integration.State)
+		require.Equal(t, []int{7}, f.enqueued)
+		require.Equal(t, done, run(t, bare, "rev-parse", "milestone/M1"), "the done commit landed on the remote's milestone branch")
+		require.False(t, p.Status().Milestones[0].Undelivered, "recorded: no longer undelivered")
+
+		release := mergeOnRemote(t, bare, "main", "milestone/M1")
+		f.states[7] = PRState{Merged: true, MergeCommit: release}
+		g, err = p.CloseMilestone(ctx(), "M1", RunOptions{})
+		require.NoError(t, err)
+		require.Equal(t, IntegrationMerged, g.Integration.State)
+		events, _ := os.ReadFile(p.EventsPath())
+		require.Equal(t, 1, strings.Count(string(events), `"milestone-done"`), "milestone-done once, at the merge")
+		g, err = p.CloseMilestone(ctx(), "M1", RunOptions{})
+		require.NoError(t, err, "the control: delivered, a close is a no-op")
+		require.Equal(t, []int{7}, f.enqueued, "nothing enqueued again")
+		require.False(t, p.Status().Milestones[0].Undelivered)
+	}
+
+	t.Run("fault-after-done", func(t *testing.T) {
+		p, bare, f := setup(t)
+		useFenceClose(t, func(context.Context, *Project) (int, error) {
+			return 0, &FailError{Code: CodeFetchFailed, Msg: "no read token from the coordination host's App service: lookup api.github.com: i/o timeout"}
+		})
+		_, err := p.CloseMilestone(ctx(), "M1", RunOptions{})
+		require.Equal(t, CodeFetchFailed, failCode(t, err))
+		require.Empty(t, f.opened, "no PR opened")
+		require.Nil(t, p.LoadIntegration(closeID("M1")), "no close-PR record")
+		useFenceClose(t, nil)
+		deliver(t, p, bare, f)
+	})
+	t.Run("open-pr-failed", func(t *testing.T) {
+		p, bare, f := setup(t)
+		f.openErr = errors.New("502 Bad Gateway")
+		_, err := p.CloseMilestone(ctx(), "M1", RunOptions{})
+		require.Equal(t, CodeIntegrationPR, failCode(t, err))
+		require.Nil(t, p.LoadIntegration(closeID("M1")))
+		f.openErr = nil
+		deliver(t, p, bare, f)
 	})
 }

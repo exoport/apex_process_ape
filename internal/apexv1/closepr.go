@@ -191,6 +191,23 @@ func (p *Project) openClosePR(ctx context.Context, ms string, attempts int, opt 
 	}
 }
 
+// closeUndelivered reports a coordinated milestone whose close wrote it
+// done but never got its close PR into main's queue (V8f): no close-PR
+// record, and milestone/<M>, here, not in the remote's main as last
+// fetched. A merged close deletes the branch, so a delivered milestone
+// is never one.
+func (p *Project) closeUndelivered(ctx context.Context, ms string) bool {
+	if rec := p.LoadIntegration(closeID(ms)); rec != nil && rec.Kind == KindClose {
+		return false
+	}
+	br := MilestoneBranch(ms)
+	if !p.branchExists(ctx, br) {
+		return false
+	}
+	_, err := git(ctx, p.Root, "merge-base", "--is-ancestor", "refs/heads/"+br, "refs/remotes/"+p.trunkRemote(ctx)+"/main")
+	return err != nil
+}
+
 // fenceClose is FenceClose: 0 and nil when unset.
 func (p *Project) fenceClose(ctx context.Context) (int, error) {
 	if FenceClose == nil {

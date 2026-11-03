@@ -294,6 +294,9 @@ type MilestoneLine struct {
 	Status string `json:"status"`
 	// AcceptRed: a person closed it with its gate red (H22).
 	AcceptRed *AcceptRed `json:"accept_red,omitempty"`
+	// Undelivered: coordinated, done, but its close PR was never enqueued
+	// (V8f): `ape milestone close <M>` opens it.
+	Undelivered bool `json:"undelivered,omitempty"`
 	// BaseSHA is the milestone's start (D130 Q60): HEAD at its first
 	// approval; absent before it is approved.
 	BaseSHA string `json:"base_sha,omitempty"`
@@ -511,6 +514,9 @@ func (p *Project) Status() *StatusReport {
 				line.LastGate = &GateSummary{SHA: run.SHA, Exit: run.Exit, At: run.At, Log: run.Log}
 			}
 			line.ApprovalSelfCheck = approvalSelfCheck(recs[line.ID])
+			if line.Status == MilestoneDone && p.MilestoneBase(line.ID) != "" {
+				line.Undelivered = p.closeUndelivered(ctx, line.ID)
+			}
 			r.Milestones = append(r.Milestones, line)
 		}
 		if m := rm.Current(); m != nil {
@@ -756,6 +762,14 @@ func nextStep(r *StatusReport) string {
 func nextStepWhy(r *StatusReport) (next, why string) {
 	if !r.Initialized {
 		return "run `ape project init`", "this directory has no APEX v1 layout yet (no _apex/state/)"
+	}
+	// V8f: a close that wrote done but never enqueued its PR comes first;
+	// the milestone is not delivered until its PR merges.
+	for i := range r.Milestones {
+		if m := &r.Milestones[i]; m.Undelivered {
+			return fmt.Sprintf("deliver %s: its close wrote it done, but its close PR was never enqueued — `ape milestone close %s` opens and enqueues it", m.ID, m.ID),
+				m.ID + " is done on " + MilestoneBranch(m.ID) + ", which is not in main and has no close PR (a close that failed after writing done; action retry)"
+		}
 	}
 	// An approved tweak runs ahead of milestone work (D40).
 	for i := range r.Changes {

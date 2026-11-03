@@ -950,7 +950,20 @@ func (p *Project) closeMilestone(ctx context.Context, id string, opt RunOptions,
 	}
 	switch m.Status {
 	case MilestoneDone:
-		return &GateResult{Milestone: id, Status: MilestoneDone}, nil
+		g := &GateResult{Milestone: id, Status: MilestoneDone}
+		// V8f (FINDING-V15-1C-4): a close that wrote done and then failed
+		// before its PR was enqueued left no close-PR record (resolveClose
+		// found none) and milestone/<M> off main. It is delivered now: the
+		// close PR is opened and enqueued, main taken in and gated first
+		// when it moved, as the close would have.
+		if coordinated && p.closeUndelivered(ctx, id) {
+			if opt.Progress != nil {
+				fmt.Fprintf(opt.Progress, "%s is done on %s but its close PR was never enqueued: opening it now\n", id, MilestoneBranch(id))
+			}
+			g.Integration, err = p.openClosePR(ctx, id, 1, opt)
+			return g, err
+		}
+		return g, nil
 	case MilestoneApproved:
 		if err := p.requireApprovalRecord(m, true); err != nil {
 			return nil, err
