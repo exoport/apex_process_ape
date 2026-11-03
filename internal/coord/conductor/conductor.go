@@ -148,7 +148,7 @@ func Run(ctx context.Context, nc *nats.Conn, cfg Config) error {
 	if err != nil {
 		return err
 	}
-	r := &runner{cfg: cfg, js: js, pend: map[uint64]*pending{}, lastAck: time.Now()}
+	r := &runner{cfg: cfg, js: js, pend: map[uint64]*pending{}, lastAck: time.Now(), reconnects: nc.Stats().Reconnects}
 	cons, err := r.bind(ctx)
 	if err != nil {
 		// Nothing was delivered: the lease is let go, so a corrected
@@ -169,6 +169,17 @@ func Run(ctx context.Context, nc *nats.Conn, cfg Config) error {
 			_ = ls.Release(context.WithoutCancel(ctx), l)
 			return nil
 		case <-t.C:
+			// The connection says an outage too: a request made while it
+			// is down waits in its buffer rather than failing, so no error
+			// need ever reach keep (V8d).
+			if !nc.IsConnected() {
+				r.unreachable(errors.New("NATS disconnected"))
+				continue
+			}
+			if n := nc.Stats().Reconnects; n != r.reconnects {
+				r.reconnects = n
+				r.unreachable(errors.New("NATS reconnected"))
+			}
 			r.sweep(ctx, r.consumer())
 			if l, err = r.keep(ctx, ls, l); err != nil {
 				return err
@@ -264,7 +275,7 @@ func (r *runner) keep(ctx context.Context, ls *lease.Store, l lease.Lease) (leas
 func (r *runner) unreachable(err error) {
 	if !r.down {
 		r.down = true
-		r.logf("conductor: the conductor lease could not be renewed (%v); riding it out, trying again every %s\n", err, r.cfg.Renew)
+		r.logf("conductor: the conductor lease could not be kept (%v); riding it out, trying again every %s\n", err, r.cfg.Renew)
 	}
 }
 
@@ -287,8 +298,10 @@ type runner struct {
 	cons    jetstream.Consumer
 	pend    map[uint64]*pending
 	lastAck time.Time
-	// down: the lease could not be kept at the last tick (said once).
-	down bool
+	// down: the lease could not be kept at the last tick, or NATS was
+	// away since (said once); reconnects is the connection's count.
+	down       bool
+	reconnects uint64
 }
 
 // deliver types each event when the session is idle; a redelivery of an

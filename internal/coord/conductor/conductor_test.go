@@ -36,6 +36,8 @@ type fakeSession struct {
 	typed   []string
 	acked   map[string]bool
 	done    atomic.Int32
+	// hold: while set, nothing is acknowledged (a delivery stays pending).
+	hold atomic.Bool
 }
 
 var (
@@ -48,7 +50,7 @@ func (f *fakeSession) Type(text string) error {
 	f.mu.Lock()
 	f.typed = append(f.typed, text)
 	seq := seqRe.FindStringSubmatch(text)[1]
-	answer := !f.acked[seq] && f.done.Load() < f.answers
+	answer := !f.hold.Load() && !f.acked[seq] && f.done.Load() < f.answers
 	if answer {
 		f.acked[seq] = true
 		f.done.Add(1)
@@ -413,17 +415,26 @@ func TestDrill_ConductorRidesOutANATSOutage(t *testing.T) {
 		publish(t, js, "block", 1)
 		require.Eventually(t, func() bool { return a.done.Load() == 1 }, 5*time.Second, 50*time.Millisecond, "delivered and acknowledged before the outage")
 
+		// A delivery pending across the outage, as a heartbeat is in
+		// production: no acknowledgement could be made while NATS was
+		// down, so the conductor is not judged silent for it.
+		a.hold.Store(true)
+		publish(t, js, "question", 2)
+		require.Eventually(t, func() bool { return a.seqs()["2"] >= 1 }, 5*time.Second, 50*time.Millisecond, "delivered, not yet acknowledged")
+
 		outage(t, c, 3*cfg.LeaseTTL)
 		select {
 		case err := <-errA:
 			t.Fatalf("attach ended during the outage: %v", err)
 		default:
 		}
+		a.hold.Store(false)
+		require.Eventually(t, func() bool { return a.done.Load() == 2 }, 20*time.Second, 100*time.Millisecond, "redelivered to the same conductor after the outage, acknowledged")
 		require.Eventually(t, func() bool {
-			_, err := events.Publish(context.Background(), js, events.Subject("bob", "taskforge", events.KindProject, "M2", "question"), events.MessageID("taskforge", "c1", 2), []byte(`{"q":"after"}`))
+			_, err := events.Publish(context.Background(), js, events.Subject("bob", "taskforge", events.KindProject, "M2", "question"), events.MessageID("taskforge", "c1", 3), []byte(`{"q":"after"}`))
 			return err == nil
 		}, 30*time.Second, 200*time.Millisecond)
-		require.Eventually(t, func() bool { return a.done.Load() == 2 }, 20*time.Second, 100*time.Millisecond, "the next event reaches the same conductor, acknowledged")
+		require.Eventually(t, func() bool { return a.done.Load() == 3 }, 20*time.Second, 100*time.Millisecond, "the next event reaches it too")
 		select {
 		case err := <-errA:
 			t.Fatalf("attach ended after the outage: %v", err)
