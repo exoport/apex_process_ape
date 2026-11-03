@@ -281,8 +281,12 @@ func (p publisher) fence(ctx context.Context) error {
 // subject already holds a message: a dedupe that never expires, beside
 // the stream's 10-minute window (R5/D3).
 func (p publisher) once(ctx context.Context, id, event string, payload any) (dup bool, err error) {
+	return p.onceOn(ctx, events.Subject(Owner, p.c.cfg.Ensemble, events.KindCoord, id, event), id, event, payload)
+}
+
+// onceOn is once on subject subj.
+func (p publisher) onceOn(ctx context.Context, subj, id, event string, payload any) (dup bool, err error) {
 	c := p.c
-	subj := events.Subject(Owner, c.cfg.Ensemble, events.KindCoord, id, event)
 	st, err := c.js.Stream(ctx, events.EventsStream)
 	if err != nil {
 		return false, err

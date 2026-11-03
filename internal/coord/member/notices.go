@@ -46,7 +46,7 @@ func ReadNotices(ctx context.Context, js jetstream.JetStream, ensemble, project 
 	out := map[string][]apexv1.NoticeLine{}
 	// By hand: events.Subject would make the wildcard a literal token.
 	filter := "ape.evt.coord." + natsconn.SubjectToken(ensemble) + "." + events.KindCoord + ".*.impact-notice"
-	ok = readAll(ctx, js, filter, func(data []byte) {
+	ok = events.ReadAll(ctx, js, filter, func(data []byte) {
 		var ev struct {
 			ID       string   `json:"id"`
 			Target   string   `json:"target"`
@@ -67,45 +67,4 @@ func ReadNotices(ctx context.Context, js jetstream.JetStream, ensemble, project 
 		}
 	})
 	return out, ok
-}
-
-// readAll hands fn every stored message on filter, oldest first. The
-// count comes from the stream's own per-subject state: an ordered
-// consumer's pending count is not known before its first fetch.
-func readAll(ctx context.Context, js jetstream.JetStream, filter string, fn func([]byte)) bool {
-	st, err := js.Stream(ctx, events.EventsStream)
-	if err != nil {
-		return false
-	}
-	info, err := st.Info(ctx, jetstream.WithSubjectFilter(filter))
-	if err != nil {
-		return false
-	}
-	var left uint64
-	for _, n := range info.State.Subjects {
-		left += n
-	}
-	if left == 0 {
-		return true
-	}
-	cons, err := js.OrderedConsumer(ctx, events.EventsStream, jetstream.OrderedConsumerConfig{FilterSubjects: []string{filter}, DeliverPolicy: jetstream.DeliverAllPolicy})
-	if err != nil {
-		return false
-	}
-	for left > 0 && ctx.Err() == nil {
-		batch, err := cons.Fetch(int(min(left, 256)), jetstream.FetchMaxWait(time.Second))
-		if err != nil {
-			return false
-		}
-		n := uint64(0)
-		for msg := range batch.Messages() {
-			n++
-			fn(msg.Data())
-		}
-		if n == 0 {
-			break
-		}
-		left -= min(n, left)
-	}
-	return true
 }

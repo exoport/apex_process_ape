@@ -85,6 +85,9 @@ var Subjects = []Subject{
 		"lease-expired", "slot-granted", "slot-reclaimed", "impact-notice", "hold-requested", "assessor-failed", "assessor-skipped",
 		"coordinator-replaced", "health-unconfirmed", "nats-paused", "nats-resumed", "heartbeat",
 	}},
+	{Pattern: "ape.evt.coord.<ensemble>-assessor.coord.<batch>.<event>", Kind: "coord", Names: []string{
+		"assessor-batch", "assessor-done", "assessor-started",
+	}},
 	{Pattern: "ape.coord.<ensemble>.<verb>", Kind: "service", Names: []string{"slot.acquire", "slot.release", "status", "hold.ack"}},
 	{Pattern: "ape.sup.<verb>", Kind: "service", Names: []string{"ensure", "health.report", "status"}},
 }

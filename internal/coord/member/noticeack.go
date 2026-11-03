@@ -97,7 +97,7 @@ func AckNotice(ctx context.Context, p *apexv1.Project, id, outcome string) (Noti
 // each).
 func ReadAcks(ctx context.Context, js jetstream.JetStream, project string) (map[string]NoticeAck, bool) {
 	out := map[string]NoticeAck{}
-	ok := readAll(ctx, js, "ape.evt.*."+natsconn.SubjectToken(project)+"."+events.KindProject+".*."+apexv1.EventNoticeAcked, func(data []byte) {
+	ok := events.ReadAll(ctx, js, "ape.evt.*."+natsconn.SubjectToken(project)+"."+events.KindProject+".*."+apexv1.EventNoticeAcked, func(data []byte) {
 		var a NoticeAck
 		if json.Unmarshal(data, &a) == nil && a.ID != "" {
 			if _, seen := out[a.ID]; !seen {

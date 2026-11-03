@@ -188,6 +188,11 @@ func (r *assessRunner) runProject(ctx context.Context, b coordinator.Batch, proj
 		kept = ""
 		return res
 	}
+	// A predecessor killed mid-session (step 8) left its folder and no
+	// record: this run starts it afresh.
+	for _, stale := range []string{folder, folder + assessPluginSuffix, apexv1.AssessDeniedPath(folder), folder + ".task.json", folder + ".manifest.yaml"} {
+		_ = os.RemoveAll(stale)
+	}
 	fail := func(outcome, reason, detail string) assessResult {
 		res.Outcome, res.Reason, res.Detail = outcome, reason, detail
 		if err := pub.Failed(ctx, b.ID, project, reason, ids); err != nil {

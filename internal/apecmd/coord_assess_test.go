@@ -325,3 +325,29 @@ func TestAssessRunner_TokenLine(t *testing.T) {
 	require.Equal(t, "usage", res.Reason)
 	require.Equal(t, before, sessions)
 }
+
+// Step 8 on the runner's side: a predecessor killed mid-session left the
+// batch's folder (and a denial) and no record; the replayed batch runs
+// afresh and publishes. The control: a recorded batch is still not run
+// again (TestAssessRunner_OutcomesAndKeptRecords).
+func TestAssessRunner_ReplayAfterAKill(t *testing.T) {
+	checkout, _ := assessCheckout(t)
+	dir := t.TempDir()
+	r := &assessRunner{
+		dir: dir, checkouts: map[string]string{"atomix": checkout}, logf: t.Logf,
+		session: func(_ context.Context, folder, _ string) ([]byte, error) {
+			require.NoError(t, os.WriteFile(filepath.Join(folder, apexv1.AssessNotice), []byte(`{"notices":[]}`), 0o600))
+			return []byte(`{"success":true}`), nil
+		},
+	}
+	stale := filepath.Join(dir, "k-1-atomix")
+	require.NoError(t, os.MkdirAll(filepath.Join(stale, "half"), 0o700))
+	require.NoError(t, os.WriteFile(apexv1.AssessDeniedPath(stale), []byte(`{"tool":"Bash"}`+"\n"), 0o600))
+	b := assessBatch("k-1")
+	b.Replay = true
+	pub := &fakePublisher{}
+	r.onBatch(context.Background(), b, pub)
+	res := readResult(t, r.keptDir("k-1", "atomix"))
+	require.Equal(t, assessPublished, res.Outcome, "%s %s", res.Reason, res.Detail)
+	require.Empty(t, res.Denials, "the dead session's denial is not this run's")
+}

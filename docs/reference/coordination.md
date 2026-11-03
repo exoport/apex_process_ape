@@ -30,6 +30,7 @@ in the `<user>` position, which its credential enforces as a developer's does.
 | `ape.evt.<user>.<project>.change.<change-id>.<event>` | change | `pr-opened`, `queued`, `ejected`, `merged`, `rebased`, `conflicted` |
 | `ape.evt.<user>.<ensemble>.contract.<name>.<event>` | contract | `drafted`, `frozen`, `fulfilled`, `version-proposed`, `version-accepted` |
 | `ape.evt.coord.<ensemble>.coord.<id>.<event>` | coord | `lease-expired`, `slot-granted`, `slot-reclaimed`, `impact-notice`, `hold-requested`, `assessor-failed`, `assessor-skipped`, `coordinator-replaced`, `health-unconfirmed`, `nats-paused`, `nats-resumed`, `heartbeat` |
+| `ape.evt.coord.<ensemble>-assessor.coord.<batch>.<event>` | coord | `assessor-batch`, `assessor-done`, `assessor-started` |
 | `ape.coord.<ensemble>.<verb>` | service | `slot.acquire`, `slot.release`, `status`, `hold.ack` |
 | `ape.sup.<verb>` | service | `ensure`, `health.report`, `status` |
 <!-- END generated:subjects -->
@@ -100,6 +101,16 @@ Leases are not requests: claiming, renewing and releasing one is a compare-and-s
     kind, cost, termination, and the ensemble's total spent), and kept in `result.json`, with the session's
     `manifest.yaml`.
   - A new stage starts from a fresh state dir, or with `spent.json` removed.
+- **A replaced coordinator (step 8).** The assessor records its own progress on the stream, in a scope of its own,
+  `ape.evt.coord.<ensemble>-assessor.coord.<batch>.<event>`, which the ensemble's conductors are not delivered:
+  - `assessor-batch` is a closed batch, with its triggers and their stream sequences, recorded before it runs;
+  - `assessor-done` is recorded after its run returns;
+  - `assessor-started` is recorded once per ensemble, with the stream's last sequence when the assessor first ran.
+  A coordinator that starts runs every recorded batch with no `assessor-done` first (`replay` in the batch). It then
+  reads the triggers after the newest sequence a recorded batch, or the start, covers, so a batch still open at a kill
+  is batched again. The per-subject dedupe means a second session of one batch publishes nothing twice, and the old
+  coordinator's late publish is fenced. A folder that a killed session left with no record is cleared and run afresh.
+  A recorded batch is not run again.
 - **The ack (Q3):** `ape coord notice ack <id> acted|dismissed` is a person's act, from a terminal only, in the same
   person-only list as `ape milestone pause` (pre-tool denies it in a model session in any form). It is accepted only
   from the checkout whose lease book holds the notice's milestone, and is recorded once, with the credential's user
