@@ -86,6 +86,9 @@ type AssessFolder struct {
 	// diff was read from, "" when none was (DiffNotes says why).
 	Diffs     map[string]string `json:"diffs,omitempty"`
 	DiffNotes map[string]string `json:"diff_notes,omitempty"`
+	// DiffPaths are the paths the diffs in input.md change: evidence a
+	// notice may cite though the snapshot of main lacks it (D762+).
+	DiffPaths []string `json:"diff_paths,omitempty"`
 	// Truncated: input.md, or a diff in it, was cut to its cap.
 	Truncated bool `json:"truncated,omitempty"`
 }
@@ -263,6 +266,13 @@ func (b *assessBuild) readDiffs(ctx context.Context) {
 			out.Truncated = true
 		}
 		b.diffs = append(b.diffs, assessDiff{e.Change, e.Milestone, sha, text})
+		if names, err := git(ctx, b.p.Root, "diff", "--no-color", "--no-ext-diff", "--name-only", "-z", sha+"^1", sha); err == nil {
+			for n := range strings.SplitSeq(names, "\x00") {
+				if n != "" && !slices.Contains(out.DiffPaths, n) {
+					out.DiffPaths = append(out.DiffPaths, n)
+				}
+			}
+		}
 	}
 }
 

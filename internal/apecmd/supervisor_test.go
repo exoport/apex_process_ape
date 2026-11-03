@@ -78,4 +78,7 @@ func TestSupervisor_CoordinatorArgs(t *testing.T) {
 	f := coordFlags{cwd: "/srv/atomix", url: "nats://127.0.0.1:14222"}
 	require.Equal(t, []string{"coordinator", "--ensemble", "atomix-1a", "--project", "oxid-atomix-engine", "--cwd", "/srv/atomix", "--nats-url", "nats://127.0.0.1:14222"},
 		f.coordinatorArgs("atomix-1a", []string{"oxid-atomix-engine"}))
+	require.Equal(t, []string{"coordinator", "--ensemble", "atomix-1a", "--assess", "--assess-checkout", "atomix=/srv/c", "--cwd", "/srv/atomix"},
+		(&coordFlags{cwd: "/srv/atomix"}).coordinatorArgs("atomix-1a", nil, assessArgs(true, []string{"atomix=/srv/c"})...))
+	require.Nil(t, assessArgs(false, []string{"x=y"}), "control: no --assess, no assessor flags")
 }

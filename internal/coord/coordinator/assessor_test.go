@@ -88,7 +88,7 @@ func TestCoordinator_BatchesItsProjectsTriggers(t *testing.T) {
 	go func() {
 		_ = Run(rctx, nc, Config{Ensemble: "ens", ID: "c1", Projects: []string{"notes"}, Assessor: &AssessorConfig{
 			Quiet: 300 * time.Millisecond, Ceiling: 3 * time.Second,
-			OnBatch: func(_ context.Context, b Batch) { got <- b },
+			OnBatch: func(_ context.Context, b Batch, _ Publisher) { got <- b },
 		}})
 	}()
 	require.Eventually(t, func() bool {

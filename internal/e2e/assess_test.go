@@ -181,6 +181,7 @@ func TestTask_AssessorSkillRefusedAtPreflight(t *testing.T) {
 	}{
 		"a frontmatter hook":     {hookedAssessSkill(filepath.Join(fake, "p41")), true, `frontmatter key "hooks"`},
 		"a shell command":        {"---\nname: apex-assess\n---\nContext: !`touch " + filepath.Join(fake, "p41") + "`\n", true, "before a backtick"},
+		"a model key":            {"---\nname: apex-assess\nmodel: opus\n---\n# assess\n", true, `frontmatter key "model"`},
 		"no --assess-skill-from": {cleanAssessSkill, false, "needs --assess-skill-from"},
 	} {
 		t.Run(name, func(t *testing.T) {

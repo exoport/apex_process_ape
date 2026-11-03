@@ -1,6 +1,7 @@
 package apecmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -1208,6 +1209,7 @@ with --since <seq> · 2 usage (usage.until, usage.wait). --board exits 0 whateve
 			r := p.Status()
 			p.AttachAdvise(cmd.Context(), r)
 			r.Coordination = coordinationLine(p)
+			attachNotices(cmd.Context(), p, r)
 			if board {
 				o := refreshBoardNow(cmd.Context(), p, r, cmd.ErrOrStderr())
 				return v1Emit(cmd.OutOrStdout(), &f, statusWithBoard{StatusReport: r, Board: &o}, func(w io.Writer) {
@@ -1369,6 +1371,23 @@ func statusLong(r *apexv1.StatusReport) string {
 
 // coordinationLine is ape status's coordination line (v1.5, §4.5): "" for
 // a project in no ensemble; a block that cannot be used says so.
+// attachNotices puts the assessor's notices on r's milestones (step 5),
+// in a member project whose NATS answers: not tried during a recorded
+// outage, and bounded (member.Notices) so status never hangs on NATS.
+func attachNotices(ctx context.Context, p *apexv1.Project, r *apexv1.StatusReport) {
+	m, err := member.Load(p)
+	if err != nil || !member.ReadLink(p.Root).DownSince.IsZero() {
+		return
+	}
+	byMS, ok := member.Notices(ctx, &m)
+	if !ok {
+		return
+	}
+	for i := range r.Milestones {
+		r.Milestones[i].Notices = byMS[r.Milestones[i].ID]
+	}
+}
+
 func coordinationLine(p *apexv1.Project) string {
 	m, err := member.Load(p)
 	switch {

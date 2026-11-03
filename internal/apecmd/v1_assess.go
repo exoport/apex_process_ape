@@ -83,8 +83,9 @@ func prepareAssessTask(o *taskOptions, cfg *runConfig) error {
 // assessSkillKeys are the frontmatter keys an assessor skill may carry
 // (P4-1): a skill's own hooks: run as the host's person outside the
 // roster and the guard (measured on 2.1.316: a --plugin-dir skill's
-// frontmatter hooks fire under --setting-sources user).
-var assessSkillKeys = map[string]bool{"name": true, "description": true, "argument-hint": true, "disable-model-invocation": true, "model": true}
+// frontmatter hooks fire under --setting-sources user). Not model:
+// models.apex-assess alone decides the model (D762+).
+var assessSkillKeys = map[string]bool{"name": true, "description": true, "argument-hint": true, "disable-model-invocation": true}
 
 // buildAssessPlugin writes the plugin ape-assess beside folder, its one
 // file the SKILL.md of apex-assess as checkout has it installed (P4-1:
@@ -137,7 +138,7 @@ func checkAssessSkill(file string, data []byte) error {
 	}
 	for k := range keys {
 		if !assessSkillKeys[k] {
-			return fmt.Errorf("%s: frontmatter key %q is not one an assessor skill may carry (name, description, argument-hint, disable-model-invocation, model): a skill's hooks run outside the session's confinement", file, k)
+			return fmt.Errorf("%s: frontmatter key %q is not one an assessor skill may carry (name, description, argument-hint, disable-model-invocation; the model is models.apex-assess's): a skill's hooks run outside the session's confinement", file, k)
 		}
 	}
 	if bytes.Contains(data, []byte("!`")) {

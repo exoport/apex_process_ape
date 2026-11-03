@@ -223,7 +223,8 @@ the plugin `ape-assess` at `<folder>.plugin/`, and types `/ape-assess:apex-asses
 `SKILL.md` that the checkout named by `--assess-skill-from` (the coordinator's) has installed, never
 `main`'s copy in the snapshot, which any merged change can alter. That `SKILL.md` is refused at
 preflight, and nothing spawns, when its frontmatter has a key other than `name`, `description`,
-`argument-hint`, `disable-model-invocation` and `model`, or when it holds `!` before a backtick. On
+`argument-hint` and `disable-model-invocation` (the model is `models.apex-assess`'s alone), or when it
+holds `!` before a backtick. On
 2.1.316 a `--plugin-dir` skill's frontmatter `hooks:` run as the host's person under
 `--setting-sources user`, outside the roster and this hook, and `` !`…` `` runs a shell command when
 the skill expands.

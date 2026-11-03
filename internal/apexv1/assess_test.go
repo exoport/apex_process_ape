@@ -106,6 +106,7 @@ func TestAssessFolder_PlansDiffsAndWhatItLeavesOut(t *testing.T) {
 	require.NotContains(t, in, "### M3:")
 
 	require.Equal(t, landed, f.Diffs["m1-edit"])
+	require.Equal(t, []string{"greet.sh"}, f.DiffPaths, "the paths the read diff changes; the forged commit's planted.txt is not one")
 	require.Contains(t, in, "- diff: under Diffs below, from "+short(landed)+" on `milestone/M1`")
 	require.Contains(t, in, "+echo Hi $1", "the diff of the landed commit")
 

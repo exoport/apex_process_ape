@@ -3258,12 +3258,20 @@ coord.<ensemble> (exit 1 if another coordinator holds it), serves slot requests 
 ape.coord.<ensemble>.<verb> as a NATS-micro service, records slots it granted that
 expired (slot-reclaimed), and publishes lease-expired for the ensemble's leases,
 those of the --project members' milestones included. The supervisor starts it; a
-person may too. SIGINT/SIGTERM releases the lease and exits 0.
+person may too. With --assess it also runs the assessor: the members' plan-approved,
+change-archived and gate-red triggers are batched (60 s quiet, 5 min ceiling), each batch
+is assessed by `ape task apex-assess` in a batch folder under
+$XDG_STATE_HOME/ape/coord/<ensemble>/assess (else ~/.local/state/…), and what its
+notice.json says is checked and published as impact-notice / hold-requested, or the
+batch as assessor-failed; each batch's record is kept there under kept/. SIGINT/SIGTERM
+releases the lease and exits 0.
 
 Flags:
 
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
+| `--assess` | bool | `false` | run the assessor (v1.5 §3.2): batch the --project members' triggers and run apex-assess on each batch |
+| `--assess-checkout` | stringArray | `[]` | <project>=<path>: the checkout of a member the assessor reads it from, and runs its installed apex-assess (repeatable; default: the project of --cwd) |
 | `--cwd` | string | `—` | the project whose coordination: block and hot/ape-nats.creds to use (default: the current directory) |
 | `--ensemble` | string | `—` | the ensemble (default: the project's) |
 | `--id` | string | `—` | this coordinator's id, the lease holder (default: <host>-<pid>) |
@@ -9677,6 +9685,8 @@ Flags:
 
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
+| `--assess` | bool | `false` | start each coordinator with --assess (the assessor, v1.5 §3.2) |
+| `--assess-checkout` | stringArray | `[]` | passed to each coordinator: <project>=<path>, the checkout the assessor reads a member from (repeatable) |
 | `--cwd` | string | `—` | the project whose coordination: block and hot/ape-nats.creds to use (default: the current directory) |
 | `--heartbeat` | duration | `1m0s` | how often each held conductor lease gets a heartbeat event (0: none) |
 | `--id` | string | `—` | this supervisor's id (default: sup-<host>-<pid>) |

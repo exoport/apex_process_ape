@@ -309,6 +309,20 @@ type MilestoneLine struct {
 	// change of it may not edit, and the globs whose new matches count
 	// too. Absent before approval and once done.
 	GateFrozen *GateFrozen `json:"gate_frozen,omitempty"`
+	// Notices are the assessor's open impact notices to this milestone
+	// (v1.5 §3.2, PLAN-V15-ASSESSOR step 5), read from NATS by `ape
+	// status` in a member project; absent when there are none or NATS
+	// could not be read.
+	Notices []NoticeLine `json:"notices,omitempty"`
+}
+
+// NoticeLine is one impact notice as status shows it.
+type NoticeLine struct {
+	ID       string   `json:"id"`
+	Reason   string   `json:"reason"`
+	Evidence []string `json:"evidence"`
+	Hold     bool     `json:"hold"`
+	At       string   `json:"at"`
 }
 
 // GateSummary is a gate run in short (LastGateRun).

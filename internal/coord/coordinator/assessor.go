@@ -31,11 +31,17 @@ type Batch struct {
 
 // AssessorConfig turns the assessor's batching on (step 2): a batch closes
 // once Quiet passed since its last trigger, or Ceiling since it opened,
-// and OnBatch gets it.
+// and OnBatch gets it, with the Publisher its outcome goes out through
+// (step 5). Batches are handed over one at a time, in order, apart from
+// the loop that batches: a session takes minutes, and triggers keep
+// arriving meanwhile.
 type AssessorConfig struct {
 	Quiet, Ceiling time.Duration
-	OnBatch        func(context.Context, Batch)
+	OnBatch        func(context.Context, Batch, Publisher)
 }
+
+// batchQueue bounds the closed batches waiting for OnBatch.
+const batchQueue = 64
 
 // seenKept bounds the batcher's memory of ids it batched.
 const seenKept = 4096
@@ -133,6 +139,17 @@ func (c *Coordinator) runAssessor(ctx context.Context) {
 			}
 		}
 	}()
+	closed := make(chan Batch, batchQueue)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case done := <-closed:
+				a.OnBatch(ctx, done, publisher{c})
+			}
+		}
+	}()
 	b := newBatcher(a.Quiet, a.Ceiling)
 	// Checked four times a quiet window, at least once a second.
 	tick := min(a.Quiet/ticksPerQuiet, time.Second)
@@ -146,7 +163,7 @@ func (c *Coordinator) runAssessor(ctx context.Context) {
 			b.add(e, time.Now())
 		case now := <-t.C:
 			if done := b.due(now); done != nil {
-				a.OnBatch(ctx, *done)
+				closed <- *done
 			}
 		}
 	}

@@ -22,7 +22,8 @@ func newSupervisorCmd() *cobra.Command {
 	var id string
 	var noVerify bool
 	var heartbeat time.Duration
-	var projects []string
+	var projects, assessFrom []string
+	var assess bool
 	cmd := &cobra.Command{
 		Use:   "supervisor [--id <id>] [--heartbeat 1m]",
 		Short: "APEX v1.5 (in development): run a supervisor, which keeps each ensemble's coordinator running",
@@ -51,7 +52,7 @@ SIGINT/SIGTERM stops its coordinators and exits 0.`,
 				projects = []string{m.Project}
 			}
 			start := func(ctx context.Context, ens string) (supervisor.Handle, error) {
-				return f.coordinatorProcess(ctx, ens, projects)
+				return f.coordinatorProcess(ctx, ens, projects, assessArgs(assess, assessFrom)...)
 			}
 			logf := func(format string, args ...any) {
 				fmt.Fprintf(cmd.ErrOrStderr(), "%s "+format+"\n", append([]any{time.Now().UTC().Format(time.RFC3339)}, args...)...)
@@ -64,6 +65,8 @@ SIGINT/SIGTERM stops its coordinators and exits 0.`,
 	cmd.Flags().BoolVar(&noVerify, "no-verify", false, "kill a coordinator on any health report, unverified (a drill's control; never in use)")
 	cmd.Flags().DurationVar(&heartbeat, "heartbeat", time.Minute, "how often each held conductor lease gets a heartbeat event (0: none)")
 	cmd.Flags().StringSliceVar(&projects, "project", nil, "a member project whose milestone leases its coordinators watch (repeatable; default: the member project it runs in)")
+	cmd.Flags().BoolVar(&assess, "assess", false, "start each coordinator with --assess (the assessor, v1.5 §3.2)")
+	cmd.Flags().StringArrayVar(&assessFrom, "assess-checkout", nil, "passed to each coordinator: <project>=<path>, the checkout the assessor reads a member from (repeatable)")
 	_ = cmd.Flags().MarkHidden("no-verify")
 	cmd.AddCommand(newSupervisorEnsureCmd(), newSupervisorStatusCmd())
 	return cmd
@@ -150,12 +153,25 @@ func (p coordProcess) Terminate() {
 	}
 }
 
+// assessArgs are the coordinator child's assessor flags.
+func assessArgs(assess bool, from []string) []string {
+	if !assess {
+		return nil
+	}
+	out := []string{"--assess"}
+	for _, a := range from {
+		out = append(out, "--assess-checkout", a)
+	}
+	return out
+}
+
 // coordinatorArgs is the coordinator child's command line.
-func (f *coordFlags) coordinatorArgs(ens string, projects []string) []string {
+func (f *coordFlags) coordinatorArgs(ens string, projects []string, extra ...string) []string {
 	args := []string{"coordinator", "--ensemble", ens}
 	for _, pr := range projects {
 		args = append(args, "--project", pr)
 	}
+	args = append(args, extra...)
 	for _, kv := range [][2]string{{"--cwd", f.cwd}, {"--nats-url", f.url}, {"--nats-creds", f.creds}} {
 		if kv[1] != "" {
 			args = append(args, kv[0], kv[1])
@@ -166,12 +182,12 @@ func (f *coordFlags) coordinatorArgs(ens string, projects []string) []string {
 
 // coordinatorProcess starts `ape coordinator --ensemble ens` with the
 // supervisor's own connection flags and a --project for each of projects.
-func (f *coordFlags) coordinatorProcess(ctx context.Context, ens string, projects []string) (supervisor.Handle, error) {
+func (f *coordFlags) coordinatorProcess(ctx context.Context, ens string, projects []string, extra ...string) (supervisor.Handle, error) {
 	self, err := os.Executable()
 	if err != nil {
 		return nil, err
 	}
-	c := exec.CommandContext(ctx, self, f.coordinatorArgs(ens, projects)...)
+	c := exec.CommandContext(ctx, self, f.coordinatorArgs(ens, projects, extra...)...)
 	c.Stdout, c.Stderr = os.Stderr, os.Stderr
 	if err := c.Start(); err != nil {
 		return nil, err

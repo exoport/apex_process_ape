@@ -29,7 +29,7 @@ in the `<user>` position, which its credential enforces as a developer's does.
 | `ape.evt.<user>.<project>.project.<milestone>.<event>` | project | `person`, `gate-green`, `milestone-done`, `run-end`, `run-lost`, `stop`, `block`, `plan-approved`, `change-archived`, `gate-red`, `milestone-claimed`, `milestone-released`, `close-queued`, `close-merged`, `act-requested`, `question-escalated`, `milestone-paused`, `milestone-resumed` |
 | `ape.evt.<user>.<project>.change.<change-id>.<event>` | change | `pr-opened`, `queued`, `ejected`, `merged`, `rebased`, `conflicted` |
 | `ape.evt.<user>.<ensemble>.contract.<name>.<event>` | contract | `drafted`, `frozen`, `fulfilled`, `version-proposed`, `version-accepted` |
-| `ape.evt.coord.<ensemble>.coord.<id>.<event>` | coord | `lease-expired`, `slot-granted`, `slot-reclaimed`, `impact-notice`, `hold-requested`, `coordinator-replaced`, `health-unconfirmed`, `nats-paused`, `nats-resumed`, `heartbeat` |
+| `ape.evt.coord.<ensemble>.coord.<id>.<event>` | coord | `lease-expired`, `slot-granted`, `slot-reclaimed`, `impact-notice`, `hold-requested`, `assessor-failed`, `coordinator-replaced`, `health-unconfirmed`, `nats-paused`, `nats-resumed`, `heartbeat` |
 | `ape.coord.<ensemble>.<verb>` | service | `slot.acquire`, `slot.release`, `status`, `hold.ack` |
 | `ape.sup.<verb>` | service | `ensure`, `health.report`, `status` |
 <!-- END generated:subjects -->
@@ -60,6 +60,35 @@ Leases are not requests: claiming, renewing and releasing one is a compare-and-s
   written, is left out and listed in `input.md`, and the batch still runs.
 - The assessor session runs in that folder as `ape task apex-assess`, confined to reading it and writing its
   `notice.json` ([the hook's allow-list](hooks.md#the-assessors-session)).
+- **What the coordinator publishes** (`ape coordinator --assess`, or `ape supervisor --assess`, which passes it on).
+  After the session, the coordinator judges `notice.json`, which is
+  `{"notices": [{"target": "<project>/<M>", "reason": "…", "evidence": ["<path>"], "hold": false}]}`, as a whole.
+  - The batch is refused, published as `assessor-failed`, with nothing else published, when:
+    - the file is missing, does not parse, or is over 16 KiB;
+    - it has an unknown key at any level;
+    - a target is not an open milestone of the batch's project, or is the milestone every event of the batch is of;
+    - there are two notices for one target;
+    - a reason is empty, over 600 characters, holds a control character other than newline, or matches a secret
+      pattern (`ghp_`/`gho_`/`ghs_`/`ghu_`/`ghr_`, `github_pat_`, a NATS seed, `-----BEGIN`);
+    - an evidence list is not 1 to 8 relative paths of at most 200 characters, with no `..`, each a regular file of
+      the snapshot or a path one of the input's diffs changes;
+    - the session was denied any call (`<folder>.denied.jsonl`).
+  - `assessor-failed`'s reason names the rule broken, and never quotes what the session wrote.
+  - A valid batch is published right after a fence with the coordinator's own current lease. Each notice is an
+    `impact-notice` on `ape.evt.coord.<ensemble>.coord.<batch>-<project>-<M>.impact-notice`, and also a
+    `hold-requested` on the same id when `hold` is true. A hold request pauses nothing.
+  - The payload is `{id, batch, target, reason, evidence, hold, events, at}`, where `events` holds the batch's triggers'
+    message ids.
+  - A notice's subject is published at most once: the coordinator reads the subject's last message first, a dedupe
+    that never expires, beside the stream's 10-minute window. A coordinator that lost its lease publishes nothing.
+- Each batch's record is kept under `$XDG_STATE_HOME/ape/coord/<ensemble>/assess/kept/<batch>-<project>/` (else
+  `~/.local/state/…`). It holds `result.json`, `input.md`, `notice.json`, `denied.jsonl` and the session's `task.json`.
+  `result.json` holds the outcome (`published`, `refused`, `assessor-failed` or `fenced`), the reason, the ids
+  published and the sha256 of the `SKILL.md` that ran. The snapshot itself is removed. A batch id already recorded is
+  not run again.
+- `ape status --json` in a member project lists the notices to each milestone as `milestones[].notices`
+  (`{id, reason, evidence, hold, at}`), read from NATS within 3 s. The field is left out when there are none, or when
+  NATS cannot be read.
 - `milestone-paused` / `milestone-resumed` (kind `project`) come from the conductor's ape (OQ24: a question left
   unanswered past the pause age; payload `{by, user}`) or from a person's `ape milestone pause|resume` (payload
   `{kind: "person", by, user, reason, at}`). While the newest is a pause, the milestone's change new, start and archive,
