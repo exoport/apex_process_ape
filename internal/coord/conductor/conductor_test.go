@@ -2,6 +2,7 @@ package conductor
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -349,4 +350,144 @@ func TestFormat_TheAckSurvivesARealShell(t *testing.T) {
 	stripped := strings.TrimPrefix(token, "$JS")
 	require.Equal(t, []string{"conductor", "ack", stripped}, got("ape conductor ack "+token), "the control: unquoted, $JS is expanded away")
 	require.Equal(t, []string{"conductor", "ack", stripped}, got(`ape conductor ack "`+token+`"`), "the control: double quotes expand it too")
+}
+
+// outageRig is rig on a three-node cluster whose nodes a test can stop and
+// restart on their data, with the buckets and stream at R3.
+func outageRig(t *testing.T) (*natstest.Cluster, *nats.Conn, jetstream.JetStream) {
+	t.Helper()
+	c := natstest.RunCluster(t, 3)
+	nc, err := nats.Connect(c.URLs(), nats.MaxReconnects(-1), nats.ReconnectWait(200*time.Millisecond))
+	require.NoError(t, err)
+	t.Cleanup(nc.Close)
+	js, err := jetstream.New(nc)
+	require.NoError(t, err)
+	ctx := context.Background()
+	require.NoError(t, lease.Declare(ctx, js, 3))
+	require.NoError(t, slots.Declare(ctx, js, 3))
+	require.NoError(t, events.Declare(ctx, js, 3))
+	ls, err := lease.Open(ctx, js)
+	require.NoError(t, err)
+	require.NoError(t, ls.SetEpoch(ctx, 1))
+	return c, nc, js
+}
+
+func outage(t *testing.T, c *natstest.Cluster, d time.Duration) {
+	t.Helper()
+	for i := range c.Servers {
+		c.Stop(i)
+	}
+	time.Sleep(d)
+	for i := range c.Servers {
+		c.Restart(i)
+	}
+	c.WaitMetaLeader(30 * time.Second)
+}
+
+// V8d (FINDING-V15-1C-DRILL-1): in 1c's 90 s outage attach logged "lease
+// lost: lease: read epoch: context deadline exceeded" and exited; nothing
+// restarted it, and the conductor went deaf. Now it rides the outage out,
+// as the supervisor does: every node down past the lease's TTL, then back
+// on its data, and the same conductor still runs, holds its lease and gets
+// the next event. The control: another conductor of the person took the
+// lapsed lease before this one was back, and it stops (ErrLost).
+func TestDrill_ConductorRidesOutANATSOutage(t *testing.T) {
+	t.Run("rides-it-out", func(t *testing.T) {
+		c, _, js := outageRig(t)
+		ctx := t.Context()
+		anc, err := nats.Connect(c.URLs(), nats.MaxReconnects(-1), nats.ReconnectWait(200*time.Millisecond))
+		require.NoError(t, err)
+		t.Cleanup(anc.Close)
+		a := &fakeSession{nc: anc, answers: 99, acked: map[string]bool{}}
+		var logMu sync.Mutex
+		var logged []string
+		cfg := scaled("ann", "cond-a", a)
+		cfg.Log = func(f string, args ...any) {
+			logMu.Lock()
+			logged = append(logged, fmt.Sprintf(f, args...))
+			logMu.Unlock()
+		}
+		errA := make(chan error, 1)
+		go func() { errA <- Run(ctx, anc, cfg) }()
+		time.Sleep(500 * time.Millisecond)
+		publish(t, js, "block", 1)
+		require.Eventually(t, func() bool { return a.done.Load() == 1 }, 5*time.Second, 50*time.Millisecond, "delivered and acknowledged before the outage")
+
+		outage(t, c, 3*cfg.LeaseTTL)
+		select {
+		case err := <-errA:
+			t.Fatalf("attach ended during the outage: %v", err)
+		default:
+		}
+		require.Eventually(t, func() bool {
+			_, err := events.Publish(context.Background(), js, events.Subject("bob", "taskforge", events.KindProject, "M2", "question"), events.MessageID("taskforge", "c1", 2), []byte(`{"q":"after"}`))
+			return err == nil
+		}, 30*time.Second, 200*time.Millisecond)
+		require.Eventually(t, func() bool { return a.done.Load() == 2 }, 20*time.Second, 100*time.Millisecond, "the next event reaches the same conductor, acknowledged")
+		select {
+		case err := <-errA:
+			t.Fatalf("attach ended after the outage: %v", err)
+		default:
+		}
+		require.Eventually(t, func() bool {
+			ls, err := lease.Open(ctx, js)
+			if err != nil {
+				return false
+			}
+			h, _, err := ls.Holder(ctx, layout.ConductorKey("ann", "atomix"))
+			return err == nil && h == "cond-a"
+		}, 10*time.Second, 100*time.Millisecond, "its lease is held again")
+		logMu.Lock()
+		defer logMu.Unlock()
+		all := strings.Join(logged, "")
+		require.True(t, strings.Contains(all, "riding it out") || strings.Contains(all, "claimed again"), "the outage is said: %q", all)
+	})
+	t.Run("another-conductor-took-it", func(t *testing.T) {
+		c, _, js := outageRig(t)
+		ctx := t.Context()
+		// This conductor comes back slowly, after the other claimed.
+		anc, err := nats.Connect(c.URLs(), nats.MaxReconnects(-1), nats.ReconnectWait(8*time.Second))
+		require.NoError(t, err)
+		t.Cleanup(anc.Close)
+		a := &fakeSession{nc: anc, answers: 99, acked: map[string]bool{}}
+		cfg := scaled("ann", "cond-a", a)
+		errA := make(chan error, 1)
+		go func() { errA <- Run(ctx, anc, cfg) }()
+		time.Sleep(500 * time.Millisecond)
+		publish(t, js, "block", 1)
+		require.Eventually(t, func() bool { return a.done.Load() == 1 }, 10*time.Second, 50*time.Millisecond, "bound and delivering before the outage")
+
+		outage(t, c, 3*cfg.LeaseTTL)
+		bnc, err := nats.Connect(c.URLs())
+		require.NoError(t, err)
+		t.Cleanup(bnc.Close)
+		bjs, err := jetstream.New(bnc)
+		require.NoError(t, err)
+		// The lease lapsed during the outage (a server may keep an expired
+		// key a while after a restart, so the lapse is made deterministic)
+		// and another conductor of the person takes the ensemble over.
+		require.Eventually(t, func() bool {
+			ls, err := lease.Open(ctx, bjs)
+			if err != nil {
+				return false
+			}
+			key := layout.ConductorKey("ann", "atomix")
+			h, tok, err := ls.Holder(ctx, key)
+			if err != nil {
+				return false
+			}
+			if h != "" {
+				_ = ls.Release(ctx, lease.Lease{Key: key, Holder: h, Token: tok})
+			}
+			_, err = ls.Claim(ctx, key, "cond-b", time.Minute)
+			return err == nil
+		}, 15*time.Second, 100*time.Millisecond, "another conductor takes the lapsed lease")
+		select {
+		case err := <-errA:
+			require.ErrorIs(t, err, ErrLost)
+			require.ErrorContains(t, err, "cond-b")
+		case <-time.After(30 * time.Second):
+			t.Fatal("attach kept running though another conductor holds the ensemble")
+		}
+	})
 }

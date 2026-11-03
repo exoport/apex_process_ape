@@ -2772,7 +2772,10 @@ session pinned at the first look (another session — after a /clear — pauses 
 and a steady screen. An event not acknowledged is delivered again; a question left past
 30 minutes is escalated and past 2 hours its milestone pauses; a conductor that
 acknowledges nothing stops renewing its lease, which another of your conductors may
-then take over, unacknowledged events included.
+then take over, unacknowledged events included. A NATS outage is ridden out: the lease
+is renewed again once NATS answers (claimed again if it lapsed meanwhile and nobody else
+took it), and deliveries resume; only another of your conductors holding the ensemble
+ends it.
 
 The projects must belong to one ensemble (two checkouts of one project count once); the NATS URL and the credential
 (hot/ape-nats.creds) are the first project's.

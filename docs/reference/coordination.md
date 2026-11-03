@@ -318,7 +318,7 @@ pressing Enter again (three times at most) until the input row empties or a turn
 pending, nothing is typed over it, and it is delivered again once the row is free. A different session in the pane (after a
 `/clear`) pauses it until `ape conductor watcher --repin` runs from that session. Each delivery is marked as ape's, so
 it never grants a person act, and ends with the `ape conductor ack '$JS.ACK.…'` that acknowledges it, the token single-quoted so a shell keeps its `$JS`; a token whose `$JS` was expanded away (`.ACK.…`) is refused with exit 2, never acknowledged locally. Two checkouts of
-one project passed as two `--project`s count once. An attach that fails before it binds its consumer releases the
+one project passed as two `--project`s count once. Attach rides out a NATS outage as the supervisor does: it renews the conductor lease again once NATS answers (claiming it again if it lapsed and nobody else took it), and its deliveries resume; only another of your conductors holding the ensemble ends it. An attach that fails before it binds its consumer releases the
 conductor lease, so a corrected attach need not wait out the lease's five minutes.
 
 ## Tokens and fencing

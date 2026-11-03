@@ -56,6 +56,8 @@ type Config struct {
 	// redelivery interval; Escalate and Pause the question ages.
 	LeaseTTL, Renew, AckWait, Escalate, Pause time.Duration
 	Session                                   Session
+	// Log reports what the conductor's ape rides out (V8d); nil: nothing.
+	Log func(format string, a ...any)
 }
 
 func (c *Config) defaults() {
@@ -146,24 +148,18 @@ func Run(ctx context.Context, nc *nats.Conn, cfg Config) error {
 	if err != nil {
 		return err
 	}
-	cons, err := js.CreateOrUpdateConsumer(ctx, events.EventsStream, jetstream.ConsumerConfig{
-		Durable:        layout.ConductorConsumer(tok(cfg.User), tok(cfg.Ensemble)),
-		FilterSubjects: Filters(cfg.Ensemble, cfg.Projects),
-		AckPolicy:      jetstream.AckExplicitPolicy,
-		AckWait:        cfg.AckWait,
-		DeliverPolicy:  jetstream.DeliverNewPolicy,
-	})
+	r := &runner{cfg: cfg, js: js, pend: map[uint64]*pending{}, lastAck: time.Now()}
+	cons, err := r.bind(ctx)
 	if err != nil {
 		// Nothing was delivered: the lease is let go, so a corrected
 		// attach need not wait out its TTL (v1.5 PRE-3).
 		_ = ls.Release(context.WithoutCancel(ctx), l)
 		return fmt.Errorf("conductor: bind consumer: %w", err)
 	}
-
-	r := &runner{cfg: cfg, js: js, pend: map[uint64]*pending{}, lastAck: time.Now()}
+	r.cons = cons
 	dctx, stop := context.WithCancel(ctx)
 	defer stop()
-	go r.deliver(dctx, cons)
+	go r.deliver(dctx)
 
 	t := time.NewTicker(cfg.Renew)
 	defer t.Stop()
@@ -173,20 +169,114 @@ func Run(ctx context.Context, nc *nats.Conn, cfg Config) error {
 			_ = ls.Release(context.WithoutCancel(ctx), l)
 			return nil
 		case <-t.C:
-			r.sweep(ctx, cons)
-			if !r.answering() {
-				// Silent: stop renewing; the lease expires on its own.
-				if _, _, err := ls.Holder(ctx, l.Key); err == nil && !r.stillHeld(ctx, ls, l) {
-					return ErrLost
-				}
-				continue
+			r.sweep(ctx, r.consumer())
+			if l, err = r.keep(ctx, ls, l); err != nil {
+				return err
 			}
-			nl, err := ls.Renew(ctx, l)
-			if err != nil {
-				return fmt.Errorf("%w: %w", ErrLost, err)
-			}
-			l = nl
 		}
+	}
+}
+
+// bind creates or binds the conductor's durable consumer.
+func (r *runner) bind(ctx context.Context) (jetstream.Consumer, error) {
+	return r.js.CreateOrUpdateConsumer(ctx, events.EventsStream, jetstream.ConsumerConfig{
+		Durable:        layout.ConductorConsumer(tok(r.cfg.User), tok(r.cfg.Ensemble)),
+		FilterSubjects: Filters(r.cfg.Ensemble, r.cfg.Projects),
+		AckPolicy:      jetstream.AckExplicitPolicy,
+		AckWait:        r.cfg.AckWait,
+		DeliverPolicy:  jetstream.DeliverNewPolicy,
+	})
+}
+
+func (r *runner) consumer() jetstream.Consumer {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.cons
+}
+
+func (r *runner) logf(format string, a ...any) {
+	if r.cfg.Log != nil {
+		r.cfg.Log(format, a...)
+	}
+}
+
+// keep is one tick of the conductor lease (OQ22, V8d). A silent
+// conductor stops renewing, and once its lease lapsed it has lost the
+// ensemble (ErrLost), which another of the person's conductors may then
+// take over (D545). An answering one renews it, and rides out NATS being
+// unreachable (FINDING-V15-1C-DRILL-1: attach exited on the first failed
+// read): tried again at the next tick, as the supervisor does; a lease
+// that lapsed meanwhile is claimed again when nobody else holds it, or
+// taken up at its new revision when it is still this conductor's. Another
+// conductor holding it ends the run (ErrLost).
+func (r *runner) keep(ctx context.Context, ls *lease.Store, l lease.Lease) (lease.Lease, error) {
+	// While NATS is unreachable nobody could acknowledge anything, so
+	// silence is judged only once it answers again (reachable restarts the
+	// window).
+	if !r.down && !r.answering() {
+		// Silent: stop renewing; the lease expires on its own.
+		if _, _, err := ls.Holder(ctx, l.Key); err == nil && ls.Fence(ctx, l.Key, l.Token) != nil {
+			return l, ErrLost
+		}
+		return l, nil
+	}
+	nl, err := ls.Renew(ctx, l)
+	if err == nil {
+		r.reachable()
+		return nl, nil
+	}
+	if !errors.Is(err, lease.ErrStale) {
+		r.unreachable(err)
+		return l, nil
+	}
+	cur, tok, err := ls.Holder(ctx, l.Key)
+	switch {
+	case err != nil:
+		r.unreachable(err)
+		return l, nil
+	case cur != "" && cur != r.cfg.Holder:
+		return l, fmt.Errorf("%w: %s holds %s now", ErrLost, cur, l.Key)
+	case cur == r.cfg.Holder:
+		// Ours, at a revision this conductor did not see (a renewal whose
+		// reply the outage lost).
+		nl, err := ls.Renew(ctx, lease.Lease{Key: l.Key, Holder: r.cfg.Holder, Token: tok, TTL: r.cfg.LeaseTTL})
+		if err != nil {
+			r.unreachable(err)
+			return l, nil
+		}
+		r.reachable()
+		return nl, nil
+	}
+	nl, err = ls.Claim(ctx, l.Key, r.cfg.Holder, r.cfg.LeaseTTL)
+	if errors.Is(err, lease.ErrHeld) {
+		return l, nil // taken between the read and the claim: read again next tick
+	}
+	if err != nil {
+		r.unreachable(err)
+		return l, nil
+	}
+	r.reachable()
+	r.logf("conductor: %s had lapsed during the outage; claimed again\n", l.Key)
+	return nl, nil
+}
+
+// unreachable says once per outage that the lease could not be kept.
+func (r *runner) unreachable(err error) {
+	if !r.down {
+		r.down = true
+		r.logf("conductor: the conductor lease could not be renewed (%v); riding it out, trying again every %s\n", err, r.cfg.Renew)
+	}
+}
+
+// reachable ends an outage: the conductor's answer window starts again
+// from now, since it could acknowledge nothing while NATS was down.
+func (r *runner) reachable() {
+	if r.down {
+		r.down = false
+		r.mu.Lock()
+		r.lastAck = time.Now()
+		r.mu.Unlock()
+		r.logf("conductor: the conductor lease is renewed again\n")
 	}
 }
 
@@ -194,16 +284,33 @@ type runner struct {
 	cfg     Config
 	js      jetstream.JetStream
 	mu      sync.Mutex
+	cons    jetstream.Consumer
 	pend    map[uint64]*pending
 	lastAck time.Time
+	// down: the lease could not be kept at the last tick (said once).
+	down bool
 }
 
 // deliver types each event when the session is idle; a redelivery of an
-// event still pending is typed again.
-func (r *runner) deliver(ctx context.Context, cons jetstream.Consumer) {
+// event still pending is typed again. A fetch that fails (NATS down) is
+// tried again after a pause, and a consumer gone from the cluster is
+// bound again (V8d).
+func (r *runner) deliver(ctx context.Context) {
 	for ctx.Err() == nil {
-		batch, err := cons.Fetch(1, jetstream.FetchMaxWait(time.Second))
+		batch, err := r.consumer().Fetch(1, jetstream.FetchMaxWait(time.Second))
 		if err != nil {
+			if errors.Is(err, jetstream.ErrConsumerNotFound) || errors.Is(err, jetstream.ErrConsumerDeleted) {
+				if c, berr := r.bind(ctx); berr == nil {
+					r.mu.Lock()
+					r.cons = c
+					r.mu.Unlock()
+					r.logf("conductor: bound its consumer again\n")
+				}
+			}
+			select {
+			case <-ctx.Done():
+			case <-time.After(time.Second):
+			}
 			continue
 		}
 		for m := range batch.Messages() {
@@ -271,10 +378,6 @@ func (r *runner) answering() bool {
 		return true
 	}
 	return time.Since(r.lastAck) < r.cfg.LeaseTTL
-}
-
-func (r *runner) stillHeld(ctx context.Context, ls *lease.Store, l lease.Lease) bool {
-	return ls.Fence(ctx, l.Key, l.Token) == nil
 }
 
 func (r *runner) publish(ctx context.Context, p *pending, event string) {
