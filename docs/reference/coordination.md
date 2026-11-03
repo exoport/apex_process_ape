@@ -48,6 +48,14 @@ Leases are not requests: claiming, renewing and releasing one is a compare-and-s
   gate, key, at}`. The message id is `<project>/<checkout-id>/<event>/<M>/<key>`, where `key` is the approval's time,
   the change's id or the gate run's `<sha>@<at>`. So a re-publish of one act is stored once, and an impact notice's
   `events` names its triggers by these ids.
+- The coordinator debounces those triggers into batches (60 s quiet, 5 min ceiling), and builds one **batch folder**
+  per batch and project for the assessor: a `git archive` of the remote's `main`, with no `.git`, no `hot/` and no
+  symbolic link (links, and any entry that is not a regular file or directory, are dropped at extraction), plus
+  `input.md`. `input.md` lists the batch's events, every open (approved) milestone's roadmap section, gate paths and
+  its changes' `touches:` and `paths:` on `milestone/<M>`, and each archived change's diff. That diff is read only from
+  a commit on `milestone/<M>` that `main` lacks: the event's commit when it is one, else the commit there whose
+  `Change:` trailer names the change, else none, and the input says which. `input.md` is cut at 256 KiB and each diff
+  at 64 KiB, saying so.
 - `milestone-paused` / `milestone-resumed` (kind `project`) come from the conductor's ape (OQ24: a question left
   unanswered past the pause age; payload `{by, user}`) or from a person's `ape milestone pause|resume` (payload
   `{kind: "person", by, user, reason, at}`). While the newest is a pause, the milestone's change new, start and archive,
