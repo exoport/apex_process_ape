@@ -133,7 +133,7 @@ func PreTool(payload HookPayload) PreToolDecision {
 			cwd, _ = os.Getwd()
 		}
 		command := bashCommand(payload.ToolInput)
-		for _, guard := range []func(command, cwd string) PreToolDecision{RecordGuard, CredsGuard, TagGuard, PushGuard, KillGuard, SubjectGuard, GateGuard} {
+		for _, guard := range []func(command, cwd string) PreToolDecision{RecordGuard, CredsGuard, TagGuard, PushGuard, KillGuard, SubjectGuard, GateGuard, PersonOnlyGuard} {
 			if d := guard(command, cwd); d.Deny {
 				return d
 			}

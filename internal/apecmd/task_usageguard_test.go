@@ -222,7 +222,7 @@ func TestTask_UsageOKRefusedInAModelSession(t *testing.T) {
 	}
 	t.Setenv("APE_SESSION", "")
 	t.Setenv("CLAUDECODE", "")
-	require.NoError(t, apexv1.RequirePersonFlag("--usage-ok"), "a person at a terminal")
+	require.NoError(t, apexv1.RequirePersonFlag(apexv1.PersonTaskUsageOK), "a person at a terminal")
 }
 
 // The decision lands in the run manifest as usage.guard, beside the

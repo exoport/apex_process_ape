@@ -88,7 +88,9 @@ project, `ape milestone claim` itself and its `--adopt` (v1.5). `--adopt` takes 
 refuses `session.person-only` whatever was typed, and no standing order can delegate `--adopt`:
 it is `milestone-adopt` among the acts orders never name. `ape milestone pause <M> --reason "…"` and
 `ape milestone resume <M>` are terminal-only too, and only from the checkout whose lease book holds
-M's claim (OQ6: a hold on one milestone is that person's act).
+M's claim (OQ6: a hold on one milestone is that person's act). A command's own environment is no
+proof it runs at a terminal (a model can clear it with `env -u`), so the pre-tool hook also denies
+each of these verbs' Bash calls in a model session, from one list in ape (FINDING-V15-1C-PRE-1).
 
 ## In your own Claude Code session
 

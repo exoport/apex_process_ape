@@ -59,11 +59,11 @@ Exit codes: 0 claimed · 1 refused (held by another, no ensemble, NATS) · 2 usa
 			// D736+: --adopt is a person's act of its own, from a terminal
 			// only, never granted or ordered (orders: milestone-adopt, never).
 			if adopt {
-				if err := apexv1.RequirePersonFlag("ape milestone claim --adopt"); err != nil {
+				if err := apexv1.RequirePersonFlag(apexv1.PersonMilestoneAdopt); err != nil {
 					return usageErr(err)
 				}
 			}
-			if err := apexv1.RequirePersonFlag("ape milestone claim"); err != nil {
+			if err := apexv1.RequirePersonFlag(apexv1.PersonMilestoneClaim); err != nil {
 				return usageErr(err)
 			}
 			p, err := v1Project(&f)
@@ -125,7 +125,7 @@ Exit codes: 0 released · 1 refused (no ensemble, NATS) · 2 usage.`,
 		Example: `  ape milestone release M3`,
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := apexv1.RequirePersonFlag("ape milestone release"); err != nil {
+			if err := apexv1.RequirePersonFlag(apexv1.PersonMilestoneRelease); err != nil {
 				return usageErr(err)
 			}
 			p, err := v1Project(&f)
@@ -185,9 +185,9 @@ Exit codes: 0 paused · 1 refused (not this checkout's claim, NATS) · 2 usage (
 --reason), or a model session.`,
 			`  ape milestone pause M3 --reason "wait for M4's gate"`
 	}
-	verb := "ape milestone resume"
+	verb := apexv1.PersonMilestoneResume
 	if pause {
-		verb = "ape milestone pause"
+		verb = apexv1.PersonMilestonePause
 	}
 	cmd := &cobra.Command{
 		Use: use, Short: short, Long: long, Example: example,

@@ -177,7 +177,7 @@ failed · 2 usage, a model session, or --by not the orders' person.`,
 
 // acceptOrdersFrom is `ape orders accept --from <draft>` (D662.1).
 func acceptOrdersFrom(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, by, from string) error {
-	if err := apexv1.RequirePersonFlag("ape orders accept --from"); err != nil {
+	if err := apexv1.RequirePersonFlag(apexv1.PersonOrdersAcceptFrom); err != nil {
 		return v1Fail(cmd, f, err, nil)
 	}
 	data, err := os.ReadFile(from)

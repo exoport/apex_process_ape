@@ -55,15 +55,17 @@ func requirePerson(ctx context.Context, act, flag string) error {
 	return &UsageError{Code: CodePersonOnly, Msg: msg}
 }
 
-// RequirePersonFlag refuses a person-only flag that no grant ever covers
+// RequirePersonFlag refuses a person-only verb that no grant ever covers
 // (W4: `ape task --usage-ok`) in a model session — under APE_SESSION, or in
 // any Claude Code session (CLAUDECODE): a person runs the command from a
-// terminal.
-func RequirePersonFlag(flag string) error {
+// terminal. That reads the command's own environment, which a model can
+// clear (`env -u`), so the pre-tool hook also denies each listed verb's
+// Bash call (PersonOnly, FINDING-V15-1C-PRE-1).
+func RequirePersonFlag(v PersonOnlyVerb) error {
 	k := ModelSession()
 	if k == "" {
 		return nil
 	}
-	return &UsageError{Code: CodePersonOnly, Action: ActionPerson, Msg: flag + " is for a person, and this runs in a model session (" + k +
+	return &UsageError{Code: CodePersonOnly, Action: ActionPerson, Msg: v.Label + " is for a person, and this runs in a model session (" + k +
 		" is set) — a person runs the command from a terminal outside Claude Code"}
 }

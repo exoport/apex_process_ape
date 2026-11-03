@@ -539,7 +539,7 @@ func (p *Project) LoadOrders(ctx context.Context, person string) (*Orders, error
 // no grant from a model session ever covers it (D659 A2: the orders
 // themselves are never delegated).
 func (p *Project) AcceptOrders(ctx context.Context, person, by string) (*Orders, error) {
-	return p.markOrders(ctx, person, by, "ape orders accept", func(o *Orders, m OrdersMark) {
+	return p.markOrders(ctx, person, by, PersonOrdersAccept, func(o *Orders, m OrdersMark) {
 		m.SHA256 = o.SHA256
 		o.Accepted, o.Revoked = &m, nil
 	}, "accepted")
@@ -549,13 +549,13 @@ func (p *Project) AcceptOrders(ctx context.Context, person, by string) (*Orders,
 // on the base branch. It counts at once: every delegated act reads the
 // base branch's tip.
 func (p *Project) RevokeOrders(ctx context.Context, person, by string) (*Orders, error) {
-	return p.markOrders(ctx, person, by, "ape orders revoke", func(o *Orders, m OrdersMark) {
+	return p.markOrders(ctx, person, by, PersonOrdersRevoke, func(o *Orders, m OrdersMark) {
 		o.Revoked = &m
 	}, "revoked")
 }
 
-func (p *Project) markOrders(ctx context.Context, person, by, cmd string, mark func(*Orders, OrdersMark), verb string) (*Orders, error) {
-	if err := RequirePersonFlag(cmd); err != nil {
+func (p *Project) markOrders(ctx context.Context, person, by string, cmdVerb PersonOnlyVerb, mark func(*Orders, OrdersMark), verb string) (*Orders, error) {
+	if err := RequirePersonFlag(cmdVerb); err != nil {
 		return nil, err
 	}
 	by = strings.TrimSpace(by)
@@ -708,7 +708,7 @@ func (p *Project) ReadOrdersDraft(ctx context.Context, by string, data []byte) (
 // AcceptOrdersFrom writes a confirmed draft as person's orders, accepted,
 // in one commit on the base branch. A person's act, from a terminal only.
 func (p *Project) AcceptOrdersFrom(ctx context.Context, d *OrdersDraft, by string) (*Orders, error) {
-	if err := RequirePersonFlag("ape orders accept --from"); err != nil {
+	if err := RequirePersonFlag(PersonOrdersAcceptFrom); err != nil {
 		return nil, err
 	}
 	o := d.Orders

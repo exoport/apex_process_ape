@@ -437,7 +437,7 @@ func newTaskCmd() *cobra.Command {
 			}
 			// W4: --usage-ok is a person's, from a terminal.
 			if usageOKFlag {
-				if err := apexv1.RequirePersonFlag("--usage-ok"); err != nil {
+				if err := apexv1.RequirePersonFlag(apexv1.PersonTaskUsageOK); err != nil {
 					return sessionRefusal(err)
 				}
 			}
