@@ -24,6 +24,7 @@ func newSupervisorCmd() *cobra.Command {
 	var heartbeat time.Duration
 	var projects, assessFrom []string
 	var assess bool
+	var assessBudget string
 	cmd := &cobra.Command{
 		Use:   "supervisor [--id <id>] [--heartbeat 1m]",
 		Short: "APEX v1.5 (in development): run a supervisor, which keeps each ensemble's coordinator running",
@@ -52,7 +53,7 @@ SIGINT/SIGTERM stops its coordinators and exits 0.`,
 				projects = []string{m.Project}
 			}
 			start := func(ctx context.Context, ens string) (supervisor.Handle, error) {
-				return f.coordinatorProcess(ctx, ens, projects, assessArgs(assess, assessFrom)...)
+				return f.coordinatorProcess(ctx, ens, projects, assessArgs(assess, assessFrom, assessBudget)...)
 			}
 			logf := func(format string, args ...any) {
 				fmt.Fprintf(cmd.ErrOrStderr(), "%s "+format+"\n", append([]any{time.Now().UTC().Format(time.RFC3339)}, args...)...)
@@ -66,6 +67,7 @@ SIGINT/SIGTERM stops its coordinators and exits 0.`,
 	cmd.Flags().DurationVar(&heartbeat, "heartbeat", time.Minute, "how often each held conductor lease gets a heartbeat event (0: none)")
 	cmd.Flags().StringSliceVar(&projects, "project", nil, "a member project whose milestone leases its coordinators watch (repeatable; default: the member project it runs in)")
 	cmd.Flags().BoolVar(&assess, "assess", false, "start each coordinator with --assess (the assessor, v1.5 §3.2)")
+	cmd.Flags().StringVar(&assessBudget, "assess-budget", "", "passed to each coordinator: the assessor's tokens for the stage (default: the coordinator's, 20M)")
 	cmd.Flags().StringArrayVar(&assessFrom, "assess-checkout", nil, "passed to each coordinator: <project>=<path>, the checkout the assessor reads a member from (repeatable)")
 	_ = cmd.Flags().MarkHidden("no-verify")
 	cmd.AddCommand(newSupervisorEnsureCmd(), newSupervisorStatusCmd())
@@ -154,11 +156,14 @@ func (p coordProcess) Terminate() {
 }
 
 // assessArgs are the coordinator child's assessor flags.
-func assessArgs(assess bool, from []string) []string {
+func assessArgs(assess bool, from []string, budget string) []string {
 	if !assess {
 		return nil
 	}
 	out := []string{"--assess"}
+	if budget != "" {
+		out = append(out, "--assess-budget", budget)
+	}
 	for _, a := range from {
 		out = append(out, "--assess-checkout", a)
 	}

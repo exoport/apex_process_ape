@@ -3,9 +3,11 @@ package apecmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -21,6 +23,8 @@ type fakePublisher struct {
 	mu      sync.Mutex
 	notices []coordinator.Notice
 	failed  []string
+	skipped []coordinator.Skip
+	metrics []coordinator.AssessMetrics
 	fenced  bool
 }
 
@@ -36,6 +40,20 @@ func (f *fakePublisher) Notices(_ context.Context, batch, project string, _ []st
 		published = append(published, coordinator.NoticeID(batch, project, ms))
 	}
 	return published, nil, nil
+}
+
+func (f *fakePublisher) Skipped(_ context.Context, s coordinator.Skip) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.skipped = append(f.skipped, s)
+	return nil
+}
+
+func (f *fakePublisher) Metrics(_, _ string, m coordinator.AssessMetrics) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.metrics = append(f.metrics, m)
+	return nil
 }
 
 func (f *fakePublisher) Failed(_ context.Context, _, _, reason string, _ []string) error {
@@ -211,4 +229,99 @@ func TestAssessRunner_OutcomesAndKeptRecords(t *testing.T) {
 	entries, err := os.ReadDir(filepath.Join(dir, "kept"))
 	require.NoError(t, err)
 	require.Len(t, entries, 6, "one record per batch")
+}
+
+// PLAN-V15-ASSESSOR step 7, the token line (D2, Q5): a session over its
+// cap (ape task's --max-tokens 1.5M, termination max_tokens) ends limit,
+// with nothing published but assessor-failed, and counts at least the cap;
+// past the stage budget, or with the usage guard against a launch, a batch
+// is skipped (assessor-skipped, the stage's first marked first) and no
+// session runs; each session's tokens go to the ledger and to ape.metrics.
+// The control: under the budget, a batch runs.
+func TestAssessRunner_TokenLine(t *testing.T) {
+	require.Contains(t, strings.Join(assessTaskArgs("/b", "/c"), " "), "--max-duration 10m0s --max-tokens 1500000")
+	checkout, _ := assessCheckout(t)
+	dir := t.TempDir()
+	sessions := 0
+	var answer func(folder string) []byte
+	var sessionErr error
+	usageAgainst := ""
+	r := &assessRunner{
+		dir: dir, checkouts: map[string]string{"atomix": checkout}, budget: 2_000_000, logf: t.Logf,
+		session: func(_ context.Context, folder, _ string) ([]byte, error) {
+			sessions++
+			return answer(folder), sessionErr
+		},
+		usageSkip: func(string) (string, bool) { return usageAgainst, usageAgainst != "" },
+	}
+	envelope := func(folder string, tokens int, termination string) []byte {
+		man := filepath.Join(folder, "_apex", "state", "runs", "tasks", "apex-assess", "latest", "manifest.yaml")
+		require.NoError(t, os.MkdirAll(filepath.Dir(man), 0o700))
+		body := "status: completed\n"
+		if termination != "" {
+			body = "status: failed\ntermination:\n  kind: " + termination + "\n  message: stopped\n"
+		}
+		require.NoError(t, os.WriteFile(man, []byte(body), 0o600))
+		rel, _ := filepath.Rel(folder, man)
+		return []byte(`{"success":` + map[bool]string{true: "true", false: "false"}[termination == ""] + `,"usage":{"input_tokens":` + strconv.Itoa(tokens) + `},"manifest_path":"` + rel + `"}`)
+	}
+
+	pub := &fakePublisher{}
+	answer = func(folder string) []byte {
+		require.NoError(t, os.WriteFile(filepath.Join(folder, apexv1.AssessNotice), []byte(`{"notices":[]}`), 0o600))
+		return envelope(folder, 300_000, "")
+	}
+	r.onBatch(context.Background(), assessBatch("t-1"), pub)
+	res := readResult(t, r.keptDir("t-1", "atomix"))
+	require.Equal(t, assessPublished, res.Outcome, "control: under the budget it runs")
+	require.Equal(t, int64(300_000), res.Tokens)
+	require.Len(t, pub.metrics, 1)
+	require.Equal(t, int64(300_000), pub.metrics[0].TokensTotal)
+	require.FileExists(t, filepath.Join(r.keptDir("t-1", "atomix"), "manifest.yaml"))
+
+	pub = &fakePublisher{}
+	answer = func(folder string) []byte {
+		require.NoError(t, os.WriteFile(filepath.Join(folder, apexv1.AssessNotice), []byte(`{"notices":[{"target":"atomix/M1","reason":"r","evidence":["internal/leader/sweep.go"]}]}`), 0o600))
+		return envelope(folder, 0, "max_tokens")
+	}
+	sessionErr = errors.New("exit status 1")
+	r.onBatch(context.Background(), assessBatch("t-2"), pub)
+	res = readResult(t, r.keptDir("t-2", "atomix"))
+	require.Equal(t, assessLimit, res.Outcome)
+	require.Empty(t, pub.notices, "a session over its cap publishes no notice")
+	require.Len(t, pub.failed, 1)
+	require.Contains(t, pub.failed[0], "max_tokens")
+	require.Equal(t, int64(1_500_000), res.Tokens, "counted at the cap at least")
+	require.Equal(t, int64(1_800_000), r.ledger().Tokens)
+
+	// 1.8M of 2M: one more runs, and takes the ensemble past its budget.
+	pub = &fakePublisher{}
+	answer = func(folder string) []byte {
+		require.NoError(t, os.WriteFile(filepath.Join(folder, apexv1.AssessNotice), []byte(`{"notices":[]}`), 0o600))
+		return envelope(folder, 400_000, "")
+	}
+	sessionErr = nil
+	r.onBatch(context.Background(), assessBatch("t-3"), pub)
+	require.Equal(t, assessPublished, readResult(t, r.keptDir("t-3", "atomix")).Outcome)
+	before := sessions
+	for i, id := range []string{"t-4", "t-5"} {
+		pub = &fakePublisher{}
+		r.onBatch(context.Background(), assessBatch(id), pub)
+		res = readResult(t, r.keptDir(id, "atomix"))
+		require.Equal(t, assessSkipped, res.Outcome, id)
+		require.Equal(t, "budget", res.Reason)
+		require.Len(t, pub.skipped, 1, "published once")
+		require.Equal(t, i == 0, pub.skipped[0].First, "the stage's first skip is marked first")
+		require.Equal(t, int64(2_200_000), pub.skipped[0].Spent)
+	}
+	require.Equal(t, before, sessions, "a skipped batch runs no session")
+
+	r.budget = 0
+	usageAgainst = "usage guard: the 5-hour window is at 97%"
+	pub = &fakePublisher{}
+	r.onBatch(context.Background(), assessBatch("t-6"), pub)
+	res = readResult(t, r.keptDir("t-6", "atomix"))
+	require.Equal(t, assessSkipped, res.Outcome)
+	require.Equal(t, "usage", res.Reason)
+	require.Equal(t, before, sessions)
 }

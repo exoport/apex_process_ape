@@ -33,6 +33,9 @@ const (
 	EventImpactNotice   = "impact-notice"
 	EventHoldRequested  = "hold-requested"
 	EventAssessorFailed = "assessor-failed"
+	// EventAssessorSkipped: a batch not assessed, the ensemble's assessor
+	// budget spent or the usage guard against it (step 7, D2).
+	EventAssessorSkipped = "assessor-skipped"
 
 	// NoticeFileCap and the field caps (R5).
 	NoticeFileCap   = 16 << 10
@@ -199,6 +202,46 @@ type Publisher interface {
 	Notices(ctx context.Context, batch, project string, eventIDs []string, ns []Notice) (published, dup []string, err error)
 	// Failed publishes assessor-failed for the batch's project, once.
 	Failed(ctx context.Context, batch, project, reason string, eventIDs []string) error
+	// Skipped publishes assessor-skipped for the batch's project, once
+	// (step 7): reason is budget or usage; first marks a stage's first
+	// skip, which the conductor surfaces to the person once.
+	Skipped(ctx context.Context, s Skip) error
+	// Metrics publishes a session's tokens on ape.metrics.coord.<ens>.
+	// <batch>-<project> (core NATS, as ape.metrics is; informational).
+	Metrics(batch, project string, m AssessMetrics) error
+}
+
+// Skip is assessor-skipped's payload.
+//
+//nolint:tagliatelle // ape's NATS payloads are snake_case (events.md)
+type Skip struct {
+	Batch   string   `json:"batch"`
+	Project string   `json:"project"`
+	Reason  string   `json:"reason"`
+	Detail  string   `json:"detail,omitempty"`
+	Spent   int64    `json:"spent_tokens"`
+	Budget  int64    `json:"budget_tokens"`
+	First   bool     `json:"first"`
+	Events  []string `json:"events"`
+	At      string   `json:"at"`
+}
+
+// AssessMetrics is one assessor session's usage.
+//
+//nolint:tagliatelle // ape's NATS payloads are snake_case (events.md)
+type AssessMetrics struct {
+	Batch       string  `json:"batch"`
+	Project     string  `json:"project"`
+	Ensemble    string  `json:"ensemble"`
+	TokensTotal int64   `json:"tokens_total"`
+	Input       int64   `json:"input_tokens"`
+	Output      int64   `json:"output_tokens"`
+	CacheRead   int64   `json:"cache_read_input_tokens"`
+	CacheWrite  int64   `json:"cache_creation_input_tokens"`
+	CostUSD     float64 `json:"cost_usd"`
+	Termination string  `json:"termination,omitempty"`
+	SpentTotal  int64   `json:"ensemble_spent_tokens"`
+	At          string  `json:"at"`
 }
 
 type publisher struct{ c *Coordinator }
@@ -301,4 +344,24 @@ func (p publisher) Failed(ctx context.Context, batch, project, reason string, ev
 	_, err := p.once(ctx, batch+"-"+natsconn.SubjectToken(project), EventAssessorFailed,
 		failedEvent{Batch: batch, Project: project, Reason: reason, Events: eventIDs, At: time.Now().UTC().Format(time.RFC3339)})
 	return err
+}
+
+func (p publisher) Skipped(ctx context.Context, s Skip) error {
+	if s.At == "" {
+		s.At = time.Now().UTC().Format(time.RFC3339)
+	}
+	_, err := p.once(ctx, s.Batch+"-"+natsconn.SubjectToken(s.Project), EventAssessorSkipped, s)
+	return err
+}
+
+func (p publisher) Metrics(batch, project string, m AssessMetrics) error {
+	m.Batch, m.Project, m.Ensemble = batch, project, p.c.cfg.Ensemble
+	if m.At == "" {
+		m.At = time.Now().UTC().Format(time.RFC3339)
+	}
+	data, err := json.Marshal(m)
+	if err != nil {
+		return err
+	}
+	return p.c.nc.Publish("ape.metrics."+Owner+"."+natsconn.SubjectToken(p.c.cfg.Ensemble)+"."+natsconn.SubjectToken(batch+"-"+project), data)
 }

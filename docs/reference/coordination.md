@@ -29,7 +29,7 @@ in the `<user>` position, which its credential enforces as a developer's does.
 | `ape.evt.<user>.<project>.project.<milestone>.<event>` | project | `person`, `gate-green`, `milestone-done`, `run-end`, `run-lost`, `stop`, `block`, `plan-approved`, `change-archived`, `gate-red`, `milestone-claimed`, `milestone-released`, `close-queued`, `close-merged`, `act-requested`, `question-escalated`, `milestone-paused`, `milestone-resumed`, `notice-acked` |
 | `ape.evt.<user>.<project>.change.<change-id>.<event>` | change | `pr-opened`, `queued`, `ejected`, `merged`, `rebased`, `conflicted` |
 | `ape.evt.<user>.<ensemble>.contract.<name>.<event>` | contract | `drafted`, `frozen`, `fulfilled`, `version-proposed`, `version-accepted` |
-| `ape.evt.coord.<ensemble>.coord.<id>.<event>` | coord | `lease-expired`, `slot-granted`, `slot-reclaimed`, `impact-notice`, `hold-requested`, `assessor-failed`, `coordinator-replaced`, `health-unconfirmed`, `nats-paused`, `nats-resumed`, `heartbeat` |
+| `ape.evt.coord.<ensemble>.coord.<id>.<event>` | coord | `lease-expired`, `slot-granted`, `slot-reclaimed`, `impact-notice`, `hold-requested`, `assessor-failed`, `assessor-skipped`, `coordinator-replaced`, `health-unconfirmed`, `nats-paused`, `nats-resumed`, `heartbeat` |
 | `ape.coord.<ensemble>.<verb>` | service | `slot.acquire`, `slot.release`, `status`, `hold.ack` |
 | `ape.sup.<verb>` | service | `ensure`, `health.report`, `status` |
 <!-- END generated:subjects -->
@@ -86,6 +86,20 @@ Leases are not requests: claiming, renewing and releasing one is a compare-and-s
   `result.json` holds the outcome (`published`, `refused`, `assessor-failed` or `fenced`), the reason, the ids
   published and the sha256 of the `SKILL.md` that ran. The snapshot itself is removed. A batch id already recorded is
   not run again.
+- **The token line (D2).**
+  - Each session is capped at 1.5 M tokens (`ape task --max-tokens`, termination `max_tokens`) and 10 minutes
+    (`--max-duration`). A session that reaches either cap ends with the outcome `limit`: it publishes `assessor-failed`
+    and no notice.
+  - The ensemble's assessor has a token budget for the stage: `--assess-budget`, default 20M; `0` means none. The
+    tokens spent are counted in the state dir's `spent.json`, and a session stopped at its cap counts at least the cap.
+  - At the budget, or when the usage guard would stop or hold a launch, the batch is skipped and runs no session. It
+    publishes `assessor-skipped` once per batch and project, on `….coord.<batch>-<project>.assessor-skipped`, with
+    payload `{batch, project, reason: budget|usage, detail, spent_tokens, budget_tokens, first, events, at}`. `first`
+    marks the stage's first skip, for the conductor to tell the person once. The work goes on either way.
+  - Each session's tokens are published on core NATS as `ape.metrics.coord.<ensemble>.<batch>-<project>` (tokens by
+    kind, cost, termination, and the ensemble's total spent), and kept in `result.json`, with the session's
+    `manifest.yaml`.
+  - A new stage starts from a fresh state dir, or with `spent.json` removed.
 - **The ack (Q3):** `ape coord notice ack <id> acted|dismissed` is a person's act, from a terminal only, in the same
   person-only list as `ape milestone pause` (pre-tool denies it in a model session in any form). It is accepted only
   from the checkout whose lease book holds the notice's milestone, and is recorded once, with the credential's user

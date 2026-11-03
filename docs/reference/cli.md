@@ -3329,6 +3329,7 @@ Flags:
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
 | `--assess` | bool | `false` | run the assessor (v1.5 §3.2): batch the --project members' triggers and run apex-assess on each batch |
+| `--assess-budget` | string | `20.0M` | the assessor's tokens for this stage (tokens_total, kept in the state dir's spent.json): past it each batch is skipped (assessor-skipped); 0: none |
 | `--assess-checkout` | stringArray | `[]` | <project>=<path>: the checkout of a member the assessor reads it from, and runs its installed apex-assess (repeatable; default: the project of --cwd) |
 | `--cwd` | string | `—` | the project whose coordination: block and hot/ape-nats.creds to use (default: the current directory) |
 | `--ensemble` | string | `—` | the ensemble (default: the project's) |
@@ -9744,6 +9745,7 @@ Flags:
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
 | `--assess` | bool | `false` | start each coordinator with --assess (the assessor, v1.5 §3.2) |
+| `--assess-budget` | string | `—` | passed to each coordinator: the assessor's tokens for the stage (default: the coordinator's, 20M) |
 | `--assess-checkout` | stringArray | `[]` | passed to each coordinator: <project>=<path>, the checkout the assessor reads a member from (repeatable) |
 | `--cwd` | string | `—` | the project whose coordination: block and hot/ape-nats.creds to use (default: the current directory) |
 | `--heartbeat` | duration | `1m0s` | how often each held conductor lease gets a heartbeat event (0: none) |

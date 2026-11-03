@@ -10,9 +10,11 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/exoport/apex_process_ape/internal/apexv1"
 	"github.com/exoport/apex_process_ape/internal/coord/coordinator"
 	"github.com/exoport/apex_process_ape/internal/coord/member"
 	"github.com/exoport/apex_process_ape/internal/natsconn"
+	"github.com/exoport/apex_process_ape/internal/usage"
 )
 
 func newCoordinatorCmd() *cobra.Command {
@@ -20,6 +22,7 @@ func newCoordinatorCmd() *cobra.Command {
 	var ensemble, id string
 	var projects, assessFrom []string
 	var assess bool
+	var assessBudget string
 	cmd := &cobra.Command{
 		Use:   "coordinator --ensemble <name> [--id <id>] [--project <slug>]...",
 		Short: "APEX v1.5 (in development): run an ensemble's coordinator until stopped",
@@ -55,7 +58,7 @@ releases the lease and exits 0.`,
 			}
 			cfg := coordinator.Config{Ensemble: ensemble, ID: id, Projects: projects}
 			if assess {
-				if cfg.Assessor, err = f.assessorConfig(cmd, ensemble, assessFrom); err != nil {
+				if cfg.Assessor, err = f.assessorConfig(cmd, ensemble, assessFrom, assessBudget); err != nil {
 					return err
 				}
 			}
@@ -67,16 +70,23 @@ releases the lease and exits 0.`,
 	cmd.Flags().StringVar(&id, "id", "", "this coordinator's id, the lease holder (default: <host>-<pid>)")
 	cmd.Flags().StringSliceVar(&projects, "project", nil, "a member project whose milestone leases it watches (repeatable)")
 	cmd.Flags().BoolVar(&assess, "assess", false, "run the assessor (v1.5 §3.2): batch the --project members' triggers and run apex-assess on each batch")
+	cmd.Flags().StringVar(&assessBudget, "assess-budget", apexv1.FormatTokens(assessBudgetDefault), "the assessor's tokens for this stage (tokens_total, kept in the state dir's spent.json): past it each batch is skipped (assessor-skipped); 0: none")
 	cmd.Flags().StringArrayVar(&assessFrom, "assess-checkout", nil, "<project>=<path>: the checkout of a member the assessor reads it from, and runs its installed apex-assess (repeatable; default: the project of --cwd)")
 	return cmd
 }
 
 // assessorConfig is --assess's: the checkouts, the state dir and the
 // runner, with the production batching window (Q2).
-func (f *coordFlags) assessorConfig(cmd *cobra.Command, ens string, specs []string) (*coordinator.AssessorConfig, error) {
+func (f *coordFlags) assessorConfig(cmd *cobra.Command, ens string, specs []string, budgetFlag string) (*coordinator.AssessorConfig, error) {
 	checkouts, err := assessCheckouts(specs)
 	if err != nil {
 		return nil, usageErr(err)
+	}
+	budget := int64(0)
+	if budgetFlag != "0" {
+		if budget, err = apexv1.ParseTokens(budgetFlag); err != nil {
+			return nil, usageErr(fmt.Errorf("--assess-budget: %w", err))
+		}
 	}
 	if len(checkouts) == 0 {
 		p, err := f.project()
@@ -97,7 +107,7 @@ func (f *coordFlags) assessorConfig(cmd *cobra.Command, ens string, specs []stri
 	if err != nil {
 		return nil, err
 	}
-	r := &assessRunner{dir: dir, checkouts: checkouts, session: taskSession(self), logf: func(format string, args ...any) {
+	r := &assessRunner{dir: dir, checkouts: checkouts, session: taskSession(self), budget: budget, usageSkip: assessUsageSkip, logf: func(format string, args ...any) {
 		fmt.Fprintf(cmd.ErrOrStderr(), "%s "+format+"\n", append([]any{time.Now().UTC().Format(time.RFC3339)}, args...)...)
 	}}
 	return &coordinator.AssessorConfig{Quiet: assessQuiet, Ceiling: assessCeiling, OnBatch: r.onBatch}, nil
@@ -108,3 +118,18 @@ const (
 	assessQuiet   = time.Minute
 	assessCeiling = 5 * time.Minute
 )
+
+// assessUsageSkip is the usage guard's word on an assessor launch from
+// checkout, without its hold: a stop or a hold skips the batch (D2).
+func assessUsageSkip(checkout string) (string, bool) {
+	p, err := apexv1.Open(checkout)
+	if err != nil {
+		return "", false
+	}
+	g := newUsageGuard(p, apexv1.AssessSkill, "", false)
+	d := usage.Decide(g.cfg, usage.Load(), g.share(), usageNow(), false)
+	if d.Outcome == usage.Stop || d.Outcome == usage.Hold {
+		return "usage guard: " + d.Why, true
+	}
+	return "", false
+}
