@@ -69,7 +69,8 @@ type assessRunner struct {
 	// session runs one assessor session: `ape task apex-assess` (a seam).
 	session func(ctx context.Context, folder, checkout string) (envelope []byte, err error)
 	logf    func(format string, args ...any)
-	// budget is the ensemble's assessor tokens per stage; 0 is none.
+	// budget is the ensemble's assessor tokens per stage: 0 skips every
+	// batch, -1 is none.
 	budget int64
 	// usageSkip says why the usage guard is against a launch now, if it
 	// is (a stop or a hold: a hold would wait for hours).
@@ -218,7 +219,7 @@ func (r *assessRunner) runProject(ctx context.Context, b coordinator.Batch, proj
 		r.saveLedger(led)
 		return res
 	}
-	if r.budget > 0 && led.Tokens >= r.budget {
+	if r.budget >= 0 && led.Tokens >= r.budget {
 		return skip("budget", fmt.Sprintf("the ensemble's assessor spent %s of its %s this stage", apexv1.FormatTokens(led.Tokens), apexv1.FormatTokens(r.budget)))
 	}
 	if r.usageSkip != nil {

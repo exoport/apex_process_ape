@@ -139,6 +139,7 @@ func TestAssessRunner_OutcomesAndKeptRecords(t *testing.T) {
 	r := &assessRunner{
 		dir:       dir,
 		checkouts: map[string]string{"atomix": checkout},
+		budget:    -1,
 		session: func(_ context.Context, folder, _ string) ([]byte, error) {
 			// What ape task's launch builds beside the folder.
 			skill := filepath.Join(folder+".plugin", "skills", "apex-assess", "SKILL.md")
@@ -316,7 +317,7 @@ func TestAssessRunner_TokenLine(t *testing.T) {
 	}
 	require.Equal(t, before, sessions, "a skipped batch runs no session")
 
-	r.budget = 0
+	r.budget = -1
 	usageAgainst = "usage guard: the 5-hour window is at 97%"
 	pub = &fakePublisher{}
 	r.onBatch(context.Background(), assessBatch("t-6"), pub)
@@ -334,7 +335,7 @@ func TestAssessRunner_ReplayAfterAKill(t *testing.T) {
 	checkout, _ := assessCheckout(t)
 	dir := t.TempDir()
 	r := &assessRunner{
-		dir: dir, checkouts: map[string]string{"atomix": checkout}, logf: t.Logf,
+		dir: dir, checkouts: map[string]string{"atomix": checkout}, budget: -1, logf: t.Logf,
 		session: func(_ context.Context, folder, _ string) ([]byte, error) {
 			require.NoError(t, os.WriteFile(filepath.Join(folder, apexv1.AssessNotice), []byte(`{"notices":[]}`), 0o600))
 			return []byte(`{"success":true}`), nil
@@ -350,4 +351,27 @@ func TestAssessRunner_ReplayAfterAKill(t *testing.T) {
 	res := readResult(t, r.keptDir("k-1", "atomix"))
 	require.Equal(t, assessPublished, res.Outcome, "%s %s", res.Reason, res.Detail)
 	require.Empty(t, res.Denials, "the dead session's denial is not this run's")
+}
+
+// --assess-budget: tokens, 0 (nothing allowed: PLAN §4's "budget 0 →
+// every batch skipped"), off (no budget).
+func TestAssessBudgetFlag(t *testing.T) {
+	for v, want := range map[string]int64{"20M": 20_000_000, "0": 0, "off": -1, "1.5M": 1_500_000} {
+		got, err := assessBudget(v)
+		require.NoError(t, err, v)
+		require.Equal(t, want, got, v)
+	}
+	_, err := assessBudget("lots")
+	require.Error(t, err)
+	checkout, _ := assessCheckout(t)
+	ran := false
+	r := &assessRunner{
+		dir: t.TempDir(), checkouts: map[string]string{"atomix": checkout}, budget: 0, logf: t.Logf,
+		session: func(context.Context, string, string) ([]byte, error) { ran = true; return nil, nil },
+	}
+	pub := &fakePublisher{}
+	r.onBatch(context.Background(), assessBatch("z-1"), pub)
+	require.False(t, ran, "budget 0: no session")
+	require.Len(t, pub.skipped, 1)
+	require.True(t, pub.skipped[0].First)
 }

@@ -70,7 +70,7 @@ releases the lease and exits 0.`,
 	cmd.Flags().StringVar(&id, "id", "", "this coordinator's id, the lease holder (default: <host>-<pid>)")
 	cmd.Flags().StringSliceVar(&projects, "project", nil, "a member project whose milestone leases it watches (repeatable)")
 	cmd.Flags().BoolVar(&assess, "assess", false, "run the assessor (v1.5 §3.2): batch the --project members' triggers and run apex-assess on each batch")
-	cmd.Flags().StringVar(&assessBudget, "assess-budget", apexv1.FormatTokens(assessBudgetDefault), "the assessor's tokens for this stage (tokens_total, kept in the state dir's spent.json): past it each batch is skipped (assessor-skipped); 0: none")
+	cmd.Flags().StringVar(&assessBudget, "assess-budget", apexv1.FormatTokens(assessBudgetDefault), "the assessor's tokens for this stage (tokens_total, kept in the state dir's spent.json): once spent, each batch is skipped (assessor-skipped); 0 skips every batch, off sets no budget")
 	cmd.Flags().StringArrayVar(&assessFrom, "assess-checkout", nil, "<project>=<path>: the checkout of a member the assessor reads it from, and runs its installed apex-assess (repeatable; default: the project of --cwd)")
 	return cmd
 }
@@ -82,11 +82,9 @@ func (f *coordFlags) assessorConfig(cmd *cobra.Command, ens string, specs []stri
 	if err != nil {
 		return nil, usageErr(err)
 	}
-	budget := int64(0)
-	if budgetFlag != "0" {
-		if budget, err = apexv1.ParseTokens(budgetFlag); err != nil {
-			return nil, usageErr(fmt.Errorf("--assess-budget: %w", err))
-		}
+	budget, err := assessBudget(budgetFlag)
+	if err != nil {
+		return nil, usageErr(err)
 	}
 	if len(checkouts) == 0 {
 		p, err := f.project()
@@ -132,4 +130,20 @@ func assessUsageSkip(checkout string) (string, bool) {
 		return "usage guard: " + d.Why, true
 	}
 	return "", false
+}
+
+// assessBudget is --assess-budget: tokens, 0 (every batch skipped), or
+// off (-1: no budget).
+func assessBudget(v string) (int64, error) {
+	switch v {
+	case "off":
+		return -1, nil
+	case "0":
+		return 0, nil
+	}
+	n, err := apexv1.ParseTokens(v)
+	if err != nil {
+		return 0, fmt.Errorf("--assess-budget: %w (tokens such as 20M, 0, or off)", err)
+	}
+	return n, nil
 }

@@ -110,6 +110,7 @@ v1.2, v1.3 and v1.4 keep that promise and add to it: the repository's `CHANGELOG
 - [Security model and known limits](explanation/security-model.md) — what the guards hold against, and what they do not
 - [The orchestrator and the loop](explanation/orchestrator-and-loop.md) — `/apex-orchestrator` and `ape task apex-loop`
 - [When `ape` runs inside a session `ape` started](explanation/nested-ape-runs.md) — the nesting rule
+- [The assessor (APEX v1.5, not released)](explanation/the-assessor.md) — why the cross-milestone impact check can only answer, and what the coordinator does with the answer
 - [Choosing between `ape chat`, `ape task`, and `ape prompt`](explanation/chat-task-prompt.md)
 - [Why PTY-only execution](explanation/why-pty-only.md)
 - [Why a `Stop` hook is not proof a step finished](explanation/step-completion-gates.md)

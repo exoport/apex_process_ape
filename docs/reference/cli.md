@@ -3329,7 +3329,7 @@ Flags:
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
 | `--assess` | bool | `false` | run the assessor (v1.5 §3.2): batch the --project members' triggers and run apex-assess on each batch |
-| `--assess-budget` | string | `20.0M` | the assessor's tokens for this stage (tokens_total, kept in the state dir's spent.json): past it each batch is skipped (assessor-skipped); 0: none |
+| `--assess-budget` | string | `20.0M` | the assessor's tokens for this stage (tokens_total, kept in the state dir's spent.json): once spent, each batch is skipped (assessor-skipped); 0 skips every batch, off sets no budget |
 | `--assess-checkout` | stringArray | `[]` | <project>=<path>: the checkout of a member the assessor reads it from, and runs its installed apex-assess (repeatable; default: the project of --cwd) |
 | `--cwd` | string | `—` | the project whose coordination: block and hot/ape-nats.creds to use (default: the current directory) |
 | `--ensemble` | string | `—` | the ensemble (default: the project's) |

@@ -48,7 +48,34 @@ Leases are not requests: claiming, renewing and releasing one is a compare-and-s
   that turns the milestone's recorded result red. The payload is `{event, project, milestone, change, commit, paths,
   gate, key, at}`. The message id is `<project>/<checkout-id>/<event>/<M>/<key>`, where `key` is the approval's time,
   the change's id or the gate run's `<sha>@<at>`. So a re-publish of one act is stored once, and an impact notice's
-  `events` names its triggers by these ids.
+  `events` names its triggers by these ids. What the coordinator does with them is [the assessor](#the-assessor).
+- `milestone-paused` / `milestone-resumed` (kind `project`) come from the conductor's ape (OQ24: a question left
+  unanswered past the pause age; payload `{by, user}`) or from a person's `ape milestone pause|resume` (payload
+  `{kind: "person", by, user, reason, at}`). While the newest is a pause, the milestone's change new, start and archive,
+  its take-in and its close refuse `coord.milestone-paused` (action `person`), naming who paused it and why.
+
+**Tokens and names.** `<user>`, `<host>` and `<ensemble>` are slugged by one rule, ape's subject token: lowercased,
+and `.`, `*`, `>` and whitespace become `-`. The tokens `coord` and `sup`, and any token starting `vm-` (aped's
+per-VM identities), are reserved: a member credential whose token would be one is refused when it is minted. An
+ensemble may not be named like one of its member projects' slugs.
+
+## The assessor
+
+v1.5's assessor (proposal §3.2) answers one question on each batch of triggers: does this affect another open
+milestone? It runs as `ape coordinator --assess`, which `ape supervisor --assess` passes on, with
+`--assess-checkout <project>=<path>` (default: the `--cwd` member) and `--assess-budget` (default 20M; `0` skips every
+batch; `off` sets no budget). The session holds no credential and publishes nothing. It writes `notice.json`, and the
+coordinator judges that file and publishes it. Why it is built this way is in
+[The assessor](../explanation/the-assessor.md).
+
+`notice.json`, the session's only output:
+
+```json
+{"notices": [{"target": "<project>/<M>", "reason": "<what changed> affects <what M relies on>", "evidence": ["<path>"], "hold": false}]}
+```
+
+`{"notices": []}` means nothing is affected. A missing file is a failure, never "nothing".
+
 - The coordinator debounces those triggers into batches (60 s quiet, 5 min ceiling), and builds one **batch folder**
   per batch and project for the assessor: a `git archive` of the remote's `main`, with no `.git`, no `hot/` and no
   symbolic link (links, and any entry that is not a regular file or directory, are dropped at extraction), plus
@@ -121,15 +148,6 @@ Leases are not requests: claiming, renewing and releasing one is a compare-and-s
 - `ape status --json` in a member project lists the open (not yet acknowledged) notices to each milestone as `milestones[].notices`
   (`{id, reason, evidence, hold, at}`), read from NATS within 3 s. The field is left out when there are none, or when
   NATS cannot be read.
-- `milestone-paused` / `milestone-resumed` (kind `project`) come from the conductor's ape (OQ24: a question left
-  unanswered past the pause age; payload `{by, user}`) or from a person's `ape milestone pause|resume` (payload
-  `{kind: "person", by, user, reason, at}`). While the newest is a pause, the milestone's change new, start and archive,
-  its take-in and its close refuse `coord.milestone-paused` (action `person`), naming who paused it and why.
-
-**Tokens and names.** `<user>`, `<host>` and `<ensemble>` are slugged by one rule, ape's subject token: lowercased,
-and `.`, `*`, `>` and whitespace become `-`. The tokens `coord` and `sup`, and any token starting `vm-` (aped's
-per-VM identities), are reserved: a member credential whose token would be one is refused when it is minted. An
-ensemble may not be named like one of its member projects' slugs.
 
 ## Buckets, streams and Object Stores
 
