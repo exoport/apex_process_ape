@@ -82,6 +82,7 @@ func (p *Project) regateClose(ctx context.Context, ms string, opt RunOptions) er
 		if _, err := p.commitMilestone(context.WithoutCancel(ctx), nil, ms, "gate "+gateResult(&g.Run)); err != nil {
 			return err
 		}
+		p.emitGateRed(ctx, g)
 	}
 	if g.Run.Green() {
 		return nil

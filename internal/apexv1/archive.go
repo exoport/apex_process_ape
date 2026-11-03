@@ -294,6 +294,9 @@ func (p *Project) Archive(ctx context.Context, id string, allowPendingHuman bool
 	if err := p.squashOntoBase(ctx, ci, updates, dest, pending, res, j); err != nil {
 		return res, err
 	}
+	if ms, ok := strings.CutPrefix(base, MilestoneBranchPrefix); ok && p.coordinated() {
+		p.emitTrigger(ctx, Trigger{Event: EventChangeArchived, Milestone: ms, Change: id, Commit: res.Commit, Paths: p.changedPaths(ctx, res.Commit), Key: id})
+	}
 	// Landed: nothing is left to roll back, so the journal goes before
 	// the take-in, whose crash must not undo a pushed archive.
 	p.removeJournal()

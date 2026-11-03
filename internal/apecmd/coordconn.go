@@ -76,6 +76,7 @@ func defaultCoordID(kind string) string {
 // (stage 1a).
 func init() {
 	apexv1.EventSink = member.Publish
+	apexv1.TriggerSink = member.PublishTrigger
 	apexv1.NewIntegrator = member.Integrator
 	apexv1.FenceMilestone = member.FenceMilestone
 	apexv1.FenceClose = member.FenceClose

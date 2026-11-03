@@ -490,6 +490,7 @@ func (p *Project) approveMilestone(ctx context.Context, id, by, acceptGreen stri
 	if _, err := p.commitMilestone(ctx, own, id, what); err != nil {
 		return m, true, err
 	}
+	p.emitTrigger(ctx, Trigger{Event: EventPlanApproved, Milestone: id, Gate: m.Gate, Key: rec.Approval.At})
 	return m, true, p.sendPendingRecords(ctx)
 }
 
@@ -576,6 +577,15 @@ func doneMilestoneGate(m *Milestone) *FailError {
 func (p *Project) emitGateGreen(ctx context.Context, g *GateResult) {
 	if g.ResultChanged && g.Run.Green() {
 		p.Emit(ctx, Event{Event: EventGateGreen, Milestone: g.Milestone, Reason: "gate green at " + short(g.Run.SHA)}, nil)
+	}
+	p.emitGateRed(ctx, g)
+}
+
+// emitGateRed is the assessor's gate-red trigger: a run that turned the
+// milestone's recorded result red (the first record included).
+func (p *Project) emitGateRed(ctx context.Context, g *GateResult) {
+	if g.ResultChanged && !g.Run.Green() {
+		p.emitTrigger(ctx, Trigger{Event: EventGateRed, Milestone: g.Milestone, Commit: g.Run.SHA, Key: g.Run.SHA + "@" + g.Run.At})
 	}
 }
 

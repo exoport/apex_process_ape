@@ -42,6 +42,12 @@ Leases are not requests: claiming, renewing and releasing one is a compare-and-s
   it; kind `project` has no take-in events of its own.
 - `heartbeat` (kind `coord`) is the supervisor's liveness event; its `<id>` is the conductor lease it targets, and the
   conductor acknowledges it like any other delivery.
+- `plan-approved`, `change-archived` and `gate-red` (kind `project`) are the assessor's triggers, published on NATS
+  only, never in `events.jsonl`: a milestone's approval, a coordinated change landing on `milestone/<M>`, and a gate run
+  that turns the milestone's recorded result red. The payload is `{event, project, milestone, change, commit, paths,
+  gate, key, at}`. The message id is `<project>/<checkout-id>/<event>/<M>/<key>`, where `key` is the approval's time,
+  the change's id or the gate run's `<sha>@<at>`. So a re-publish of one act is stored once, and an impact notice's
+  `events` names its triggers by these ids.
 - `milestone-paused` / `milestone-resumed` (kind `project`) come from the conductor's ape (OQ24: a question left
   unanswered past the pause age; payload `{by, user}`) or from a person's `ape milestone pause|resume` (payload
   `{kind: "person", by, user, reason, at}`). While the newest is a pause, the milestone's change new, start and archive,
