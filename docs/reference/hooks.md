@@ -219,8 +219,14 @@ The launch also passes `claude --tools Read,Grep,Glob,Write` and the inline deny
 other tool. It passes `--setting-sources user`, so the snapshot's own `.claude/settings.json` hooks
 never run, and `APE_TOOLCHAIN=local`, so the hooks run this ape rather than a pin the snapshot names.
 Measured on Claude Code 2.1.316, `--setting-sources user` also drops project skills. So ape builds
-the plugin `ape-assess` at `<folder>.plugin/` from the snapshot's own
-`.claude/skills/apex-assess/`, and types `/ape-assess:apex-assess`.
+the plugin `ape-assess` at `<folder>.plugin/`, and types `/ape-assess:apex-assess`. Its one file is the
+`SKILL.md` that the checkout named by `--assess-skill-from` (the coordinator's) has installed, never
+`main`'s copy in the snapshot, which any merged change can alter. That `SKILL.md` is refused at
+preflight, and nothing spawns, when its frontmatter has a key other than `name`, `description`,
+`argument-hint`, `disable-model-invocation` and `model`, or when it holds `!` before a backtick. On
+2.1.316 a `--plugin-dir` skill's frontmatter `hooks:` run as the host's person under
+`--setting-sources user`, outside the roster and this hook, and `` !`…` `` runs a shell command when
+the skill expands.
 
 ## `ape hook stop`
 

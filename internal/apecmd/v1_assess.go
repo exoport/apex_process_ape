@@ -1,14 +1,17 @@
 package apecmd
 
 import (
-	"errors"
+	"bytes"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
+
 	"github.com/exoport/apex_process_ape/internal/apexv1"
+	"github.com/exoport/apex_process_ape/internal/frontmatter"
 )
 
 // The assessor's launch (PLAN-V15-ASSESSOR step 4). `ape task apex-assess`
@@ -26,8 +29,9 @@ import (
 //   - --setting-sources user, so the snapshot's own .claude/settings.json
 //     hooks never run (research 7). Measured on Claude Code 2.1.316, that
 //     also drops the project's skills, so ape supplies apex-assess as the
-//     plugin ape-assess, built beside the folder from the snapshot's own
-//     copy of the skill, and types /ape-assess:apex-assess;
+//     plugin ape-assess, built beside the folder from the SKILL.md the
+//     coordinator's checkout installed (--assess-skill-from; never main's
+//     copy, P4-1), and types /ape-assess:apex-assess;
 //   - no project plugins: the snapshot's config would bring their hooks;
 //   - APE_TOOLCHAIN=local, so the hooks are this ape, not a pinned one.
 
@@ -51,7 +55,7 @@ func prepareAssessTask(o *taskOptions, cfg *runConfig) error {
 	if _, err := os.Lstat(filepath.Join(folder, ".git")); err == nil {
 		return fmt.Errorf("%s runs in a batch folder, a snapshot with no .git, and %s has one", apexv1.AssessSkill, folder)
 	}
-	plugin, err := buildAssessPlugin(folder)
+	plugin, err := buildAssessPlugin(folder, o.assessFrom)
 	if err != nil {
 		return err
 	}
@@ -76,56 +80,82 @@ func prepareAssessTask(o *taskOptions, cfg *runConfig) error {
 	return nil
 }
 
+// assessSkillKeys are the frontmatter keys an assessor skill may carry
+// (P4-1): a skill's own hooks: run as the host's person outside the
+// roster and the guard (measured on 2.1.316: a --plugin-dir skill's
+// frontmatter hooks fire under --setting-sources user).
+var assessSkillKeys = map[string]bool{"name": true, "description": true, "argument-hint": true, "disable-model-invocation": true, "model": true}
+
 // buildAssessPlugin writes the plugin ape-assess beside folder, its one
-// skill the snapshot's own .claude/skills/apex-assess: the framework main
-// has installed.
-func buildAssessPlugin(folder string) (string, error) {
-	src := filepath.Join(folder, ".claude", "skills", apexv1.AssessSkill)
-	if _, err := os.Stat(filepath.Join(src, "SKILL.md")); err != nil {
-		return "", fmt.Errorf("the batch's snapshot of main has no .claude/skills/%s/SKILL.md: install the framework's %s on main", apexv1.AssessSkill, apexv1.AssessSkill)
+// file the SKILL.md of apex-assess as checkout has it installed (P4-1:
+// never main's copy, which any merged change can alter), refused when its
+// frontmatter has a key outside assessSkillKeys or it holds a `!` before
+// a backtick (a shell command run when the skill expands).
+func buildAssessPlugin(folder, checkout string) (string, error) {
+	if checkout == "" {
+		return "", fmt.Errorf("%s needs --assess-skill-from <checkout>: the skill runs as the coordinator's checkout installed it, never as the batch's snapshot of main has it", apexv1.AssessSkill)
+	}
+	src := filepath.Join(checkout, ".claude", "skills", apexv1.AssessSkill, "SKILL.md")
+	info, err := os.Lstat(src)
+	if err != nil || !info.Mode().IsRegular() {
+		return "", fmt.Errorf("%s has no regular file .claude/skills/%s/SKILL.md: install the framework's %s there", checkout, apexv1.AssessSkill, apexv1.AssessSkill)
+	}
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return "", err
+	}
+	if err := checkAssessSkill(src, data); err != nil {
+		return "", err
 	}
 	plugin := filepath.Clean(folder) + assessPluginSuffix
 	if err := os.RemoveAll(plugin); err != nil {
 		return "", err
 	}
-	if err := os.MkdirAll(filepath.Join(plugin, ".claude-plugin"), 0o700); err != nil {
-		return "", err
+	skillDir := filepath.Join(plugin, "skills", apexv1.AssessSkill)
+	for _, d := range []string{filepath.Join(plugin, ".claude-plugin"), skillDir} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			return "", err
+		}
 	}
-	manifest := `{"name":"` + apexv1.AssessPlugin + `","version":"0.0.0","description":"ape's assessor skill, from the batch's snapshot"}` + "\n"
+	manifest := `{"name":"` + apexv1.AssessPlugin + `","version":"0.0.0","description":"ape's assessor skill, as the coordinator's checkout installed it"}` + "\n"
 	if err := os.WriteFile(filepath.Join(plugin, ".claude-plugin", "plugin.json"), []byte(manifest), 0o600); err != nil {
 		return "", err
 	}
-	if err := copyRegularTree(src, filepath.Join(plugin, "skills", apexv1.AssessSkill)); err != nil {
-		return "", err
-	}
-	return plugin, nil
+	return plugin, os.WriteFile(filepath.Join(skillDir, "SKILL.md"), data, 0o600)
 }
 
-// copyRegularTree copies src's regular files and directories to dst
-// (the snapshot holds no links: BuildAssessFolder dropped them), read
-// through an os.Root so nothing outside src is.
-func copyRegularTree(src, dst string) error {
-	root, err := os.OpenRoot(src)
+// checkAssessSkill refuses an assessor SKILL.md that could run anything
+// (P4-1).
+func checkAssessSkill(file string, data []byte) error {
+	fm, _, err := frontmatter.Split(data)
 	if err != nil {
-		return err
+		return fmt.Errorf("%s: %w", file, err)
 	}
-	defer func() { _ = root.Close() }()
-	return fs.WalkDir(root.FS(), ".", func(rel string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
+	var keys map[string]any
+	if err := yaml.Unmarshal(fm, &keys); err != nil {
+		return fmt.Errorf("%s: its frontmatter does not parse: %w", file, err)
+	}
+	for k := range keys {
+		if !assessSkillKeys[k] {
+			return fmt.Errorf("%s: frontmatter key %q is not one an assessor skill may carry (name, description, argument-hint, disable-model-invocation, model): a skill's hooks run outside the session's confinement", file, k)
 		}
-		to := filepath.Join(dst, filepath.FromSlash(rel))
-		switch {
-		case d.IsDir():
-			return os.MkdirAll(to, 0o700)
-		case d.Type().IsRegular():
-			data, err := root.ReadFile(rel)
-			if err != nil {
-				return err
-			}
-			return os.WriteFile(to, data, 0o600)
-		default:
-			return errors.New(filepath.Join(src, rel) + " is not a regular file")
-		}
-	})
+	}
+	if bytes.Contains(data, []byte("!`")) {
+		return fmt.Errorf("%s: it holds `!` before a backtick, a shell command Claude Code runs when the skill expands", file)
+	}
+	return nil
+}
+
+// assessSkillFromFlag is ape task's hidden --assess-skill-from: the
+// checkout whose installed apex-assess the assessor runs (P4-1).
+const assessSkillFromFlag = "assess-skill-from"
+
+func addAssessSkillFromFlag(cmd *cobra.Command) {
+	cmd.Flags().String(assessSkillFromFlag, "", "apex-assess only: the checkout whose installed .claude/skills/apex-assess/SKILL.md the assessor runs (the coordinator's; P4-1)")
+	_ = cmd.Flags().MarkHidden(assessSkillFromFlag)
+}
+
+func assessSkillFrom(cmd *cobra.Command) string {
+	v, _ := cmd.Flags().GetString(assessSkillFromFlag)
+	return v
 }

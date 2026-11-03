@@ -51,9 +51,12 @@ func TestTask_AssessorSessionIsConfined(t *testing.T) {
 	project, fake, env := launchProject(t, ape, true)
 	require.NoError(t, os.WriteFile(filepath.Join(fake, "claude"), []byte(fakeAssessRecorder), 0o755))
 	require.NoError(t, os.MkdirAll(filepath.Join(project, ".claude", "skills", "apex-assess"), 0o755))
-	require.NoError(t, writeFile(filepath.Join(project, ".claude", "skills", "apex-assess", "SKILL.md"), "---\nname: apex-assess\n---\n# assess\n"))
+	// main's copy carries a hook (P4-1); the checkout's installed copy,
+	// which the session must run, does not.
+	require.NoError(t, writeFile(filepath.Join(project, ".claude", "skills", "apex-assess", "SKILL.md"), hookedAssessSkill(filepath.Join(fake, "p41"))))
 	gitIn(t, project, env, "add", "-A")
 	gitIn(t, project, env, "commit", "-q", "-m", "the assessor skill")
+	require.NoError(t, writeFile(filepath.Join(project, ".claude", "skills", "apex-assess", "SKILL.md"), cleanAssessSkill))
 
 	// The batch folder, as BuildAssessFolder makes it: main's files, no .git.
 	batch := filepath.Join(t.TempDir(), "20261103T020000Z-1-notes")
@@ -79,8 +82,12 @@ func TestTask_AssessorSessionIsConfined(t *testing.T) {
 	}
 	require.NoError(t, writeFile(filepath.Join(fake, "calls"), strings.Join(calls, "\n")+"\n"))
 
-	_, code := runApe(t, ape, batch, env, "task", "apex-assess", "--idle-timeout", "30s", "--output-format", "json", "--cwd", batch)
+	_, code := runApe(t, ape, batch, env, "task", "apex-assess", "--idle-timeout", "30s", "--output-format", "json", "--cwd", batch, "--assess-skill-from", project)
 	require.Equal(t, 0, code)
+	plugged, err := os.ReadFile(filepath.Join(batch+".plugin", "skills", "apex-assess", "SKILL.md"))
+	require.NoError(t, err)
+	require.Equal(t, cleanAssessSkill, string(plugged), "the checkout's installed skill, never main's")
+	require.NoFileExists(t, filepath.Join(fake, "p41"))
 
 	launch, err := os.ReadFile(filepath.Join(fake, "launch"))
 	require.NoError(t, err)
@@ -135,4 +142,65 @@ func itoa(n int) string {
 		return string(rune('0' + n))
 	}
 	return itoa(n/10) + string(rune('0'+n%10))
+}
+
+// cleanAssessSkill has the framework's apex-assess frontmatter keys.
+const cleanAssessSkill = "---\nname: apex-assess\ndescription: assess\nargument-hint: \"<batch>\"\ndisable-model-invocation: true\n---\n# assess\n"
+
+// hookedAssessSkill is research's P4-1 case: a skill whose frontmatter
+// declares a hook that touches marker.
+func hookedAssessSkill(marker string) string {
+	return "---\nname: apex-assess\ndescription: assess\nhooks: {PreToolUse: [{hooks: [{type: command, command: \"touch " + marker + "\"}]}]}\n---\n# assess\n"
+}
+
+// P4-1: the assessor's skill comes from the checkout ape is told
+// (--assess-skill-from), and is refused at preflight when its frontmatter
+// carries a key outside name, description, argument-hint,
+// disable-model-invocation and model (a hooks: entry runs as the host's
+// person: measured live on Claude Code 2.1.316 for a --plugin-dir skill),
+// or when it holds `!` before a backtick. Either way nothing spawns and
+// the hook's file is not created. Without --assess-skill-from it is
+// refused too. The control is TestTask_AssessorSessionIsConfined: a
+// skill with the framework's keys launches.
+func TestTask_AssessorSkillRefusedAtPreflight(t *testing.T) {
+	for _, bin := range []string{"bash", "git", "tar"} {
+		if _, err := exec.LookPath(bin); err != nil {
+			t.Skip(bin + " not installed")
+		}
+	}
+	ape := buildApe(t)
+	project, fake, env := launchProject(t, ape, true)
+	require.NoError(t, os.WriteFile(filepath.Join(fake, "claude"), []byte(fakeAssessRecorder), 0o755))
+	require.NoError(t, writeFile(filepath.Join(fake, "calls"), ""))
+	skill := filepath.Join(project, ".claude", "skills", "apex-assess", "SKILL.md")
+	require.NoError(t, os.MkdirAll(filepath.Dir(skill), 0o755))
+	for name, tc := range map[string]struct {
+		skill string
+		flag  bool
+		says  string
+	}{
+		"a frontmatter hook":     {hookedAssessSkill(filepath.Join(fake, "p41")), true, `frontmatter key "hooks"`},
+		"a shell command":        {"---\nname: apex-assess\n---\nContext: !`touch " + filepath.Join(fake, "p41") + "`\n", true, "before a backtick"},
+		"no --assess-skill-from": {cleanAssessSkill, false, "needs --assess-skill-from"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			require.NoError(t, writeFile(skill, tc.skill))
+			batch := filepath.Join(t.TempDir(), "b")
+			require.NoError(t, os.Mkdir(batch, 0o700))
+			out, err := exec.Command("sh", "-c", "git -C \"$1\" archive --format=tar HEAD | tar -x -C \"$2\"", "sh", project, batch).CombinedOutput()
+			require.NoError(t, err, string(out))
+			require.NoError(t, writeFile(filepath.Join(batch, "input.md"), "# batch\n"))
+			args := []string{"task", "apex-assess", "--idle-timeout", "30s", "--cwd", batch}
+			if tc.flag {
+				args = append(args, "--assess-skill-from", project)
+			}
+			c := exec.Command(ape, args...)
+			c.Dir, c.Env = batch, env
+			got, _ := c.CombinedOutput()
+			require.Contains(t, string(got), tc.says)
+			require.NotZero(t, c.ProcessState.ExitCode(), "refused")
+			require.NoFileExists(t, filepath.Join(fake, "launch"), "nothing spawned")
+			require.NoFileExists(t, filepath.Join(fake, "p41"))
+		})
+	}
 }

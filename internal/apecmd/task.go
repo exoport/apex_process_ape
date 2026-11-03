@@ -494,15 +494,7 @@ func newTaskCmd() *cobra.Command {
 				}
 				taskCommit = &pipeline.CommitDirective{Mode: pipeline.CommitModeExplicit, Message: msg}
 			}
-			var maxTokens int64
-			if cmd.Flags().Changed("max-tokens") {
-				n, err := apexv1.ParseTokens(maxTokensFlag)
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "Error: --max-tokens: %s\n", err)
-					os.Exit(ExitUsage)
-				}
-				maxTokens = n
-			}
+			maxTokens := taskMaxTokens(cmd, maxTokensFlag)
 			warnUnknownOutputStyleFlag(cmd, outputStyleFlag)
 			opts := taskOptions{
 				skill:                 args[0],
@@ -513,6 +505,7 @@ func newTaskCmd() *cobra.Command {
 				prompt:                promptFlag,
 				promptFlagName:        promptFlagName,
 				skillNoCommit:         noCommitFlag,
+				assessFrom:            assessSkillFrom(cmd),
 				taskCommit:            taskCommit,
 				allowDirty:            allowDirtyFlag,
 				idleTimeout:           idleTimeoutFlag,
@@ -564,8 +557,23 @@ func newTaskCmd() *cobra.Command {
 	addDetachFlag(cmd, &detachFlag)
 	cmd.Flags().BoolVar(&usageOKFlag, "usage-ok", false, "Launch whatever the plan's usage reads: the usage guard's override (a person only, from a terminal; recorded in the run manifest with the reading)")
 	addLeftoversFlag(cmd, &leftoversFlag)
+	addAssessSkillFromFlag(cmd)
 	addNatsFlags(cmd, &natsURLFlag, &natsCredsFlag, &eventsPrefixFlag, &uploadTranscripts, &transcriptStore)
 	return cmd
+}
+
+// taskMaxTokens is --max-tokens parsed, 0 when unset; a bad value is a
+// usage error.
+func taskMaxTokens(cmd *cobra.Command, v string) int64 {
+	if !cmd.Flags().Changed("max-tokens") {
+		return 0
+	}
+	n, err := apexv1.ParseTokens(v)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: --max-tokens: %s\n", err)
+		os.Exit(ExitUsage)
+	}
+	return n
 }
 
 // taskOptions bundles the resolved `ape task` invocation parameters.
@@ -582,6 +590,9 @@ type taskOptions struct {
 	// (the assessor's plugin skill, v1_assess.go); skill stays the key
 	// every decision is made by.
 	typedSkill string
+	// assessFrom is --assess-skill-from: the checkout apex-assess's
+	// SKILL.md is taken from (v1_assess.go).
+	assessFrom string
 	// sessionKind overrides the APE_SESSION kind for a caller that
 	// dispatches through the task runner: `ape change`.
 	sessionKind           string
