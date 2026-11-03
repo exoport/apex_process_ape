@@ -405,3 +405,70 @@ func TestMilestoneLease_ReleasedByThisCheckoutIsNoLoss(t *testing.T) {
 	require.Eventually(t, func() bool { return strings.Contains(log.String(), "released by this checkout (the milestone closed)") }, 10*time.Second, 50*time.Millisecond, log.String())
 	require.NotContains(t, log.String(), "was lost")
 }
+
+// V8e (FINDING-V15-1C-3): a close that found another checkout's close in
+// progress was refused at once (coord.close-busy, retry), and a loop's
+// retry met the refusal for the whole first close. Now the close waits:
+// it says whose close it waits for, and takes close.<project> once that
+// close releases it. The controls: max 0 is refused at once, as a close
+// called with --wait 0 is (CloseBusy); past max the refusal comes back;
+// the checkout holding it is not busy to itself.
+func TestWaitClose_WaitsForTheOtherClose(t *testing.T) {
+	shortLeases(t, 250*time.Millisecond)
+	oldPoll := CloseWaitPoll
+	CloseWaitPoll = 100 * time.Millisecond
+	t.Cleanup(func() { CloseWaitPoll = oldPoll })
+	ctx := context.Background()
+	url := leaseCluster(t)
+	ann, bob := checkout(t, url, "ann"), checkout(t, url, "bob")
+
+	release, err := HoldClose(ctx, ann, io.Discard, nil)
+	require.NoError(t, err)
+	require.NoError(t, CloseBusy(ctx, ann), "ann's own close is not busy to ann")
+	require.Equal(t, apexv1.CodeCloseBusy, leaseCode(t, CloseBusy(ctx, bob)), "--wait 0: refused at once")
+
+	start := time.Now()
+	_, err = WaitClose(ctx, bob, io.Discard, nil, 0)
+	require.Equal(t, apexv1.CodeCloseBusy, leaseCode(t, err), "max 0: refused at once")
+	require.Less(t, time.Since(start), time.Second)
+
+	start = time.Now()
+	_, err = WaitClose(ctx, bob, io.Discard, nil, 400*time.Millisecond)
+	require.Equal(t, apexv1.CodeCloseBusy, leaseCode(t, err), "past max: refused")
+	require.GreaterOrEqual(t, time.Since(start), 400*time.Millisecond)
+
+	var mu sync.Mutex
+	var log strings.Builder
+	type held struct {
+		release func()
+		err     error
+	}
+	got := make(chan held, 1)
+	go func() {
+		r, err := WaitClose(ctx, bob, writerFunc(func(b []byte) { mu.Lock(); log.Write(b); mu.Unlock() }), nil, 30*time.Second)
+		got <- held{r, err}
+	}()
+	time.Sleep(3 * MilestoneTTL) // ann's close runs on, renewed
+	select {
+	case h := <-got:
+		t.Fatalf("bob's close did not wait: %v", h.err)
+	default:
+	}
+	mu.Lock()
+	require.Contains(t, log.String(), "waiting for ann/", "it says whose close it waits for")
+	require.Equal(t, 1, strings.Count(log.String(), "waiting for"), "once per holder")
+	mu.Unlock()
+	release()
+	select {
+	case h := <-got:
+		require.NoError(t, h.err, "ann's close ended: bob's close goes on")
+		require.Contains(t, mustHolder(t, url, "close.notes-svc"), "bob/")
+		h.release()
+	case <-time.After(5 * time.Second):
+		t.Fatal("bob's close still waits after ann's close released close.<project>")
+	}
+}
+
+type writerFunc func([]byte)
+
+func (w writerFunc) Write(b []byte) (int, error) { w(b); return len(b), nil }

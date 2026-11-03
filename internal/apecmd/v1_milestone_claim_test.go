@@ -297,3 +297,53 @@ func TestMilestoneClaim_AdoptIsTerminalOnly(t *testing.T) {
 		require.NotContains(t, stdout+stderr+err.Error(), "is for a person", "past the person check")
 	})
 }
+
+// V8e through the CLI: `milestone close --wait 0` asks for no waiting, so
+// another checkout's close in progress is refused at once with
+// coord.close-busy (exit 1, action retry), before any run starts. The
+// control: with close.<project> free the same call is not refused for it.
+func TestMilestoneClose_WaitZeroRefusesABusyCloseAtOnce(t *testing.T) {
+	root := v1Repo(t)
+	url := natstest.RunJetStreamServer(t)
+	nc, err := nats.Connect(url)
+	require.NoError(t, err)
+	t.Cleanup(nc.Close)
+	js, err := jetstream.New(nc)
+	require.NoError(t, err)
+	ctx := context.Background()
+	require.NoError(t, lease.Declare(ctx, js, 1))
+	ls, err := lease.Open(ctx, js)
+	require.NoError(t, err)
+	require.NoError(t, ls.SetEpoch(ctx, 1))
+	cfg, err := os.ReadFile(apexv1.ConfigPath(root))
+	require.NoError(t, err)
+	block := "coordination:\n  ensemble: shop\n  home: git@example.invalid:shop/home.git\n  url: " + url + "\n"
+	require.NoError(t, os.WriteFile(apexv1.ConfigPath(root), append(cfg, []byte(block)...), 0o644))
+	creds, _ := natstest.MintStandaloneCreds(t, "dana")
+	data, err := os.ReadFile(creds)
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "hot"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "hot", "ape-nats.creds"), data, 0o600))
+	_, _, err = v1Exec(t, newMilestoneCmd, "claim", "M1", "--cwd", root)
+	require.NoError(t, err)
+	p, err := apexv1.Open(root)
+	require.NoError(t, err)
+	m, err := member.Load(p)
+	require.NoError(t, err)
+	key := "close." + m.Project
+
+	_, stderr, err := v1Exec(t, newMilestoneCmd, "close", "M1", "--wait", "0", "--cwd", root)
+	require.NotContains(t, fmt.Sprint(err)+stderr, apexv1.CodeCloseBusy, "the control: close.<project> free, not refused for it")
+
+	other, err := ls.Claim(ctx, key, "zed/other-checkout", time.Minute)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ls.Release(context.Background(), other) })
+	start := time.Now()
+	stdout, stderr, err := v1Exec(t, newMilestoneCmd, "close", "M1", "--wait", "0", "--json", "--cwd", root)
+	require.Error(t, err)
+	require.Equal(t, 1, exitCodeOf(t, err))
+	require.Contains(t, stdout+stderr+err.Error(), apexv1.CodeCloseBusy)
+	require.Contains(t, stdout+stderr+err.Error(), "zed/other-checkout")
+	require.Less(t, time.Since(start), 5*time.Second, "at once")
+	require.Nil(t, p.LoadRunLock("M1"), "no run started")
+}

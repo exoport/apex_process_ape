@@ -5370,8 +5370,10 @@ done, gate green (exit 0) …", "close <M>: gate red, not closed (exit 1) …"; 
 Coordinated (v1.5 stage 1a; a project with coordination.github, section 5.3; D702): the
 close needs this checkout's lease on M and runs on milestone/<M>, fetched and synced. It
 holds the project's close lease (close.<project>, D709) from before it fetches main to the
-merge, so closes take main in, gate and merge one at a time (another checkout's close in
-progress: coord.close-busy, retry).
+merge, so closes take main in, gate and merge one at a time: a close finding another
+checkout's close in progress waits for it to end ("waiting for <holder>'s close"; the
+call's --wait and exit 75 as for any run, at most 2 h, then coord.close-busy, retry), and
+with --wait 0 is refused at once (coord.close-busy, retry).
 When main moved since the milestone last took it in, the close takes it in first
 (`ape milestone take-in --help`): its conflict or red regression is the close's refusal,
 laid out for apex-apply. The gate runs as above, and the close record, "apex: <M> done"

@@ -636,8 +636,10 @@ done, gate green (exit 0) …", "close <M>: gate red, not closed (exit 1) …"; 
 Coordinated (v1.5 stage 1a; a project with coordination.github, section 5.3; D702): the
 close needs this checkout's lease on M and runs on milestone/<M>, fetched and synced. It
 holds the project's close lease (close.<project>, D709) from before it fetches main to the
-merge, so closes take main in, gate and merge one at a time (another checkout's close in
-progress: coord.close-busy, retry).
+merge, so closes take main in, gate and merge one at a time: a close finding another
+checkout's close in progress waits for it to end ("waiting for <holder>'s close"; the
+call's --wait and exit 75 as for any run, at most 2 h, then coord.close-busy, retry), and
+with --wait 0 is refused at once (coord.close-busy, retry).
 When main moved since the milestone last took it in, the close takes it in first
 (` + "`ape milestone take-in --help`" + `): its conflict or red regression is the close's refusal,
 laid out for apex-apply. The gate runs as above, and the close record, "apex: <M> done"
@@ -678,25 +680,23 @@ branch · 2 usage, or --accept-red from a model session.`,
 			if err := member.Gate(cmd.Context(), p, "milestone close", id, time.Now()); err != nil {
 				return v1Fail(cmd, &f, err, nil)
 			}
+			// V8e: --wait 0 asks for no waiting, so another checkout's
+			// close is refused at once (coord.close-busy), before a run
+			// starts that would wait for it.
+			if _, worker := cmd.Context().Value(workerKey{}).(string); !worker && f.wait == 0 {
+				if err := member.CloseBusy(cmd.Context(), p); err != nil {
+					return v1Fail(cmd, &f, err, nil)
+				}
+			}
 			f.person = personCallOf(cmd, args)
 			return runLong(cmd, &f, p, id, func(ctx context.Context, opt apexv1.RunOptions) renderFn {
 				var g *apexv1.GateResult
 				var err error
-				// D709: one close of the project at a time, from taking
-				// main in to the merge (close.<project>).
-				// FINDING-V15-1A-11: held by another checkout after a lapse,
-				// the close is cancelled before it enqueues anything.
-				ctx, cancelClose := context.WithCancel(ctx)
-				defer cancelClose()
-				release, err := member.HoldClose(ctx, p, os.Stderr, cancelClose)
-				if err != nil {
-					return func(cmd *cobra.Command, f *v1Flags) error { return v1Fail(cmd, f, err, nil) }
-				}
-				defer release()
 				// FINDING-V15-1A-11: M's lease is renewed for the whole close,
 				// whose gate runs far past the lease's TTL before the fenced
 				// push — run from a loop (whose own keeper it then shares) or
 				// from a person's terminal. A project in no ensemble has none.
+				// Taken first, so it is renewed while the close waits (V8e).
 				stopHold, err := member.HoldMilestone(ctx, p, id, os.Stderr)
 				switch {
 				case errors.Is(err, member.ErrNotMember):
@@ -705,6 +705,19 @@ branch · 2 usage, or --accept-red from a model session.`,
 				default:
 					defer stopHold()
 				}
+				// D709: one close of the project at a time, from taking
+				// main in to the merge (close.<project>); another
+				// checkout's close is waited for (V8e), at most
+				// member.CloseWaitMax.
+				// FINDING-V15-1A-11: held by another checkout after a lapse,
+				// the close is cancelled before it enqueues anything.
+				ctx, cancelClose := context.WithCancel(ctx)
+				defer cancelClose()
+				release, err := member.WaitClose(ctx, p, os.Stderr, cancelClose, member.CloseWaitMax)
+				if err != nil {
+					return func(cmd *cobra.Command, f *v1Flags) error { return v1Fail(cmd, f, err, nil) }
+				}
+				defer release()
 				if accepting {
 					g, err = p.CloseMilestoneAcceptRed(ctx, id, acceptRed, personBy(ctx, by), opt)
 				} else {

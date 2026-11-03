@@ -379,6 +379,69 @@ func tokenText(t layout.Token) string {
 	return fmt.Sprintf("epoch %d, revision %d", t.Epoch, t.Revision)
 }
 
+// CloseWaitMax bounds how long a close waits for another checkout's close
+// of the project (WaitClose); CloseWaitPoll is how often it tries again.
+var (
+	CloseWaitMax  = 2 * time.Hour
+	CloseWaitPoll = 5 * time.Second
+)
+
+// WaitClose is HoldClose that waits while another checkout's close holds
+// close.<project> (V8e, FINDING-V15-1C-3: refused at once, a loop's retry
+// met the refusal for the whole first close), trying again every
+// CloseWaitPoll and saying once per holder whose close it waits for. It
+// takes the lease when that close ends, or its holder's lapses. Past max,
+// or when ctx ends, it returns the refusal: coord.close-busy (retry). max
+// 0 is HoldClose: refused at once.
+func WaitClose(ctx context.Context, p *apexv1.Project, log io.Writer, onLost func(), maxWait time.Duration) (release func(), err error) {
+	deadline := time.Now().Add(maxWait)
+	said := ""
+	for {
+		release, holder, err := holdClose(ctx, p, log, onLost)
+		if holder == "" || !time.Now().Before(deadline) {
+			return release, err
+		}
+		if holder != said && log != nil {
+			said = holder
+			fmt.Fprintf(log, "ape: waiting for %s's close of this project (closes take main in, gate and merge one at a time); trying again every %s, for at most %s\n",
+				holder, CloseWaitPoll, maxWait)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, err
+		case <-time.After(CloseWaitPoll):
+		}
+	}
+}
+
+// CloseBusy is coord.close-busy when another checkout's close holds
+// close.<project> now, nil otherwise: the refusal at once of a close
+// called with --wait 0 (V8e). A project in no ensemble is never busy.
+func CloseBusy(ctx context.Context, p *apexv1.Project) error {
+	s, err := openMilestones(ctx, p)
+	if errors.Is(err, ErrNotMember) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer s.close()
+	key := layout.CloseKey(s.m.Project)
+	cur, _, err := s.store.Holder(ctx, key)
+	if err != nil {
+		return err
+	}
+	if cur != "" && cur != s.holder {
+		return closeBusy(cur, key)
+	}
+	return nil
+}
+
+func closeBusy(holder, key string) error {
+	return &apexv1.FailError{Code: apexv1.CodeCloseBusy, Action: apexv1.ActionRetry, Msg: fmt.Sprintf(
+		"another close of this project is in progress (%s holds %s): closes take main in, gate and merge one at a time — close again once it is done (a close called with a --wait above 0 waits for it)", holder, key)}
+}
+
 // HoldClose is a coordinated close's hold on the project's close lease,
 // close.<project> (D709): taken before the close fetches main, renewed
 // while it gates on the merge, enqueues and waits for the merge, and
@@ -386,12 +449,19 @@ func tokenText(t layout.Token) string {
 // coord.close-busy (retry); this checkout's own live key (a close run
 // again) is kept. Nothing for a project in no ensemble.
 func HoldClose(ctx context.Context, p *apexv1.Project, log io.Writer, onLost func()) (release func(), err error) {
+	release, _, err = holdClose(ctx, p, log, onLost)
+	return release, err
+}
+
+// holdClose is HoldClose, and the other checkout holding the lease when
+// that is the refusal ("" otherwise).
+func holdClose(ctx context.Context, p *apexv1.Project, log io.Writer, onLost func()) (release func(), busyWith string, err error) {
 	s, err := openMilestones(ctx, p)
 	if errors.Is(err, ErrNotMember) {
-		return func() {}, nil
+		return func() {}, "", nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	key := layout.CloseKey(s.m.Project)
 	l, err := s.store.Claim(ctx, key, s.holder, MilestoneTTL)
@@ -400,17 +470,20 @@ func HoldClose(ctx context.Context, p *apexv1.Project, log io.Writer, onLost fun
 		switch {
 		case herr != nil:
 			err = herr
+		case cur == "":
+			// Released between the claim and the read: try again.
+			s.close()
+			return nil, "(a close that just ended)", closeBusy("another checkout", key)
 		case cur != s.holder:
 			s.close()
-			return nil, &apexv1.FailError{Code: apexv1.CodeCloseBusy, Action: apexv1.ActionRetry, Msg: fmt.Sprintf(
-				"another close of this project is in progress (%s holds %s): closes take main in, gate and merge one at a time — close again once it is done", cur, key)}
+			return nil, cur, closeBusy(cur, key)
 		default:
 			l, err = s.store.Renew(ctx, lease.Lease{Key: key, Holder: s.holder, Token: tok, TTL: MilestoneTTL})
 		}
 	}
 	if err != nil {
 		s.close()
-		return nil, err
+		return nil, "", err
 	}
 	h := &closeHold{s: s, key: key, l: l}
 	activeClose.Store(h)
@@ -442,7 +515,7 @@ func HoldClose(ctx context.Context, p *apexv1.Project, log io.Writer, onLost fun
 		_ = s.store.Release(context.WithoutCancel(ctx), h.l)
 		h.mu.Unlock()
 		s.close()
-	}, nil
+	}, "", nil
 }
 
 // closeHold is a running close's hold on close.<project> (D709): the lease,
