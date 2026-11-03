@@ -2,7 +2,11 @@ package conductor
 
 import (
 	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -34,7 +38,7 @@ type fakeSession struct {
 }
 
 var (
-	ackRe = regexp.MustCompile(`ape conductor ack (\S+)`)
+	ackRe = regexp.MustCompile(`ape conductor ack '([^']+)'`) // single-quoted, as a shell takes it (V8g)
 	seqRe = regexp.MustCompile(`seq="(\d+)"`)
 )
 
@@ -310,4 +314,39 @@ func TestRun_ReleasesTheLeaseOnABindError(t *testing.T) {
 	}, 5*time.Second, 50*time.Millisecond)
 	time.Sleep(300 * time.Millisecond)
 	require.ErrorIs(t, Run(ctx, nc, scaled("ann", "cond-b", &fakeSession{nc: nc, acked: map[string]bool{}})), ErrTaken, "the control: a bound conductor keeps its lease")
+}
+
+// V8g (FINDING-V15-1C-5): the delivery's ack command, run as given through
+// a real shell, reaches ape with the whole token. Unquoted, the shell
+// expanded $JS away and ape got .ACK.…; a conductor session ran it so.
+// The token is now single-quoted. The controls: the old unquoted form, and
+// the token in double quotes, both reach ape stripped — what the refusal
+// in `ape conductor ack` is for.
+func TestFormat_TheAckSurvivesARealShell(t *testing.T) {
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no sh")
+	}
+	bin := t.TempDir()
+	argv := filepath.Join(t.TempDir(), "argv")
+	require.NoError(t, os.WriteFile(filepath.Join(bin, "ape"), []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > "+argv+"\n"), 0o755))
+	token := "$JS.ACK.APE_EVENTS.ape-conductor-ann-shop.1.466.27.1762198506000000000.3"
+	got := func(cmdline string) []string {
+		t.Helper()
+		c := exec.Command(sh, "-c", cmdline)
+		c.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), "JS=")
+		out, err := c.CombinedOutput()
+		require.NoError(t, err, string(out))
+		data, err := os.ReadFile(argv)
+		require.NoError(t, err)
+		return strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
+	}
+	line := Format(466, "n1", "ape.evt.coord.shop.heartbeat", []byte(`{}`), token)
+	_, cmdline, ok := strings.Cut(line, "When you have handled this event, run: ")
+	require.True(t, ok, line)
+	require.Equal(t, []string{"conductor", "ack", token}, got(cmdline), "as given: the whole token")
+
+	stripped := strings.TrimPrefix(token, "$JS")
+	require.Equal(t, []string{"conductor", "ack", stripped}, got("ape conductor ack "+token), "the control: unquoted, $JS is expanded away")
+	require.Equal(t, []string{"conductor", "ack", stripped}, got(`ape conductor ack "`+token+`"`), "the control: double quotes expand it too")
 }

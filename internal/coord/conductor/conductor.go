@@ -97,10 +97,11 @@ func Filters(ens string, projects []string) []string {
 // Format is a delivery as ape types it, one line (a typed newline would
 // submit early): the marker the user-prompt hook reads (apexv1.DeliveryTag;
 // such a prompt never grants a person act), the event, and how to
-// acknowledge it.
+// acknowledge it — the token single-quoted, so a shell keeps its $JS
+// (V8g, FINDING-V15-1C-5: run unquoted it reached ape as .ACK.…).
 func Format(seq uint64, nonce, subject string, data []byte, ackToken string) string {
 	body := strings.Join(strings.Fields(string(data)), " ")
-	return fmt.Sprintf("%sseq=\"%d\" nonce=%q> %s %s </ape-delivery> When you have handled this event, run: ape conductor ack %s",
+	return fmt.Sprintf("%sseq=\"%d\" nonce=%q> %s %s </ape-delivery> When you have handled this event, run: ape conductor ack '%s'",
 		apexv1.DeliveryTag, seq, nonce, subject, body, ackToken)
 }
 

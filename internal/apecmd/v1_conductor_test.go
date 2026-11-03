@@ -8,6 +8,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/exoport/apex_process_ape/internal/natstest"
+
 	"github.com/exoport/apex_process_ape/internal/apexv1"
 )
 
@@ -65,4 +67,50 @@ func TestV1Commands_Conductor(t *testing.T) {
 	out, _, err = v1Exec(t, newConductorCmd, "log", "--open", "--project", root)
 	require.NoError(t, err)
 	require.Contains(t, out, "nothing")
+}
+
+// V8g (FINDING-V15-1C-5, ANSWER-D784 b, c): `ape conductor ack` took a
+// token whose $JS a shell had expanded away (.ACK.…) as a watcher id,
+// wrote a file for it and exited 0, and nothing was acknowledged. Now a
+// stripped token is refused (exit 2) naming the quoting, and the local
+// branch acks only an id its watcher recorded; neither writes a file.
+// The controls: a recorded watcher id is acknowledged locally, and a
+// whole $JS.ACK token goes over NATS.
+func TestConductorAck_RefusesAStrippedTokenAndAnUnknownID(t *testing.T) {
+	state := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", state)
+	dir := filepath.Join(state, "ape", "conductor")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "watcher.json"),
+		[]byte(`{"cursors":{},"deliveries":[{"id":"notes.42","project":"notes","event":"block","at":"2026-11-03T19:00:00Z"}]}`), 0o600))
+	acks := func() []string {
+		t.Helper()
+		es, _ := os.ReadDir(filepath.Join(dir, "acks"))
+		var names []string
+		for _, e := range es {
+			names = append(names, e.Name())
+		}
+		return names
+	}
+
+	for _, id := range []string{".ACK.APE_EVENTS.ape-conductor-ann-shop.1.466.27.1762198506000000000.3", "APE_EVENTS.ACK.APE_EVENTS.x.1.2"} {
+		_, stderr, err := v1Exec(t, newConductorCmd, "ack", id)
+		require.Equal(t, ExitUsage, exitCodeOf(t, err), "%s: refused", id)
+		require.Contains(t, err.Error()+stderr, "single quotes")
+	}
+	_, stderr, err := v1Exec(t, newConductorCmd, "ack", "notes.99")
+	require.Equal(t, ExitUsage, exitCodeOf(t, err), "never delivered: refused")
+	require.Contains(t, err.Error()+stderr, "no delivery")
+	require.Empty(t, acks(), "nothing acknowledged, no file written")
+
+	stdout, _, err := v1Exec(t, newConductorCmd, "ack", "notes.42")
+	require.NoError(t, err, "the control: a delivered id")
+	require.Contains(t, stdout, "acknowledged notes.42")
+	require.Equal(t, []string{"notes.42"}, acks())
+
+	url := natstest.RunServer(t)
+	stdout, _, err = v1Exec(t, newConductorCmd, "ack", "$JS.ACK.APE_EVENTS.c.1.466.27.1762198506000000000.3", "--nats-url", url)
+	require.NoError(t, err, "the control: a whole token goes over NATS")
+	require.Equal(t, "acknowledged\n", stdout)
+	require.Equal(t, []string{"notes.42"}, acks(), "the NATS branch writes no file")
 }

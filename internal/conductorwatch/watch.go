@@ -174,10 +174,20 @@ func saveState(dir string, s *State) error {
 	return atomicfile.Write(statePath(dir), append(data, '\n'))
 }
 
-// Ack records the conductor's acknowledgement of a delivery.
+// Ack records the conductor's acknowledgement of a delivery: only of one
+// this watcher recorded (V8g, ANSWER-D784 c) — an id it never delivered,
+// a JetStream ack token with its $JS stripped by a shell among them, was
+// "acknowledged" with exit 0 and nothing was.
 func Ack(dir, id string, now time.Time) error {
 	if strings.ContainsAny(id, `/\`) || strings.TrimSpace(id) == "" {
 		return fmt.Errorf("conductorwatch: %q is not a delivery id", id)
+	}
+	s, err := LoadState(dir)
+	if err != nil {
+		return err
+	}
+	if !slices.ContainsFunc(s.Deliveries, func(d Delivery) bool { return d.ID == id }) {
+		return fmt.Errorf("conductorwatch: %q is no delivery this machine's watcher recorded (%s) — nothing acknowledged; acknowledge the id the delivery names", id, statePath(dir))
 	}
 	if err := os.MkdirAll(ackDir(dir), 0o755); err != nil {
 		return err

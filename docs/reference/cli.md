@@ -2658,12 +2658,14 @@ the event (it reads `ape status` for it; the delivery is never the person's word
 delivery not acknowledged within the ack alert notifies the person.
 
 APEX v1.5 (in development): a delivery of an ensemble's event ends "When you have handled
-this event, run: ape conductor ack <token>"; the token is the event's JetStream ack subject
-($JS.ACK.…, proposal §3.1, OQ22). Such a token — or any id given with --nats-url or
+this event, run: ape conductor ack '<token>'"; the token is the event's JetStream ack subject
+($JS.ACK.…, proposal §3.1, OQ22), single-quoted so a shell keeps its $JS. A token whose $JS
+was expanded away (.ACK.…, run unquoted or in double quotes) is refused (exit 2), as is an
+id the watcher never delivered. Such a token — or any id given with --nats-url or
 --nats-creds — is acknowledged over NATS instead: an unacknowledged event is delivered
 again, and acknowledgements keep the conductor's lease renewed.
 
-Exit codes: 0 acknowledged · 1 a NATS acknowledgement failed · 2 usage.
+Exit codes: 0 acknowledged · 1 a NATS acknowledgement failed · 2 usage (a stripped token, an id never delivered).
 
 Examples:
 

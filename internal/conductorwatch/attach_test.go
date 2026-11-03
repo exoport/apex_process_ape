@@ -102,7 +102,7 @@ func TestAttach_DeliversThroughTheGate(t *testing.T) {
 	require.Eventually(t, func() bool { return len(pane.seen()) == 1 }, 5*time.Second, 50*time.Millisecond)
 	typed := pane.seen()[0]
 	require.True(t, strings.HasPrefix(typed, apexv1.DeliveryTag), typed)
-	require.Contains(t, typed, "ape conductor ack $JS.ACK.")
+	require.Contains(t, typed, "ape conductor ack '$JS.ACK.", "the token single-quoted (V8g)")
 
 	pane.set(idleScreen, "after-clear")
 	publish(2, "question")
