@@ -207,3 +207,36 @@ func TestCoordinator_PublishesNoticesOnceFenced(t *testing.T) {
 	require.Len(t, published, 1, "the replacement publishes the batch once")
 	require.Equal(t, uint64(1), subjectCount(ctx, t, js, old))
 }
+
+// S5-1: a renew between fence's copy of the lease and its check moves the
+// key's revision; the coordinator still holds its lease, so its publish
+// goes out (the copy is refreshed and checked once more). The control: a
+// lease another coordinator took stays fenced (TestCoordinator_
+// PublishesNoticesOnceFenced's replacement case).
+func TestPublisher_RenewBetweenCopyAndFencePublishes(t *testing.T) {
+	nc, js, ls := noticeRig(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	pub, stop, done := startAssessing(ctx, t, nc, js, ls, "c1")
+	defer func() { stop(); <-done }()
+	pp, ok := pub.(publisher)
+	require.True(t, ok)
+	c := pp.c
+	renewed := 0
+	afterHeldCopy = func() {
+		if renewed > 0 {
+			return
+		}
+		renewed++
+		c.mu.Lock()
+		l, err := c.leases.Renew(ctx, c.held)
+		require.NoError(t, err)
+		c.held = l
+		c.mu.Unlock()
+	}
+	t.Cleanup(func() { afterHeldCopy = nil })
+	published, _, err := pub.Notices(ctx, "20261103T050000Z-1", "atomix", nil, []Notice{{Target: "atomix/M1", Reason: "r", Evidence: []string{"x.go"}}})
+	require.NoError(t, err, "its own renew does not fence the coordinator out")
+	require.Len(t, published, 1)
+	require.Equal(t, 1, renewed)
+}

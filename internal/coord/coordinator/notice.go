@@ -18,6 +18,7 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/exoport/apex_process_ape/internal/coord/events"
+	"github.com/exoport/apex_process_ape/internal/coord/lease"
 	"github.com/exoport/apex_process_ape/internal/natsconn"
 )
 
@@ -202,12 +203,32 @@ type Publisher interface {
 
 type publisher struct{ c *Coordinator }
 
+// afterHeldCopy is a test seam: called between fence's copy of the
+// lease and its check (S5-1).
+var afterHeldCopy func()
+
+// fence checks the coordinator's current lease. A renew between the copy
+// and the check moves the key's revision (S5-1): then the lease it holds
+// now is checked once more, so the coordinator never fences out its own
+// publish; a lease another coordinator took stays refused.
 func (p publisher) fence(ctx context.Context) error {
 	c := p.c
-	c.mu.Lock()
-	l := c.held
-	c.mu.Unlock()
-	if err := c.leases.Fence(ctx, l.Key, l.Token); err != nil {
+	held := func() lease.Lease {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		return c.held
+	}
+	l := held()
+	if afterHeldCopy != nil {
+		afterHeldCopy()
+	}
+	err := c.leases.Fence(ctx, l.Key, l.Token)
+	if errors.Is(err, lease.ErrStale) {
+		if now := held(); now.Token != l.Token {
+			err = c.leases.Fence(ctx, now.Key, now.Token)
+		}
+	}
+	if err != nil {
 		return fmt.Errorf("%w: %w", ErrFenced, err)
 	}
 	return nil
