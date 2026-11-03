@@ -43,6 +43,9 @@ type Config struct {
 	// Projects are the ensemble's members, whose milestone leases it
 	// watches (the ensemble view, step 9).
 	Projects []string
+	// Assessor, when set, batches the members' triggers for the assessor
+	// (PLAN-V15-ASSESSOR step 2).
+	Assessor *AssessorConfig
 }
 
 // AcquireRequest is ape.coord.<ens>.slot.acquire's body.
@@ -153,6 +156,9 @@ func Run(ctx context.Context, nc *nats.Conn, cfg Config) error {
 		})
 	}()
 	go c.watchLeaseExpiries(wctx)
+	if cfg.Assessor != nil {
+		go c.runAssessor(wctx)
+	}
 
 	t := time.NewTicker(cfg.Renew)
 	defer t.Stop()
