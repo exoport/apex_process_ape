@@ -2763,7 +2763,8 @@ ensemble's contracts, each member project's — into the pane, marked as ape's
 (<ape-delivery …>: a prompt carrying one grants no person act) and ending with the
 `ape conductor ack <token>` that acknowledges it.
 
-It types by the same rule as `ape conductor watcher`: the pane runs the Claude Code
+It types and submits by the same rules as `ape conductor watcher` (Enter is pressed
+again, up to three times, until the input row empties or a turn starts): the pane runs the Claude Code
 session pinned at the first look (another session — after a /clear — pauses it until
 `ape conductor watcher --repin` from that session), no turn running, an empty input row,
 and a steady screen. An event not acknowledged is delivered again; a question left past
@@ -2771,7 +2772,7 @@ and a steady screen. An event not acknowledged is delivered again; a question le
 acknowledges nothing stops renewing its lease, which another of your conductors may
 then take over, unacknowledged events included.
 
-The projects must belong to one ensemble; the NATS URL and the credential
+The projects must belong to one ensemble (two checkouts of one project count once); the NATS URL and the credential
 (hot/ape-nats.creds) are the first project's.
 
 Exit codes: 0 stopped (Ctrl-C) · 1 the lease is held by another of your conductors, or

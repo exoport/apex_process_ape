@@ -313,9 +313,13 @@ last one left unacknowledged, and its acknowledgements are what renews the lease
 
 `ape conductor attach --project <dir>… --pane <tmux pane>` is that conductor's ape. It types each event into your own
 Claude Code session's tmux pane by the same rule as `ape conductor watcher` (v1.4.2): the session pinned at the first
-look, with no turn running, an empty input row and a steady screen. A different session in the pane (after a
+look, with no turn running, an empty input row and a steady screen. It submits each delivery as the watcher does,
+pressing Enter again (three times at most) until the input row empties or a turn starts; one left unsubmitted stays
+pending, nothing is typed over it, and it is delivered again once the row is free. A different session in the pane (after a
 `/clear`) pauses it until `ape conductor watcher --repin` runs from that session. Each delivery is marked as ape's, so
-it never grants a person act, and ends with the `ape conductor ack $JS.ACK.…` that acknowledges it.
+it never grants a person act, and ends with the `ape conductor ack $JS.ACK.…` that acknowledges it. Two checkouts of
+one project passed as two `--project`s count once. An attach that fails before it binds its consumer releases the
+conductor lease, so a corrected attach need not wait out the lease's five minutes.
 
 ## Tokens and fencing
 

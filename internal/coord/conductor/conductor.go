@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -80,12 +81,15 @@ var ErrLost = errors.New("conductor: lease lost")
 
 // Filters are the subjects a conductor of ens receives: the coordinator's
 // events (heartbeats included), the ensemble's contracts, and each member
-// project's events.
+// project's events. A project named twice — two checkouts of one
+// project — is one filter (v1.5 PRE-3): NATS refuses overlapping filters.
 func Filters(ens string, projects []string) []string {
 	out := make([]string, 0, 2+len(projects))
 	out = append(out, "ape.evt.coord."+tok(ens)+".>", "ape.evt.*."+tok(ens)+".contract.>")
 	for _, p := range projects {
-		out = append(out, "ape.evt.*."+tok(p)+".project.>")
+		if f := "ape.evt.*." + tok(p) + ".project.>"; !slices.Contains(out, f) {
+			out = append(out, f)
+		}
 	}
 	return out
 }
@@ -149,6 +153,9 @@ func Run(ctx context.Context, nc *nats.Conn, cfg Config) error {
 		DeliverPolicy:  jetstream.DeliverNewPolicy,
 	})
 	if err != nil {
+		// Nothing was delivered: the lease is let go, so a corrected
+		// attach need not wait out its TTL (v1.5 PRE-3).
+		_ = ls.Release(context.WithoutCancel(ctx), l)
 		return fmt.Errorf("conductor: bind consumer: %w", err)
 	}
 

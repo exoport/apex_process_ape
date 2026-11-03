@@ -244,3 +244,70 @@ func TestDrill_ConductorControl_NothingEscalatesWithoutIt(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, paused)
 }
+
+// v1.5 PRE-3 (a): two checkouts of one project name the project twice.
+// One filter each made overlapping consumer filters, which NATS refuses
+// (err 10138): attach never bound. Now the project is one filter, and the
+// conductor binds and gets its events; the control, two projects, keeps a
+// filter for each.
+func TestRun_TwoCheckoutsOfOneProjectBind(t *testing.T) {
+	require.Equal(t, []string{"ape.evt.coord.atomix.>", "ape.evt.*.atomix.contract.>", "ape.evt.*.taskforge.project.>"},
+		Filters("atomix", []string{"taskforge", "taskforge"}))
+	require.Equal(t, []string{"ape.evt.coord.atomix.>", "ape.evt.*.atomix.contract.>", "ape.evt.*.taskforge.project.>", "ape.evt.*.billing.project.>"},
+		Filters("atomix", []string{"taskforge", "billing"}), "the control: two projects, two filters")
+
+	_, nc, js := rig(t)
+	ctx := t.Context()
+	f := &fakeSession{nc: nc, answers: 99, acked: map[string]bool{}}
+	cfg := scaled("ann", "cond-a", f)
+	cfg.Projects = []string{"taskforge", "taskforge"}
+	errc := make(chan error, 1)
+	go func() { errc <- Run(ctx, nc, cfg) }()
+	time.Sleep(500 * time.Millisecond) // the consumer bound: DeliverNew
+	publish(t, js, "question", 1)
+	require.Eventually(t, func() bool {
+		select {
+		case err := <-errc:
+			t.Fatalf("Run returned: %v", err)
+		default:
+		}
+		return len(f.seqs()) == 1
+	}, 5*time.Second, 50*time.Millisecond, "bound, and the project's event delivered")
+}
+
+// v1.5 PRE-3 (b): a conductor that fails before its first delivery (here
+// the consumer cannot bind: no events stream) lets its lease go, so a
+// corrected attach claims it at once instead of waiting out the TTL. The
+// control: a conductor that bound holds it, and a second is refused.
+func TestRun_ReleasesTheLeaseOnABindError(t *testing.T) {
+	url := natstest.RunJetStreamServer(t)
+	nc, err := nats.Connect(url)
+	require.NoError(t, err)
+	t.Cleanup(nc.Close)
+	js, err := jetstream.New(nc)
+	require.NoError(t, err)
+	ctx := t.Context()
+	require.NoError(t, lease.Declare(ctx, js, 1))
+	ls, err := lease.Open(ctx, js)
+	require.NoError(t, err)
+	require.NoError(t, ls.SetEpoch(ctx, 1))
+	cfg := scaled("ann", "cond-a", &fakeSession{nc: nc, acked: map[string]bool{}})
+	cfg.LeaseTTL = time.Minute
+	err = Run(ctx, nc, cfg)
+	require.ErrorContains(t, err, "bind consumer")
+	h, _, err := ls.Holder(ctx, layout.ConductorKey("ann", "atomix"))
+	require.NoError(t, err)
+	require.Empty(t, h, "released on the bind error")
+	l, err := ls.Claim(ctx, layout.ConductorKey("ann", "atomix"), "cond-b", time.Minute)
+	require.NoError(t, err, "a corrected attach claims it at once")
+	require.NoError(t, ls.Release(ctx, l))
+
+	require.NoError(t, events.Declare(ctx, js, 1))
+	go func() { _ = Run(ctx, nc, cfg) }()
+	require.Eventually(t, func() bool {
+		h, _, _ := ls.Holder(ctx, layout.ConductorKey("ann", "atomix"))
+		return h == "cond-a"
+	}, 5*time.Second, 50*time.Millisecond)
+	time.Sleep(300 * time.Millisecond)
+	require.ErrorIs(t, Run(ctx, nc, scaled("ann", "cond-b", &fakeSession{nc: nc, acked: map[string]bool{}})), ErrTaken, "the control: a bound conductor keeps its lease")
+}
