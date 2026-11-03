@@ -94,6 +94,12 @@ func TestTask_AssessorSessionIsConfined(t *testing.T) {
 	args := string(launch)
 	require.Contains(t, args, "--tools Read,Grep,Glob,Write")
 	require.Contains(t, args, "--setting-sources user")
+	// V8h (FINDING-ASSESS-R1): no MCP server, not even ape's mcp-bridge,
+	// whose reply the session called and the guard denied, failing the
+	// batch; the batch still completes (exit 0 above) without it.
+	require.Contains(t, args, "--strict-mcp-config")
+	require.NotContains(t, args, "--mcp-config", "the assessor gets no MCP server")
+	require.NotContains(t, args, "mcp-bridge")
 	require.Contains(t, args, "--plugin-dir "+batch+".plugin")
 	require.Contains(t, args, "assess="+batch)
 	require.Contains(t, args, "toolchain=local", "the hooks are this ape, never a pin in the snapshot")

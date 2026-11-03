@@ -33,6 +33,8 @@ import (
 //     coordinator's checkout installed (--assess-skill-from; never main's
 //     copy, P4-1), and types /ape-assess:apex-assess;
 //   - no project plugins: the snapshot's config would bring their hooks;
+//   - --strict-mcp-config with no --mcp-config: no MCP server at all, not
+//     even ape's own mcp-bridge, whose reply the guard denies (V8h);
 //   - APE_TOOLCHAIN=local, so the hooks are this ape, not a pinned one.
 
 // assessDenyRules are the tools the assessor never has, denied inline as
@@ -60,6 +62,7 @@ func prepareAssessTask(o *taskOptions, cfg *runConfig) error {
 		return err
 	}
 	cfg.ignoreProjectSettings = true
+	cfg.spawnSettings.noMCPBridge = true // V8h: no MCP server, ape's bridge included
 	cfg.spawnSettings.args = append(cfg.spawnSettings.args, "--tools", strings.Join(apexv1.AssessTools, ","), "--plugin-dir", plugin)
 	cfg.spawnSettings.settings = withCredsDeny(map[string]any{"permissions": map[string]any{"deny": append([]string(nil), assessDenyRules...)}})
 	for i := range cfg.spawnSettings.hooks {

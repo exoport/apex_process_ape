@@ -817,10 +817,9 @@ func buildInteractivePrepend(
 	if err != nil {
 		return nil, err
 	}
-	prepend := []string{
-		"--strict-mcp-config",
-		"--mcp-config", string(mcpCfg),
-		"--settings", string(settings),
+	prepend := []string{"--strict-mcp-config", "--mcp-config", string(mcpCfg), "--settings", string(settings)}
+	if extra.noMCPBridge {
+		prepend = []string{"--strict-mcp-config", "--settings", string(settings)}
 	}
 	if ignoreProjectSettings {
 		prepend = append(prepend, "--setting-sources", "user")

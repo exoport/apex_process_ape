@@ -344,6 +344,13 @@ type spawnSettings struct {
 	// it gets no statusLine from ape, so the person's own status line
 	// stays theirs (W4).
 	personSession bool
+	// noMCPBridge launches claude with --strict-mcp-config and no
+	// --mcp-config, so the session has no MCP server at all, ape's own
+	// mcp-bridge included (V8h, FINDING-ASSESS-R1: the assessor called the
+	// bridge's reply, denied, and the batch failed). Nothing ape runs needs
+	// the bridge: readiness is the PTY's, and the hooks reach ape through
+	// `ape notify` on the IPC port.
+	noMCPBridge bool
 }
 
 // ANSI color escapes for colorized output (doctor). 16-color palette only,

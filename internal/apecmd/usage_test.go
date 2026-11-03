@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -202,4 +203,23 @@ func TestStatus_ShowsUsage(t *testing.T) {
 	require.InDelta(t, 0.55, st.Usage["seven_day"], 1e-9)
 	require.Contains(t, st.Usage, "age_seconds")
 	require.Contains(t, st.Usage, "seven_day_resets_at")
+}
+
+// V8h: the assessor's launch (noMCPBridge) keeps --strict-mcp-config and
+// passes no --mcp-config, so it has no MCP server at all. The control: an
+// ordinary launch keeps ape's mcp-bridge.
+func TestSpawnSettings_NoMCPBridgeForTheAssessor(t *testing.T) {
+	usageTempCache(t)
+	plain, err := buildInteractivePrepend("/opt/ape/bin/ape", 4242, false, "", nil, spawnSettings{})
+	require.NoError(t, err)
+	require.Contains(t, plain, "--strict-mcp-config")
+	i := slices.Index(plain, "--mcp-config")
+	require.GreaterOrEqual(t, i, 0, "the control: an ordinary launch has ape's bridge")
+	require.Contains(t, plain[i+1], "mcp-bridge")
+
+	assess, err := buildInteractivePrepend("/opt/ape/bin/ape", 4242, true, "", nil, spawnSettings{noMCPBridge: true})
+	require.NoError(t, err)
+	require.Contains(t, assess, "--strict-mcp-config")
+	require.NotContains(t, assess, "--mcp-config")
+	require.Contains(t, assess, "--settings", "the hooks still reach ape (ape notify on the IPC port)")
 }

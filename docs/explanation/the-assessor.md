@@ -31,7 +31,8 @@ and gives it nothing it does not need:
 - **An allow-list, three times over.** Claude Code's `--tools` limits the session to Read, Grep, Glob and Write. The
   pre-tool hook, registered for every tool, binds those four to the folder (every link resolved, any `..` refused)
   and allows only `notice.json` to be written; it denies anything else, MCP tools included, and records the denial,
-  which fails the batch. The inline deny rules name the rest.
+  which fails the batch. The inline deny rules name the rest. And the session starts with no MCP server at all
+  (`--strict-mcp-config` with no `--mcp-config`), not even ape's own bridge, so there is no MCP tool for it to try.
 - **No code from the snapshot.** `--setting-sources user` keeps the snapshot's own settings hooks from running.
   That also drops project skills, so ape supplies the skill as a plugin — from the coordinator's own checkout, never
   from `main`, and refused if its frontmatter carries hooks (measured: a plugin skill's hooks do run) or its body a
