@@ -333,6 +333,9 @@ type runConfig struct {
 type spawnSettings struct {
 	hooks    []config.ExtraHook
 	settings map[string]any
+	// args are added to claude's command line (the assessor's --tools
+	// and --plugin-dir, v1_assess.go).
+	args []string
 	// usageKey is the launch key the session's status line records the
 	// run's usage readings under (W4, ape usage record --run); "" records
 	// the newest reading only.

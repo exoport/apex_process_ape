@@ -127,6 +127,10 @@ func (d PreToolDecision) Output() ([]byte, error) {
 // Monitor call's command (v1.3). A Bash call's person acts are
 // PersonActGate's, after these.
 func PreTool(payload HookPayload) PreToolDecision {
+	// An assessor session is an allow-list (step 4): nothing below applies.
+	if folder := os.Getenv(EnvAssess); folder != "" {
+		return AssessGuard(payload, folder)
+	}
 	if ShellTools[payload.ToolName] {
 		cwd := payload.Cwd
 		if cwd == "" {

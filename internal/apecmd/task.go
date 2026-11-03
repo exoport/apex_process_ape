@@ -578,6 +578,10 @@ type taskOptions struct {
 	prompt         string
 	promptFlagName string
 	skillNoCommit  bool
+	// typedSkill, when set, is the name the session is given the skill by
+	// (the assessor's plugin skill, v1_assess.go); skill stays the key
+	// every decision is made by.
+	typedSkill string
 	// sessionKind overrides the APE_SESSION kind for a caller that
 	// dispatches through the task runner: `ape change`.
 	sessionKind           string
@@ -638,8 +642,12 @@ func resolveHandoffPrompt(handoff string, promptChanged bool) (string, error) {
 // their own work, so `ape task <skill>` must not tell them not to (v1
 // trial decision D4).
 func buildTaskStep(o taskOptions) pipeline.Step {
+	skill := o.skill
+	if o.typedSkill != "" {
+		skill = o.typedSkill
+	}
 	step := pipeline.Step{
-		Skill:      o.skill,
+		Skill:      skill,
 		Agent:      o.agent,
 		Model:      o.model,
 		Effort:     o.effort,
@@ -889,6 +897,10 @@ func dispatchTaskOnce(ctx context.Context, o taskOptions, cfg runConfig) (taskRu
 			return taskRun{}, err
 		}
 		v1Launch = l
+	} else if o.skill == apexv1.AssessSkill {
+		// The assessor is confined by prepareV1Task's launch; outside a v1
+		// project it would not be.
+		return taskRun{}, &taskPreflightError{err: errors.New(apexv1.AssessSkill + " runs only in a batch folder of an APEX v1 project's main (_apex/state/ exists); " + o.projectRoot + " is not one")}
 	} else if err := v1ConfigError(o.projectRoot); err != nil {
 		return taskRun{}, &taskPreflightError{err: err}
 	} else if o.maxTokens > 0 {
@@ -1101,6 +1113,14 @@ func prepareV1Task(ctx context.Context, p *apexv1.Project, o *taskOptions, cfg *
 	}
 	// Backlog 36: the plugins _apex/config.yaml lists are installed at
 	// their refs before anything spawns, and enabled inline.
+	if o.skill == apexv1.AssessSkill {
+		// PLAN-V15-ASSESSOR step 4: the confined session, no plugins.
+		if err := prepareAssessTask(o, cfg); err != nil {
+			return nil, &taskPreflightError{err: err}
+		}
+		cfg.usageGuard = newUsageGuard(p, o.skill, o.args, o.usageOK)
+		return &l, nil
+	}
 	plugins, err := v1TaskPlugins(ctx, p, cfg.claudeBin)
 	if err != nil {
 		return nil, &taskPreflightError{err: err}

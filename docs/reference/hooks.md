@@ -199,6 +199,29 @@ session ape launched (`APE_SESSION`), nothing is granted. A `Monitor` command th
 act is denied whatever the person typed: a grant is for a `Bash` call in the turn the person typed
 the words, and a `Monitor` command runs on unattended.
 
+### The assessor's session
+
+`ape task apex-assess` (v1.5, the coordinator's assessor) registers this hook for **every** tool
+and marks the session with `APE_ASSESS` = its batch folder. There the hook is an allow-list, and
+nothing above applies:
+
+- `Read`: `file_path` inside the folder;
+- `Grep`: `path` (default: the folder) inside the folder, and `glob` relative with no `..`;
+- `Glob`: `path` inside the folder, and `pattern` relative with no `..`;
+- `Write`: only the folder's `notice.json`.
+
+"Inside" is judged on the path with every symbolic link resolved, and a path with a `..` element
+is refused outright. Any other tool is denied, an MCP tool included. Every denial is also appended
+to `<folder>.denied.jsonl`, beside the folder, and the coordinator fails a batch with any line
+there.
+
+The launch also passes `claude --tools Read,Grep,Glob,Write` and the inline deny rules for every
+other tool. It passes `--setting-sources user`, so the snapshot's own `.claude/settings.json` hooks
+never run, and `APE_TOOLCHAIN=local`, so the hooks run this ape rather than a pin the snapshot names.
+Measured on Claude Code 2.1.316, `--setting-sources user` also drops project skills. So ape builds
+the plugin `ape-assess` at `<folder>.plugin/` from the snapshot's own
+`.claude/skills/apex-assess/`, and types `/ape-assess:apex-assess`.
+
 ## `ape hook stop`
 
 Registered for `Stop` and `SubagentStop`. What it does depends on who started the session.

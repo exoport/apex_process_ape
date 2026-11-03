@@ -56,6 +56,8 @@ Leases are not requests: claiming, renewing and releasing one is a compare-and-s
   a commit on `milestone/<M>` that `main` lacks: the event's commit when it is one, else the commit there whose
   `Change:` trailer names the change, else none, and the input says which. `input.md` is cut at 256 KiB and each diff
   at 64 KiB, saying so.
+- The assessor session runs in that folder as `ape task apex-assess`, confined to reading it and writing its
+  `notice.json` ([the hook's allow-list](hooks.md#the-assessors-session)).
 - `milestone-paused` / `milestone-resumed` (kind `project`) come from the conductor's ape (OQ24: a question left
   unanswered past the pause age; payload `{by, user}`) or from a person's `ape milestone pause|resume` (payload
   `{kind: "person", by, user, reason, at}`). While the newest is a pause, the milestone's change new, start and archive,

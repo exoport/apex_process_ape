@@ -825,7 +825,7 @@ func buildInteractivePrepend(
 	if ignoreProjectSettings {
 		prepend = append(prepend, "--setting-sources", "user")
 	}
-	return prepend, nil
+	return append(prepend, extra.args...), nil
 }
 
 // buildSpecPrepends resolves the prepend flags for a whole run: the
