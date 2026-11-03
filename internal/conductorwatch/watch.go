@@ -128,10 +128,10 @@ func (c *Config) defaults() {
 		c.Poll = 2 * time.Second
 	}
 	if c.SubmitSettle == 0 {
-		c.SubmitSettle = 300 * time.Millisecond
+		c.SubmitSettle = DefaultSubmitSettle
 	}
 	if c.SubmitWait == 0 {
-		c.SubmitWait = 3 * time.Second
+		c.SubmitWait = DefaultSubmitWait
 	}
 	if c.Now == nil {
 		c.Now = time.Now
@@ -324,7 +324,7 @@ func (w *Watcher) deliver(ctx context.Context, s *State, now time.Time, projects
 	}
 	d.DeliveredAt = now.UTC().Format(time.RFC3339)
 	w.gate.Typed()
-	if !w.submit(ctx) {
+	if !Submit(ctx, w.c.Pane, w.c.SubmitSettle, w.c.SubmitWait) {
 		d.Unsubmitted = true
 		w.c.Log("watcher: %s was typed but not submitted after %d Enters (the input row kept it, no turn started): nothing more is typed over it; the ack alert reaches the person\n", d.ID, submitEnters)
 	}
@@ -333,23 +333,33 @@ func (w *Watcher) deliver(ctx context.Context, s *State, now time.Time, projects
 // submitEnters bounds the Enters pressed for one delivery.
 const submitEnters = 3
 
-// submit presses Enter until the typed delivery is submitted — the input
-// row empty, or a turn running — at most submitEnters times (1.4.3
+// DefaultSubmitSettle and DefaultSubmitWait are Submit's settle and
+// per-Enter wait when a caller sets none.
+const (
+	DefaultSubmitSettle = 300 * time.Millisecond
+	DefaultSubmitWait   = 3 * time.Second
+)
+
+// Submit presses Enter until the text just typed into pane is submitted —
+// the input row empty, or a turn running — at most submitEnters times,
+// after letting it settle, and gives each Enter wait to take (1.4.3
 // PDFA-6: on Claude Code 2.1.311 the Enter after a ≈ 500-character typed
 // delivery was swallowed, the delivery sat in the row, and the next ones
-// saw a busy row). It never clears the row.
-func (w *Watcher) submit(ctx context.Context) bool {
-	sleep(ctx, w.c.SubmitSettle)
+// saw a busy row). It never clears the row. Every path that types into a
+// conductor's pane submits through it: the watcher and attach's
+// PaneSession (v1.5 PRE-4).
+func Submit(ctx context.Context, pane Pane, settle, wait time.Duration) bool {
+	sleep(ctx, settle)
 	for range submitEnters {
-		if err := w.c.Pane.Enter(ctx); err != nil {
+		if err := pane.Enter(ctx); err != nil {
 			return false
 		}
-		deadline := time.Now().Add(w.c.SubmitWait)
+		deadline := time.Now().Add(wait)
 		for time.Now().Before(deadline) {
-			if pane, err := w.c.Pane.Capture(ctx); err == nil && Submitted(pane) {
+			if screen, err := pane.Capture(ctx); err == nil && Submitted(screen) {
 				return true
 			}
-			sleep(ctx, w.c.SubmitWait/submitLooks)
+			sleep(ctx, wait/submitLooks)
 		}
 	}
 	return false

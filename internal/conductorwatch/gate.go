@@ -2,7 +2,9 @@ package conductorwatch
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"time"
 )
 
 // Gate is the conductor pane's typing rule (D664, D664+, D665+, D666+ F5),
@@ -90,10 +92,13 @@ func (g *Gate) Typed() { g.lastPane = "" }
 func (g *Gate) Why() string { return g.why }
 
 // PaneSession is a conductor.Session over the gate (v1.5 stage 1a, `ape
-// conductor attach`): Idle is the gate open, Type types through it.
+// conductor attach`): Idle is the gate open, Type types through it and
+// submits as the watcher does (Submit).
 type PaneSession struct {
 	Ctx  context.Context //nolint:containedctx // conductor.Session's methods take none; this is attach's own context
 	Gate *Gate
+	// SubmitSettle and SubmitWait are Submit's; zero: the defaults.
+	SubmitSettle, SubmitWait time.Duration
 }
 
 // Idle reports the gate open now.
@@ -102,8 +107,27 @@ func (s *PaneSession) Idle() bool {
 	return ok && s.Gate.Ready(s.Ctx)
 }
 
-// Type types text and presses Enter.
+// Type types text and presses Enter until it is submitted (v1.5 PRE-4:
+// it once only typed, and a real Claude Code conductor kept the first
+// delivery in its input row). Unsubmitted is an error, and nothing more
+// is typed over it: the gate sees a busy row, and the event stays
+// pending, to be delivered again.
 func (s *PaneSession) Type(text string) error {
 	defer s.Gate.Typed()
-	return s.Gate.Pane.Type(s.Ctx, text)
+	if err := s.Gate.Pane.Type(s.Ctx, text); err != nil {
+		return err
+	}
+	s.Gate.Typed()
+	settle, wait := s.SubmitSettle, s.SubmitWait
+	if settle == 0 {
+		settle = DefaultSubmitSettle
+	}
+	if wait == 0 {
+		wait = DefaultSubmitWait
+	}
+	if !Submit(s.Ctx, s.Gate.Pane, settle, wait) {
+		s.Gate.logf("attach: a delivery was typed but not submitted after %d Enters (the input row kept it, no turn started): nothing more is typed over it\n", submitEnters)
+		return errors.New("conductorwatch: the delivery was typed but not submitted")
+	}
+	return nil
 }
