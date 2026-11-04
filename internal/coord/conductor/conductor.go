@@ -427,10 +427,11 @@ func conductorPausedNow(ctx context.Context, js jetstream.JetStream, project, mi
 
 // Paused reports whether a milestone is paused: a person's pause (`ape
 // milestone pause`) newer than the person's newest resume, or a
-// conductor's (OQ24) newer than a conductor's newest resume. The two are
-// read apart (FINDING-V15-1C2-1, D797+): a conductor's resume never lifts
-// a person's pause, nor a person's resume a conductor's. change new and change start
-// refuse on it (step 9 wires them).
+// conductor's (OQ24) newer than any newer resume, a conductor's or a
+// person's. The two are read apart (FINDING-V15-1C2-1, D797+): a
+// conductor's resume never lifts a person's pause, and a person's resume
+// lifts both, so a person can clear a pause whose conductor is gone
+// (Q-V8J-1). change new and change start refuse on it (step 9 wires them).
 func Paused(ctx context.Context, js jetstream.JetStream, project, milestone string) (bool, error) {
 	paused, _, err := PausedWith(ctx, js, project, milestone)
 	return paused, err
@@ -478,9 +479,11 @@ const pauseReadMax = 512
 var errPauseHistory = errors.New("more pause and resume events than one read takes")
 
 // readPauses finds each kind's newest pause or resume event: a person's
-// events carry kind "person", a conductor's carry none, and each kind's
-// resume lifts that kind's pause only (D797+). Only the newest event of a
-// kind matters, so it reads back from the newest in a widening window of
+// events carry kind "person", a conductor's carry none; a conductor's
+// resume lifts a conductor's pause only, a person's lifts both (D797+,
+// Q-V8J-1). Only the newest event of a kind matters (and the newest person
+// resume, which is newer than a conductor event in the window or older than
+// all of it), so it reads back from the newest in a widening window of
 // stream sequences, and stops once both kinds are seen or the window
 // reaches the stream's start.
 func readPauses(ctx context.Context, js jetstream.JetStream, project, milestone string) (pauses, error) {
@@ -516,6 +519,7 @@ func readPauses(ctx context.Context, js jetstream.JetStream, project, milestone 
 			from = top - span
 		}
 		var person, cond *newest
+		var personResume uint64
 		read := 0
 		for subj, paused := range subjects {
 			for seq := from; seq <= top; {
@@ -537,6 +541,9 @@ func readPauses(ctx context.Context, js jetstream.JetStream, project, milestone 
 					if person == nil || e.seq > person.seq {
 						person = e
 					}
+					if !paused {
+						personResume = max(personResume, e.seq)
+					}
 				} else if cond == nil || e.seq > cond.seq {
 					cond = e
 				}
@@ -548,7 +555,7 @@ func readPauses(ctx context.Context, js jetstream.JetStream, project, milestone 
 			if person != nil && person.paused {
 				st.person = &person.p
 			}
-			if cond != nil && cond.paused {
+			if cond != nil && cond.paused && cond.seq > personResume {
 				st.conductor = &cond.p
 			}
 			return st, nil

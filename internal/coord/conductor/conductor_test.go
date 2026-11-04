@@ -588,8 +588,11 @@ func TestPaused_APersonsAndAConductorsPauseAreReadApart(t *testing.T) {
 		{"control-the-persons-resume-lifts-it", []struct{ event, kind string }{
 			{apexv1.EventMilestonePaused, PausePerson}, {apexv1.EventMilestoneResumed, PausePerson},
 		}, false},
-		{"a-persons-resume-leaves-a-conductors-pause", []struct{ event, kind string }{
+		{"a-persons-resume-lifts-a-conductors-pause-too", []struct{ event, kind string }{
 			{apexv1.EventMilestonePaused, PausePerson}, {apexv1.EventMilestonePaused, ""}, {apexv1.EventMilestoneResumed, PausePerson},
+		}, false},
+		{"a-conductor-pause-after-the-persons-resume-holds", []struct{ event, kind string }{
+			{apexv1.EventMilestonePaused, PausePerson}, {apexv1.EventMilestoneResumed, PausePerson}, {apexv1.EventMilestonePaused, ""},
 		}, true},
 		{"conductor-pause-then-person-pause-then-conductor-resume", []struct{ event, kind string }{
 			{apexv1.EventMilestonePaused, ""}, {apexv1.EventMilestonePaused, PausePerson}, {apexv1.EventMilestoneResumed, ""},

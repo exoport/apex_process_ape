@@ -262,7 +262,7 @@ func gate(ctx context.Context, p *apexv1.Project, op, milestone string, now time
 			milestone, why.By, why.At, why.Reason, op, milestone)}
 	case paused:
 		return "", &apexv1.FailError{Code: apexv1.CodeCoordMilestonePaused, Action: apexv1.ActionPerson, Msg: fmt.Sprintf(
-			"%s is paused: a question to the conductor went unanswered (OQ24), so %s waits — the conductor's answer resumes it (a person's `ape milestone resume` lifts a person's pause only, D797+)", milestone, op)}
+			"%s is paused: a question to the conductor went unanswered (OQ24), so %s waits — the conductor's answer resumes it, or `ape milestone resume %s` from the checkout holding its claim", milestone, op, milestone)}
 	}
 	// Stage 1a: a change of a milestone is this checkout's to start only
 	// while it holds the milestone's lease (section 3.1).
