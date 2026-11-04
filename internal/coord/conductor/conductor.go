@@ -14,7 +14,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -470,52 +469,90 @@ func PausedWith(ctx context.Context, js jetstream.JetStream, project, milestone 
 // each nil when its newest resume is newer.
 type pauses struct{ person, conductor *Pause }
 
-// readPauses walks the milestone's pause and resume events in stream
-// order. A person's events carry kind "person"; a conductor's carry none.
-// Each kind's resume lifts that kind's pause only (D797+).
+// pauseReadMax bounds how many pause and resume events one read takes in
+// (D800+): past it the read fails, and a gate refuses rather than guess.
+const pauseReadMax = 512
+
+// errPauseHistory is a milestone whose pause history the bound cannot
+// read.
+var errPauseHistory = errors.New("more pause and resume events than one read takes")
+
+// readPauses finds each kind's newest pause or resume event: a person's
+// events carry kind "person", a conductor's carry none, and each kind's
+// resume lifts that kind's pause only (D797+). Only the newest event of a
+// kind matters, so it reads back from the newest in a widening window of
+// stream sequences, and stops once both kinds are seen or the window
+// reaches the stream's start.
 func readPauses(ctx context.Context, js jetstream.JetStream, project, milestone string) (pauses, error) {
 	s, err := js.Stream(ctx, events.EventsStream)
 	if err != nil {
 		return pauses{}, err
 	}
-	type ev struct {
+	subjects := map[string]bool{} // subject → it is a pause
+	var top uint64
+	for _, event := range []string{apexv1.EventMilestonePaused, apexv1.EventMilestoneResumed} {
+		subj := "ape.evt.*." + tok(project) + ".project." + milestone + "." + event
+		m, err := s.GetLastMsgForSubject(ctx, subj)
+		if errors.Is(err, jetstream.ErrMsgNotFound) {
+			continue
+		}
+		if err != nil {
+			return pauses{}, err
+		}
+		subjects[subj] = event == apexv1.EventMilestonePaused
+		top = max(top, m.Sequence)
+	}
+	if top == 0 {
+		return pauses{}, nil
+	}
+	type newest struct {
 		seq    uint64
 		paused bool
 		p      Pause
 	}
-	var evs []ev
-	for _, event := range []string{apexv1.EventMilestonePaused, apexv1.EventMilestoneResumed} {
-		subj := "ape.evt.*." + tok(project) + ".project." + milestone + "." + event
-		for seq := uint64(1); ; {
-			m, err := s.GetMsg(ctx, seq, jetstream.WithGetMsgSubject(subj))
-			if errors.Is(err, jetstream.ErrMsgNotFound) {
-				break
+	for span := uint64(256); ; span *= 8 {
+		from := uint64(1)
+		if top > span {
+			from = top - span
+		}
+		var person, cond *newest
+		read := 0
+		for subj, paused := range subjects {
+			for seq := from; seq <= top; {
+				m, err := s.GetMsg(ctx, seq, jetstream.WithGetMsgSubject(subj))
+				if errors.Is(err, jetstream.ErrMsgNotFound) {
+					break
+				}
+				if err != nil {
+					return pauses{}, err
+				}
+				if read++; read > pauseReadMax {
+					return pauses{}, fmt.Errorf("%s %s: %w (%d)", project, milestone, errPauseHistory, pauseReadMax)
+				}
+				var p Pause
+				_ = json.Unmarshal(m.Data, &p)
+				e := &newest{seq: m.Sequence, paused: paused, p: p}
+				if p.Kind == PausePerson {
+					if person == nil || e.seq > person.seq {
+						person = e
+					}
+				} else if cond == nil || e.seq > cond.seq {
+					cond = e
+				}
+				seq = m.Sequence + 1
 			}
-			if err != nil {
-				return pauses{}, err
+		}
+		if person != nil && cond != nil || from == 1 {
+			var st pauses
+			if person != nil && person.paused {
+				st.person = &person.p
 			}
-			var p Pause
-			_ = json.Unmarshal(m.Data, &p)
-			evs = append(evs, ev{seq: m.Sequence, paused: event == apexv1.EventMilestonePaused, p: p})
-			seq = m.Sequence + 1
+			if cond != nil && cond.paused {
+				st.conductor = &cond.p
+			}
+			return st, nil
 		}
 	}
-	sort.Slice(evs, func(i, j int) bool { return evs[i].seq < evs[j].seq })
-	var st pauses
-	for _, e := range evs {
-		person := e.p.Kind == PausePerson
-		switch {
-		case e.paused && person:
-			st.person = &e.p
-		case e.paused:
-			st.conductor = &e.p
-		case person:
-			st.person = nil
-		default:
-			st.conductor = nil
-		}
-	}
-	return st, nil
 }
 
 func tok(s string) string {

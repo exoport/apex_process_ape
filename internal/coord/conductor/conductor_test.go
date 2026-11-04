@@ -612,3 +612,38 @@ func TestPaused_APersonsAndAConductorsPauseAreReadApart(t *testing.T) {
 		})
 	}
 }
+
+// D800+: the pause read is bounded. A person's pause behind more events
+// than the first window is still found (the window widens); a history past
+// pauseReadMax fails the read, which a gate does not take as "not paused".
+func TestPaused_TheReadIsBounded(t *testing.T) {
+	_, _, js := rig(t)
+	ctx := t.Context()
+	pub := func(event, kind string, id string) {
+		t.Helper()
+		data := fmt.Sprintf(`{"kind":%q,"by":"x","user":"bob"}`, kind)
+		_, err := events.Publish(ctx, js, events.Subject("bob", "taskforge", events.KindProject, "M2", event), id, []byte(data))
+		require.NoError(t, err)
+	}
+	pub(apexv1.EventMilestonePaused, PausePerson, "p")
+	for i := range 300 {
+		publish(t, js, "block", int64(i))
+	}
+	pub(apexv1.EventMilestonePaused, "", "c")
+	paused, why, err := PausedWith(ctx, js, "taskforge", "M2")
+	require.NoError(t, err)
+	require.True(t, paused)
+	require.Equal(t, PausePerson, why.Kind, "the person's pause, 300 events back, is found")
+
+	for i := range pauseReadMax + 8 {
+		ev := apexv1.EventMilestonePaused
+		if i%2 == 1 {
+			ev = apexv1.EventMilestoneResumed
+		}
+		data := `{"by":"x","user":"bob"}`
+		_, err := events.Publish(ctx, js, events.Subject("bob", "taskforge", events.KindProject, "M3", ev), fmt.Sprintf("m3-%d", i), []byte(data))
+		require.NoError(t, err)
+	}
+	_, err = Paused(ctx, js, "taskforge", "M3")
+	require.ErrorIs(t, err, errPauseHistory, "a conductor-only history past the bound is not read as 'no person pause'")
+}
