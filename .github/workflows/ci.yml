@@ -73,10 +73,16 @@ jobs:
         if: failure()
         run: |
           [ -f test.log ] || exit 0
-          # Each failure with the indented lines after it (file:line, Error,
-          # Messages), so the annotation says what failed, not only that it did.
-          awk '/^ *--- FAIL|^panic:|^FAIL/ { n = 12; print; next } n > 0 && /^ +[^ -]/ { n--; print; next } { n = 0 }' test.log \
-            | head -n 150 | sed -e 's/%/%25/g' -e 's/^/::error title=go test::/' || true
+          # One annotation per failure, the indented lines after it (file:line,
+          # Error, Messages) inside it: GitHub shows at most 10 error
+          # annotations a step, so a line each hid whole failures.
+          awk '
+            function esc(s) { gsub(/%/, "%25", s); gsub(/\r/, "", s); return s }
+            function flush() { if (msg != "") { print "::error title=go test::" msg; msg = "" } }
+            /^ *--- FAIL|^panic:/ { flush(); msg = esc($0); n = 12; next }
+            n > 0 && /^ +[^ -]/ { n--; msg = msg "%0A" esc($0); next }
+            { n = 0 }
+            END { flush() }' test.log | head -n 40 || true
 
       - name: Smoke — ./ape version
         # Catches //go:build constraint regressions that would let a

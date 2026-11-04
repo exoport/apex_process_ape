@@ -20,7 +20,8 @@ const page = "../../../docs/reference/coordination.md"
 func TestPageMatchesLayout(t *testing.T) {
 	data, err := os.ReadFile(filepath.FromSlash(page))
 	require.NoError(t, err)
-	doc := string(data)
+	// A Windows checkout may turn the page's line endings into CRLF.
+	doc := strings.ReplaceAll(string(data), "\r\n", "\n")
 	for name, table := range map[string]string{"subjects": SubjectsTable(), "stores": StoresTable()} {
 		begin, end := "<!-- BEGIN generated:"+name+" -->\n", "<!-- END generated:"+name+" -->"
 		i, j := strings.Index(doc, begin), strings.Index(doc, end)

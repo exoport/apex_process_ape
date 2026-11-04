@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -96,7 +97,9 @@ func TestService(t *testing.T) {
 	require.Contains(t, string(log), `"user":"mallory"`, "refusals are logged too")
 	st, err := os.Stat(cfg.Log)
 	require.NoError(t, err)
-	require.Equal(t, os.FileMode(0o600), st.Mode().Perm())
+	if runtime.GOOS != "windows" { // Windows keeps no POSIX permission bits
+		require.Equal(t, os.FileMode(0o600), st.Mode().Perm())
+	}
 	n, err := os.ReadFile(notified)
 	require.NoError(t, err)
 	require.Equal(t, 2, strings.Count(string(n), "\n"), "secrets and runner-token notify the operator")
