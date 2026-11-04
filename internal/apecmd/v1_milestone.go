@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/exoport/apex_process_ape/internal/apexv1"
 	"github.com/exoport/apex_process_ape/internal/coord/member"
@@ -681,7 +680,7 @@ branch · 2 usage, or --accept-red from a model session.`,
 			id, accepting := args[0], cmd.Flags().Changed("accept-red")
 			// D702: a coordinated close writes milestone/<M> and main's
 			// queue, so it needs NATS and M's lease (single writer).
-			if err := member.Gate(cmd.Context(), p, "milestone close", id, time.Now()); err != nil {
+			if err := coordGate(cmd, &f, p, "milestone close", id); err != nil {
 				return v1Fail(cmd, &f, err, nil)
 			}
 			// V8e: --wait 0 asks for no waiting, so another checkout's

@@ -30,7 +30,8 @@ which must fail where the drill passes. That control is what shows the protectio
 
 `make check-coord` also runs:
 
-- the outage: NATS unreachable refuses `ape change new`, `start` and `archive` with `coord.nats-unreachable`, and
+- the outage: NATS unreachable refuses `ape change new`, and `start` or `archive` with `--wait 0`, with
+  `coord.nats-unreachable` (with a `--wait`, they wait for NATS; a detached run exits 75 and the next call attaches), and
   the coordinator publishes `nats-paused` and `nats-resumed` once its link is back;
 - the credential guard: a Bash or Monitor command that could read `hot/ape-nats.creds` is denied;
 - publish and wake: a member project's events reach NATS once each, and `ape status --wait` wakes on them.

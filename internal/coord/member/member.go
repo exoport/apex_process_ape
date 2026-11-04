@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -156,23 +157,75 @@ func CheckEnsemble(ens string, members []string) error {
 	return nil
 }
 
-// pauseCheckTimeout bounds the read of a milestone's pause events.
-const pauseCheckTimeout = 2 * time.Second
+// pauseCheckTimeout bounds one read of a milestone's pause events.
+var pauseCheckTimeout = 2 * time.Second
+
+// GateWaitMax bounds how long a gating run waits for NATS and a clean
+// pause read (D800+), as a close waits for another's (CloseWaitMax).
+var GateWaitMax = 2 * time.Hour
+
+// gateWaitEvery is how often a waiting gate tries again.
+var gateWaitEvery = 5 * time.Second
+
+// What a transient gate refusal waits for (D800+).
+const (
+	waitNATS  = "NATS"
+	waitPause = "the pause state"
+)
 
 // Gate is the rule of OQ5 for one start or integration step (op): nil for
 // a project in no ensemble; coord.membership for a block that cannot be
 // used; coord.nats-unreachable when NATS cannot be reached with the
-// project's credential. With a milestone, a milestone the conductor's ape
-// paused (OQ24: a question left unanswered) refuses too, with
+// project's credential, or when the milestone's pause state cannot be read
+// (an error, its timeout, its bound: D800+, never taken as "not paused").
+// With a milestone, a paused milestone refuses too, with
 // coord.milestone-paused: only that milestone; and one whose lease this
-// checkout does not hold refuses with session.not-lease-holder.
+// checkout does not hold refuses with session.not-lease-holder. Gate
+// refuses at once; GateWait waits out the transient refusals.
 func Gate(ctx context.Context, p *apexv1.Project, op, milestone string, now time.Time) error {
+	_, err := gate(ctx, p, op, milestone, now)
+	return err
+}
+
+// Transient reports a Gate refusal that GateWait would wait out: NATS
+// unreachable, or a pause state that could not be read.
+func Transient(err error) bool {
+	var fe *apexv1.FailError
+	return errors.As(err, &fe) && fe.Code == apexv1.CodeCoordNATSUnreachable
+}
+
+// GateWait is Gate that waits, at most bound, for NATS and for a clean read
+// of the milestone's pause state (D800+: a run waits, as a close waits for
+// another's), saying on w once what it waits for each time that changes.
+// Any other refusal, and a transient one past bound, is returned.
+func GateWait(ctx context.Context, p *apexv1.Project, op, milestone string, bound time.Duration, w io.Writer) error {
+	deadline := time.Now().Add(bound)
+	said := ""
+	for {
+		what, err := gate(ctx, p, op, milestone, time.Now())
+		if what == "" || !time.Now().Before(deadline) {
+			return err
+		}
+		if what != said {
+			fmt.Fprintf(w, "%s: waiting for %s (%v) — every %s, for at most %s\n", op, what, err, gateWaitEvery, bound)
+			said = what
+		}
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(min(gateWaitEvery, time.Until(deadline))):
+		}
+	}
+}
+
+// gate is Gate, with what a transient refusal waits for ("" otherwise).
+func gate(ctx context.Context, p *apexv1.Project, op, milestone string, now time.Time) (string, error) {
 	m, err := Load(p)
 	if errors.Is(err, ErrNotMember) {
-		return nil
+		return "", nil
 	}
 	if err != nil {
-		return &apexv1.FailError{Code: apexv1.CodeCoordMembership, Msg: err.Error() +
+		return "", &apexv1.FailError{Code: apexv1.CodeCoordMembership, Msg: err.Error() +
 			" — a person fixes _apex/config.yaml's coordination: block or places the ensemble credential"}
 	}
 	var nc *nats.Conn
@@ -181,28 +234,37 @@ func Gate(ctx context.Context, p *apexv1.Project, op, milestone string, now time
 		nc, err = natsconn.Connect(ctx, natsconn.Config{URL: m.URL, CredsFile: m.Creds}, "ape-member", nats.NoReconnect())
 		return err
 	}, now); err != nil {
-		return err
+		return waitNATS, err
 	}
 	defer nc.Close()
 	if milestone == "" || milestone == "none" {
-		return nil
+		return "", nil
+	}
+	unread := func(err error) (string, error) {
+		return waitPause, &apexv1.FailError{Code: apexv1.CodeCoordNATSUnreachable, Msg: fmt.Sprintf(
+			"%s's pause state could not be read (%v), so %s waits — a pause is never assumed away; run it again", milestone, err, op)}
 	}
 	js, err := jetstream.New(nc)
 	if err != nil {
-		return nil // no stream to read: nothing is paused
+		return unread(err)
 	}
 	pctx, cancel := context.WithTimeout(ctx, pauseCheckTimeout)
 	defer cancel()
-	if paused, why, err := conductor.PausedWith(pctx, js, m.Project, milestone); err == nil && paused {
-		if why.Kind == conductor.PausePerson {
-			return &apexv1.FailError{Code: apexv1.CodeCoordMilestonePaused, Action: apexv1.ActionPerson, Msg: fmt.Sprintf(
-				"%s is paused by %s since %s: %s — so %s waits; `ape milestone resume %s`, from the checkout holding its claim, resumes it",
-				milestone, why.By, why.At, why.Reason, op, milestone)}
-		}
-		return &apexv1.FailError{Code: apexv1.CodeCoordMilestonePaused, Action: apexv1.ActionPerson, Msg: fmt.Sprintf(
-			"%s is paused: a question to the conductor went unanswered (OQ24), so %s waits — the conductor's answer resumes it, or `ape milestone resume %s` from the checkout holding its claim", milestone, op, milestone)}
+	paused, why, err := conductor.PausedWith(pctx, js, m.Project, milestone)
+	switch {
+	case errors.Is(err, jetstream.ErrStreamNotFound):
+		// no events stream: nothing was ever paused
+	case err != nil:
+		return unread(err)
+	case paused && why.Kind == conductor.PausePerson:
+		return "", &apexv1.FailError{Code: apexv1.CodeCoordMilestonePaused, Action: apexv1.ActionPerson, Msg: fmt.Sprintf(
+			"%s is paused by %s since %s: %s — so %s waits; `ape milestone resume %s`, from the checkout holding its claim, resumes it",
+			milestone, why.By, why.At, why.Reason, op, milestone)}
+	case paused:
+		return "", &apexv1.FailError{Code: apexv1.CodeCoordMilestonePaused, Action: apexv1.ActionPerson, Msg: fmt.Sprintf(
+			"%s is paused: a question to the conductor went unanswered (OQ24), so %s waits — the conductor's answer resumes it (a person's `ape milestone resume` lifts a person's pause only, D797+)", milestone, op)}
 	}
 	// Stage 1a: a change of a milestone is this checkout's to start only
 	// while it holds the milestone's lease (section 3.1).
-	return requireMilestoneLease(ctx, p, op, milestone)
+	return "", requireMilestoneLease(ctx, p, op, milestone)
 }

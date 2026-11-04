@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/exoport/apex_process_ape/internal/apexv1"
+	"github.com/exoport/apex_process_ape/internal/coord/member"
 	"github.com/exoport/apex_process_ape/internal/repl"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -597,4 +598,26 @@ func spawnWorker(cmd *cobra.Command, logPath string, args []string) error {
 	fmt.Fprintln(cmd.OutOrStdout(), w.Process.Pid)
 	_ = w.Process.Release()
 	return nil
+}
+
+// coordGate is member.Gate for a long verb (D800+): its run waits for NATS
+// and for a clean read of the milestone's pause state — a detached run at
+// most member.GateWaitMax, so the call exits 75 while it waits and the next
+// call attaches; a run in this process (--no-detach) within the call's
+// --wait. --wait 0 refuses at once, and so does any refusal that is not
+// transient (a pause that holds, another's lease). A verb that is not long
+// (change new) refuses at once.
+func coordGate(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, op, milestone string) error {
+	ctx := cmd.Context()
+	if _, worker := ctx.Value(workerKey{}).(string); worker {
+		return member.GateWait(ctx, p, op, milestone, member.GateWaitMax, os.Stderr)
+	}
+	if f.long && (f.noDetach || !v1DetachDefault) {
+		return member.GateWait(ctx, p, op, milestone, f.wait, cmd.ErrOrStderr())
+	}
+	err := member.Gate(ctx, p, op, milestone, time.Now())
+	if f.long && f.wait > 0 && member.Transient(err) {
+		return nil // the detached run waits for it
+	}
+	return err
 }

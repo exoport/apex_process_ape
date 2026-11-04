@@ -27,8 +27,13 @@ import (
 // as `ape milestone claim` leaves it (stage 1b's m9 after its claim).
 func githubCoordRepo(t *testing.T) string {
 	t.Helper()
+	return githubCoordRepoOn(t, natstest.RunJetStreamServer(t))
+}
+
+// githubCoordRepoOn is githubCoordRepo on the NATS at url.
+func githubCoordRepoOn(t *testing.T, url string) string {
+	t.Helper()
 	root := v1Repo(t)
-	url := natstest.RunJetStreamServer(t)
 	nc, err := nats.Connect(url)
 	require.NoError(t, err)
 	t.Cleanup(nc.Close)
@@ -111,6 +116,60 @@ func TestMilestoneTakeIn_DetachedWorkerTakesTheMilestone(t *testing.T) {
 	var here map[string]any
 	require.NoError(t, json.Unmarshal([]byte(stdout), &here), stdout)
 	require.Equal(t, res, here, "control: in-process, the same answer")
+}
+
+// D800+ (as V8e): a long verb's run waits for NATS rather than refusing,
+// so a loop's call exits 75 and its next call attaches. The T1: with every
+// node down, `take-in M1 --wait 3s` exits 75 while the detached run says it
+// waits for NATS; once NATS is back, the next call attaches and ends 0.
+// The control: `--wait 0` refuses at once (coord.nats-unreachable, exit 1)
+// and starts no run. (A pause state that cannot be read takes the same
+// path in member.GateWait: TestGateWait_APauseStateThatCannotBeRead.)
+func TestMilestoneTakeIn_WaitsOutANATSOutage(t *testing.T) {
+	c := natstest.RunCluster(t, 3)
+	root := githubCoordRepoOn(t, c.URLs())
+	old := v1DetachDefault
+	v1DetachDefault = true
+	t.Setenv(asApeBinary, "1")
+	t.Cleanup(func() { v1DetachDefault = old })
+	p, err := apexv1.Open(root)
+	require.NoError(t, err)
+	scope := apexv1.TakeInPrefix + "M1"
+	t.Cleanup(func() {
+		if l := p.LoadRunLock(scope); l != nil && l.PID > 0 && l.PID != os.Getpid() {
+			_ = syscall.Kill(l.PID, syscall.SIGKILL)
+		}
+		awaitNoProcessUnder(t, root, 10*time.Second)
+	})
+	for i := range 3 {
+		c.Stop(i)
+	}
+
+	start := time.Now()
+	stdout, stderr, err := v1Exec(t, newMilestoneCmd, "take-in", "M1", "--json", "--wait", "0", "--cwd", root)
+	require.Equal(t, 1, exitCodeOf(t, err), "control: --wait 0 refuses at once")
+	require.Contains(t, stdout+stderr, apexv1.CodeCoordNATSUnreachable)
+	require.Less(t, time.Since(start), 10*time.Second)
+	require.Nil(t, p.LoadRunLock(scope), "control: no run started")
+
+	stdout, stderr, err = v1Exec(t, newMilestoneCmd, "take-in", "M1", "--json", "--wait", "3s", "--cwd", root)
+	log, _ := os.ReadFile(p.RunLogPath(scope))
+	require.Equal(t, exitCodeStillRunning, exitCodeOf(t, err), "stdout %s\nstderr %s\nworker log %s", stdout, stderr, log)
+	require.Eventually(t, func() bool {
+		log, _ = os.ReadFile(p.RunLogPath(scope))
+		return strings.Contains(string(log), "milestone take-in: waiting for NATS")
+	}, 10*time.Second, 200*time.Millisecond, "the run says what it waits for: %s", log)
+
+	for i := range 3 {
+		c.Restart(i)
+	}
+	c.WaitMetaLeader(30 * time.Second)
+	stdout, stderr, err = v1Exec(t, newMilestoneCmd, "take-in", "M1", "--json", "--wait", "60s", "--cwd", root)
+	log, _ = os.ReadFile(p.RunLogPath(scope))
+	require.NoError(t, err, "stdout %s\nstderr %s\nworker log %s", stdout, stderr, log)
+	var res map[string]any
+	require.NoError(t, json.Unmarshal([]byte(stdout), &res), stdout)
+	require.Equal(t, true, res["up_to_date"], stdout)
 }
 
 // The worker's argv is the verb's argument, and only the lock is the

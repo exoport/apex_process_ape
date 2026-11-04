@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -29,7 +30,14 @@ func TestV1Commands_CoordinationNeedsNATS(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "hot"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(root, "hot", "ape-nats.creds"), []byte("unused: nothing listens"), 0o600))
 
-	stdout, _, err = v1Exec(t, newChangeCmd, "start", "add-nothing", "--json", "--cwd", root)
+	// D800+: --wait 0 refuses at once; with a --wait, the run waits for
+	// NATS within it (in this process here), then refuses the same way.
+	start := time.Now()
+	_, stderr, err := v1Exec(t, newChangeCmd, "start", "add-nothing", "--json", "--wait", "1s", "--cwd", root)
+	require.Equal(t, 1, exitCodeOf(t, err), stderr)
+	require.GreaterOrEqual(t, time.Since(start), time.Second, "it waited within --wait")
+	require.Contains(t, stderr, "change start: waiting for NATS")
+	stdout, _, err = v1Exec(t, newChangeCmd, "start", "add-nothing", "--json", "--wait", "0", "--cwd", root)
 	require.Equal(t, 1, exitCodeOf(t, err), stdout)
 	var out struct {
 		Diagnostics []struct {

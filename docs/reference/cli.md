@@ -5903,10 +5903,12 @@ before its close (the close does it itself). Records that reach main through rec
 (a milestone's approval, section 5.4) reach milestone/<M> the same way: a milestone
 claimed before its approval merged starts its changes once a take-in brought it.
 
-Needs this checkout's lease on M (`ape milestone claim`) and NATS. From main (where a
-claim leaves HEAD) it switches to milestone/<M> on a clean tree, and refuses otherwise.
+Needs this checkout's lease on M (`ape milestone claim`) and NATS. Its run waits for NATS,
+and for a clean read of M's pause state (D800+: at most 2 h; --wait 0 refuses at once). From
+main (where a claim leaves HEAD) it switches to milestone/<M> on a clean tree, and refuses
+otherwise.
 
-Exit codes: 0 up to date, or landed · 1 refused (no lease, NATS, a red regression, the
+Exit codes: 0 up to date, or landed · 1 refused (no lease, NATS under --wait 0, a red regression, the
 branch moved, a push) · 2 usage, or a project not integrating through GitHub · 3 conflict ·
 75 still running when --wait ran out (the run goes on; call again).
 

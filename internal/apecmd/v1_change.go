@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/exoport/apex_process_ape/internal/apexv1"
-	"github.com/exoport/apex_process_ape/internal/coord/member"
 	"github.com/spf13/cobra"
 )
 
@@ -157,7 +156,7 @@ func v1ChangeLeaf(use, short, long, example string, f *v1Flags, run func(cmd *co
 				}
 			}
 			if coordVerbs[cmd.Name()] {
-				if err := member.Gate(cmd.Context(), p, "change "+cmd.Name(), coordMilestone(cmd, p, args[0]), time.Now()); err != nil {
+				if err := coordGate(cmd, f, p, "change "+cmd.Name(), coordMilestone(cmd, p, args[0])); err != nil {
 					return v1Fail(cmd, f, err, nil)
 				}
 			}
