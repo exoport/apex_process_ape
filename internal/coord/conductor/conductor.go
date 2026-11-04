@@ -526,7 +526,8 @@ func readPauses(ctx context.Context, js jetstream.JetStream, project, milestone 
 				if err != nil {
 					return pauses{}, err
 				}
-				if read++; read > pauseReadMax {
+				read++
+				if read > pauseReadMax {
 					return pauses{}, fmt.Errorf("%s %s: %w (%d)", project, milestone, errPauseHistory, pauseReadMax)
 				}
 				var p Pause
