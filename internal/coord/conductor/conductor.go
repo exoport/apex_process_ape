@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -363,9 +364,12 @@ func (r *runner) sweep(ctx context.Context, cons jetstream.Consumer) {
 		}
 		delete(r.pend, seq)
 		r.lastAck = time.Now()
-		// Resume what this answer unblocks, whoever paused it: a conductor
-		// that took the ensemble over answers its predecessor's question.
-		if p.paused || p.project != "" && pausedNow(ctx, r.js, p.project, p.milestone) {
+		// Resume what this answer unblocks, whichever conductor paused it:
+		// one that took the ensemble over answers its predecessor's
+		// question. A person's pause is the person's to lift
+		// (FINDING-V15-1C2-1): the resume published here is a conductor's,
+		// and lifts a conductor's pause only.
+		if p.project != "" && conductorPausedNow(ctx, r.js, p.project, p.milestone) {
 			r.publish(ctx, p, apexv1.EventMilestoneResumed)
 		}
 	}
@@ -415,15 +419,19 @@ func projectOf(subject string) (project, milestone string) {
 	return "", ""
 }
 
-func pausedNow(ctx context.Context, js jetstream.JetStream, project, milestone string) bool {
-	p, err := Paused(ctx, js, project, milestone)
-	return err == nil && p
+// conductorPausedNow reports a milestone a conductor's pause (OQ24)
+// holds, whatever a person's pause says.
+func conductorPausedNow(ctx context.Context, js jetstream.JetStream, project, milestone string) bool {
+	st, err := readPauses(ctx, js, project, milestone)
+	return err == nil && st.conductor != nil
 }
 
-// Paused reports whether a milestone is paused: its newest milestone-paused
-// event is newer than its newest milestone-resumed (OQ24, or a person's
-// `ape milestone pause`). change new and change start refuse on it (step
-// 9 wires them).
+// Paused reports whether a milestone is paused: a person's pause (`ape
+// milestone pause`) newer than the person's newest resume, or a
+// conductor's (OQ24) newer than a conductor's newest resume. The two are
+// read apart (FINDING-V15-1C2-1, D797+): a conductor's resume never lifts
+// a person's pause, nor a person's resume a conductor's. change new and change start
+// refuse on it (step 9 wires them).
 func Paused(ctx context.Context, js jetstream.JetStream, project, milestone string) (bool, error) {
 	paused, _, err := PausedWith(ctx, js, project, milestone)
 	return paused, err
@@ -442,26 +450,72 @@ type Pause struct {
 // PausePerson is a person's pause's Kind.
 const PausePerson = "person"
 
-// PausedWith is Paused with the newest pause's payload.
+// PausedWith is Paused with the pause that holds it: the person's when
+// both hold, since only the person lifts it.
 func PausedWith(ctx context.Context, js jetstream.JetStream, project, milestone string) (bool, Pause, error) {
-	s, err := js.Stream(ctx, events.EventsStream)
+	st, err := readPauses(ctx, js, project, milestone)
 	if err != nil {
 		return false, Pause{}, err
 	}
-	last := func(event string) *jetstream.RawStreamMsg {
-		m, err := s.GetLastMsgForSubject(ctx, "ape.evt.*."+tok(project)+".project."+milestone+"."+event)
-		if err != nil {
-			return nil
+	switch {
+	case st.person != nil:
+		return true, *st.person, nil
+	case st.conductor != nil:
+		return true, *st.conductor, nil
+	}
+	return false, Pause{}, nil
+}
+
+// pauses is a milestone's standing pauses, a person's and a conductor's,
+// each nil when its newest resume is newer.
+type pauses struct{ person, conductor *Pause }
+
+// readPauses walks the milestone's pause and resume events in stream
+// order. A person's events carry kind "person"; a conductor's carry none.
+// Each kind's resume lifts that kind's pause only (D797+).
+func readPauses(ctx context.Context, js jetstream.JetStream, project, milestone string) (pauses, error) {
+	s, err := js.Stream(ctx, events.EventsStream)
+	if err != nil {
+		return pauses{}, err
+	}
+	type ev struct {
+		seq    uint64
+		paused bool
+		p      Pause
+	}
+	var evs []ev
+	for _, event := range []string{apexv1.EventMilestonePaused, apexv1.EventMilestoneResumed} {
+		subj := "ape.evt.*." + tok(project) + ".project." + milestone + "." + event
+		for seq := uint64(1); ; {
+			m, err := s.GetMsg(ctx, seq, jetstream.WithGetMsgSubject(subj))
+			if errors.Is(err, jetstream.ErrMsgNotFound) {
+				break
+			}
+			if err != nil {
+				return pauses{}, err
+			}
+			var p Pause
+			_ = json.Unmarshal(m.Data, &p)
+			evs = append(evs, ev{seq: m.Sequence, paused: event == apexv1.EventMilestonePaused, p: p})
+			seq = m.Sequence + 1
 		}
-		return m
 	}
-	p, r := last(apexv1.EventMilestonePaused), last(apexv1.EventMilestoneResumed)
-	if p == nil || r != nil && r.Sequence > p.Sequence {
-		return false, Pause{}, nil
+	sort.Slice(evs, func(i, j int) bool { return evs[i].seq < evs[j].seq })
+	var st pauses
+	for _, e := range evs {
+		person := e.p.Kind == PausePerson
+		switch {
+		case e.paused && person:
+			st.person = &e.p
+		case e.paused:
+			st.conductor = &e.p
+		case person:
+			st.person = nil
+		default:
+			st.conductor = nil
+		}
 	}
-	var pause Pause
-	_ = json.Unmarshal(p.Data, &pause)
-	return true, pause, nil
+	return st, nil
 }
 
 func tok(s string) string {

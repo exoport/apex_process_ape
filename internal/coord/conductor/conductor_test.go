@@ -538,3 +538,77 @@ func TestDrill_ConductorRidesOutANATSOutage(t *testing.T) {
 		}
 	})
 }
+
+// FINDING-V15-1C2-1: a person's pause is the person's to lift. The
+// conductor acknowledges the pause's own delivery and a later delivery of
+// the same milestone, and the milestone stays paused, with no
+// milestone-resumed published. The control is Drill 4: a conductor's own
+// pause is resumed by the answer, its predecessor's included.
+func TestRun_APersonsPauseSurvivesTheConductorsAcks(t *testing.T) {
+	url, nc, js := rig(t)
+	ctx := t.Context()
+	seen := watch(t, nc, "ape.evt.>")
+	cnc, err := nats.Connect(url)
+	require.NoError(t, err)
+	defer cnc.Close()
+	go func() {
+		_ = coordinator.Run(ctx, cnc, coordinator.Config{Ensemble: "atomix", ID: "coord-1", TTL: 3 * time.Second, Renew: time.Second, Projects: []string{"taskforge"}})
+	}()
+	a := &fakeSession{nc: nc, answers: 10, acked: map[string]bool{}}
+	go func() { _ = Run(ctx, nc, scaled("ann", "cond-a", a)) }()
+	time.Sleep(300 * time.Millisecond)
+
+	data := fmt.Sprintf(`{"kind":%q,"by":"bob","user":"bob","reason":"close contention"}`, PausePerson)
+	_, err = events.Publish(ctx, js, events.Subject("bob", "taskforge", events.KindProject, "M2", apexv1.EventMilestonePaused), "bob/pause/M2", []byte(data))
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return a.ackedWith(apexv1.EventMilestonePaused) }, 5*time.Second, 50*time.Millisecond, "the pause is delivered and acknowledged")
+	publish(t, js, "block", 1)
+	require.Eventually(t, func() bool { return a.ackedWith(".M2.block") }, 5*time.Second, 50*time.Millisecond, "a later M2 delivery is acknowledged")
+
+	require.Never(t, func() bool { return seen(".project.M2." + apexv1.EventMilestoneResumed) }, 3*time.Second, 100*time.Millisecond,
+		"the conductor's acks do not lift a person's pause")
+	paused, err := Paused(ctx, js, "taskforge", "M2")
+	require.NoError(t, err)
+	require.True(t, paused)
+}
+
+// FINDING-V15-1C2-1, widened (D797+): a person's pause and a conductor's
+// are read apart. A person pauses M2, a conductor pauses it too (OQ24) and
+// then resumes its own pause: M2 is still the person's, paused. The
+// control: the person's own resume lifts it.
+func TestPaused_APersonsAndAConductorsPauseAreReadApart(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		events []struct{ event, kind string }
+		paused bool
+	}{
+		{"conductor-resume-leaves-the-persons-pause", []struct{ event, kind string }{
+			{apexv1.EventMilestonePaused, PausePerson}, {apexv1.EventMilestonePaused, ""}, {apexv1.EventMilestoneResumed, ""},
+		}, true},
+		{"control-the-persons-resume-lifts-it", []struct{ event, kind string }{
+			{apexv1.EventMilestonePaused, PausePerson}, {apexv1.EventMilestoneResumed, PausePerson},
+		}, false},
+		{"a-persons-resume-leaves-a-conductors-pause", []struct{ event, kind string }{
+			{apexv1.EventMilestonePaused, PausePerson}, {apexv1.EventMilestonePaused, ""}, {apexv1.EventMilestoneResumed, PausePerson},
+		}, true},
+		{"conductor-pause-then-person-pause-then-conductor-resume", []struct{ event, kind string }{
+			{apexv1.EventMilestonePaused, ""}, {apexv1.EventMilestonePaused, PausePerson}, {apexv1.EventMilestoneResumed, ""},
+		}, true},
+		{"control-a-conductors-own-pause-and-resume", []struct{ event, kind string }{
+			{apexv1.EventMilestonePaused, ""}, {apexv1.EventMilestoneResumed, ""},
+		}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, js := rig(t)
+			ctx := t.Context()
+			for i, e := range tc.events {
+				data := fmt.Sprintf(`{"kind":%q,"by":"x","user":"bob"}`, e.kind)
+				_, err := events.Publish(ctx, js, events.Subject("bob", "taskforge", events.KindProject, "M2", e.event), fmt.Sprintf("e%d", i), []byte(data))
+				require.NoError(t, err)
+			}
+			paused, err := Paused(ctx, js, "taskforge", "M2")
+			require.NoError(t, err)
+			require.Equal(t, tc.paused, paused)
+		})
+	}
+}
