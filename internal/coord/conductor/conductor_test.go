@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -350,6 +351,9 @@ func TestRun_ReleasesTheLeaseOnABindError(t *testing.T) {
 // the token in double quotes, both reach ape stripped — what the refusal
 // in `ape conductor ack` is for.
 func TestFormat_TheAckSurvivesARealShell(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a POSIX shell's quoting; the conductor's pane runs one (tmux), never Windows'")
+	}
 	sh, err := exec.LookPath("sh")
 	if err != nil {
 		t.Skip("no sh")

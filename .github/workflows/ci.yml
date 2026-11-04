@@ -73,8 +73,10 @@ jobs:
         if: failure()
         run: |
           [ -f test.log ] || exit 0
-          grep -E -e '--- FAIL' -e '^panic:' -e '^FAIL' test.log | head -n 40 \
-            | sed -e 's/%/%25/g' -e 's/^/::error title=go test::/' || true
+          # Each failure with the indented lines after it (file:line, Error,
+          # Messages), so the annotation says what failed, not only that it did.
+          awk '/^ *--- FAIL|^panic:|^FAIL/ { n = 12; print; next } n > 0 && /^ +[^ -]/ { n--; print; next } { n = 0 }' test.log \
+            | head -n 150 | sed -e 's/%/%25/g' -e 's/^/::error title=go test::/' || true
 
       - name: Smoke — ./ape version
         # Catches //go:build constraint regressions that would let a
