@@ -33,7 +33,8 @@ func TestService(t *testing.T) {
 		Warden: AppConfig{AppID: 42, Key: keyPath, Installations: map[string]int64{"shop/notes": 8}},
 		Pusher: AppConfig{AppID: 42, Key: keyPath, Installations: map[string]int64{"shop/notes": 7}},
 		Repos:  map[string]RepoPolicy{"shop/notes": {Members: []string{"dana", "ci"}, Operators: []string{"dana"}}},
-		Log:    filepath.Join(dir, "acts.jsonl"), Notify: "cat >> " + notified,
+		// sh reads a Windows path's backslashes as escapes: quote it, with slashes.
+		Log: filepath.Join(dir, "acts.jsonl"), Notify: "cat >> '" + filepath.ToSlash(notified) + "'",
 	}
 	s, err := NewService(cfg)
 	require.NoError(t, err)

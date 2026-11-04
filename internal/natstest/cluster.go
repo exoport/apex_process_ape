@@ -96,11 +96,18 @@ func (c *Cluster) Restart(i int) {
 	c.Servers[i] = c.start(o)
 }
 
-// Shutdown stops every server.
+// Shutdown stops every server and waits until each has closed its store:
+// on Windows an open file cannot be removed, so t.TempDir's cleanup would
+// otherwise fail on a store file still in use.
 func (c *Cluster) Shutdown() {
 	for _, s := range c.Servers {
 		if s != nil {
 			s.Shutdown()
+		}
+	}
+	for _, s := range c.Servers {
+		if s != nil {
+			s.WaitForShutdown()
 		}
 	}
 }
