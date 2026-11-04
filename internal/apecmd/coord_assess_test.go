@@ -279,7 +279,11 @@ func TestAssessRunner_TokenLine(t *testing.T) {
 		}
 		require.NoError(t, os.WriteFile(man, []byte(body), 0o600))
 		rel, _ := filepath.Rel(folder, man)
-		return []byte(`{"success":` + map[bool]string{true: "true", false: "false"}[termination == ""] + `,"usage":{"input_tokens":` + strconv.Itoa(tokens) + `},"manifest_path":"` + rel + `"}`)
+		// json.Marshal, not a hand-built string: on Windows rel has
+		// backslashes, which are escapes inside a JSON string.
+		relJSON, err := json.Marshal(rel)
+		require.NoError(t, err)
+		return []byte(`{"success":` + map[bool]string{true: "true", false: "false"}[termination == ""] + `,"usage":{"input_tokens":` + strconv.Itoa(tokens) + `},"manifest_path":` + string(relJSON) + `}`)
 	}
 
 	pub := &fakePublisher{}

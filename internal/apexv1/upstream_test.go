@@ -131,7 +131,16 @@ func TestBehindUpstream_CoordinatedFetches(t *testing.T) {
 	// local base carries this checkout's unpushed plan commit.
 	before := run(t, p.Root, "rev-parse", "refs/remotes/origin/milestone/M1")
 	theirs := run(t, p.Root, "commit-tree", "-p", before, "-m", "someone else's merge", before+"^{tree}")
-	run(t, p.Root, "push", "-q", bare, theirs+":refs/heads/milestone/M1")
+	// Landed on the remote as another member's push would, not from this
+	// checkout: a push from here to origin's URL may update this
+	// checkout's own remote-tracking ref too (git does on GitHub's
+	// runners), and then nothing is left to fetch.
+	run(t, p.Root, "push", "-q", bare, theirs+":refs/heads/scratch-theirs")
+	run(t, bare, "update-ref", "refs/heads/milestone/M1", theirs)
+	run(t, bare, "update-ref", "-d", "refs/heads/scratch-theirs")
+	if got := run(t, p.Root, "rev-parse", "refs/remotes/origin/milestone/M1"); got != before {
+		run(t, p.Root, "update-ref", "refs/remotes/origin/milestone/M1", before)
+	}
 	require.Equal(t, before, run(t, p.Root, "rev-parse", "refs/remotes/origin/milestone/M1"), "not fetched yet")
 
 	// The fetch sees it, and the plan commit is replayed onto it: the
