@@ -47,14 +47,22 @@ is renewed again once NATS answers (claimed again if it lapsed meanwhile and nob
 took it), and deliveries resume; only another of your conductors holding the ensemble
 ends it.
 
+A person's act, from a terminal: refused in a model session (APE_SESSION or CLAUDECODE set), and
+the pre-tool hook denies it in any form — the conductor session it delivers into never
+starts it (V8i).
+
 The projects must belong to one ensemble (two checkouts of one project count once); the NATS URL and the credential
 (hot/ape-nats.creds) are the first project's.
 
 Exit codes: 0 stopped (Ctrl-C) · 1 the lease is held by another of your conductors, or
-was lost · 2 usage (no pane, no member project, projects of different ensembles).`,
+was lost · 2 usage (no pane, no member project, projects of different ensembles), or a model
+session.`,
 		Example: "  ape conductor attach --project ~/src/notes --project ~/src/billing --pane %3",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := apexv1.RequirePersonFlag(apexv1.PersonConductorAttach); err != nil {
+				return usageErr(err)
+			}
 			if len(projects) == 0 {
 				wd, err := os.Getwd()
 				if err != nil {

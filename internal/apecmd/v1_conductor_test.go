@@ -114,3 +114,27 @@ func TestConductorAck_RefusesAStrippedTokenAndAnUnknownID(t *testing.T) {
 	require.Equal(t, "acknowledged\n", stdout)
 	require.Equal(t, []string{"notes.42"}, acks(), "the NATS branch writes no file")
 }
+
+// V8i (FINDING-V15-1C2-H2-1): attach is a person's, from a terminal. The
+// T1: under APE_SESSION, and in a Claude Code session (CLAUDECODE), it is
+// refused before it reads a project (session.person-only, exit 2). The
+// control: with neither set, the same call gets past the guard to the
+// project check.
+func TestConductorAttach_APersonsFromATerminal(t *testing.T) {
+	dir := t.TempDir()
+	for _, k := range []string{"APE_SESSION", "CLAUDECODE"} {
+		t.Run(k, func(t *testing.T) {
+			t.Setenv("APE_SESSION", "")
+			t.Setenv("CLAUDECODE", "")
+			t.Setenv(k, "1")
+			_, stderr, err := v1Exec(t, newConductorCmd, "attach", "--project", dir, "--pane", "%1")
+			require.Equal(t, ExitUsage, exitCodeOf(t, err))
+			require.Contains(t, stderr+err.Error(), "ape conductor attach is for a person")
+		})
+	}
+	t.Setenv("APE_SESSION", "")
+	t.Setenv("CLAUDECODE", "")
+	_, stderr, err := v1Exec(t, newConductorCmd, "attach", "--project", dir, "--pane", "%1")
+	require.Error(t, err, "control: an empty dir is no member project")
+	require.NotContains(t, stderr+err.Error(), "is for a person", "control: a terminal gets past the guard")
+}

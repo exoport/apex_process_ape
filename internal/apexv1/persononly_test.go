@@ -59,12 +59,16 @@ func TestPreTool_DeniesEveryPersonOnlyVerb(t *testing.T) {
 			require.Contains(t, d.Reason, v.Label, "%q names the verb", form)
 		}
 	}
+	require.True(t, preToolBash(t, "env -u CLAUDECODE ape conductor attach --project . --pane %3").Deny, "V8i: attach is listed")
 	for _, ok := range []string{
 		"ape status --json",
 		"ape milestone gate M1 --wait 9m --json",
 		"ape task apex-loop --args M1",
 		"ape orders show ann",
 		"echo ape milestone resume M1 > notes.txt",
+		// V8i: the conductor model acks and re-pins; only attach is a person's.
+		"ape conductor ack 'ape.ack.x.1.2.3'",
+		"ape conductor watcher --repin",
 	} {
 		require.False(t, preToolBash(t, ok).Deny, "control: %q is not a person-only call", ok)
 	}

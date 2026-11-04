@@ -41,6 +41,9 @@ var (
 	PersonOrdersAccept     = personOnly("ape orders accept", "", "orders", "accept")
 	PersonOrdersRevoke     = personOnly("ape orders revoke", "", "orders", "revoke")
 	PersonCoordNoticeAck   = personOnly("ape coord notice ack", "", "coord", "notice", "ack")
+	// PersonConductorAttach is V8i (FINDING-V15-1C2-H2-1): a conductor model
+	// ran attach itself and lost the lease race to its person's.
+	PersonConductorAttach = personOnly("ape conductor attach", "", "conductor", "attach")
 )
 
 // matches reports whether an ape invocation's arguments run v: its path as
