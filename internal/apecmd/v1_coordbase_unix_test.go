@@ -5,6 +5,7 @@ package apecmd
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -170,6 +171,137 @@ func TestMilestoneTakeIn_WaitsOutANATSOutage(t *testing.T) {
 	var res map[string]any
 	require.NoError(t, json.Unmarshal([]byte(stdout), &res), stdout)
 	require.Equal(t, true, res["up_to_date"], stdout)
+}
+
+// V8l, 1c3's live shape (outage #1, m15's archive): the outage comes
+// after the run's entry, during the take-in's regression, so V8's entry
+// wait never sees it and the fence before the push met it: exit 1 retry,
+// the take-in undone, the regression run again. The T1: NATS goes down
+// while the regression runs; the run says it waits for NATS at the push,
+// and once NATS is back the take-in lands with exit 0 — the regression ran
+// once. (The controls are member's: outside a run, and another's lease,
+// refuse at once.)
+func TestMilestoneTakeIn_WaitsForNATSAtThePushFence(t *testing.T) {
+	c := natstest.RunCluster(t, 3)
+	root := githubCoordRepoOn(t, c.URLs())
+	ran := filepath.Join(t.TempDir(), "ran.txt")
+	cfg, err := os.ReadFile(apexv1.ConfigPath(root))
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(apexv1.ConfigPath(root), append(cfg, []byte("regression: ./suite.sh\n")...), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "suite.sh"), []byte("#!/bin/sh\necho run >> "+ran+"\nsleep 3\n"), 0o755))
+	v1Git(t, root, "add", "-A")
+	v1Git(t, root, "commit", "-qm", "chore: a regression")
+	v1Git(t, root, "push", "-q", "origin", "main")
+	_, _, err = v1Exec(t, newProjectCmd, "accept-config", "--by", "t", "--cwd", root)
+	require.NoError(t, err)
+	old := v1DetachDefault
+	v1DetachDefault = true
+	t.Setenv(asApeBinary, "1")
+	t.Cleanup(func() { v1DetachDefault = old })
+	p, err := apexv1.Open(root)
+	require.NoError(t, err)
+	scope := apexv1.TakeInPrefix + "M1"
+	t.Cleanup(func() {
+		if l := p.LoadRunLock(scope); l != nil && l.PID > 0 && l.PID != os.Getpid() {
+			_ = syscall.Kill(l.PID, syscall.SIGKILL)
+		}
+		awaitNoProcessUnder(t, root, 10*time.Second)
+	})
+	// No loop renews M1 here: claim it again so its TTL covers the run.
+	_, _, err = v1Exec(t, newMilestoneCmd, "claim", "M1", "--cwd", root)
+	require.NoError(t, err)
+	// main moves after the claim, so M1 has a take-in to land.
+	v1Git(t, root, "switch", "-q", "main")
+	require.NoError(t, os.WriteFile(filepath.Join(root, "moved.txt"), []byte("main moved\n"), 0o644))
+	v1Git(t, root, "add", "moved.txt")
+	v1Git(t, root, "commit", "-qm", "chore: main moves")
+	v1Git(t, root, "push", "-q", "origin", "main")
+
+	type result struct {
+		stdout, stderr string
+		err            error
+	}
+	done := make(chan result, 1)
+	go func() {
+		o, e, err := v1Exec(t, newMilestoneCmd, "take-in", "M1", "--json", "--wait", "90s", "--cwd", root)
+		done <- result{o, e, err}
+	}()
+	for start := time.Now(); ; {
+		if _, err := os.Stat(ran); err == nil {
+			break
+		}
+		select {
+		case r := <-done:
+			log, _ := os.ReadFile(p.RunLogPath(scope))
+			t.Fatalf("the take-in ended before its regression: %v\nstdout %q\nstderr %s\nworker log %s", r.err, r.stdout, r.stderr, log)
+		default:
+		}
+		require.Less(t, time.Since(start), 60*time.Second, "the regression starts")
+		time.Sleep(100 * time.Millisecond)
+	}
+	for i := range 3 {
+		c.Stop(i)
+	}
+	require.Eventually(t, func() bool {
+		log, _ := os.ReadFile(p.RunLogPath(scope))
+		return strings.Contains(string(log), "the push of milestone/M1: waiting for NATS")
+	}, 20*time.Second, 200*time.Millisecond, "the run waits at the push fence")
+	for i := range 3 {
+		c.Restart(i)
+	}
+	c.WaitMetaLeader(30 * time.Second)
+	var r result
+	select {
+	case r = <-done:
+	case <-time.After(120 * time.Second):
+		t.Fatal("the take-in did not end")
+	}
+	log, _ := os.ReadFile(p.RunLogPath(scope))
+	require.NoError(t, r.err, "stdout %s\nstderr %s\nworker log %s", r.stdout, r.stderr, log)
+	var res map[string]any
+	require.NoError(t, json.Unmarshal([]byte(r.stdout), &res), r.stdout)
+	require.Equal(t, false, res["up_to_date"], r.stdout)
+	runs, err := os.ReadFile(ran)
+	require.NoError(t, err)
+	require.Equal(t, 1, strings.Count(string(runs), "run"), "the regression ran once: nothing was undone")
+}
+
+// V8m (1c3, M16): a take-in conflict is laid out on change/take-in-<n>,
+// apex-apply commits its fix there, and a close called from that HEAD
+// resumes: its take-in lands the fix and switches back to milestone/<M>.
+// The control: HEAD on an ordinary change branch still refuses
+// (change.branch).
+func TestMilestoneClose_ResumesOnItsLaidOutTakeIn(t *testing.T) {
+	root := githubCoordRepo(t)
+	v1Git(t, root, "switch", "-q", "milestone/M1")
+	require.NoError(t, os.WriteFile(filepath.Join(root, "clash.txt"), []byte("milestone\n"), 0o644))
+	v1Git(t, root, "add", "clash.txt")
+	v1Git(t, root, "commit", "-qm", "chore: the milestone's line")
+	v1Git(t, root, "push", "-q", "origin", "milestone/M1")
+	v1Git(t, root, "switch", "-q", "main")
+	require.NoError(t, os.WriteFile(filepath.Join(root, "clash.txt"), []byte("main\n"), 0o644))
+	v1Git(t, root, "add", "clash.txt")
+	v1Git(t, root, "commit", "-qm", "chore: main's line")
+	v1Git(t, root, "push", "-q", "origin", "main")
+
+	_, _, err := v1Exec(t, newMilestoneCmd, "take-in", "M1", "--json", "--no-detach", "--cwd", root)
+	require.Error(t, err, "the take-in conflicts")
+	require.Equal(t, "change/take-in-1", v1Git(t, root, "branch", "--show-current"))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "clash.txt"), []byte("both\n"), 0o644))
+	v1Git(t, root, "add", "clash.txt")
+	v1Git(t, root, "commit", "-q", "--no-edit")
+
+	stdout, stderr, err := v1Exec(t, newMilestoneCmd, "close", "M1", "--json", "--no-detach", "--cwd", root)
+	require.NotContains(t, stdout+stderr+fmt.Sprint(err), apexv1.CodeChangeBranch, "the close resumes on its own take-in")
+	require.Equal(t, "milestone/M1", v1Git(t, root, "branch", "--show-current"), "its take-in landed and switched back")
+	got, err := os.ReadFile(filepath.Join(root, "clash.txt"))
+	require.NoError(t, err)
+	require.Equal(t, "both\n", string(got), "the fix landed on milestone/M1")
+
+	v1Git(t, root, "switch", "-q", "-c", "change/unrelated")
+	stdout, stderr, err = v1Exec(t, newMilestoneCmd, "close", "M1", "--json", "--no-detach", "--cwd", root)
+	require.Error(t, err)
+	require.Contains(t, stdout+stderr+err.Error(), apexv1.CodeChangeBranch, "control: another change branch refuses")
 }
 
 // The worker's argv is the verb's argument, and only the lock is the

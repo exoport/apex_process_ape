@@ -912,6 +912,17 @@ func (p *Project) CloseMilestoneAcceptRed(ctx context.Context, id, reason, by st
 	return p.closeMilestone(ctx, id, opt, &AcceptRed{Reason: reason, By: by})
 }
 
+// refuseCloseOnChangeBranch is refuseOnChangeBranch for close, but HEAD on
+// milestone ms's own laid-out take-in (apex-apply's fix committed there)
+// is where a close resumes (V8m): its take-in lands the fix and switches
+// back to milestone/<M>. Any other change branch refuses.
+func (p *Project) refuseCloseOnChangeBranch(ctx context.Context, ms string) error {
+	if head := p.HeadChange(ctx); head != "" && p.MilestoneBase(ms) != "" && head == p.pendingTakeIn(ctx) {
+		return nil
+	}
+	return p.refuseOnChangeBranch(ctx, "closing a milestone")
+}
+
 // closeMilestone is close; red, when set, is a person's acceptance of a
 // red gate.
 //
@@ -920,7 +931,7 @@ func (p *Project) closeMilestone(ctx context.Context, id string, opt RunOptions,
 	if err := p.recoverArchive(ctx); err != nil {
 		return nil, err
 	}
-	if err := p.refuseOnChangeBranch(ctx, "closing a milestone"); err != nil {
+	if err := p.refuseCloseOnChangeBranch(ctx, id); err != nil {
 		return nil, err
 	}
 	// Coordinated: a recorded close PR is read (merged, queued, or redone

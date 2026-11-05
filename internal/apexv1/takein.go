@@ -60,7 +60,9 @@ func (p *Project) nextTakeInID(ctx context.Context, base string) string {
 // pendingTakeIn is the id of a take-in laid out on its change branch, ""
 // for none.
 func (p *Project) pendingTakeIn(ctx context.Context) string {
-	out, _ := git(ctx, p.Root, "for-each-ref", "--format=%(refname:short)", "refs/heads/"+ChangeBranchPrefix+TakeInPrefix)
+	// A glob: for-each-ref matches a bare prefix only at a / boundary, so
+	// "refs/heads/change/take-in-" alone matched nothing (V8m found it).
+	out, _ := git(ctx, p.Root, "for-each-ref", "--format=%(refname:short)", "refs/heads/"+ChangeBranchPrefix+TakeInPrefix+"*")
 	if f := strings.Fields(out); len(f) > 0 {
 		return strings.TrimPrefix(f[0], ChangeBranchPrefix)
 	}
