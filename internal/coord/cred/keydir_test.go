@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -31,7 +32,9 @@ func TestKeyDir_MintsWorkingCredentials(t *testing.T) {
 	for _, f := range []string{"operator.nk", "sys.nk", "app.nk", cred.ResolverConf} {
 		st, err := os.Stat(filepath.Join(dir, f))
 		require.NoError(t, err, f)
-		require.Equal(t, os.FileMode(0o600), st.Mode().Perm(), f)
+		if runtime.GOOS != "windows" { // POSIX modes; Windows has none to check
+			require.Equal(t, os.FileMode(0o600), st.Mode().Perm(), f)
+		}
 	}
 
 	// A server config includes it relative to itself, as natslocal's do.

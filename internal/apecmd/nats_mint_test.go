@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/nats-io/nats.go"
@@ -27,7 +28,9 @@ func TestNatsMint_CLI(t *testing.T) {
 	require.NoError(t, err, stdout)
 	st, err := os.Stat(out)
 	require.NoError(t, err)
-	require.Equal(t, os.FileMode(0o600), st.Mode().Perm())
+	if runtime.GOOS != "windows" { // POSIX modes; Windows has none to check
+		require.Equal(t, os.FileMode(0o600), st.Mode().Perm())
+	}
 	_, _, err = v1Exec(t, newNatsCmd, "mint", "user", "--dir", dir, "--kind", "member", "--name", "bob", "--out", out+"2")
 	require.Equal(t, ExitUsage, exitCodeOf(t, err), "a member needs its project and ensemble")
 	_, _, err = v1Exec(t, newNatsCmd, "mint", "user", "--dir", dir, "--kind", "member", "--name", "Ann", "--project", "notes", "--ensemble", "shop", "--out", out+"3")
