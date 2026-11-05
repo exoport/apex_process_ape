@@ -229,9 +229,10 @@ func gate(ctx context.Context, p *apexv1.Project, op, milestone string, now time
 			" — a person fixes _apex/config.yaml's coordination: block or places the ensemble credential"}
 	}
 	var nc *nats.Conn
+	denied := &denials{}
 	if err := Require(p.Root, op, func() error {
 		var err error
-		nc, err = natsconn.Connect(ctx, natsconn.Config{URL: m.URL, CredsFile: m.Creds}, "ape-member", nats.NoReconnect())
+		nc, err = natsconn.Connect(ctx, natsconn.Config{URL: m.URL, CredsFile: m.Creds}, "ape-member", nats.NoReconnect(), denied.option())
 		return err
 	}, now); err != nil {
 		return waitNATS, err
@@ -261,6 +262,8 @@ func gate(ctx context.Context, p *apexv1.Project, op, milestone string, now time
 	switch {
 	case errors.Is(err, jetstream.ErrStreamNotFound):
 		// no events stream: nothing was ever paused
+	case err != nil && denied.gap("", err) != nil:
+		return "", denied.gap(milestone+"'s pause state", err)
 	case err != nil:
 		return unread(err)
 	case paused && why.Kind == conductor.PausePerson:

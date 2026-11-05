@@ -37,6 +37,8 @@ type milestones struct {
 	book   *lease.Book
 	holder string
 	m      Membership
+	// denied keeps the connection's permission violations (V12d).
+	denied *denials
 }
 
 // openMilestones connects for p's milestone leases. The holder is
@@ -60,7 +62,8 @@ func openMilestones(ctx context.Context, p *apexv1.Project, opts ...nats.Option)
 	if err != nil {
 		return nil, err
 	}
-	nc, err := natsconn.Connect(ctx, natsconn.Config{URL: m.URL, CredsFile: m.Creds}, "ape-milestone", opts...)
+	denied := &denials{}
+	nc, err := natsconn.Connect(ctx, natsconn.Config{URL: m.URL, CredsFile: m.Creds}, "ape-milestone", append(opts, denied.option())...)
 	if err != nil {
 		_, _ = Down(p.Root, time.Now())
 		return nil, &apexv1.FailError{Code: apexv1.CodeCoordNATSUnreachable, Action: apexv1.ActionRetry, Msg: fmt.Sprintf(
@@ -75,6 +78,9 @@ func openMilestones(ctx context.Context, p *apexv1.Project, opts ...nats.Option)
 	store, err := lease.Open(ctx, js)
 	if err != nil {
 		nc.Close()
+		if gap := denied.gap("the milestone lease's buckets", err); gap != nil {
+			return nil, gap
+		}
 		// Right after an outage NATS can take the connection before its
 		// JetStream answers (CI-V8LM check-1, windows): that is NATS not
 		// back yet, which a run waits for (V8l), not a missing bucket.
@@ -85,7 +91,7 @@ func openMilestones(ctx context.Context, p *apexv1.Project, opts ...nats.Option)
 		}
 		return nil, fmt.Errorf("%w — the ensemble's NATS has no lease buckets yet: its supervisor declares them (`ape nats declare --new-epoch`)", err)
 	}
-	return &milestones{nc: nc, store: store, book: lease.OpenBook(runlog.CoordTokensPath(p.Root)), holder: id.SubjectToken + "/" + checkout, m: m}, nil
+	return &milestones{nc: nc, store: store, book: lease.OpenBook(runlog.CoordTokensPath(p.Root)), holder: id.SubjectToken + "/" + checkout, m: m, denied: denied}, nil
 }
 
 func (s *milestones) close() { s.nc.Close() }
@@ -379,6 +385,9 @@ func FenceMilestone(ctx context.Context, p *apexv1.Project, ms string) error {
 		defer s.close()
 		holder, key = s.holder, s.key(ms)
 		l, err = s.store.LiveHolder(ctx, key)
+		if gap := s.denied.gap(ms+"'s lease before the push", err); err != nil && gap != nil {
+			return false, gap
+		}
 		if err != nil && !natsDown(err) {
 			return false, &apexv1.FailError{Code: apexv1.CodeNotLeaseHolder, Action: apexv1.ActionPerson, Msg: fmt.Sprintf(
 				"%s's lease could not be read before the push (%v): nothing landed — a lease or epoch that does not decode is not a NATS outage, so ape does not wait it out", ms, err)}
@@ -451,6 +460,9 @@ func retakeAtFence(ctx context.Context, p *apexv1.Project, ms string) (lease.Liv
 		fmt.Fprintf(w, "%s ape: the push of milestone/%s: its lease lapsed while the fence waited and was taken again by this checkout, whose claim stands\n",
 			time.Now().UTC().Format(time.RFC3339), ms)
 		l, err = s.store.LiveHolder(ctx, s.key(ms))
+		if gap := s.denied.gap(ms+"'s retaken lease", err); err != nil && gap != nil {
+			return false, gap
+		}
 		if err != nil {
 			return natsDown(err), &apexv1.FailError{Code: apexv1.CodeCoordNATSUnreachable, Action: apexv1.ActionRetry, Msg: fmt.Sprintf(
 				"%s's lease was taken again but could not be read back before the push (%v): nothing landed — run this again", ms, err)}
@@ -744,6 +756,9 @@ func (h *closeHold) fence(ctx context.Context) (retakes int, err error) {
 	err = waitTransient(ctx, "the close PR's enqueue", func() (bool, error) {
 		var rerr error
 		l, rerr = h.s.store.LiveHolder(ctx, h.key)
+		if gap := h.s.denied.gap("the close lease before the enqueue", rerr); rerr != nil && gap != nil {
+			return false, gap
+		}
 		if rerr != nil {
 			return natsDown(rerr), &apexv1.FailError{Code: apexv1.CodeCloseLost, Action: apexv1.ActionRetry, Msg: fmt.Sprintf("the close lease %s could not be read before the enqueue (%v): nothing was enqueued — close again", h.key, rerr)}
 		}

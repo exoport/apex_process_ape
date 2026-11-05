@@ -222,3 +222,50 @@ func TestMemberGrant_TheAppTokenUnderIt(t *testing.T) {
 	_, err = ghapp.Ask(actx, nc, ghapp.TokenSubject, "bob", ghapp.Request{Repo: "shop/notes", Purpose: "push"})
 	require.Error(t, err, "control: not as another user")
 }
+
+// V12d (R1): a call the grant denies is never answered, so it read as NATS
+// not answering and a run waited out its bound for a grant gap. Now the
+// server's violation is seen on the connection: the fence, and the gate's
+// pause read, refuse at once with coord.membership. The control: the full
+// grant claims, gates and fences (TestMemberGrant_TheMemberVerbsUnderIt).
+func TestMemberGrant_AGrantGapRefusesRatherThanWaits(t *testing.T) {
+	ctx := context.Background()
+	e, _ := enforcedCluster(t)
+	ann := enforcedCheckout(t, e, block)
+	_, err := ClaimMilestone(ctx, ann, "M1")
+	require.NoError(t, err)
+
+	// The same checkout, re-minted without one verb the read needs.
+	narrowed := func(drop string) {
+		t.Helper()
+		g := cred.MemberGrant("ann", "notes-svc", "shop")
+		var pub []string
+		for _, s := range g.PubAllow {
+			if !strings.HasPrefix(s, drop) {
+				pub = append(pub, s)
+			}
+		}
+		g.PubAllow = pub
+		data, err := os.ReadFile(e.Mint(t, "ann", perms(g)))
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(filepath.Join(ann.Root, "hot", "ape-nats.creds"), data, 0o600))
+	}
+	run := WithRunWait(ctx, time.Minute, io.Discard)
+
+	narrowed("$JS.API.DIRECT.GET.KV_ape-leases")
+	e.Expect("$JS.API.DIRECT.GET.KV_ape-leases")
+	start := time.Now()
+	err = FenceMilestone(run, ann, "M1")
+	require.Equal(t, apexv1.CodeCoordMembership, leaseCode(t, err), "%v", err)
+	require.ErrorContains(t, err, "the server refused this credential's call")
+	require.Less(t, time.Since(start), 20*time.Second, "refused, not waited out (the bound is a minute)")
+
+	narrowed("$JS.API.STREAM.MSG.GET.APE_EVENTS")
+	e.Expect("$JS.API.STREAM.MSG.GET.APE_EVENTS")
+	e.Expect("$JS.API.DIRECT.GET.APE_EVENTS")
+	start = time.Now()
+	err = GateWait(ctx, ann, "change start", "M1", time.Minute, io.Discard)
+	require.Equal(t, apexv1.CodeCoordMembership, leaseCode(t, err), "%v", err)
+	require.ErrorContains(t, err, "pause state")
+	require.Less(t, time.Since(start), 20*time.Second, "the gate refuses a grant gap, not waits")
+}
