@@ -218,6 +218,73 @@ func GateWait(ctx context.Context, p *apexv1.Project, op, milestone string, boun
 	}
 }
 
+// errNoIdentity wraps a credential whose identity does not decode.
+var errNoIdentity = errors.New("member: the credential's identity")
+
+// readPause is the gate's read of milestone's pause state: PausedWith as
+// the claim holder — this credential's user, since the gate passes only
+// in the holder's checkout (requireMilestoneLease) — a person's pause
+// counting only from the holder (V12c, V12-2), within pauseCheckTimeout.
+func readPause(ctx context.Context, js jetstream.JetStream, m Membership, milestone string) (bool, conductor.Pause, error) {
+	id, err := natsconn.DecodeIdentity(m.Creds)
+	if err != nil {
+		return false, conductor.Pause{}, fmt.Errorf("%w: %w", errNoIdentity, err)
+	}
+	pctx, cancel := context.WithTimeout(ctx, pauseCheckTimeout)
+	defer cancel()
+	return conductor.PausedWith(pctx, js, m.Project, milestone, id.SubjectToken)
+}
+
+// PauseState is what the gate reads of a milestone's pause, for a reader
+// that is not a gate (D816+: eval's row 3a): the same readPause, on this
+// checkout's credential, read only.
+type PauseState struct {
+	Milestone string `json:"milestone"`
+	Paused    bool   `json:"paused"`
+	// Kind is "person" for a person's pause, "" for a conductor's.
+	Kind   string `json:"kind,omitempty"`
+	By     string `json:"by,omitempty"`
+	Reason string `json:"reason,omitempty"`
+	At     string `json:"at,omitempty"`
+	// ReadAs is the owner token pauses are counted from: the credential's.
+	ReadAs string `json:"read_as"` //nolint:tagliatelle // ape's NATS payloads are snake_case (events.md)
+}
+
+// ReadPauseState reads milestone's pause state as p's gate would.
+func ReadPauseState(ctx context.Context, p *apexv1.Project, milestone string) (PauseState, error) {
+	m, err := Load(p)
+	if err != nil {
+		return PauseState{}, err
+	}
+	id, err := natsconn.DecodeIdentity(m.Creds)
+	if err != nil {
+		return PauseState{}, err
+	}
+	denied := &denials{}
+	nc, err := natsconn.Connect(ctx, natsconn.Config{URL: m.URL, CredsFile: m.Creds}, "ape-pause-state", nats.NoReconnect(), denied.option())
+	if err != nil {
+		return PauseState{}, err
+	}
+	defer nc.Close()
+	js, err := jetstream.New(nc)
+	if err != nil {
+		return PauseState{}, err
+	}
+	paused, why, err := readPause(ctx, js, m, milestone)
+	switch {
+	case errors.Is(err, jetstream.ErrStreamNotFound):
+	case err != nil && denied.gap("", err) != nil:
+		return PauseState{}, denied.gap(milestone+"'s pause state", err)
+	case err != nil:
+		return PauseState{}, err
+	}
+	st := PauseState{Milestone: milestone, Paused: paused, ReadAs: id.SubjectToken}
+	if paused {
+		st.Kind, st.By, st.Reason, st.At = why.Kind, why.By, why.Reason, why.At
+	}
+	return st, nil
+}
+
 // gate is Gate, with what a transient refusal waits for ("" otherwise).
 func gate(ctx context.Context, p *apexv1.Project, op, milestone string, now time.Time) (string, error) {
 	m, err := Load(p)
@@ -249,17 +316,10 @@ func gate(ctx context.Context, p *apexv1.Project, op, milestone string, now time
 	if err != nil {
 		return unread(err)
 	}
-	pctx, cancel := context.WithTimeout(ctx, pauseCheckTimeout)
-	defer cancel()
-	// A person's pause counts only from the claim holder (V12c): the gate
-	// passes only in the holder's checkout (requireMilestoneLease below),
-	// so the holder is this credential's user.
-	id, err := natsconn.DecodeIdentity(m.Creds)
-	if err != nil {
-		return "", &apexv1.FailError{Code: apexv1.CodeCoordMembership, Msg: err.Error()}
-	}
-	paused, why, err := conductor.PausedWith(pctx, js, m.Project, milestone, id.SubjectToken)
+	paused, why, err := readPause(ctx, js, m, milestone)
 	switch {
+	case errors.Is(err, errNoIdentity):
+		return "", &apexv1.FailError{Code: apexv1.CodeCoordMembership, Msg: err.Error()}
 	case errors.Is(err, jetstream.ErrStreamNotFound):
 		// no events stream: nothing was ever paused
 	case err != nil && denied.gap("", err) != nil:

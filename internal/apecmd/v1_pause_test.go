@@ -76,6 +76,21 @@ func TestMilestonePauseResume_APersonAct(t *testing.T) {
 	require.Equal(t, true, res["paused"])
 	require.Equal(t, "dana", res["by"])
 
+	// D816+: `ape nats pause-state` reads what the gate reads (row 3a).
+	pauseState := func() map[string]any {
+		t.Helper()
+		stdout, _, err := v1Exec(t, newNatsCmd, "pause-state", "M1", "--cwd", root)
+		require.NoError(t, err, stdout)
+		var st map[string]any
+		require.NoError(t, json.Unmarshal([]byte(stdout), &st), stdout)
+		return st
+	}
+	st := pauseState()
+	require.Equal(t, true, st["paused"])
+	require.Equal(t, "person", st["kind"])
+	require.Equal(t, "dana", st["by"])
+	require.Equal(t, "dana", st["read_as"])
+
 	for _, args := range [][]string{{"change", "new", "add-wave", "--milestone", "M1", "--touches", "greeting"}, {"milestone", "close", "M1"}} {
 		c := newChangeCmd
 		if args[0] == "milestone" {
@@ -105,6 +120,7 @@ func TestMilestonePauseResume_APersonAct(t *testing.T) {
 	require.NoError(t, err)
 	_, _, err = v1Exec(t, newChangeCmd, "new", "add-mist", "--milestone", "M1", "--touches", "greeting", "--cwd", root)
 	require.NoError(t, err, "V12-2: another member's conductor-kind pause does not hold the holder")
+	require.Equal(t, false, pauseState()["paused"], "pause-state agrees with the gate")
 
 	// OQ24's pause, as the holder's conductor publishes it, still pauses M1.
 	_, err = js.Publish(context.Background(), events.Subject("dana", m.Project, events.KindProject, "M1", apexv1.EventMilestonePaused), []byte(`{"by":"dana/conductor","user":"dana"}`))
@@ -112,6 +128,9 @@ func TestMilestonePauseResume_APersonAct(t *testing.T) {
 	stdout, _, err = v1Exec(t, newChangeCmd, "new", "add-tide", "--milestone", "M1", "--touches", "greeting", "--json", "--cwd", root)
 	require.Error(t, err, "control: OQ24's pause still pauses")
 	require.Contains(t, stdout, "a question to the conductor went unanswered")
+	st = pauseState()
+	require.Equal(t, true, st["paused"], "pause-state agrees with the gate")
+	require.Nil(t, st["kind"], "a conductor's pause")
 	_, _, err = v1Exec(t, newMilestoneCmd, "resume", "M1", "--cwd", root)
 	require.NoError(t, err, "a person may resume an OQ24 pause from the holding checkout")
 

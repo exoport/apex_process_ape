@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/exoport/apex_process_ape/internal/coord/cred"
+	"github.com/exoport/apex_process_ape/internal/coord/member"
 )
 
 // newNatsMintCmd is `ape nats mint` (hidden; D813/D814): an enforcing
@@ -122,6 +123,38 @@ func newNatsConsumerInfoCmd() *cobra.Command {
 				return failErr(err)
 			}
 			data, err := json.MarshalIndent(info, "", "  ")
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), string(data))
+			return nil
+		},
+	}
+	f.add(cmd)
+	return cmd
+}
+
+// newNatsPauseStateCmd is `ape nats pause-state` (hidden, read-only;
+// D816+): a milestone's pause state exactly as this checkout's gate reads
+// it (member.ReadPauseState: the same PausedWith, counted from the
+// credential's user), as JSON, so eval can read row 3a with no gated verb.
+func newNatsPauseStateCmd() *cobra.Command {
+	var f coordFlags
+	cmd := &cobra.Command{
+		Use:    "pause-state <M> [--cwd <checkout>]",
+		Short:  "Print a milestone's pause state as this checkout's gate reads it (read-only)",
+		Hidden: true,
+		Args:   cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			p, err := f.project()
+			if err != nil {
+				return usageErr(err)
+			}
+			st, err := member.ReadPauseState(cmd.Context(), p, args[0])
+			if err != nil {
+				return failErr(err)
+			}
+			data, err := json.MarshalIndent(st, "", "  ")
 			if err != nil {
 				return err
 			}

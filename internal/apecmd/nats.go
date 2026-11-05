@@ -24,7 +24,7 @@ checkout runs ` + "`ape nats replay`" + `, and each lease is re-claimed by its l
 token. Both connect with --nats-url/--nats-creds, or with the project's coordination:
 block and hot/ape-nats.creds.`,
 	}
-	cmd.AddCommand(newNatsDeclareCmd(), newNatsReplayCmd(), newNatsMintCmd(), newNatsConsumerInfoCmd())
+	cmd.AddCommand(newNatsDeclareCmd(), newNatsReplayCmd(), newNatsMintCmd(), newNatsConsumerInfoCmd(), newNatsPauseStateCmd())
 	return cmd
 }
 
