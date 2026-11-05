@@ -2,6 +2,7 @@ package member
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -118,4 +119,96 @@ func TestGateWait_APauseStateThatCannotBeRead(t *testing.T) {
 	require.ErrorAs(t, err, &fe)
 	require.Equal(t, apexv1.CodeCoordMilestonePaused, fe.Code, "control: a pause that holds refuses")
 	require.Less(t, time.Since(start), 5*time.Second, "at once: a pause is not waited out")
+}
+
+// V8l (1c3's outage #1): a fence inside a gated verb's run waits for NATS
+// as its entry does. The T1: every node down, FenceMilestone under
+// WithRunWait says it waits for NATS and passes once the nodes are back.
+// The controls: without a run wait it refuses at once (transient), and a
+// lease another checkout holds refuses at once even inside a run.
+func TestFenceMilestone_WaitsForNATSInARun(t *testing.T) {
+	p, c, js := gateRig(t)
+	ctx := t.Context()
+	defer func(d time.Duration) { gateWaitEvery = d }(gateWaitEvery)
+	gateWaitEvery = 200 * time.Millisecond
+	require.NoError(t, FenceMilestone(ctx, p, "M2"), "held, NATS up: the push goes")
+
+	for i := range 3 {
+		c.Stop(i)
+	}
+	start := time.Now()
+	err := FenceMilestone(ctx, p, "M2")
+	require.True(t, Transient(err), "control: outside a run it refuses at once: %v", err)
+	require.Less(t, time.Since(start), 10*time.Second)
+
+	var out syncBuf
+	done := make(chan error, 1)
+	go func() { done <- FenceMilestone(WithRunWait(ctx, time.Minute, &out), p, "M2") }()
+	time.Sleep(1500 * time.Millisecond)
+	select {
+	case err := <-done:
+		t.Fatalf("returned during the outage: %v", err)
+	default:
+	}
+	require.Contains(t, out.String(), "the push of milestone/M2: waiting for NATS")
+	for i := range 3 {
+		c.Restart(i)
+	}
+	select {
+	case err := <-done:
+		require.NoError(t, err, "the fence passes once NATS is back, the lease still this checkout's")
+	case <-time.After(30 * time.Second):
+		t.Fatal("still waiting after NATS came back")
+	}
+
+	ls, err := lease.Open(ctx, js)
+	require.NoError(t, err)
+	_, err = ReleaseMilestone(ctx, p, "M2")
+	require.NoError(t, err)
+	other, err := ls.Claim(ctx, "milestone.notes-svc.M2", "zed/other", time.Minute)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ls.Release(context.Background(), other) })
+	start = time.Now()
+	err = FenceMilestone(WithRunWait(ctx, time.Minute, &out), p, "M2")
+	require.ErrorContains(t, err, "zed/other", "control: another's lease refuses, in a run too")
+	require.False(t, Transient(err))
+	require.Less(t, time.Since(start), 5*time.Second, "at once")
+}
+
+// V8l for the close PR's enqueue: FenceClose inside a run waits for NATS
+// rather than refusing (close.lost, retry). The T1: the close lease held,
+// every node down, FenceClose under WithRunWait says it waits and passes
+// once the nodes are back. The control: outside a run it refuses at once.
+func TestFenceClose_WaitsForNATSInARun(t *testing.T) {
+	p, c, _ := gateRig(t)
+	ctx := t.Context()
+	defer func(d time.Duration) { gateWaitEvery = d }(gateWaitEvery)
+	gateWaitEvery = 200 * time.Millisecond
+	release, err := HoldClose(ctx, p, io.Discard, nil)
+	require.NoError(t, err)
+	t.Cleanup(release)
+	_, err = FenceClose(ctx, p)
+	require.NoError(t, err, "held, NATS up")
+
+	for i := range 3 {
+		c.Stop(i)
+	}
+	fctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	_, err = FenceClose(fctx, p)
+	cancel()
+	require.ErrorContains(t, err, "could not be read before the enqueue", "control: outside a run it refuses")
+
+	var out syncBuf
+	done := make(chan error, 1)
+	go func() { _, err := FenceClose(WithRunWait(ctx, time.Minute, &out), p); done <- err }()
+	require.Eventually(t, func() bool { return strings.Contains(out.String(), "the close PR's enqueue: waiting for NATS") }, 20*time.Second, 100*time.Millisecond)
+	for i := range 3 {
+		c.Restart(i)
+	}
+	select {
+	case err := <-done:
+		require.NoError(t, err, "passes once NATS is back")
+	case <-time.After(60 * time.Second):
+		t.Fatal("still waiting after NATS came back")
+	}
 }

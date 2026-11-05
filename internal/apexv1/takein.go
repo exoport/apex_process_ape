@@ -125,6 +125,13 @@ func (p *Project) landTakeIn(ctx context.Context, id, base, baseTip, merge strin
 	if err := p.requireCleanTree(ctx, "take-in "+id); err != nil {
 		return err
 	}
+	// V8l: the lease is fenced before the regression too, so a lease lost,
+	// or NATS waited for, is met before minutes of checks, not after them.
+	if FenceMilestone != nil {
+		if err := FenceMilestone(ctx, p, strings.TrimPrefix(base, MilestoneBranchPrefix)); err != nil {
+			return err
+		}
+	}
 	if err := p.switchBranch(ctx, base); err != nil {
 		return err
 	}

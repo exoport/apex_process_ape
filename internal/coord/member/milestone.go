@@ -330,25 +330,81 @@ func requireMilestoneLease(ctx context.Context, p *apexv1.Project, op, ms string
 // FenceMilestone is apexv1.FenceMilestone (D702): right before ape pushes
 // milestone/<M>, this checkout must hold M's lease now — a holder whose
 // renewal failed, and whose lease another member took, does not push. A
-// project in no ensemble is not checked.
+// project in no ensemble is not checked. Inside a gated verb's run
+// (WithRunWait), NATS unreachable or the lease unread is waited out (V8l);
+// a lease another holds, or that lapsed, refuses at once.
 func FenceMilestone(ctx context.Context, p *apexv1.Project, ms string) error {
-	s, err := openMilestones(ctx, p, nats.NoReconnect())
-	if errors.Is(err, ErrNotMember) {
-		return nil
-	}
-	if err != nil {
+	var l lease.Live
+	var holder, key string
+	notMember := false
+	err := waitTransient(ctx, "the push of milestone/"+ms, func() (bool, error) {
+		s, err := openMilestones(ctx, p, nats.NoReconnect())
+		if errors.Is(err, ErrNotMember) {
+			notMember = true
+			return false, nil
+		}
+		if err != nil {
+			return Transient(err), err
+		}
+		defer s.close()
+		holder, key = s.holder, s.key(ms)
+		l, err = s.store.LiveHolder(ctx, key)
+		if err != nil {
+			return true, &apexv1.FailError{Code: apexv1.CodeCoordNATSUnreachable, Action: apexv1.ActionRetry, Msg: fmt.Sprintf(
+				"%s's lease could not be read before the push (%v): nothing landed — run this again once NATS is back", ms, err)}
+		}
+		return false, nil
+	})
+	if notMember || err != nil {
 		return err
 	}
-	defer s.close()
-	l, err := s.store.LiveHolder(ctx, s.key(ms))
-	if err != nil {
-		return err
-	}
-	if l.Holder != s.holder {
+	if l.Holder != holder {
 		return notHolder(fmt.Sprintf("%s's lease is held by %s, not this checkout, so ape does not push milestone/%s: nothing landed — `ape milestone claim %s` if it is still yours to drive", ms, whoHolds(l), ms, ms))
 	}
-	fenceLogf("milestone/%s: pushing under %s, held by this checkout (%s), last renewed %s", ms, s.key(ms), tokenText(l.Token), l.At.UTC().Format(time.RFC3339))
+	fenceLogf("milestone/%s: pushing under %s, held by this checkout (%s), last renewed %s", ms, key, tokenText(l.Token), l.At.UTC().Format(time.RFC3339))
 	return nil
+}
+
+// runWaitKey carries a gated verb's run wait (V8l).
+type runWaitKey struct{}
+
+type runWait struct {
+	bound time.Duration
+	w     io.Writer
+}
+
+// WithRunWait marks ctx as a gated verb's run (change start and archive,
+// milestone take-in and close: D800+): its fences (FenceMilestone,
+// FenceClose) wait out a transient NATS failure for at most bound, saying
+// so on w once, as GateWait does at the verb's entry (V8l, D807). Without
+// it, a fence refuses at once.
+func WithRunWait(ctx context.Context, bound time.Duration, w io.Writer) context.Context {
+	return context.WithValue(ctx, runWaitKey{}, runWait{bound: bound, w: w})
+}
+
+// waitTransient runs try again, every gateWaitEvery within ctx's run wait,
+// while it reports its error transient; the last error is returned.
+func waitTransient(ctx context.Context, what string, try func() (transient bool, err error)) error {
+	transient, err := try()
+	rw, ok := ctx.Value(runWaitKey{}).(runWait)
+	if !transient || !ok || rw.bound <= 0 {
+		return err
+	}
+	deadline := time.Now().Add(rw.bound)
+	for said := false; transient && time.Now().Before(deadline); {
+		if !said && rw.w != nil {
+			fmt.Fprintf(rw.w, "%s ape: %s: waiting for NATS (%v) — every %s, for at most %s\n",
+				time.Now().UTC().Format(time.RFC3339), what, err, gateWaitEvery, rw.bound)
+			said = true
+		}
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(min(gateWaitEvery, time.Until(deadline))):
+		}
+		transient, err = try()
+	}
+	return err
 }
 
 // FenceLog gets one line per fenced push or enqueue (D732): the lease, its
@@ -585,10 +641,20 @@ func FenceClose(ctx context.Context, _ *apexv1.Project) (retakes int, err error)
 }
 
 // fence is FenceClose for this hold.
+// A lease that cannot be read is waited out inside a run (V8l); one
+// another holds refuses at once.
 func (h *closeHold) fence(ctx context.Context) (retakes int, err error) {
-	l, err := h.s.store.LiveHolder(ctx, h.key)
+	var l lease.Live
+	err = waitTransient(ctx, "the close PR's enqueue", func() (bool, error) {
+		var rerr error
+		l, rerr = h.s.store.LiveHolder(ctx, h.key)
+		if rerr != nil {
+			return true, &apexv1.FailError{Code: apexv1.CodeCloseLost, Action: apexv1.ActionRetry, Msg: fmt.Sprintf("the close lease %s could not be read before the enqueue (%v): nothing was enqueued — close again", h.key, rerr)}
+		}
+		return false, nil
+	})
 	if err != nil {
-		return 0, &apexv1.FailError{Code: apexv1.CodeCloseLost, Action: apexv1.ActionRetry, Msg: fmt.Sprintf("the close lease %s could not be read before the enqueue (%v): nothing was enqueued — close again", h.key, err)}
+		return 0, err
 	}
 	if l.Holder != h.s.holder {
 		return 0, &apexv1.FailError{Code: apexv1.CodeCloseLost, Action: apexv1.ActionRetry, Msg: fmt.Sprintf(

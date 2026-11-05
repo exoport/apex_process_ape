@@ -609,10 +609,14 @@ func spawnWorker(cmd *cobra.Command, logPath string, args []string) error {
 // (change new) refuses at once.
 func coordGate(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, op, milestone string) error {
 	ctx := cmd.Context()
+	// V8l: the run's own fences (before each milestone push, before a
+	// close PR's enqueue) wait as long as its entry does.
 	if _, worker := ctx.Value(workerKey{}).(string); worker {
+		cmd.SetContext(member.WithRunWait(ctx, member.GateWaitMax, os.Stderr))
 		return member.GateWait(ctx, p, op, milestone, member.GateWaitMax, os.Stderr)
 	}
 	if f.long && (f.noDetach || !v1DetachDefault) {
+		cmd.SetContext(member.WithRunWait(ctx, f.wait, cmd.ErrOrStderr()))
 		return member.GateWait(ctx, p, op, milestone, f.wait, cmd.ErrOrStderr())
 	}
 	err := member.Gate(ctx, p, op, milestone, time.Now())
