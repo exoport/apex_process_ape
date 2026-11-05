@@ -9748,7 +9748,9 @@ Run a supervisor (stage 0; proposal §3.3). Two or more may run: one holds sup.l
 and serves ape.sup.ensure, ape.sup.health.report and ape.sup.status; the others wait to
 take over. On ensure (`ape supervisor ensure`) it starts `ape coordinator --ensemble <name>`
 as a child process with this command's connection flags and each --project (default: the
-member project it runs in), whose milestone leases the coordinator watches. A health report is verified before anything is
+member project it runs in), whose milestone leases the coordinator watches;
+--coordinator-creds gives the child its own credential, since a coordinator's grant is not a
+supervisor's (V12b). A health report is verified before anything is
 killed: the coordinator's lease must be stale AND its ping unanswered; otherwise the
 reporter is told its own link looks unhealthy (health-unconfirmed). At most 3 starts per
 ensemble in 15 minutes. --no-verify kills on any report (the drills' control only).
@@ -9766,6 +9768,7 @@ Flags:
 | `--assess` | bool | `false` | start each coordinator with --assess (the assessor, v1.5 §3.2) |
 | `--assess-budget` | string | `—` | passed to each coordinator: the assessor's tokens for the stage (default: the coordinator's, 20M) |
 | `--assess-checkout` | stringArray | `[]` | passed to each coordinator: <project>=<path>, the checkout the assessor reads a member from (repeatable) |
+| `--coordinator-creds` | string | `—` | the coordinators' own NATS credentials file (cred.CoordinatorGrant; default: this command's) |
 | `--cwd` | string | `—` | the project whose coordination: block and hot/ape-nats.creds to use (default: the current directory) |
 | `--heartbeat` | duration | `1m0s` | how often each held conductor lease gets a heartbeat event (0: none) |
 | `--id` | string | `—` | this supervisor's id (default: sup-<host>-<pid>) |

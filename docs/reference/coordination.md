@@ -52,12 +52,27 @@ Leases are not requests: claiming, renewing and releasing one is a compare-and-s
 - `milestone-paused` / `milestone-resumed` (kind `project`) come from the conductor's ape (OQ24: a question left
   unanswered past the pause age; payload `{by, user}`) or from a person's `ape milestone pause|resume` (payload
   `{kind: "person", by, user, reason, at}`). While the newest is a pause, the milestone's change new, start and archive,
-  its take-in and its close refuse `coord.milestone-paused` (action `person`), naming who paused it and why.
+  its take-in and its close refuse `coord.milestone-paused` (action `person`), naming who paused it and why. A
+  person's pause or resume counts only from the user whose checkout holds the milestone's claim (its subject's
+  `<user>` token, which the server binds to the publisher's credential), so another member can neither pause the
+  milestone nor lift the holder's pause. A conductor's pause counts from anyone.
 
 **Tokens and names.** `<user>`, `<host>` and `<ensemble>` are slugged by one rule, ape's subject token: lowercased,
 and `.`, `*`, `>` and whitespace become `-`. The tokens `coord` and `sup`, and any token starting `vm-` (aped's
 per-VM identities), are reserved: a member credential whose token would be one is refused when it is minted. An
 ensemble may not be named like one of its member projects' slugs.
+
+**Credentials.** Each kind of credential has its own allow-list, measured by running that kind's code against an
+enforcing server:
+- a **member's** (`hot/ape-nats.creds`; `ape conductor attach` runs on it too) publishes its own events and metrics,
+  writes its project's `milestone.<project>.<M>` and `close.<project>` leases and its `conductor.<user>.<ensemble>`
+  lease, and asks `ape.sup.*`, `ape.coord.<ensemble>.status` and the App service for its own user;
+- the **coordinator's** (`ape supervisor --coordinator-creds`; by default the supervisor's own) holds
+  `coord.<ensemble>` and the slots, and publishes the coordinator's events;
+- the **supervisor's** holds `sup.leader`, clears a dead coordinator's lease, and publishes heartbeats.
+
+Every kind reads the streams it uses and makes consumers on them. **None may create, update, purge or delete a
+stream, or delete a message.** Those are `ape nats declare`'s, run on the operator's own credential.
 
 ## The assessor
 
