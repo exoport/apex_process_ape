@@ -204,18 +204,27 @@ func CIGrant(name string, projects ...string) aped.Grant {
 // inUse's (the names already minted in the account; V12-5): two names that
 // slug to one token share its events, its inbox and its pauses.
 func Mint(account aped.Account, user, project, ensemble string, expires time.Duration, inUse ...string) ([]byte, error) {
-	tok := natsconn.SubjectToken(user)
-	if tok == "" {
-		return nil, errors.New("cred: empty user name")
-	}
-	if layout.Reserved(tok) {
-		return nil, fmt.Errorf("cred: %q's subject token %q is reserved (coord, sup and vm-* are ape's own); name the member otherwise", user, tok)
-	}
-	for _, other := range inUse {
-		if natsconn.SubjectToken(other) == tok && other != user {
-			return nil, fmt.Errorf("cred: %q's subject token %q is %q's already: two names on one token share its events, inbox and pauses; name the member otherwise", user, tok, other)
-		}
+	if err := checkName(user, inUse); err != nil {
+		return nil, err
 	}
 	creds, _, err := account.MintUser(user, MemberGrant(user, project, ensemble), expires)
 	return creds, err
+}
+
+// checkName is a credential name's checks: a subject token, not reserved,
+// and no other name in inUse with the same token.
+func checkName(user string, inUse []string) error {
+	tok := natsconn.SubjectToken(user)
+	if tok == "" {
+		return errors.New("cred: empty user name")
+	}
+	if layout.Reserved(tok) {
+		return fmt.Errorf("cred: %q's subject token %q is reserved (coord, sup and vm-* are ape's own); name the member otherwise", user, tok)
+	}
+	for _, other := range inUse {
+		if natsconn.SubjectToken(other) == tok && other != user {
+			return fmt.Errorf("cred: %q's subject token %q is %q's already: two names on one token share its events, inbox and pauses; name the member otherwise", user, tok, other)
+		}
+	}
+	return nil
 }
