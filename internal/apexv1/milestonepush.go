@@ -178,7 +178,7 @@ func (p *Project) PushHead(ctx context.Context, sha, branch string) error {
 
 // Integrator is the coordinated repository's API (NewIntegrator's), for
 // callers outside the archive and close.
-func (p *Project) Integrator() (Integrator, error) { return p.integrator() }
+func (p *Project) Integrator(ctx context.Context) (Integrator, error) { return p.integrator(ctx) }
 
 // FetchAndSync fetches branches from the coordinated repository (the App's
 // read token when the project has one) into their remote-tracking refs,

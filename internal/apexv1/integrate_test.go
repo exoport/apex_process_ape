@@ -80,7 +80,7 @@ func (f *fakeIntegrator) PRState(_ context.Context, n int) (PRState, error) {
 func useIntegrator(t *testing.T, f *fakeIntegrator) {
 	t.Helper()
 	old := NewIntegrator
-	NewIntegrator = func(*Project) (Integrator, error) { return f, nil }
+	NewIntegrator = func(context.Context, *Project) (Integrator, error) { return f, nil }
 	t.Cleanup(func() { NewIntegrator = old })
 }
 

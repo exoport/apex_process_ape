@@ -149,7 +149,7 @@ func (p *Project) openClosePR(ctx context.Context, ms string, attempts int, opt 
 		if err := p.pushMilestone(ctx, base, tip); err != nil {
 			return nil, err
 		}
-		api, err := p.integrator()
+		api, err := p.integrator(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -250,7 +250,7 @@ func (p *Project) resolveClose(ctx context.Context, ms string, opt RunOptions, p
 		return g, true, nil
 	}
 	if rec.State == IntegrationQueued {
-		api, err := p.integrator()
+		api, err := p.integrator(ctx)
 		if err != nil {
 			return g, true, err
 		}

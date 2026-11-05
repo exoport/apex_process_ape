@@ -13,13 +13,17 @@ import (
 // Integrator is apexv1.NewIntegrator for a member project: ape's own
 // GitHub client on coordination.github's repository, with the token from
 // hot/github.token.
-func Integrator(p *apexv1.Project) (apexv1.Integrator, error) {
+func Integrator(ctx context.Context, p *apexv1.Project) (apexv1.Integrator, error) {
 	m, err := Load(p)
 	if err != nil {
 		return nil, &apexv1.FailError{Code: apexv1.CodeCoordMembership, Msg: err.Error() +
 			" — a person fixes _apex/config.yaml's coordination: block or places the token"}
 	}
-	tok, err := m.GitHubTokenFor(context.Background(), "pr")
+	tok, err := m.GitHubTokenFor(ctx, "pr")
+	if err != nil && m.GitHubApp {
+		return nil, &apexv1.FailError{Code: apexv1.CodeCoordNATSUnreachable, Action: apexv1.ActionRetry, Msg: "no pr token from the coordination host's App service (" + m.GitHubRepo + "): " + err.Error() +
+			" — check that the App service runs and NATS answers at " + m.URL + ", then run the command again"}
+	}
 	if err != nil {
 		return nil, &apexv1.FailError{Code: apexv1.CodeCoordMembership, Msg: err.Error()}
 	}

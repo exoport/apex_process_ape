@@ -3,6 +3,7 @@ package member
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -21,7 +22,11 @@ const askTimeout = 30 * time.Second
 // GitHubTokenFor is a token for purpose (push, pr, read): from the
 // coordination host's GitHub App service when the block says app: true —
 // an installation token narrowed to the repository and the purpose,
-// asked over NATS as this member's user — else hot/github.token.
+// asked over NATS as this member's user — else hot/github.token. Inside a
+// gated verb's run (WithRunWait) NATS unreachable, or no App service
+// answering, is waited out (V8L-1, D808+): the push, fetch and PR calls
+// after a fence ask for their token here. A refusal the service answers
+// with is returned at once.
 func (m Membership) GitHubTokenFor(ctx context.Context, purpose string) (string, error) {
 	if !m.GitHubApp {
 		tok, err := m.ReadGitHubToken()
@@ -31,18 +36,30 @@ func (m Membership) GitHubTokenFor(ctx context.Context, purpose string) (string,
 	if err != nil {
 		return "", err
 	}
-	ctx, cancel := context.WithTimeout(ctx, askTimeout)
-	defer cancel()
-	nc, err := natsconn.Connect(ctx, natsconn.Config{URL: m.URL, CredsFile: m.Creds}, "ape-ghapp-client", nats.NoReconnect())
-	if err != nil {
-		return "", err
-	}
-	defer nc.Close()
-	rep, err := ghapp.Ask(ctx, nc, ghapp.TokenSubject, id.SubjectToken, ghapp.Request{Repo: m.GitHubRepo, Purpose: purpose})
-	if err != nil {
-		return "", err
-	}
-	return rep.Token, nil
+	var tok string
+	err = waitTransient(ctx, "the "+purpose+" token from the App service", func() (bool, error) {
+		actx, cancel := context.WithTimeout(ctx, askTimeout)
+		defer cancel()
+		nc, err := natsconn.Connect(actx, natsconn.Config{URL: m.URL, CredsFile: m.Creds}, "ape-ghapp-client", nats.NoReconnect())
+		if err != nil {
+			return true, err
+		}
+		defer nc.Close()
+		rep, err := ghapp.Ask(actx, nc, ghapp.TokenSubject, id.SubjectToken, ghapp.Request{Repo: m.GitHubRepo, Purpose: purpose})
+		if err != nil {
+			return askUnanswered(err), err
+		}
+		tok = rep.Token
+		return false, nil
+	})
+	return tok, err
+}
+
+// askUnanswered is an App service request nobody answered: no responders,
+// or no reply in time. A reply that refuses is not.
+func askUnanswered(err error) bool {
+	return errors.Is(err, nats.ErrNoResponders) || errors.Is(err, nats.ErrTimeout) || errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, nats.ErrConnectionClosed)
 }
 
 // webHost is the git host beside the API: github.com for api.github.com,

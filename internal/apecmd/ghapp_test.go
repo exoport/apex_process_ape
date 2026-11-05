@@ -137,7 +137,7 @@ func TestGhappLand_CLI(t *testing.T) {
 	tip := v1Git(t, root, "rev-parse", "HEAD")
 	fake := &landIntegrator{}
 	old := apexv1.NewIntegrator
-	apexv1.NewIntegrator = func(*apexv1.Project) (apexv1.Integrator, error) { return fake, nil }
+	apexv1.NewIntegrator = func(context.Context, *apexv1.Project) (apexv1.Integrator, error) { return fake, nil }
 	t.Cleanup(func() { apexv1.NewIntegrator = old })
 
 	stdout, _, err := v1Exec(t, newGhappCmd, "land", "apex/framework-update", "--cwd", root)

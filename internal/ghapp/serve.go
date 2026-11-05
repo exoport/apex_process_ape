@@ -375,7 +375,7 @@ func Ask(ctx context.Context, nc *nats.Conn, subject, user string, req Request) 
 	m, err := nc.RequestWithContext(ctx, subject+"."+user, data)
 	if err != nil {
 		if errors.Is(err, nats.ErrNoResponders) {
-			return Reply{}, errors.New("ghapp: no App service answers on " + subject + " — is apex-ghapp running on the coordination host?")
+			return Reply{}, fmt.Errorf("ghapp: no App service answers on %s — is apex-ghapp running on the coordination host? (%w)", subject, err)
 		}
 		return Reply{}, err
 	}

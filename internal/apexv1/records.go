@@ -74,7 +74,7 @@ func (p *Project) sendPendingRecords(ctx context.Context) error {
 		case in.State == IntegrationQueued:
 			// Sent by an earlier call that did not see it merge: wait for
 			// it now (FINDING-V15-1A-7 b).
-			api, err := p.integrator()
+			api, err := p.integrator(ctx)
 			if err != nil {
 				return err
 			}
@@ -102,7 +102,7 @@ func (p *Project) sendRecord(ctx context.Context, commit, subject string) (*Inte
 	if _, err := gitWithEnv(ctx, p.Root, env, "push", "--quiet", "--force", "--no-follow-tags", target, commit+":refs/heads/"+head); err != nil {
 		return nil, &FailError{Code: CodeIntegrationPush, Action: ActionRetry, Msg: fmt.Sprintf("the record %q is committed on main, but pushing it to %s on %s failed: %v — the next milestone record sends it, or run the command again", subject, head, remote, err)}
 	}
-	api, err := p.integrator()
+	api, err := p.integrator(ctx)
 	if err != nil {
 		return nil, err
 	}

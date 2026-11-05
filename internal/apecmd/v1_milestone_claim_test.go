@@ -121,7 +121,7 @@ func TestMilestoneTakeIn_CLI(t *testing.T) {
 
 	fake := &cliIntegrator{}
 	old := apexv1.NewIntegrator
-	apexv1.NewIntegrator = func(*apexv1.Project) (apexv1.Integrator, error) { return fake, nil }
+	apexv1.NewIntegrator = func(context.Context, *apexv1.Project) (apexv1.Integrator, error) { return fake, nil }
 	t.Cleanup(func() { apexv1.NewIntegrator = old })
 
 	stdout, _, err := v1Exec(t, newMilestoneCmd, "claim", "M1", "--cwd", root)

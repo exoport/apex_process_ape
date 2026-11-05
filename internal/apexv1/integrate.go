@@ -72,7 +72,7 @@ type Integrator interface {
 // NewIntegrator, when set, is the coordinated project's Integrator; ape
 // sets it (apecmd), tests set a fake. Unset, a coordinated archive
 // refuses: nothing can open its pull request.
-var NewIntegrator func(p *Project) (Integrator, error)
+var NewIntegrator func(ctx context.Context, p *Project) (Integrator, error)
 
 // Integration states.
 const (
@@ -152,11 +152,11 @@ func (p *Project) saveIntegration(in Integration) error {
 }
 
 // integrator is the coordinated project's Integrator, or the refusal.
-func (p *Project) integrator() (Integrator, error) {
+func (p *Project) integrator(ctx context.Context) (Integrator, error) {
 	if NewIntegrator == nil {
 		return nil, &FailError{Code: CodeIntegrationPR, Msg: "this project integrates through GitHub (coordination.github), and this ape has no GitHub client wired — run the archive with ape itself"}
 	}
-	return NewIntegrator(p)
+	return NewIntegrator(ctx, p)
 }
 
 // QueuePoll is how often a close waiting on main's queue reads its PR

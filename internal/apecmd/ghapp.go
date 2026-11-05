@@ -345,7 +345,7 @@ Exit codes: 0 merged · 1 refused, failed, ejected or closed · 2 usage · 75 st
 			if err := p.PushHead(ctx, sha, branch); err != nil {
 				return v1Fail(cmd, &f, err, nil)
 			}
-			api, err := p.Integrator()
+			api, err := p.Integrator(ctx)
 			if err != nil {
 				return v1Fail(cmd, &f, err, nil)
 			}
