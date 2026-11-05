@@ -153,7 +153,7 @@ func Run(ctx context.Context, nc *nats.Conn, cfg Config) error {
 		select {
 		case <-ctx.Done():
 			if lead.svc != nil {
-				_ = lead.svc.Stop()
+				lead.end()
 				_ = ls.Release(context.WithoutCancel(ctx), lead.held)
 			}
 			return nil
@@ -162,10 +162,25 @@ func Run(ctx context.Context, nc *nats.Conn, cfg Config) error {
 	}
 }
 
-// leadership is what a supervisor holds while it leads.
+// leadership is what a supervisor holds while it leads: the lease, and
+// the service on the term's own connection.
 type leadership struct {
 	held lease.Lease
 	svc  micro.Service
+	conn *nats.Conn
+}
+
+// end stops serving. Closing the term's connection is what ends its
+// subscriptions on the server (FINDING-2A-DRY-2): a term usually ends in an
+// outage, and a service stopped while its connection reconnects leaks every
+// endpoint's subscription there — nats.go's drain sends no UNSUB while
+// reconnecting, the reconnect subscribes them again and the client then
+// forgets them — so the next term's endpoints share each queue group with
+// a member that drops what it is given.
+func (l *leadership) end() {
+	_ = l.svc.Stop()
+	l.conn.Close()
+	l.svc, l.conn = nil, nil
 }
 
 // contend is one tick: a standby tries to claim sup.leader and serve; the
@@ -181,8 +196,7 @@ func (s *Supervisor) contend(ctx context.Context, lead *leadership) {
 			lead.held = l
 			return
 		}
-		_ = lead.svc.Stop()
-		lead.svc = nil
+		lead.end()
 		s.setLeader(false)
 		s.logf("supervisor %s: lost sup.leader (%v); contending again", s.cfg.ID, err)
 		return
@@ -195,13 +209,13 @@ func (s *Supervisor) contend(ctx context.Context, lead *leadership) {
 		s.logf("supervisor %s: cannot claim sup.leader (%v); trying again", s.cfg.ID, err)
 		return
 	}
-	svc, err := s.serve()
+	svc, conn, err := s.serve()
 	if err != nil {
 		_ = s.leases.Release(ctx, l)
 		s.logf("supervisor %s: cannot serve ape.sup.* (%v); trying again", s.cfg.ID, err)
 		return
 	}
-	lead.held, lead.svc = l, svc
+	lead.held, lead.svc, lead.conn = l, svc, conn
 	s.setLeader(true)
 	s.logf("supervisor %s: leads", s.cfg.ID)
 }
@@ -255,10 +269,18 @@ func (s *Supervisor) setLeader(v bool) {
 	s.mu.Unlock()
 }
 
-func (s *Supervisor) serve() (micro.Service, error) {
-	svc, err := micro.AddService(s.nc, micro.Config{Name: "ape-sup", Version: "0.0.0", Description: "APEX v1.5 supervisor " + s.cfg.ID})
+// serve starts the term's service on a connection of its own, dialed with
+// the supervisor's options (its servers, credential and reply inboxes), so
+// that ending the term can close it (leadership.end).
+func (s *Supervisor) serve() (micro.Service, *nats.Conn, error) {
+	conn, err := s.nc.Opts.Connect()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	svc, err := micro.AddService(conn, micro.Config{Name: "ape-sup", Version: "0.0.0", Description: "APEX v1.5 supervisor " + s.cfg.ID})
+	if err != nil {
+		conn.Close()
+		return nil, nil, err
 	}
 	grp := svc.AddGroup("ape.sup")
 	for name, h := range map[string]micro.HandlerFunc{
@@ -269,10 +291,11 @@ func (s *Supervisor) serve() (micro.Service, error) {
 		// An endpoint's name may not hold a dot; its subject does.
 		if err := grp.AddEndpoint(strings.ReplaceAll(name, ".", "-"), h, micro.WithEndpointSubject(name)); err != nil {
 			_ = svc.Stop()
-			return nil, err
+			conn.Close()
+			return nil, nil, err
 		}
 	}
-	return svc, nil
+	return svc, conn, nil
 }
 
 func (s *Supervisor) ensure(r micro.Request) {

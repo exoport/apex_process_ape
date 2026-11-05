@@ -391,3 +391,61 @@ func TestStopAll_TerminatesWhenItCan(t *testing.T) {
 	require.True(t, s2, "the control: a plain handle is stopped")
 	require.Empty(t, s.handles)
 }
+
+// FINDING-2A-DRY-2: a leader that loses sup.leader in a NATS outage stops
+// its service while the connection is reconnecting. nats.go then leaks the
+// endpoints' subscriptions on the server (a drain while reconnecting sends
+// no UNSUB, the reconnect re-subscribes them, and the client forgets them),
+// so after it leads again each ape.sup.* subject has a dead queue member and
+// about half the requests go unanswered. After the outage every request is
+// answered (the control: the same count before it).
+func TestDrill_ServiceAnswersEveryRequestAfterAnOutage(t *testing.T) {
+	c := natstest.RunCluster(t, 3)
+	url := c.URLs()
+	snc, err := nats.Connect(url, nats.MaxReconnects(-1), nats.ReconnectWait(200*time.Millisecond))
+	require.NoError(t, err)
+	t.Cleanup(snc.Close)
+	js, err := jetstream.New(snc)
+	require.NoError(t, err)
+	ctx := context.Background()
+	require.NoError(t, lease.Declare(ctx, js, 3))
+	ls, err := lease.Open(ctx, js)
+	require.NoError(t, err)
+	require.NoError(t, ls.SetEpoch(ctx, 1))
+
+	sctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- Run(sctx, snc, Config{ID: "sup-a", TTL: ttl, Renew: renew}) }()
+	t.Cleanup(func() { cancel(); <-done })
+
+	answered := func() int {
+		nc, err := nats.Connect(c.URLs())
+		require.NoError(t, err)
+		defer nc.Close()
+		n := 0
+		for range 20 {
+			if _, err := nc.Request("ape.sup.status", nil, time.Second); err == nil {
+				n++
+			}
+		}
+		return n
+	}
+	waitLeader(t, snc)
+	require.Equal(t, 20, answered(), "the control: every request answered before the outage")
+
+	// The outage outlasts the renewal, so the leader stops serving while
+	// its connection is reconnecting.
+	for i := range c.Servers {
+		c.Stop(i)
+	}
+	time.Sleep(3 * ttl)
+	for i := range c.Servers {
+		c.Restart(i)
+	}
+	c.WaitMetaLeader(30 * time.Second)
+	require.Eventually(t, func() bool {
+		_, err := snc.Request("ape.sup.status", nil, 500*time.Millisecond)
+		return err == nil
+	}, 60*time.Second, 200*time.Millisecond, "it leads again")
+	require.Equal(t, 20, answered(), "every request answered after the outage")
+}
