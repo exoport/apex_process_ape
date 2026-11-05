@@ -156,7 +156,9 @@ func v1ChangeLeaf(use, short, long, example string, f *v1Flags, run func(cmd *co
 				}
 			}
 			if coordVerbs[cmd.Name()] {
-				if err := coordGate(cmd, f, p, "change "+cmd.Name(), coordMilestone(cmd, p, args[0])); err != nil {
+				stop, err := coordGateHold(cmd, f, p, "change "+cmd.Name(), coordMilestone(cmd, p, args[0]))
+				defer stop()
+				if err != nil {
 					return v1Fail(cmd, f, err, nil)
 				}
 			}

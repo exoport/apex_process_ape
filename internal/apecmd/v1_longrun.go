@@ -600,6 +600,33 @@ func spawnWorker(cmd *cobra.Command, logPath string, args []string) error {
 	return nil
 }
 
+// coordGateHold is coordGate that, where the run's body runs (a worker,
+// or this process with --no-detach), then holds the milestone's lease
+// for the run as close does (member.HoldMilestone; Q-H5-4, D808+): renewed
+// through a regression longer than the TTL, and retaken by the run's own
+// keeper after an outage. Beside a loop's keeper of the same checkout it
+// shares the lease (the same holder, renewed at the current revision;
+// retake adopts the other's renewal). stop ends the renewing, never the
+// lease; it is a no-op where nothing is held.
+func coordGateHold(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, op, milestone string) (stop func(), err error) {
+	stop = func() {}
+	if err := coordGate(cmd, f, p, op, milestone); err != nil {
+		return stop, err
+	}
+	_, worker := cmd.Context().Value(workerKey{}).(string)
+	if milestone == "" || milestone == "none" || !worker && !(f.long && (f.noDetach || !v1DetachDefault)) {
+		return stop, nil
+	}
+	hold, err := member.HoldMilestone(cmd.Context(), p, milestone, cmd.ErrOrStderr())
+	switch {
+	case errors.Is(err, member.ErrNotMember):
+		return stop, nil
+	case err != nil:
+		return stop, err
+	}
+	return hold, nil
+}
+
 // coordGate is member.Gate for a long verb (D800+): its run waits for NATS
 // and for a clean read of the milestone's pause state — a detached run at
 // most member.GateWaitMax, so the call exits 75 while it waits and the next

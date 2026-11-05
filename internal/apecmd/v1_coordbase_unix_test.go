@@ -19,6 +19,7 @@ import (
 
 	"github.com/exoport/apex_process_ape/internal/apexv1"
 	"github.com/exoport/apex_process_ape/internal/coord/lease"
+	"github.com/exoport/apex_process_ape/internal/coord/member"
 	"github.com/exoport/apex_process_ape/internal/natstest"
 )
 
@@ -365,4 +366,77 @@ func TestMilestoneTakeIn_FromMainSwitchesOrRefuses(t *testing.T) {
 	stdout, _, err = v1Exec(t, newMilestoneCmd, "take-in", "M1", "--json", "--cwd", root)
 	require.NoError(t, err, stdout)
 	require.Equal(t, "milestone/M1", v1Git(t, root, "branch", "--show-current"))
+}
+
+// Q-H5-4 (D808+): a take-in holds M's lease through its own run, as close
+// does (FINDING-V15-1A-11). With no loop renewing it, a regression three
+// TTLs long used to let it lapse, and the push fence met "held by nobody
+// (it lapsed)". The T1: a 1 s TTL, a 3 s regression, run in this process
+// with no loop: the lease is renewed while the regression runs (its
+// revision moves, still this checkout's) and the take-in lands, exit 0.
+func TestMilestoneTakeIn_HoldsTheLeaseThroughItsRun(t *testing.T) {
+	oldTTL, oldEvery := member.MilestoneTTL, member.MilestoneRenewEvery
+	member.MilestoneTTL, member.MilestoneRenewEvery = time.Second, 250*time.Millisecond
+	t.Cleanup(func() { member.MilestoneTTL, member.MilestoneRenewEvery = oldTTL, oldEvery })
+	c := natstest.RunCluster(t, 3)
+	root := githubCoordRepoOn(t, c.URLs())
+	ran := filepath.Join(t.TempDir(), "ran.txt")
+	cfg, err := os.ReadFile(apexv1.ConfigPath(root))
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(apexv1.ConfigPath(root), append(cfg, []byte("regression: ./suite.sh\n")...), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "suite.sh"), []byte("#!/bin/sh\necho run >> "+ran+"\nsleep 3\n"), 0o755))
+	v1Git(t, root, "add", "-A")
+	v1Git(t, root, "commit", "-qm", "chore: a regression")
+	v1Git(t, root, "push", "-q", "origin", "main")
+	_, _, err = v1Exec(t, newProjectCmd, "accept-config", "--by", "t", "--cwd", root)
+	require.NoError(t, err)
+	_, _, err = v1Exec(t, newMilestoneCmd, "claim", "M1", "--cwd", root)
+	require.NoError(t, err)
+	v1Git(t, root, "switch", "-q", "main")
+	require.NoError(t, os.WriteFile(filepath.Join(root, "moved.txt"), []byte("main moved\n"), 0o644))
+	v1Git(t, root, "add", "moved.txt")
+	v1Git(t, root, "commit", "-qm", "chore: main moves")
+	v1Git(t, root, "push", "-q", "origin", "main")
+	p, err := apexv1.Open(root)
+	require.NoError(t, err)
+	m, err := member.Load(p)
+	require.NoError(t, err)
+
+	nc, err := nats.Connect(c.URLs())
+	require.NoError(t, err)
+	t.Cleanup(nc.Close)
+	js, err := jetstream.New(nc)
+	require.NoError(t, err)
+	ls, err := lease.Open(t.Context(), js)
+	require.NoError(t, err)
+	key := "milestone." + m.Project + ".M1"
+
+	type result struct {
+		stdout, stderr string
+		err            error
+	}
+	done := make(chan result, 1)
+	go func() {
+		o, e, err := v1Exec(t, newMilestoneCmd, "take-in", "M1", "--json", "--no-detach", "--wait", "90s", "--cwd", root)
+		done <- result{o, e, err}
+	}()
+	require.Eventually(t, func() bool { _, err := os.Stat(ran); return err == nil }, 60*time.Second, 50*time.Millisecond, "the regression starts")
+	holder, first, err := ls.Holder(t.Context(), key)
+	require.NoError(t, err)
+	require.NotEmpty(t, holder, "held as the regression starts")
+	time.Sleep(2 * time.Second) // two TTLs into the regression
+	h, now, err := ls.Holder(t.Context(), key)
+	require.NoError(t, err)
+	require.Equal(t, holder, h, "still this checkout's, two TTLs on")
+	require.Greater(t, now.Revision, first.Revision, "renewed by the take-in's own hold")
+	var r result
+	select {
+	case r = <-done:
+	case <-time.After(90 * time.Second):
+		t.Fatal("the take-in did not end")
+	}
+	require.NoError(t, r.err, "stdout %s\nstderr %s", r.stdout, r.stderr)
+	var res map[string]any
+	require.NoError(t, json.Unmarshal([]byte(r.stdout), &res), r.stdout)
+	require.Equal(t, false, res["up_to_date"], r.stdout)
 }

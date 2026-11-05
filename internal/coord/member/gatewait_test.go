@@ -400,3 +400,50 @@ func TestFenceClose_RetakesALeaseThatLapsedDuringTheWait(t *testing.T) {
 	_, err = FenceClose(WithRunWait(ctx, time.Minute, &out), p)
 	require.ErrorContains(t, err, "zed/other")
 }
+
+// FINDING-H5-DRY-1 with a renewer running (Q-H5-4, D808+): a keeper of the
+// same checkout (a loop's, or the run's own hold) renews M's lease while
+// the fence waits out an outage longer than the TTL. After NATS is back
+// either may retake it first; the other adopts it (the same holder,
+// renewed at the current revision), so the fence passes and the keeper
+// goes on renewing — they never refuse each other.
+func TestFenceMilestone_ALapseWithAKeeperRunning(t *testing.T) {
+	shortLeases(t, 300*time.Millisecond)
+	p, c, js := gateRig(t)
+	ctx := t.Context()
+	defer func(d time.Duration) { gateWaitEvery = d }(gateWaitEvery)
+	gateWaitEvery = 200 * time.Millisecond
+	var keeperLog syncBuf
+	stop, err := HoldMilestone(ctx, p, "M2", &keeperLog)
+	require.NoError(t, err)
+	defer stop()
+
+	var out syncBuf
+	done := make(chan error, 1)
+	for i := range 3 {
+		c.Stop(i)
+	}
+	go func() { done <- FenceMilestone(WithRunWait(ctx, time.Minute, &out), p, "M2") }()
+	require.Eventually(t, func() bool { return strings.Contains(out.String(), "the push of milestone/M2: waiting for NATS") },
+		15*time.Second, 50*time.Millisecond)
+	time.Sleep(3 * MilestoneTTL)
+	for i := range 3 {
+		c.Restart(i)
+	}
+	select {
+	case err := <-done:
+		require.NoError(t, err, "the fence passes beside the keeper")
+	case <-time.After(60 * time.Second):
+		t.Fatal("still waiting after NATS came back")
+	}
+	ls, err := lease.Open(ctx, js)
+	require.NoError(t, err)
+	_, before, err := ls.Holder(ctx, "milestone.notes-svc.M2")
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		h, tok, err := ls.Holder(ctx, "milestone.notes-svc.M2")
+		return err == nil && strings.HasPrefix(h, "dana/") && tok.Revision > before.Revision
+	}, 10*time.Second, 100*time.Millisecond, "the keeper goes on renewing it")
+	require.NotContains(t, keeperLog.String(), "was lost", "the keeper never lost it to the fence: %s", keeperLog.String())
+	require.NoError(t, FenceMilestone(ctx, p, "M2"), "and it is still this checkout's")
+}

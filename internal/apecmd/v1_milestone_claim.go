@@ -267,7 +267,9 @@ branch moved, a push) · 2 usage, or a project not integrating through GitHub ·
 				return err
 			}
 			ms := args[0]
-			if err := coordGate(cmd, &f, p, "milestone take-in", ms); err != nil {
+			stop, err := coordGateHold(cmd, &f, p, "milestone take-in", ms)
+			defer stop()
+			if err != nil {
 				return v1Fail(cmd, &f, err, nil)
 			}
 			return runLongArg(cmd, &f, p, apexv1.TakeInPrefix+ms, ms, func(ctx context.Context, opt apexv1.RunOptions) renderFn {
