@@ -24,12 +24,13 @@ import (
 func newConductorAttachCmd() *cobra.Command {
 	var projects []string
 	var pane, user string
+	var gitUser bool // user is git user.email's slug, not --user
 	cmd := &cobra.Command{
 		Use:   "attach --project <dir>… [--pane <tmux pane>] [--user <slug>]",
 		Short: "APEX v1.5 (in development): deliver an ensemble's events into your conductor's tmux pane",
 		Long: `Attach your conductor — your own Claude Code session, in a tmux pane — to the ensemble its
 --project directories belong to (v1.5, OQ25), and run until interrupted. ape claims the
-conductor lease conductor.<user>.<ensemble> (exit 1 if another of your conductors holds
+conductor lease conductor.<user>.<ensemble>, <user> being the credential's (exit 1 if another of your conductors holds
 it), binds your durable consumer, and types each event — the coordinator's, the
 ensemble's contracts, each member project's — into the pane, marked as ape's
 (<ape-delivery …>: a prompt carrying one grants no person act) and ending with the
@@ -89,12 +90,27 @@ session.`,
 					first = m
 					if user == "" {
 						user = apexv1.PersonSlug(apexv1.GitUserEmail(cmd.Context(), p.Root))
+						gitUser = true
 					}
 				} else if m.Ensemble != first.Ensemble {
 					return usageErr(fmt.Errorf("%s is in ensemble %s, %s in %s: one conductor attaches to one ensemble", d, m.Ensemble, projects[0], first.Ensemble))
 				}
 				if !slices.Contains(tokens, m.Project) {
 					tokens = append(tokens, m.Project) // two checkouts of one project are one project
+				}
+			}
+			// The conductor's name is its credential's (FINDING-2A-DRY-1): the
+			// grant scopes its lease, consumer and acks to the credential's
+			// user, so any other name is refused by an enforcing cluster —
+			// after a 30 s wait, as it was. A credential that names nobody
+			// keeps the git user.email slug.
+			if id, err := natsconn.DecodeIdentity(first.Creds); err == nil && id.Name != "" {
+				switch {
+				case gitUser:
+					user = id.SubjectToken
+				case natsconn.SubjectToken(user) != id.SubjectToken:
+					return usageErr(fmt.Errorf("--user %s: the credential %s is %s's, and a conductor runs as its credential's user (its lease, consumer and acks are scoped to %s): drop --user, or attach with %s's credential",
+						user, first.Creds, id.SubjectToken, id.SubjectToken, user))
 				}
 			}
 			if strings.TrimSpace(user) == "" {
@@ -131,6 +147,6 @@ session.`,
 	}
 	cmd.Flags().StringArrayVar(&projects, "project", nil, "a member project of the ensemble (repeatable; default the current directory's)")
 	cmd.Flags().StringVar(&pane, "pane", "", "your conductor's tmux pane (-t target); default the one pane running claude")
-	cmd.Flags().StringVar(&user, "user", "", "your conductor's name in the lease and consumer (default: the slug of git user.email)")
+	cmd.Flags().StringVar(&user, "user", "", "your conductor's name in the lease and consumer (default: the credential's user, else the slug of git user.email); one that is not the credential's is refused")
 	return cmd
 }

@@ -2759,7 +2759,7 @@ ape conductor attach --project <dir>… [--pane <tmux pane>] [--user <slug>] [fl
 
 Attach your conductor — your own Claude Code session, in a tmux pane — to the ensemble its
 --project directories belong to (v1.5, OQ25), and run until interrupted. ape claims the
-conductor lease conductor.<user>.<ensemble> (exit 1 if another of your conductors holds
+conductor lease conductor.<user>.<ensemble>, <user> being the credential's (exit 1 if another of your conductors holds
 it), binds your durable consumer, and types each event — the coordinator's, the
 ensemble's contracts, each member project's — into the pane, marked as ape's
 (<ape-delivery …>: a prompt carrying one grants no person act) and ending with the
@@ -2800,7 +2800,7 @@ Flags:
 | ---- | ---- | ------- | ----------- |
 | `--pane` | string | `—` | your conductor's tmux pane (-t target); default the one pane running claude |
 | `--project` | stringArray | `[]` | a member project of the ensemble (repeatable; default the current directory's) |
-| `--user` | string | `—` | your conductor's name in the lease and consumer (default: the slug of git user.email) |
+| `--user` | string | `—` | your conductor's name in the lease and consumer (default: the credential's user, else the slug of git user.email); one that is not the credential's is refused |
 
 ## ape conductor log
 
