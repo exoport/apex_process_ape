@@ -281,3 +281,122 @@ func TestFenceMilestone_AnUndecodableLeaseRefusesAtOnce(t *testing.T) {
 	require.False(t, Transient(err))
 	require.Less(t, time.Since(start), 5*time.Second, "at once")
 }
+
+// FINDING-H5-DRY-1 (eval's dry pass, D808+): an outage longer than the
+// lease's TTL let it lapse while the fence waited, and the fence then
+// refused "held by nobody (it lapsed)" — the run's renewer would have
+// taken it again a tick later, but no renewer runs here (as in the
+// fixture) and in a stage it raced the fence's first read. The earlier
+// T1s missed it: their outage (about 2 s) was far inside the 30 s TTL. The
+// T1: a 1 s TTL, every node down longer than that, the fence in a run
+// waits, retakes the lapsed lease under retake's condition, and passes.
+// The controls: outside a run the lapsed lease refuses as before; another
+// checkout that claimed it meanwhile refuses at once.
+func TestFenceMilestone_RetakesALeaseThatLapsedDuringTheWait(t *testing.T) {
+	shortLeases(t, time.Hour) // no renewer tick inside the test
+	p, c, js := gateRig(t)
+	ctx := t.Context()
+	defer func(d time.Duration) { gateWaitEvery = d }(gateWaitEvery)
+	gateWaitEvery = 200 * time.Millisecond
+
+	outage := func() {
+		t.Helper()
+		for i := range 3 {
+			c.Stop(i)
+		}
+		time.Sleep(2 * MilestoneTTL)
+		for i := range 3 {
+			c.Restart(i)
+		}
+	}
+	var out syncBuf
+	done := make(chan error, 1)
+	for i := range 3 {
+		c.Stop(i)
+	}
+	go func() { done <- FenceMilestone(WithRunWait(ctx, time.Minute, &out), p, "M2") }()
+	require.Eventually(t, func() bool { return strings.Contains(out.String(), "the push of milestone/M2: waiting for NATS") },
+		15*time.Second, 50*time.Millisecond)
+	time.Sleep(2 * MilestoneTTL)
+	for i := range 3 {
+		c.Restart(i)
+	}
+	select {
+	case err := <-done:
+		require.NoError(t, err, "the lapsed lease is taken again and the fence passes")
+	case <-time.After(60 * time.Second):
+		t.Fatal("still waiting after NATS came back")
+	}
+	require.Contains(t, out.String(), "its lease lapsed while the fence waited and was taken again")
+
+	// Control: outside a run, a lapsed lease refuses as before.
+	outage()
+	require.Eventually(t, func() bool {
+		err := FenceMilestone(ctx, p, "M2")
+		return err != nil && strings.Contains(err.Error(), "it lapsed")
+	}, 30*time.Second, 200*time.Millisecond, "outside a run the lapsed lease refuses")
+
+	// Control: another checkout claimed it after it lapsed — refused at
+	// once, in a run too.
+	ls, err := lease.Open(ctx, js)
+	require.NoError(t, err)
+	other, err := ls.Claim(ctx, "milestone.notes-svc.M2", "zed/other", time.Minute)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ls.Release(context.Background(), other) })
+	start := time.Now()
+	err = FenceMilestone(WithRunWait(ctx, time.Minute, &out), p, "M2")
+	require.ErrorContains(t, err, "zed/other")
+	require.Less(t, time.Since(start), 5*time.Second, "at once")
+}
+
+// FINDING-H5-DRY-1 for the close PR's enqueue: the close lease lapses
+// during an outage longer than its TTL with its keeper's tick not yet due;
+// FenceClose in a run retakes it (counted, so the close re-checks main)
+// and passes. The control: another checkout's close took it — refused.
+func TestFenceClose_RetakesALeaseThatLapsedDuringTheWait(t *testing.T) {
+	shortLeases(t, time.Hour)
+	p, c, js := gateRig(t)
+	ctx := t.Context()
+	defer func(d time.Duration) { gateWaitEvery = d }(gateWaitEvery)
+	gateWaitEvery = 200 * time.Millisecond
+	release, err := HoldClose(ctx, p, io.Discard, nil)
+	require.NoError(t, err)
+	t.Cleanup(release)
+
+	var out syncBuf
+	done := make(chan error, 1)
+	for i := range 3 {
+		c.Stop(i)
+	}
+	retakes := make(chan int, 1)
+	go func() {
+		n, err := FenceClose(WithRunWait(ctx, time.Minute, &out), p)
+		retakes <- n
+		done <- err
+	}()
+	require.Eventually(t, func() bool { return strings.Contains(out.String(), "the close PR's enqueue: waiting for NATS") }, 20*time.Second, 100*time.Millisecond)
+	time.Sleep(2 * MilestoneTTL) // lapsed by the clock (LiveHolder's At+TTL) whatever the server still has
+	for i := range 3 {
+		c.Restart(i)
+	}
+	select {
+	case err := <-done:
+		require.NoError(t, err, "the lapsed close lease is taken again and the fence passes")
+		require.Equal(t, 1, <-retakes, "counted: the close re-checks main")
+	case <-time.After(60 * time.Second):
+		t.Fatal("still waiting after NATS came back")
+	}
+
+	// Control: another close took it.
+	ls, err := lease.Open(ctx, js)
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		h, _, err := ls.Holder(ctx, "close.notes-svc")
+		return err == nil && h == ""
+	}, 15*time.Second, 100*time.Millisecond, "the retaken lease lapses again (1 s TTL, no keeper tick)")
+	other, err := ls.Claim(ctx, "close.notes-svc", "zed/other", time.Minute)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ls.Release(context.Background(), other) })
+	_, err = FenceClose(WithRunWait(ctx, time.Minute, &out), p)
+	require.ErrorContains(t, err, "zed/other")
+}

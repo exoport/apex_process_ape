@@ -392,11 +392,59 @@ func FenceMilestone(ctx context.Context, p *apexv1.Project, ms string) error {
 	if notMember || err != nil {
 		return err
 	}
+	if l.Holder == "" {
+		// Lapsed — an outage longer than the TTL, waited out above
+		// (FINDING-H5-DRY-1): inside a run it is taken again exactly as
+		// the run's renewer does (retake: nobody holds it and this
+		// checkout's claim stands), then read again. The renewer would
+		// retake it within a tick, but the fence reads first and lost
+		// that race every time.
+		if relive, ok, err := retakeAtFence(ctx, p, ms); err != nil {
+			return err
+		} else if ok {
+			l = relive
+		}
+	}
 	if l.Holder != holder {
 		return notHolder(fmt.Sprintf("%s's lease is held by %s, not this checkout, so ape does not push milestone/%s: nothing landed — `ape milestone claim %s` if it is still yours to drive", ms, whoHolds(l), ms, ms))
 	}
 	fenceLogf("milestone/%s: pushing under %s, held by this checkout (%s), last renewed %s", ms, key, tokenText(l.Token), l.At.UTC().Format(time.RFC3339))
 	return nil
+}
+
+// retakeAtFence is a fence's retake of ms's lapsed lease inside a run
+// (FINDING-H5-DRY-1): retake's condition and its log line, then the lease
+// read again for the fence. ok is false outside a run, or when retake did
+// not take it (another holds it, or the claim no longer stands): the
+// fence then refuses as before.
+func retakeAtFence(ctx context.Context, p *apexv1.Project, ms string) (lease.Live, bool, error) {
+	rw, inRun := ctx.Value(runWaitKey{}).(runWait)
+	if !inRun || rw.bound <= 0 {
+		return lease.Live{}, false, nil
+	}
+	s, err := openMilestones(ctx, p, nats.NoReconnect())
+	if err != nil {
+		return lease.Live{}, false, err
+	}
+	defer s.close()
+	w := rw.w
+	if w == nil {
+		w = FenceLog
+	}
+	if w == nil {
+		w = io.Discard
+	}
+	if next, _ := s.retake(ctx, ms, errors.New("lapsed while the fence waited"), w); next == nil {
+		return lease.Live{}, false, nil
+	}
+	fmt.Fprintf(w, "%s ape: the push of milestone/%s: its lease lapsed while the fence waited and was taken again by this checkout, whose claim stands\n",
+		time.Now().UTC().Format(time.RFC3339), ms)
+	l, err := s.store.LiveHolder(ctx, s.key(ms))
+	if err != nil {
+		return lease.Live{}, false, &apexv1.FailError{Code: apexv1.CodeCoordNATSUnreachable, Action: apexv1.ActionRetry, Msg: fmt.Sprintf(
+			"%s's lease was taken again but could not be read back before the push (%v): nothing landed — run this again", ms, err)}
+	}
+	return l, true, nil
 }
 
 // runWaitKey carries a gated verb's run wait (V8l).
@@ -689,6 +737,20 @@ func (h *closeHold) fence(ctx context.Context) (retakes int, err error) {
 	})
 	if err != nil {
 		return 0, err
+	}
+	if _, inRun := ctx.Value(runWaitKey{}).(runWait); inRun && l.Holder == "" {
+		// Lapsed during the wait (FINDING-H5-DRY-1): one tick of the
+		// close's own keeper retakes it under its condition (nobody holds
+		// it; counted, so the close re-checks main), then it is read again.
+		w := FenceLog
+		if w == nil {
+			w = io.Discard
+		}
+		if h.renew(ctx, w) {
+			if relive, rerr := h.s.store.LiveHolder(ctx, h.key); rerr == nil {
+				l = relive
+			}
+		}
 	}
 	if l.Holder != h.s.holder {
 		return 0, &apexv1.FailError{Code: apexv1.CodeCloseLost, Action: apexv1.ActionRetry, Msg: fmt.Sprintf(
