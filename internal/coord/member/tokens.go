@@ -40,12 +40,30 @@ func (m Membership) GitHubTokenFor(ctx context.Context, purpose string) (string,
 	err = waitTransient(ctx, "the "+purpose+" token from the App service", func() (bool, error) {
 		actx, cancel := context.WithTimeout(ctx, askTimeout)
 		defer cancel()
-		nc, err := natsconn.Connect(actx, natsconn.Config{URL: m.URL, CredsFile: m.Creds}, "ape-ghapp-client", nats.NoReconnect())
+		// A request the server refuses by permission is never answered:
+		// the refusal comes back on the connection's error handler, and
+		// is told from an unanswered one by it (V8LM2-1, V12).
+		denied := make(chan error, 1)
+		nc, err := natsconn.Connect(actx, natsconn.Config{URL: m.URL, CredsFile: m.Creds}, "ape-ghapp-client", nats.NoReconnect(),
+			nats.ErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, err error) {
+				if errors.Is(err, nats.ErrPermissionViolation) {
+					select {
+					case denied <- err:
+						cancel()
+					default:
+					}
+				}
+			}))
 		if err != nil {
-			return true, err
+			return !authRefused(err), err
 		}
 		defer nc.Close()
 		rep, err := ghapp.Ask(actx, nc, ghapp.TokenSubject, id.SubjectToken, ghapp.Request{Repo: m.GitHubRepo, Purpose: purpose})
+		select {
+		case perr := <-denied:
+			return false, fmt.Errorf("ghapp: this credential may not ask the App service for a token (%w)", perr)
+		default:
+		}
 		if err != nil {
 			return askUnanswered(err), err
 		}
@@ -53,6 +71,14 @@ func (m Membership) GitHubTokenFor(ctx context.Context, purpose string) (string,
 		return false, nil
 	})
 	return tok, err
+}
+
+// authRefused is a connection the server refused for its credential —
+// rejected, expired or revoked: not an outage, so not waited out
+// (V8LM2-1).
+func authRefused(err error) bool {
+	return errors.Is(err, nats.ErrAuthorization) || errors.Is(err, nats.ErrAuthExpired) || errors.Is(err, nats.ErrAuthRevoked) ||
+		errors.Is(err, nats.ErrAccountAuthExpired)
 }
 
 // askUnanswered is an App service request nobody answered: no responders,

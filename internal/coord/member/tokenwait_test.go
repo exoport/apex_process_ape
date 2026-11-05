@@ -1,7 +1,9 @@
 package member
 
 import (
+	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/exoport/apex_process_ape/internal/apexv1"
+	"github.com/exoport/apex_process_ape/internal/coord/cred"
 	"github.com/exoport/apex_process_ape/internal/ghapp"
 	"github.com/exoport/apex_process_ape/internal/natstest"
 )
@@ -134,4 +137,60 @@ func TestGitVia_TheTokenWaitsForNATSInARun(t *testing.T) {
 	_, _, err = GitVia(WithRunWait(ctx, time.Minute, nil), p, "push")
 	require.ErrorContains(t, err, "repository not served")
 	require.Less(t, time.Since(start), 5*time.Second, "control: a refusal is returned at once, in a run too")
+}
+
+// V8LM2-1 (research's note on 1bb321e): the token wait is for NATS or the
+// App service being away, not for a credential the server refuses. In a
+// run, a credential of another account (rejected at connect) and one whose
+// grant does not cover the token subject (the request refused, so never
+// answered) each refuse at once rather than wait the bound. The control: a
+// grant that covers it, with no App service answering, is transient (and
+// waits in a run: TestGitVia_TheTokenWaitsForNATSInARun).
+func TestGitHubTokenFor_ARefusedCredentialDoesNotWait(t *testing.T) {
+	e, _ := enforcedCluster(t)
+	app := block + "  github:\n    repo: shop/notes\n    app: true\n"
+	run := WithRunWait(context.Background(), time.Minute, io.Discard)
+	refusesAtOnce := func(name string, p *apexv1.Project, want string) {
+		t.Helper()
+		m, err := Load(p)
+		require.NoError(t, err)
+		start := time.Now()
+		_, err = m.GitHubTokenFor(run, "push")
+		require.ErrorContains(t, err, want, name)
+		require.Less(t, time.Since(start), 10*time.Second, "%s: refused at once, not waited out", name)
+	}
+
+	// A credential of another account: the server rejects the connection.
+	stranger := project(t, strings.Replace(app, "nats://127.0.0.1:4222", e.URL, 1), false)
+	creds, _ := natstest.MintStandaloneCreds(t, "ann")
+	data, err := os.ReadFile(creds)
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(filepath.Join(stranger.Root, "hot"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(stranger.Root, "hot", "ape-nats.creds"), data, 0o600))
+	refusesAtOnce("rejected credential", stranger, "uthorization")
+
+	// A grant without the token subject: the request is refused.
+	narrow := project(t, strings.Replace(app, "nats://127.0.0.1:4222", e.URL, 1), false)
+	g := cred.MemberGrant("ann", "notes-svc", "shop")
+	var pub []string
+	for _, s := range g.PubAllow {
+		if !strings.HasPrefix(s, ghapp.TokenSubject) {
+			pub = append(pub, s)
+		}
+	}
+	g.PubAllow = pub
+	data, err = os.ReadFile(e.Mint(t, "ann", perms(g)))
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(filepath.Join(narrow.Root, "hot"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(narrow.Root, "hot", "ape-nats.creds"), data, 0o600))
+	e.Expect(`"` + ghapp.TokenSubject + `.ann"`)
+	refusesAtOnce("denied token subject", narrow, "may not ask the App service")
+
+	// The control: covered, but nobody answers — transient.
+	ann := enforcedCheckout(t, e, app)
+	m, err := Load(ann)
+	require.NoError(t, err)
+	_, err = m.GitHubTokenFor(context.Background(), "push")
+	require.Error(t, err)
+	require.True(t, askUnanswered(err), "no App service: unanswered, which a run waits for: %v", err)
 }
