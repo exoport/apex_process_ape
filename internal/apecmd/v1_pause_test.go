@@ -95,12 +95,19 @@ func TestMilestonePauseResume_APersonAct(t *testing.T) {
 	_, _, err = v1Exec(t, newChangeCmd, "new", "add-wave", "--milestone", "M1", "--touches", "greeting", "--cwd", root)
 	require.NoError(t, err, "resumed: change new goes through")
 
-	// OQ24's pause, as the conductor publishes it, still pauses M1.
+	// V12-2: a kind-less pause from another member (ann; dana holds M1)
+	// is not the holder's conductor's, so it does not pause M1.
 	p, err := apexv1.Open(root)
 	require.NoError(t, err)
 	m, err := member.Load(p)
 	require.NoError(t, err)
 	_, err = js.Publish(context.Background(), events.Subject("ann", m.Project, events.KindProject, "M1", apexv1.EventMilestonePaused), []byte(`{"by":"ann/conductor","user":"ann"}`))
+	require.NoError(t, err)
+	_, _, err = v1Exec(t, newChangeCmd, "new", "add-mist", "--milestone", "M1", "--touches", "greeting", "--cwd", root)
+	require.NoError(t, err, "V12-2: another member's conductor-kind pause does not hold the holder")
+
+	// OQ24's pause, as the holder's conductor publishes it, still pauses M1.
+	_, err = js.Publish(context.Background(), events.Subject("dana", m.Project, events.KindProject, "M1", apexv1.EventMilestonePaused), []byte(`{"by":"dana/conductor","user":"dana"}`))
 	require.NoError(t, err)
 	stdout, _, err = v1Exec(t, newChangeCmd, "new", "add-tide", "--milestone", "M1", "--touches", "greeting", "--json", "--cwd", root)
 	require.Error(t, err, "control: OQ24's pause still pauses")
