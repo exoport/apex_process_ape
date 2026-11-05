@@ -54,6 +54,13 @@ func RunJetStreamServer(t *testing.T) string {
 // as a deployed cluster's do (C1, D757).
 func StartOperatorJetStream(t *testing.T) (url string, accountKey KeyPair) {
 	t.Helper()
+	return startOperatorJetStream(t, nil)
+}
+
+// startOperatorJetStream is StartOperatorJetStream with the server's log
+// going to logger (nil: none).
+func startOperatorJetStream(t *testing.T, logger server.Logger) (url string, accountKey KeyPair) {
+	t.Helper()
 	okp := createOperator(t)
 	akp := createAccount(t)
 	apub := publicKey(t, akp)
@@ -85,6 +92,9 @@ func StartOperatorJetStream(t *testing.T) (url string, accountKey KeyPair) {
 	s, err := server.NewServer(opts)
 	if err != nil {
 		t.Fatalf("natstest: new operator server: %v", err)
+	}
+	if logger != nil {
+		s.SetLogger(logger, false, false)
 	}
 	go s.Start()
 	t.Cleanup(s.Shutdown)
