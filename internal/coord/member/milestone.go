@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -74,6 +75,14 @@ func openMilestones(ctx context.Context, p *apexv1.Project, opts ...nats.Option)
 	store, err := lease.Open(ctx, js)
 	if err != nil {
 		nc.Close()
+		// Right after an outage NATS can take the connection before its
+		// JetStream answers (CI-V8LM check-1, windows): that is NATS not
+		// back yet, which a run waits for (V8l), not a missing bucket.
+		if jetStreamUnavailable(err) {
+			_, _ = Down(p.Root, time.Now())
+			return nil, &apexv1.FailError{Code: apexv1.CodeCoordNATSUnreachable, Action: apexv1.ActionRetry, Msg: fmt.Sprintf(
+				"the milestone lease needs NATS's JetStream, and it did not answer (%v) — run this again once NATS is back", err)}
+		}
 		return nil, fmt.Errorf("%w — the ensemble's NATS has no lease buckets yet: its supervisor declares them (`ape nats declare --new-epoch`)", err)
 	}
 	return &milestones{nc: nc, store: store, book: lease.OpenBook(runlog.CoordTokensPath(p.Root)), holder: id.SubjectToken + "/" + checkout, m: m}, nil
@@ -325,6 +334,18 @@ func requireMilestoneLease(ctx context.Context, p *apexv1.Project, op, ms string
 		return notHolder(fmt.Sprintf("%s refused: this checkout holds no lease on %s (never claimed, released, or lapsed with no run renewing it) — `ape milestone claim %s`, then run its loop", op, ms, ms))
 	}
 	return notHolder(fmt.Sprintf("%s refused: %s is held by %s, not this checkout — its changes are theirs to start", op, ms, cur))
+}
+
+// jetStreamUnavailable is a JetStream that did not answer: a timeout, no
+// responders, or its API's 503 (temporarily unavailable, not enabled yet).
+// A bucket that is not there is not one of them.
+func jetStreamUnavailable(err error) bool {
+	if errors.Is(err, jetstream.ErrBucketNotFound) {
+		return false
+	}
+	var api *jetstream.APIError
+	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, nats.ErrTimeout) || errors.Is(err, nats.ErrNoResponders) ||
+		errors.As(err, &api) && api.Code == http.StatusServiceUnavailable
 }
 
 // FenceMilestone is apexv1.FenceMilestone (D702): right before ape pushes

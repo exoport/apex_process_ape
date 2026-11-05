@@ -2,6 +2,8 @@ package member
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -210,5 +212,54 @@ func TestFenceClose_WaitsForNATSInARun(t *testing.T) {
 		require.NoError(t, err, "passes once NATS is back")
 	case <-time.After(60 * time.Second):
 		t.Fatal("still waiting after NATS came back")
+	}
+}
+
+// CI-V8LM check-1 (windows): right after the nodes came back, the fence's
+// first try reached NATS before JetStream answered ("lease: bind
+// ape-leases: context deadline exceeded") and was refused as "no lease
+// buckets". JetStream not answering is NATS not back yet (transient, so a
+// run waits); a bucket that is not there still refuses as before.
+func TestJetStreamUnavailable(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"deadline", fmt.Errorf("lease: bind ape-leases: %w", context.DeadlineExceeded), true},
+		{"timeout", fmt.Errorf("x: %w", nats.ErrTimeout), true},
+		{"no-responders", fmt.Errorf("x: %w", nats.ErrNoResponders), true},
+		{"jetstream-503", fmt.Errorf("x: %w", jetstream.ErrJetStreamNotEnabled), true},
+		{"control-bucket-missing", fmt.Errorf("lease: bind ape-leases: %w", jetstream.ErrBucketNotFound), false},
+		{"control-other", errors.New("permission denied"), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) { require.Equal(t, tc.want, jetStreamUnavailable(tc.err)) })
+	}
+
+	// Live: a NATS without JetStream answers the bind with a 503 → transient.
+	// The control: JetStream up, the lease buckets never declared → the
+	// "no lease buckets" refusal, not transient.
+	for _, tc := range []struct {
+		name      string
+		url       string
+		transient bool
+	}{
+		{"jetstream-not-answering", natstest.RunServer(t), true},
+		{"control-no-buckets", natstest.RunJetStreamServer(t), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := project(t, strings.Replace(block, "nats://127.0.0.1:4222", tc.url, 1), false)
+			creds, _ := natstest.MintStandaloneCreds(t, "dana")
+			data, err := os.ReadFile(creds)
+			require.NoError(t, err)
+			require.NoError(t, os.MkdirAll(filepath.Join(p.Root, "hot"), 0o755))
+			require.NoError(t, os.WriteFile(filepath.Join(p.Root, "hot", "ape-nats.creds"), data, 0o600))
+			err = FenceMilestone(t.Context(), p, "M2")
+			require.Error(t, err)
+			require.Equal(t, tc.transient, Transient(err), "%v", err)
+			if !tc.transient {
+				require.ErrorContains(t, err, "no lease buckets")
+			}
+		})
 	}
 }
