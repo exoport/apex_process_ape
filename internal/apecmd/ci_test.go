@@ -14,6 +14,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/exoport/apex_process_ape/internal/apexv1"
+	"github.com/exoport/apex_process_ape/internal/coord/cred"
 	"github.com/exoport/apex_process_ape/internal/coord/events"
 	"github.com/exoport/apex_process_ape/internal/coord/member"
 	"github.com/exoport/apex_process_ape/internal/natstest"
@@ -110,4 +111,47 @@ func TestCICheck_CLI(t *testing.T) {
 	stdout, _, err := v1Exec(t, newCICmd, "check", "--base", head, "--head", "HEAD", "--json", "--cwd", root)
 	require.Equal(t, 1, exitCodeOf(t, err), stdout)
 	require.Contains(t, stdout, apexv1.CodeCIOutsideFlow)
+}
+
+// V12g: `ape ci event` publishes under exactly cred.CIGrant, and the
+// member's waiting ape, under exactly cred.MemberGrant, wakes on it, on an
+// enforcing server that refuses nothing.
+func TestCIEvent_UnderTheCIGrant(t *testing.T) {
+	e := natstest.StartEnforced(t)
+	nc, err := nats.Connect(e.URL, nats.UserCredentials(e.Admin))
+	require.NoError(t, err)
+	t.Cleanup(nc.Close)
+	js, err := jetstream.New(nc)
+	require.NoError(t, err)
+	ctx := context.Background()
+	require.NoError(t, events.Declare(ctx, js, 1))
+
+	root := v1Repo(t)
+	cfg, err := os.ReadFile(apexv1.ConfigPath(root))
+	require.NoError(t, err)
+	block := "coordination:\n  ensemble: shop\n  home: git@example.invalid:shop/home.git\n  url: " + e.URL + "\n"
+	require.NoError(t, os.WriteFile(apexv1.ConfigPath(root), append(cfg, []byte(block)...), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "hot"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "hot", "ape-nats.creds"), []byte("x"), 0o600))
+	p, err := apexv1.Open(root)
+	require.NoError(t, err)
+	m, err := member.Load(p)
+	require.NoError(t, err)
+	g := cred.MemberGrant("dana", m.Project, m.Ensemble)
+	data, err := os.ReadFile(e.Mint(t, "dana", natstest.Perms{PubAllow: g.PubAllow, SubAllow: g.SubAllow}))
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(root, "hot", "ape-nats.creds"), data, 0o600))
+	wake, stop, live := member.Watch(ctx, p)
+	defer stop()
+	require.True(t, live)
+
+	c := cred.CIGrant("ci-runner", m.Project)
+	ciCreds := e.Mint(t, "ci-runner", natstest.Perms{PubAllow: c.PubAllow, SubAllow: c.SubAllow})
+	stdout, _, err := v1Exec(t, newCICmd, "event", "merged", "--ref", "milestone/M2", "--sha", "abc123", "--cwd", root, "--nats-url", e.URL, "--nats-creds", ciCreds)
+	require.NoError(t, err, stdout)
+	select {
+	case <-wake:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the member's waiting ape did not wake on CI's event")
+	}
 }

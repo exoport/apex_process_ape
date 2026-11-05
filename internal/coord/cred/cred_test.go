@@ -26,6 +26,14 @@ func TestMint_RefusesReservedTokens(t *testing.T) {
 	creds, err := Mint(acct, "Ann Lee", "taskforge", "atomix", time.Hour)
 	require.NoError(t, err)
 	require.Contains(t, string(creds), "BEGIN NATS USER JWT")
+
+	// V12-5: a name whose token another minted name has already.
+	_, err = Mint(acct, "ann.lee", "taskforge", "atomix", time.Hour, "Ann Lee", "bob")
+	require.ErrorContains(t, err, `"ann-lee" is "Ann Lee"'s already`)
+	_, err = Mint(acct, "Ann Lee", "taskforge", "atomix", time.Hour, "Ann Lee", "bob")
+	require.NoError(t, err, "control: the same name again (a re-mint) is fine")
+	_, err = Mint(acct, "carl", "taskforge", "atomix", time.Hour, "Ann Lee", "bob")
+	require.NoError(t, err, "control: a token nobody has")
 }
 
 // §4.6 (D546), server-enforced: a member writes its own conductor lease and

@@ -24,6 +24,7 @@ import (
 	"github.com/exoport/apex_process_ape/internal/coord/lease"
 	"github.com/exoport/apex_process_ape/internal/coord/slots"
 	"github.com/exoport/apex_process_ape/internal/coord/supervisor"
+	"github.com/exoport/apex_process_ape/internal/ghapp"
 	"github.com/exoport/apex_process_ape/internal/natsconn"
 	"github.com/exoport/apex_process_ape/internal/natstest"
 )
@@ -351,4 +352,15 @@ func TestGrants_V12_3_AnotherPersonsDurable(t *testing.T) {
 	}
 	e.Expect("CONSUMER.DELETE." + events.EventsStream + "." + layout.ConductorConsumer("ann", "atomix"))
 	require.Error(t, err)
+}
+
+// cred names the App service's subjects itself (so ghapp's tests can
+// import it); they must be ghapp's.
+func TestGrants_AppSubjectsAreGHApps(t *testing.T) {
+	g := cred.GHAppGrant("svc")
+	require.Contains(t, g.SubAllow, ghapp.TokenSubject+".*")
+	require.Contains(t, g.SubAllow, ghapp.SetupSubject+".*")
+	m := cred.MemberGrant("ann", "taskforge", "atomix")
+	require.Contains(t, m.PubAllow, ghapp.TokenSubject+".ann")
+	require.Contains(t, m.PubAllow, ghapp.SetupSubject+".ann")
 }

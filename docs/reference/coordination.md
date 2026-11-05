@@ -55,7 +55,9 @@ Leases are not requests: claiming, renewing and releasing one is a compare-and-s
   its take-in and its close refuse `coord.milestone-paused` (action `person`), naming who paused it and why. A
   pause or resume counts only from the user whose checkout holds the milestone's claim (its subject's `<user>` token,
   which the server binds to the publisher's credential), a person's and a conductor's alike: the kind is only the
-  payload's word. So another member can neither pause the milestone nor lift the holder's pause.
+  payload's word. So another member can neither pause the milestone nor lift the holder's pause. It follows that a
+  claim handover drops the previous holder's pause (OQ6: a pause is the holder's act). The new holder pauses again if
+  the milestone should stay paused.
 
 **Tokens and names.** `<user>`, `<host>` and `<ensemble>` are slugged by one rule, ape's subject token: lowercased,
 and `.`, `*`, `>` and whitespace become `-`. The tokens `coord` and `sup`, and any token starting `vm-` (aped's

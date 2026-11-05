@@ -21,7 +21,6 @@ import (
 
 	"github.com/exoport/apex_process_ape/internal/aped"
 	"github.com/exoport/apex_process_ape/internal/coord/layout"
-	"github.com/exoport/apex_process_ape/internal/ghapp"
 	"github.com/exoport/apex_process_ape/internal/natsconn"
 )
 
@@ -31,6 +30,14 @@ const (
 	leasesStream = "KV_ape-leases"
 	metaStream   = "KV_ape-meta"
 	slotsStream  = "KV_ape-slots"
+)
+
+// The App service's request subjects, ghapp.TokenSubject and
+// ghapp.SetupSubject (.<user>): named here rather than imported, so
+// ghapp's own tests can measure GHAppGrant (cred_test checks they agree).
+const (
+	appTokenSubject = "ape.sup.ghapp.pusher" //nolint:gosec // G101 false positive: a NATS subject, not a credential
+	appSetupSubject = "ape.sup.ghapp.warden"
 )
 
 // leaseKV is the leases' key subject prefix.
@@ -108,8 +115,8 @@ func MemberGrant(user, project, ensemble string) aped.Grant {
 			"ape.sup.status",
 			"ape.sup.health.report",
 			"ape.coord." + natsconn.SubjectToken(ensemble) + ".status",
-			ghapp.TokenSubject + "." + u,
-			ghapp.SetupSubject + "." + u,
+			appTokenSubject + "." + u,
+			appSetupSubject + "." + u,
 		}, c.PubAllow...),
 		// Its project's events (the event watch), and its own replies.
 		SubAllow: []string{"ape.evt.*." + p + ".project.>", inbox(u)},
@@ -159,17 +166,55 @@ func SupervisorGrant(name string) aped.Grant {
 	}
 }
 
+// GHAppGrant is the App service's permissions (`ape ghapp serve`, V12g,
+// R4): it answers the token and set-up requests of every user
+// (ape.sup.ghapp.pusher.* and .warden.*, a queue group) and replies to
+// each once (allow_responses). It publishes nothing else, reads no stream
+// and holds no lease. Its only standing publish is its own inbox, so that
+// the list is not empty (an empty allow list is no restriction).
+func GHAppGrant(name string) aped.Grant {
+	in := inbox(natsconn.SubjectToken(name))
+	return aped.Grant{
+		PubAllow:       []string{in},
+		SubAllow:       []string{appTokenSubject + ".*", appSetupSubject + ".*", in},
+		AllowResponses: true,
+	}
+}
+
+// CIGrant is the permissions of the CI publisher (`ape ci event`, in a
+// workflow, V12g): the merged / ejected / close-merged project events of
+// projects, under its own user token (the credential's name), and the
+// stream's acks on its inbox. Nothing else: no lease, no read, no request.
+func CIGrant(name string, projects ...string) aped.Grant {
+	u := natsconn.SubjectToken(name)
+	pub := make([]string, 0, len(projects))
+	for _, p := range projects {
+		pub = append(pub, "ape.evt."+u+"."+natsconn.SubjectToken(p)+".project.>")
+	}
+	if len(pub) == 0 {
+		pub = append(pub, inbox(u)) // never an empty list: that is no restriction
+	}
+	return aped.Grant{PubAllow: pub, SubAllow: []string{inbox(u)}}
+}
+
 // Mint issues a member credential for user's project of ensemble,
 // refusing a name whose subject token is reserved (`coord`, `sup`,
 // `vm-*`): a member must not be able to publish as the coordinator, a
-// supervisor or a VM.
-func Mint(account aped.Account, user, project, ensemble string, expires time.Duration) ([]byte, error) {
+// supervisor or a VM. It also refuses a name whose token is one of
+// inUse's (the names already minted in the account; V12-5): two names that
+// slug to one token share its events, its inbox and its pauses.
+func Mint(account aped.Account, user, project, ensemble string, expires time.Duration, inUse ...string) ([]byte, error) {
 	tok := natsconn.SubjectToken(user)
 	if tok == "" {
 		return nil, errors.New("cred: empty user name")
 	}
 	if layout.Reserved(tok) {
 		return nil, fmt.Errorf("cred: %q's subject token %q is reserved (coord, sup and vm-* are ape's own); name the member otherwise", user, tok)
+	}
+	for _, other := range inUse {
+		if natsconn.SubjectToken(other) == tok && other != user {
+			return nil, fmt.Errorf("cred: %q's subject token %q is %q's already: two names on one token share its events, inbox and pauses; name the member otherwise", user, tok, other)
+		}
 	}
 	creds, _, err := account.MintUser(user, MemberGrant(user, project, ensemble), expires)
 	return creds, err
