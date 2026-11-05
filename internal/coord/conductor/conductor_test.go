@@ -176,7 +176,7 @@ func TestDrill_ConductorAnswersOnceThenGoesSilent(t *testing.T) {
 	require.Eventually(t, func() bool { return a.seqs()["2"] >= 2 }, 6*time.Second, 50*time.Millisecond, "unacknowledged: delivered again")
 	require.Eventually(t, func() bool { return seen(".project.M2." + apexv1.EventQuestionEscalated) }, 6*time.Second, 50*time.Millisecond)
 	require.Eventually(t, func() bool { return seen(".project.M2." + apexv1.EventMilestonePaused) }, 6*time.Second, 50*time.Millisecond)
-	paused, err := Paused(ctx, js, "taskforge", "M2")
+	paused, err := Paused(ctx, js, "taskforge", "M2", "bob")
 	require.NoError(t, err)
 	require.True(t, paused)
 
@@ -192,7 +192,7 @@ func TestDrill_ConductorAnswersOnceThenGoesSilent(t *testing.T) {
 	go func() { _ = Run(ctx, nc, scaled("ann", "cond-b", b)) }()
 	require.Eventually(t, func() bool { return b.seqs()["2"] >= 1 }, 6*time.Second, 50*time.Millisecond, "the takeover receives what was left unacknowledged")
 	require.Eventually(t, func() bool { return seen(".project.M2." + apexv1.EventMilestoneResumed) }, 6*time.Second, 50*time.Millisecond)
-	paused, err = Paused(ctx, js, "taskforge", "M2")
+	paused, err = Paused(ctx, js, "taskforge", "M2", "bob")
 	require.NoError(t, err)
 	require.False(t, paused)
 	_, ok := b.seqs()["1"]
@@ -272,7 +272,7 @@ func TestDrill_ConductorControl_NothingEscalatesWithoutIt(t *testing.T) {
 	publish(t, js, "person", 1)
 	time.Sleep(5 * time.Second) // past the scaled escalation and pause ages
 	require.False(t, seen("."+apexv1.EventQuestionEscalated))
-	paused, err := Paused(t.Context(), js, "taskforge", "M2")
+	paused, err := Paused(t.Context(), js, "taskforge", "M2", "ann")
 	require.NoError(t, err)
 	require.False(t, paused)
 }
@@ -567,7 +567,7 @@ func TestRun_APersonsPauseSurvivesTheConductorsAcks(t *testing.T) {
 
 	require.Never(t, func() bool { return seen(".project.M2." + apexv1.EventMilestoneResumed) }, 3*time.Second, 100*time.Millisecond,
 		"the conductor's acks do not lift a person's pause")
-	paused, err := Paused(ctx, js, "taskforge", "M2")
+	paused, err := Paused(ctx, js, "taskforge", "M2", "bob")
 	require.NoError(t, err)
 	require.True(t, paused)
 }
@@ -609,7 +609,7 @@ func TestPaused_APersonsAndAConductorsPauseAreReadApart(t *testing.T) {
 				_, err := events.Publish(ctx, js, events.Subject("bob", "taskforge", events.KindProject, "M2", e.event), fmt.Sprintf("e%d", i), []byte(data))
 				require.NoError(t, err)
 			}
-			paused, err := Paused(ctx, js, "taskforge", "M2")
+			paused, err := Paused(ctx, js, "taskforge", "M2", "bob")
 			require.NoError(t, err)
 			require.Equal(t, tc.paused, paused)
 		})
@@ -633,7 +633,7 @@ func TestPaused_TheReadIsBounded(t *testing.T) {
 		publish(t, js, "block", int64(i))
 	}
 	pub(apexv1.EventMilestonePaused, "", "c")
-	paused, why, err := PausedWith(ctx, js, "taskforge", "M2")
+	paused, why, err := PausedWith(ctx, js, "taskforge", "M2", "bob")
 	require.NoError(t, err)
 	require.True(t, paused)
 	require.Equal(t, PausePerson, why.Kind, "the person's pause, 300 events back, is found")
@@ -647,6 +647,46 @@ func TestPaused_TheReadIsBounded(t *testing.T) {
 		_, err := events.Publish(ctx, js, events.Subject("bob", "taskforge", events.KindProject, "M3", ev), fmt.Sprintf("m3-%d", i), []byte(data))
 		require.NoError(t, err)
 	}
-	_, err = Paused(ctx, js, "taskforge", "M3")
+	_, err = Paused(ctx, js, "taskforge", "M3", "bob")
 	require.ErrorIs(t, err, errPauseHistory, "a conductor-only history past the bound is not read as 'no person pause'")
+}
+
+// V12c (D806+, research's D6 after V8j): a person's pause or resume counts
+// only from the claim holder's user token. The T1: bob, a member of the
+// project who does not hold M2, publishes a person pause — ann, the
+// holder, is not paused by it; ann's own pause holds, and bob's person
+// resume does not lift it; ann's resume does. A conductor's pause is still
+// read from anyone (the control).
+func TestPaused_APersonsPauseCountsOnlyFromTheClaimHolder(t *testing.T) {
+	_, _, js := rig(t)
+	ctx := t.Context()
+	n := 0
+	pub := func(user, event, kind string) {
+		t.Helper()
+		n++
+		data := fmt.Sprintf(`{"kind":%q,"by":%q,"user":%q}`, kind, user, user)
+		_, err := events.Publish(ctx, js, events.Subject(user, "taskforge", events.KindProject, "M2", event), fmt.Sprintf("e%d", n), []byte(data))
+		require.NoError(t, err)
+	}
+	paused := func() bool {
+		t.Helper()
+		p, err := Paused(ctx, js, "taskforge", "M2", "ann")
+		require.NoError(t, err)
+		return p
+	}
+	pub("bob", apexv1.EventMilestonePaused, PausePerson)
+	require.False(t, paused(), "bob does not hold M2: his person pause does not count")
+	p, err := Paused(ctx, js, "taskforge", "M2", "bob")
+	require.NoError(t, err)
+	require.True(t, p, "read for bob as the holder, it would")
+
+	pub("ann", apexv1.EventMilestonePaused, PausePerson)
+	require.True(t, paused(), "the holder's own pause holds")
+	pub("bob", apexv1.EventMilestoneResumed, PausePerson)
+	require.True(t, paused(), "a non-holder's resume does not lift it")
+	pub("ann", apexv1.EventMilestoneResumed, PausePerson)
+	require.False(t, paused(), "the holder's resume does")
+
+	pub("bob", apexv1.EventMilestonePaused, "")
+	require.True(t, paused(), "control: a conductor's pause is read from anyone, as before")
 }

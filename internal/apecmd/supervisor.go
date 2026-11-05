@@ -24,7 +24,7 @@ func newSupervisorCmd() *cobra.Command {
 	var heartbeat time.Duration
 	var projects, assessFrom []string
 	var assess bool
-	var assessBudget string
+	var assessBudget, coordCreds string
 	cmd := &cobra.Command{
 		Use:   "supervisor [--id <id>] [--heartbeat 1m]",
 		Short: "APEX v1.5 (in development): run a supervisor, which keeps each ensemble's coordinator running",
@@ -32,7 +32,9 @@ func newSupervisorCmd() *cobra.Command {
 and serves ape.sup.ensure, ape.sup.health.report and ape.sup.status; the others wait to
 take over. On ensure (` + "`ape supervisor ensure`" + `) it starts ` + "`ape coordinator --ensemble <name>`" + `
 as a child process with this command's connection flags and each --project (default: the
-member project it runs in), whose milestone leases the coordinator watches. A health report is verified before anything is
+member project it runs in), whose milestone leases the coordinator watches;
+--coordinator-creds gives the child its own credential, since a coordinator's grant is not a
+supervisor's (V12b). A health report is verified before anything is
 killed: the coordinator's lease must be stale AND its ping unanswered; otherwise the
 reporter is told its own link looks unhealthy (health-unconfirmed). At most 3 starts per
 ensemble in 15 minutes. --no-verify kills on any report (the drills' control only).
@@ -52,8 +54,9 @@ SIGINT/SIGTERM stops its coordinators and exits 0.`,
 			if len(projects) == 0 && m != nil {
 				projects = []string{m.Project}
 			}
+			cf := f.forCoordinators(coordCreds)
 			start := func(ctx context.Context, ens string) (supervisor.Handle, error) {
-				return f.coordinatorProcess(ctx, ens, projects, assessArgs(assess, assessFrom, assessBudget)...)
+				return cf.coordinatorProcess(ctx, ens, projects, assessArgs(assess, assessFrom, assessBudget)...)
 			}
 			logf := func(format string, args ...any) {
 				fmt.Fprintf(cmd.ErrOrStderr(), "%s "+format+"\n", append([]any{time.Now().UTC().Format(time.RFC3339)}, args...)...)
@@ -66,6 +69,7 @@ SIGINT/SIGTERM stops its coordinators and exits 0.`,
 	cmd.Flags().BoolVar(&noVerify, "no-verify", false, "kill a coordinator on any health report, unverified (a drill's control; never in use)")
 	cmd.Flags().DurationVar(&heartbeat, "heartbeat", time.Minute, "how often each held conductor lease gets a heartbeat event (0: none)")
 	cmd.Flags().StringSliceVar(&projects, "project", nil, "a member project whose milestone leases its coordinators watch (repeatable; default: the member project it runs in)")
+	cmd.Flags().StringVar(&coordCreds, "coordinator-creds", "", "the coordinators' own NATS credentials file (cred.CoordinatorGrant; default: this command's)")
 	cmd.Flags().BoolVar(&assess, "assess", false, "start each coordinator with --assess (the assessor, v1.5 §3.2)")
 	cmd.Flags().StringVar(&assessBudget, "assess-budget", "", "passed to each coordinator: the assessor's tokens for the stage (default: the coordinator's, 20M)")
 	cmd.Flags().StringArrayVar(&assessFrom, "assess-checkout", nil, "passed to each coordinator: <project>=<path>, the checkout the assessor reads a member from (repeatable)")
@@ -168,6 +172,17 @@ func assessArgs(assess bool, from []string, budget string) []string {
 		out = append(out, "--assess-checkout", a)
 	}
 	return out
+}
+
+// forCoordinators is f as the coordinators a supervisor starts get it:
+// creds, when given (--coordinator-creds), in place of the supervisor's
+// own credential (V12b: a coordinator's grant is not a supervisor's).
+func (f *coordFlags) forCoordinators(creds string) coordFlags {
+	c := *f
+	if creds != "" {
+		c.creds = creds
+	}
+	return c
 }
 
 // coordinatorArgs is the coordinator child's command line.

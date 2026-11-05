@@ -250,7 +250,14 @@ func gate(ctx context.Context, p *apexv1.Project, op, milestone string, now time
 	}
 	pctx, cancel := context.WithTimeout(ctx, pauseCheckTimeout)
 	defer cancel()
-	paused, why, err := conductor.PausedWith(pctx, js, m.Project, milestone)
+	// A person's pause counts only from the claim holder (V12c): the gate
+	// passes only in the holder's checkout (requireMilestoneLease below),
+	// so the holder is this credential's user.
+	id, err := natsconn.DecodeIdentity(m.Creds)
+	if err != nil {
+		return "", &apexv1.FailError{Code: apexv1.CodeCoordMembership, Msg: err.Error()}
+	}
+	paused, why, err := conductor.PausedWith(pctx, js, m.Project, milestone, id.SubjectToken)
 	switch {
 	case errors.Is(err, jetstream.ErrStreamNotFound):
 		// no events stream: nothing was ever paused

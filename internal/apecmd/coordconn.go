@@ -47,6 +47,12 @@ func (f *coordFlags) connect(ctx context.Context, name string) (*nats.Conn, *mem
 	if err != nil {
 		return nil, nil, failErr(fmt.Errorf("%w (%s)", err, apexv1.CodeCoordMembership))
 	}
+	// --nats-creds is honoured here too (V12b): without --nats-url it was
+	// dropped for the project's credential, so a supervisor could not
+	// give its coordinators a credential of their own.
+	if f.creds != "" {
+		m.Creds = f.creds
+	}
 	nc, err := natsconn.Connect(ctx, natsconn.Config{URL: m.URL, CredsFile: m.Creds}, name)
 	if err != nil {
 		return nil, nil, failErr(fmt.Errorf("NATS unreachable at %s: %w (%s)", m.URL, err, apexv1.CodeCoordNATSUnreachable))

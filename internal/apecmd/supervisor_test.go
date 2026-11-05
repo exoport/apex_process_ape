@@ -81,4 +81,13 @@ func TestSupervisor_CoordinatorArgs(t *testing.T) {
 	require.Equal(t, []string{"coordinator", "--ensemble", "atomix-1a", "--assess", "--assess-checkout", "atomix=/srv/c", "--cwd", "/srv/atomix"},
 		(&coordFlags{cwd: "/srv/atomix"}).coordinatorArgs("atomix-1a", nil, assessArgs(true, []string{"atomix=/srv/c"}, "")...))
 	require.Nil(t, assessArgs(false, []string{"x=y"}, "1M"), "control: no --assess, no assessor flags")
+
+	// V12b: --coordinator-creds gives the child its own credential; the
+	// control: without it, the supervisor's own.
+	sup := coordFlags{cwd: "/srv/atomix", creds: "/srv/hot/sup.creds"}
+	own, same := sup.forCoordinators("/srv/hot/coord.creds"), sup.forCoordinators("")
+	require.Equal(t, []string{"coordinator", "--ensemble", "atomix-1a", "--cwd", "/srv/atomix", "--nats-creds", "/srv/hot/coord.creds"},
+		own.coordinatorArgs("atomix-1a", nil))
+	require.Equal(t, []string{"coordinator", "--ensemble", "atomix-1a", "--cwd", "/srv/atomix", "--nats-creds", "/srv/hot/sup.creds"},
+		same.coordinatorArgs("atomix-1a", nil))
 }

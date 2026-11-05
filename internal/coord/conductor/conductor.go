@@ -421,7 +421,7 @@ func projectOf(subject string) (project, milestone string) {
 // conductorPausedNow reports a milestone a conductor's pause (OQ24)
 // holds, whatever a person's pause says.
 func conductorPausedNow(ctx context.Context, js jetstream.JetStream, project, milestone string) bool {
-	st, err := readPauses(ctx, js, project, milestone)
+	st, err := readPauses(ctx, js, project, milestone, "")
 	return err == nil && st.conductor != nil
 }
 
@@ -432,8 +432,15 @@ func conductorPausedNow(ctx context.Context, js jetstream.JetStream, project, mi
 // conductor's resume never lifts a person's pause, and a person's resume
 // lifts both, so a person can clear a pause whose conductor is gone
 // (Q-V8J-1). change new and change start refuse on it (step 9 wires them).
-func Paused(ctx context.Context, js jetstream.JetStream, project, milestone string) (bool, error) {
-	paused, _, err := PausedWith(ctx, js, project, milestone)
+//
+// A person's pause or resume counts only from holder, the subject token
+// of the user whose checkout holds the milestone's claim (V12c, D6): a
+// pause is that person's act (OQ6), and the server binds an event's owner
+// token to its publisher's credential (cred.MemberGrant), so another
+// member of the project can neither pause the milestone nor lift its
+// holder's pause. A conductor's pause is read from anyone, as before.
+func Paused(ctx context.Context, js jetstream.JetStream, project, milestone, holder string) (bool, error) {
+	paused, _, err := PausedWith(ctx, js, project, milestone, holder)
 	return paused, err
 }
 
@@ -452,8 +459,8 @@ const PausePerson = "person"
 
 // PausedWith is Paused with the pause that holds it: the person's when
 // both hold, since only the person lifts it.
-func PausedWith(ctx context.Context, js jetstream.JetStream, project, milestone string) (bool, Pause, error) {
-	st, err := readPauses(ctx, js, project, milestone)
+func PausedWith(ctx context.Context, js jetstream.JetStream, project, milestone, holder string) (bool, Pause, error) {
+	st, err := readPauses(ctx, js, project, milestone, holder)
 	if err != nil {
 		return false, Pause{}, err
 	}
@@ -485,8 +492,9 @@ var errPauseHistory = errors.New("more pause and resume events than one read tak
 // resume, which is newer than a conductor event in the window or older than
 // all of it), so it reads back from the newest in a widening window of
 // stream sequences, and stops once both kinds are seen or the window
-// reaches the stream's start.
-func readPauses(ctx context.Context, js jetstream.JetStream, project, milestone string) (pauses, error) {
+// reaches the stream's start. A person's event whose owner token is not
+// holder is passed over ("": every person's event is).
+func readPauses(ctx context.Context, js jetstream.JetStream, project, milestone, holder string) (pauses, error) {
 	s, err := js.Stream(ctx, events.EventsStream)
 	if err != nil {
 		return pauses{}, err
@@ -537,6 +545,10 @@ func readPauses(ctx context.Context, js jetstream.JetStream, project, milestone 
 				var p Pause
 				_ = json.Unmarshal(m.Data, &p)
 				e := &newest{seq: m.Sequence, paused: paused, p: p}
+				if p.Kind == PausePerson && (holder == "" || ownerOf(m.Subject) != tok(holder)) {
+					seq = m.Sequence + 1
+					continue
+				}
 				if p.Kind == PausePerson {
 					if person == nil || e.seq > person.seq {
 						person = e
@@ -561,6 +573,16 @@ func readPauses(ctx context.Context, js jetstream.JetStream, project, milestone 
 			return st, nil
 		}
 	}
+}
+
+// ownerOf is an event subject's owner token (ape.evt.<owner>.…).
+func ownerOf(subject string) string {
+	rest, ok := strings.CutPrefix(subject, "ape.evt.")
+	if !ok {
+		return ""
+	}
+	owner, _, _ := strings.Cut(rest, ".")
+	return owner
 }
 
 func tok(s string) string {

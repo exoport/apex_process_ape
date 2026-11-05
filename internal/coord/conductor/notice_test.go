@@ -78,7 +78,7 @@ func TestConductor_DeliversNoticesAsAckedDeliveries(t *testing.T) {
 
 	time.Sleep(5 * time.Second) // past the scaled pause age (4 s)
 	for _, ms := range []string{"M1", "M2"} {
-		p, err := Paused(ctx, js, "taskforge", ms)
+		p, err := Paused(ctx, js, "taskforge", ms, "bob")
 		require.NoError(t, err)
 		require.False(t, p, "control: a hold request pauses nothing (%s)", ms)
 	}
@@ -86,7 +86,7 @@ func TestConductor_DeliversNoticesAsAckedDeliveries(t *testing.T) {
 
 	_, err = events.Publish(ctx, js, events.Subject("ann", "taskforge", events.KindProject, "M1", "milestone-paused"), "oq24-pause-1", []byte(`{"by":"cond-a","user":"ann"}`))
 	require.NoError(t, err)
-	p, err := Paused(ctx, js, "taskforge", "M1")
+	p, err := Paused(ctx, js, "taskforge", "M1", "bob")
 	require.NoError(t, err)
 	require.True(t, p, "control: OQ24's pause still pauses the milestone")
 }
