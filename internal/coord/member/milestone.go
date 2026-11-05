@@ -422,11 +422,6 @@ func retakeAtFence(ctx context.Context, p *apexv1.Project, ms string) (lease.Liv
 	if !inRun || rw.bound <= 0 {
 		return lease.Live{}, false, nil
 	}
-	s, err := openMilestones(ctx, p, nats.NoReconnect())
-	if err != nil {
-		return lease.Live{}, false, err
-	}
-	defer s.close()
 	w := rw.w
 	if w == nil {
 		w = FenceLog
@@ -434,17 +429,36 @@ func retakeAtFence(ctx context.Context, p *apexv1.Project, ms string) (lease.Liv
 	if w == nil {
 		w = io.Discard
 	}
-	if next, _ := s.retake(ctx, ms, errors.New("lapsed while the fence waited"), w); next == nil {
-		return lease.Live{}, false, nil
-	}
-	fmt.Fprintf(w, "%s ape: the push of milestone/%s: its lease lapsed while the fence waited and was taken again by this checkout, whose claim stands\n",
-		time.Now().UTC().Format(time.RFC3339), ms)
-	l, err := s.store.LiveHolder(ctx, s.key(ms))
-	if err != nil {
-		return lease.Live{}, false, &apexv1.FailError{Code: apexv1.CodeCoordNATSUnreachable, Action: apexv1.ActionRetry, Msg: fmt.Sprintf(
-			"%s's lease was taken again but could not be read back before the push (%v): nothing landed — run this again", ms, err)}
-	}
-	return l, true, nil
+	// Right after NATS is back a read can still fail: retake says so
+	// (keep, no lease), and the retake is tried again within the run's
+	// wait rather than read as "not taken" (ci-local under load).
+	var l lease.Live
+	var taken bool
+	err := waitTransient(ctx, "the push of milestone/"+ms, func() (bool, error) {
+		s, err := openMilestones(ctx, p, nats.NoReconnect())
+		if err != nil {
+			return Transient(err), err
+		}
+		defer s.close()
+		next, keep := s.retake(ctx, ms, errors.New("lapsed while the fence waited"), w)
+		if next == nil {
+			if keep {
+				return true, &apexv1.FailError{Code: apexv1.CodeCoordNATSUnreachable, Action: apexv1.ActionRetry, Msg: ms +
+					"'s lapsed lease could not be taken again yet (its holder or claim unread): nothing landed — run this again"}
+			}
+			return false, nil
+		}
+		fmt.Fprintf(w, "%s ape: the push of milestone/%s: its lease lapsed while the fence waited and was taken again by this checkout, whose claim stands\n",
+			time.Now().UTC().Format(time.RFC3339), ms)
+		l, err = s.store.LiveHolder(ctx, s.key(ms))
+		if err != nil {
+			return natsDown(err), &apexv1.FailError{Code: apexv1.CodeCoordNATSUnreachable, Action: apexv1.ActionRetry, Msg: fmt.Sprintf(
+				"%s's lease was taken again but could not be read back before the push (%v): nothing landed — run this again", ms, err)}
+		}
+		taken = true
+		return false, nil
+	})
+	return l, taken, err
 }
 
 // runWaitKey carries a gated verb's run wait (V8l).
