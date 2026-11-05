@@ -7,8 +7,10 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/nats-io/jwt/v2"
+	"github.com/nats-io/nats.go"
 )
 
 // Perms is a credential's subject permissions: allow and deny lists for
@@ -67,6 +69,53 @@ func (e *Enforced) Expect(sub string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.expected = append(e.expected, sub)
+}
+
+// RequireRefused is the harness's "no wider" mode (V12-4): a connection
+// on creds (with opts) publishes each of pubs and subscribes to each of
+// subs, and every one must be refused by the server — each subject named
+// in a logged violation. The refusals are expected, so Cleanup passes them.
+func (e *Enforced) RequireRefused(t *testing.T, creds string, opts []nats.Option, pubs, subs []string) {
+	t.Helper()
+	nc, err := nats.Connect(e.URL, append([]nats.Option{nats.UserCredentials(creds), nats.ErrorHandler(func(*nats.Conn, *nats.Subscription, error) {})}, opts...)...)
+	if err != nil {
+		t.Fatalf("natstest: connect: %v", err)
+	}
+	defer nc.Close()
+	want := map[string]string{}
+	for _, s := range pubs {
+		e.Expect(`Publish Violation - Subject "` + s + `"`)
+		want[`Publish Violation - Subject "`+s+`"`] = "publish " + s
+		if err := nc.Publish(s, []byte("{}")); err != nil {
+			t.Fatalf("natstest: publish %s: %v", s, err)
+		}
+	}
+	for _, s := range subs {
+		e.Expect(`Subscription Violation - Subject "` + s + `"`)
+		want[`Subscription Violation - Subject "`+s+`"`] = "subscribe " + s
+		if _, err := nc.SubscribeSync(s); err != nil {
+			t.Fatalf("natstest: subscribe %s: %v", s, err)
+		}
+	}
+	_ = nc.Flush()
+	const poll = 50 * time.Millisecond
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		missing := []string{}
+		got := strings.Join(e.Violations(), "\n")
+		for k, what := range want {
+			if !strings.Contains(got, k) {
+				missing = append(missing, what)
+			}
+		}
+		if len(missing) == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("natstest: not refused by the server: %s", strings.Join(missing, "; "))
+		}
+		time.Sleep(poll)
+	}
 }
 
 // Violations are the server's logged refusals so far, each with the

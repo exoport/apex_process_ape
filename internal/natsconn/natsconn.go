@@ -58,6 +58,11 @@ func Resolve(urlFlag, credsFlag string) Config {
 // const) so tests can shorten it.
 var connectTimeout = 3 * time.Second
 
+// InboxPrefix is the reply-inbox prefix of the user whose subject token is
+// tok: _INBOX.<tok>. Every ape connection with a credential uses it, and
+// each credential kind's grant subscribes to its own (cred).
+func InboxPrefix(tok string) string { return "_INBOX." + tok }
+
 // Connect opens a connection for the given client name (e.g.
 // "ape/0.0.42"). It returns (nil, nil) when cfg is disabled, so callers can
 // treat "NATS off" and "no NATS" identically. On a reachable cluster the
@@ -97,6 +102,12 @@ func Connect(ctx context.Context, cfg Config, name string, extra ...nats.Option)
 	}
 	if cfg.CredsFile != "" {
 		opts = append(opts, nats.UserCredentials(cfg.CredsFile))
+		// Replies come to this user's own inboxes (V12-1): a grant then
+		// subscribes to _INBOX.<user>.> only, and no member reads another's
+		// replies — an App token, a warden's answer.
+		if id, err := DecodeIdentity(cfg.CredsFile); err == nil && id.SubjectToken != "" {
+			opts = append(opts, nats.CustomInboxPrefix(InboxPrefix(id.SubjectToken)))
+		}
 	}
 	opts = append(opts, extra...)
 

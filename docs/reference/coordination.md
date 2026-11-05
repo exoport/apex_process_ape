@@ -53,9 +53,9 @@ Leases are not requests: claiming, renewing and releasing one is a compare-and-s
   unanswered past the pause age; payload `{by, user}`) or from a person's `ape milestone pause|resume` (payload
   `{kind: "person", by, user, reason, at}`). While the newest is a pause, the milestone's change new, start and archive,
   its take-in and its close refuse `coord.milestone-paused` (action `person`), naming who paused it and why. A
-  person's pause or resume counts only from the user whose checkout holds the milestone's claim (its subject's
-  `<user>` token, which the server binds to the publisher's credential), so another member can neither pause the
-  milestone nor lift the holder's pause. A conductor's pause counts from anyone.
+  pause or resume counts only from the user whose checkout holds the milestone's claim (its subject's `<user>` token,
+  which the server binds to the publisher's credential), a person's and a conductor's alike: the kind is only the
+  payload's word. So another member can neither pause the milestone nor lift the holder's pause.
 
 **Tokens and names.** `<user>`, `<host>` and `<ensemble>` are slugged by one rule, ape's subject token: lowercased,
 and `.`, `*`, `>` and whitespace become `-`. The tokens `coord` and `sup`, and any token starting `vm-` (aped's
@@ -70,6 +70,11 @@ enforcing server:
 - the **coordinator's** (`ape supervisor --coordinator-creds`; by default the supervisor's own) holds
   `coord.<ensemble>` and the slots, and publishes the coordinator's events;
 - the **supervisor's** holds `sup.leader`, clears a dead coordinator's lease, and publishes heartbeats.
+
+Every ape connection with a credential takes its replies on its user's own inboxes, `_INBOX.<user>.…`, and each grant
+subscribes to its own only. No kind subscribes to `_INBOX.>` or to `ape.sup.ghapp.>`, where another member's App
+token reply or a warden's request would arrive. A member subscribes only to its project's events; the coordinator
+and the supervisor subscribe only to their own service verbs.
 
 Every kind reads the streams it uses and makes consumers on them. **None may create, update, purge or delete a
 stream, or delete a message.** Those are `ape nats declare`'s, run on the operator's own credential.

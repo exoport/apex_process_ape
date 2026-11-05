@@ -19,6 +19,7 @@ import (
 	"github.com/exoport/apex_process_ape/internal/coord/events"
 	"github.com/exoport/apex_process_ape/internal/coord/lease"
 	"github.com/exoport/apex_process_ape/internal/ghapp"
+	"github.com/exoport/apex_process_ape/internal/natsconn"
 	"github.com/exoport/apex_process_ape/internal/natstest"
 )
 
@@ -125,7 +126,7 @@ func TestMemberGrant_TheMemberVerbsUnderIt(t *testing.T) {
 	e.Expect(`"$KV.ape-leases.milestone.notes-svc.M1"`)
 	e.Expect(`"ape.evt.carl.notes-svc.project.M1.milestone-paused"`)
 	errs := make(chan error, 4)
-	cnc, err := nats.Connect(e.URL, nats.UserCredentials(carl), nats.ErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, err error) { errs <- err }))
+	cnc, err := nats.Connect(e.URL, append(inboxOf(t, carl), nats.ErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, err error) { errs <- err }))...)
 	require.NoError(t, err)
 	defer cnc.Close()
 	for _, s := range []string{"$KV.ape-leases.milestone.notes-svc.M1", "ape.evt.carl.notes-svc.project.M1.milestone-paused"} {
@@ -137,6 +138,15 @@ func TestMemberGrant_TheMemberVerbsUnderIt(t *testing.T) {
 			t.Fatalf("control: %s was not refused", s)
 		}
 	}
+}
+
+// inboxOf is a credential's connect options as natsconn.Connect sets
+// them: the credential, and its user's inbox prefix.
+func inboxOf(t *testing.T, creds string) []nats.Option {
+	t.Helper()
+	id, err := natsconn.DecodeIdentity(creds)
+	require.NoError(t, err)
+	return []nats.Option{nats.UserCredentials(creds), nats.CustomInboxPrefix(natsconn.InboxPrefix(id.SubjectToken))}
 }
 
 // perms is a grant as natstest mints it.
@@ -158,7 +168,7 @@ func TestMemberGrant_APersonPauseByAnotherMemberDoesNotHold(t *testing.T) {
 
 	bobCreds := e.Mint(t, "bob", perms(cred.MemberGrant("bob", "notes-svc", "shop")))
 	errs := make(chan error, 4)
-	bob, err := nats.Connect(e.URL, nats.UserCredentials(bobCreds), nats.ErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, err error) { errs <- err }))
+	bob, err := nats.Connect(e.URL, append(inboxOf(t, bobCreds), nats.ErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, err error) { errs <- err }))...)
 	require.NoError(t, err)
 	defer bob.Close()
 	bjs, err := jetstream.New(bob)
@@ -204,7 +214,7 @@ func TestMemberGrant_TheAppTokenUnderIt(t *testing.T) {
 	}
 
 	e.Expect(`"` + ghapp.TokenSubject + `.bob"`)
-	nc, err := nats.Connect(e.URL, nats.UserCredentials(m.Creds))
+	nc, err := nats.Connect(e.URL, inboxOf(t, m.Creds)...)
 	require.NoError(t, err)
 	defer nc.Close()
 	actx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

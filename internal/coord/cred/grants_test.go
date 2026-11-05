@@ -24,6 +24,7 @@ import (
 	"github.com/exoport/apex_process_ape/internal/coord/lease"
 	"github.com/exoport/apex_process_ape/internal/coord/slots"
 	"github.com/exoport/apex_process_ape/internal/coord/supervisor"
+	"github.com/exoport/apex_process_ape/internal/natsconn"
 	"github.com/exoport/apex_process_ape/internal/natstest"
 )
 
@@ -31,12 +32,22 @@ func perms(g aped.Grant) natstest.Perms {
 	return natstest.Perms{PubAllow: g.PubAllow, PubDeny: g.PubDeny, SubAllow: g.SubAllow, SubDeny: g.SubDeny, AllowResponses: g.AllowResponses}
 }
 
+// connect is a connection as ape makes one (natsconn.Connect): the
+// credential, and replies to its user's own inboxes.
 func connect(t *testing.T, url, creds string) *nats.Conn {
 	t.Helper()
-	nc, err := nats.Connect(url, nats.UserCredentials(creds))
+	nc, err := nats.Connect(url, inboxOf(t, creds)...)
 	require.NoError(t, err)
 	t.Cleanup(nc.Close)
 	return nc
+}
+
+// inboxOf is a credential's connect options, with its user's inbox prefix.
+func inboxOf(t *testing.T, creds string) []nats.Option {
+	t.Helper()
+	id, err := natsconn.DecodeIdentity(creds)
+	require.NoError(t, err)
+	return []nats.Option{nats.UserCredentials(creds), nats.CustomInboxPrefix(natsconn.InboxPrefix(id.SubjectToken))}
 }
 
 // acker is a conductor's terminal that acknowledges every delivery, with
@@ -116,8 +127,8 @@ func TestGrants_TheEnsembleUnderItsOwnAllowLists(t *testing.T) {
 		return false
 	}
 
-	supCreds := e.Mint(t, "sup-a", perms(cred.SupervisorGrant()))
-	coordCreds := e.Mint(t, "coordinator", perms(cred.CoordinatorGrant("atomix")))
+	supCreds := e.Mint(t, "sup-a", perms(cred.SupervisorGrant("sup-a")))
+	coordCreds := e.Mint(t, "coordinator", perms(cred.CoordinatorGrant("coordinator", "atomix")))
 	annCreds := e.Mint(t, "ann", perms(cred.MemberGrant("ann", "taskforge", "atomix")))
 	bobCreds := e.Mint(t, "bob", perms(cred.MemberGrant("bob", "taskforge", "atomix")))
 
@@ -126,7 +137,7 @@ func TestGrants_TheEnsembleUnderItsOwnAllowLists(t *testing.T) {
 	var procMu sync.Mutex
 	var procs []*coordProc
 	start := func(parent context.Context, ens string) (supervisor.Handle, error) {
-		nc, err := nats.Connect(e.URL, nats.UserCredentials(coordCreds))
+		nc, err := nats.Connect(e.URL, inboxOf(t, coordCreds)...)
 		if err != nil {
 			return nil, err
 		}
@@ -257,4 +268,87 @@ func TestGrants_TheEnsembleUnderItsOwnAllowLists(t *testing.T) {
 	require.Contains(t, once("ape.sup.health.report", supervisor.HealthReport{Ensemble: "atomix", Reporter: "ann", Subject: "ape.coord.atomix.status", SentAt: time.Now()}), "replaced")
 	require.Eventually(t, func() bool { return coordID() == "coord-2" }, 15*time.Second, 100*time.Millisecond)
 	require.Eventually(t, func() bool { return saw(".coordinator-replaced") }, 5*time.Second, 50*time.Millisecond)
+}
+
+// streamAdmin is the JetStream API no credential kind may call: a stream's
+// create, update, delete, purge, message delete, snapshot and restore on
+// every coordination stream, a new stream, and the account- and
+// cluster-wide verbs.
+func streamAdmin() []string {
+	var out []string
+	for _, s := range []string{"APE_EVENTS", "APE_METRICS", "KV_ape-leases", "KV_ape-meta", "KV_ape-slots"} {
+		for _, v := range []string{"CREATE", "UPDATE", "DELETE", "PURGE", "MSG.DELETE", "SNAPSHOT", "RESTORE"} {
+			out = append(out, "$JS.API.STREAM."+v+"."+s)
+		}
+	}
+	return append(out, "$JS.API.STREAM.CREATE.NEW", "$JS.API.ACCOUNT.PURGE.APP", "$JS.API.META.LEADER.STEPDOWN", "$JS.API.SERVER.REMOVE",
+		"$JS.API.STREAM.PEER.REMOVE.APE_EVENTS", "$JS.API.STREAM.LEADER.STEPDOWN.APE_EVENTS")
+}
+
+// V12-4 (research's REVIEW-V12): every grant is no wider than its kind
+// needs — the harness's refusal mode. For each kind, the server refuses
+// the stream administration C1 used and its siblings (stream create and
+// update included), the subscriptions another person's replies or the App
+// service's requests arrive on (V12-1: a member read another's App token
+// on _INBOX.>, and the warden's secrets request on ape.sup.ghapp.>), and
+// publishing as another user or kind.
+func TestGrants_NoWiderThanTheKindNeeds(t *testing.T) {
+	e := natstest.StartEnforced(t)
+	opt := func(creds string) []nats.Option { return inboxOf(t, creds)[1:] }
+	others := []string{"_INBOX.>", "_INBOX.bob.>", "ape.>", "ape.sup.ghapp.>", "ape.sup.ghapp.pusher.bob", "ape.sup.ghapp.warden.*", "ape.sup.ghapp.warden.op"}
+
+	ann := e.Mint(t, "ann", perms(cred.MemberGrant("ann", "taskforge", "atomix")))
+	e.RequireRefused(t, ann, opt(ann), append(streamAdmin(),
+		"ape.evt.bob.taskforge.project.M1.milestone-paused", "ape.evt.coord.atomix.coord.x.impact-notice", "ape.evt.ann.other.project.M1.gate-green",
+		"$KV.ape-leases.sup.leader", "$KV.ape-leases.coord.atomix", "$KV.ape-leases.milestone.other.M1", "$KV.ape-leases.close.other",
+		"$KV.ape-leases.conductor.bob.atomix", "$KV.ape-meta.epoch", "$KV.ape-slots.slot.h.p.0",
+		"ape.sup.ghapp.pusher.bob", "ape.sup.ghapp.warden.bob", "_INBOX.bob.x", "$JS.ACK.APE_EVENTS.conductor-bob-atomix.1.1.1.1.0",
+	), append(others, "ape.evt.*.other.project.>", "ape.evt.coord.>", "ape.coord.atomix.>", "ape.sup.ensure", "$SRV.>"))
+
+	coord := e.Mint(t, "coordinator", perms(cred.CoordinatorGrant("coordinator", "atomix")))
+	e.RequireRefused(t, coord, opt(coord), append(streamAdmin(),
+		"ape.evt.ann.taskforge.project.M1.milestone-resumed", "ape.evt.coord.other.coord.x.impact-notice",
+		"$KV.ape-leases.sup.leader", "$KV.ape-leases.coord.other", "$KV.ape-leases.milestone.taskforge.M1", "$KV.ape-meta.epoch",
+		"ape.sup.ghapp.pusher.ann", "ape.sup.health.report",
+	), append(others, "ape.evt.>", "ape.sup.>", "ape.coord.other.>"))
+
+	sup := e.Mint(t, "sup-a", perms(cred.SupervisorGrant("sup-a")))
+	e.RequireRefused(t, sup, opt(sup), append(streamAdmin(),
+		"ape.evt.ann.taskforge.project.M1.milestone-resumed", "$KV.ape-leases.milestone.taskforge.M1", "$KV.ape-leases.conductor.ann.atomix",
+		"$KV.ape-meta.epoch", "ape.sup.ghapp.pusher.ann", "ape.coord.atomix.slot.acquire",
+	), append(others, "ape.evt.>", "ape.coord.>"))
+}
+
+// v12_3Open says V12-3 is unfixed (research's REVIEW-V12; R2): consumer
+// names carry no owner token NATS can scope, so the consumer verbs a
+// member's ephemeral readers need also reach another person's durable. The
+// test shows it — bob deletes ann's conductor consumer — and requires the
+// refusal once it is fixed.
+const v12_3Open = true
+
+func TestGrants_V12_3_AnotherPersonsDurable(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	e := natstest.StartEnforced(t)
+	admin := connect(t, e.URL, e.Admin)
+	ajs, err := jetstream.New(admin)
+	require.NoError(t, err)
+	require.NoError(t, events.Declare(ctx, ajs, 1))
+	_, err = ajs.CreateOrUpdateConsumer(ctx, events.EventsStream, jetstream.ConsumerConfig{
+		Durable: layout.ConductorConsumer("ann", "atomix"), FilterSubjects: conductor.Filters("atomix", []string{"taskforge"}), AckPolicy: jetstream.AckExplicitPolicy,
+	})
+	require.NoError(t, err)
+	bob := e.Mint(t, "bob", perms(cred.MemberGrant("bob", "taskforge", "atomix")))
+	bjs, err := jetstream.New(connect(t, e.URL, bob))
+	require.NoError(t, err)
+	dctx, dcancel := context.WithTimeout(ctx, 3*time.Second)
+	defer dcancel()
+	err = bjs.DeleteConsumer(dctx, events.EventsStream, layout.ConductorConsumer("ann", "atomix"))
+	t.Logf("V12-3: bob deletes ann's conductor consumer: %v", err)
+	if v12_3Open {
+		require.NoError(t, err, "V12-3 open: another person's durable can be deleted")
+		return
+	}
+	e.Expect("CONSUMER.DELETE." + events.EventsStream + "." + layout.ConductorConsumer("ann", "atomix"))
+	require.Error(t, err)
 }

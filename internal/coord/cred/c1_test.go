@@ -12,6 +12,7 @@ import (
 
 	"github.com/exoport/apex_process_ape/internal/coord/events"
 	"github.com/exoport/apex_process_ape/internal/coord/lease"
+	"github.com/exoport/apex_process_ape/internal/natsconn"
 	"github.com/exoport/apex_process_ape/internal/natstest"
 )
 
@@ -52,7 +53,7 @@ func TestMemberGrant_C1_JetStreamAPIReachesOutsideItsSubjects(t *testing.T) {
 	g := MemberGrant("ann", "taskforge", "atomix")
 	annPath, _ := natstest.MintCreds(t, acct, "ann", g.PubAllow, g.SubAllow)
 	errs := make(chan error, 16)
-	ann, err := nats.Connect(url, nats.UserCredentials(annPath), nats.ErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, err error) { errs <- err }))
+	ann, err := nats.Connect(url, nats.UserCredentials(annPath), nats.CustomInboxPrefix(natsconn.InboxPrefix("ann")), nats.ErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, err error) { errs <- err }))
 	require.NoError(t, err)
 	t.Cleanup(ann.Close)
 	js, err := jetstream.New(ann)

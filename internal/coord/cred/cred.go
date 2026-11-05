@@ -76,9 +76,15 @@ func ConductorGrant(user, ensemble string, projects ...string) aped.Grant {
 	}
 	return aped.Grant{
 		PubAllow: append(pub, readStreams(eventsStream, leasesStream, metaStream)...),
-		SubAllow: []string{"ape.>", "_INBOX.>"},
+		SubAllow: []string{inbox(u)},
 	}
 }
+
+// inbox is the subscribe grant on a user's own replies
+// (natsconn.InboxPrefix, which every ape connection with a credential
+// uses): never _INBOX.>, where another's App token or a warden's secrets
+// would arrive (V12-1).
+func inbox(tok string) string { return natsconn.InboxPrefix(tok) + ".>" }
 
 // MemberGrant is a project credential's permissions (hot/ape-nats.creds):
 // publish its own events and metrics, write its project's milestone and
@@ -105,15 +111,17 @@ func MemberGrant(user, project, ensemble string) aped.Grant {
 			ghapp.TokenSubject + "." + u,
 			ghapp.SetupSubject + "." + u,
 		}, c.PubAllow...),
-		SubAllow: c.SubAllow,
+		// Its project's events (the event watch), and its own replies.
+		SubAllow: []string{"ape.evt.*." + p + ".project.>", inbox(u)},
 	}
 }
 
-// CoordinatorGrant is an ensemble coordinator's permissions (V12b, C2):
+// CoordinatorGrant is the permissions of an ensemble coordinator whose
+// credential is named name (its inbox token) (V12b, C2):
 // its coord.<ens> lease, the slots it grants, its events and the
 // assessor's records under the coordinator's reserved owner token, its
 // metrics, and its service's replies (ape.coord.<ens>.*).
-func CoordinatorGrant(ensemble string) aped.Grant {
+func CoordinatorGrant(name, ensemble string) aped.Grant {
 	e := natsconn.SubjectToken(ensemble)
 	// The assessor's records' scope, coordinator.AssessorScope.
 	assessor := natsconn.SubjectToken(ensemble + "-assessor")
@@ -125,17 +133,18 @@ func CoordinatorGrant(ensemble string) aped.Grant {
 			leaseKV + layout.CoordKey(e),
 			"$KV.ape-slots.slot.>",
 		}, readStreams(eventsStream, leasesStream, metaStream, slotsStream)...),
-		SubAllow:       []string{"ape.coord." + e + ".>", "$SRV.>", "ape.evt.>", "_INBOX.>"},
+		SubAllow:       []string{"ape.coord." + e + ".>", "$SRV.>", inbox(natsconn.SubjectToken(name))},
 		AllowResponses: true,
 	}
 }
 
-// SupervisorGrant is a supervisor's permissions (V12b): the sup.leader
+// SupervisorGrant is the permissions of a supervisor whose credential is
+// named name (its inbox token) (V12b): the sup.leader
 // lease, the coordinators' leases it clears when one is unhealthy, the
 // coord-kind events it publishes for any ensemble (heartbeats, a
 // coordinator replaced), its health requests to the coordinators, and its
 // service's replies (ape.sup.*).
-func SupervisorGrant() aped.Grant {
+func SupervisorGrant(name string) aped.Grant {
 	return aped.Grant{
 		PubAllow: append([]string{
 			leaseKV + layout.SupLeaderKey,
@@ -143,7 +152,9 @@ func SupervisorGrant() aped.Grant {
 			"ape.evt.coord.*.coord.>",
 			"ape.coord.*.status",
 		}, readStreams(eventsStream, leasesStream, metaStream)...),
-		SubAllow:       []string{"ape.sup.>", "$SRV.>", "ape.evt.coord.>", "_INBOX.>"},
+		// Its service's own verbs: never ape.sup.ghapp.>, the App
+		// service's, whose requests carry secrets.
+		SubAllow:       []string{"ape.sup.ensure", "ape.sup.health.report", "ape.sup.status", "$SRV.>", inbox(natsconn.SubjectToken(name))},
 		AllowResponses: true,
 	}
 }
