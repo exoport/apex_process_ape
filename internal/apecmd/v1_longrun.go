@@ -614,7 +614,8 @@ func coordGateHold(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, op, milest
 		return stop, err
 	}
 	_, worker := cmd.Context().Value(workerKey{}).(string)
-	if milestone == "" || milestone == "none" || !worker && !(f.long && (f.noDetach || !v1DetachDefault)) {
+	runsHere := worker || f.long && (f.noDetach || !v1DetachDefault)
+	if milestone == "" || milestone == "none" || !runsHere {
 		return stop, nil
 	}
 	hold, err := member.HoldMilestone(cmd.Context(), p, milestone, cmd.ErrOrStderr())
