@@ -100,9 +100,29 @@ func TestFixture_ScratchCoordinated(t *testing.T) {
 	data, err := os.ReadFile(cfg)
 	require.NoError(t, err)
 	block := "coordination:\n  ensemble: scratch1c\n  home: scratch-home\n  url: " + url + "\n"
+	// H5 (D807+): FIXTURE_GITHUB_API puts the project on the
+	// coordination.github flow (milestone branches, record and close PRs,
+	// take-ins), against fakegh at that URL over origin.git, with a
+	// regression command of a fixed length that marks its start.
+	ghAPI := os.Getenv("FIXTURE_GITHUB_API")
+	if ghAPI != "" {
+		block += "  github:\n    repo: scratch/notes\n    api: " + ghAPI + "\n"
+		secs := os.Getenv("FIXTURE_REGRESSION_SECS")
+		if secs == "" {
+			secs = "30"
+		}
+		block += "regression: ./suite.sh\n"
+		suite := "#!/bin/sh\necho \"$(date -u +%Y-%m-%dT%H:%M:%SZ) regression start $(basename \"$PWD\")\" >> " + filepath.Join(out, "regression.log") + "\nsleep " + secs + "\n"
+		require.NoError(t, os.WriteFile(filepath.Join(a, "suite.sh"), []byte(suite), 0o755))
+	}
 	require.NoError(t, os.WriteFile(cfg, append(data, []byte(block)...), 0o644))
 	run(a, "git", "add", "-A")
 	run(a, "git", "commit", "-q", "-m", "chore: the coordination block (scratch1c)")
+	if ghAPI != "" {
+		// The block and the regression are guarded keys: a person accepts
+		// them (H3 did by hand).
+		run(a, ape, "project", "accept-config", "--by", "fixture")
+	}
 	run(a, "git", "push", "-q", "origin", "HEAD:main")
 
 	b := filepath.Join(out, "b")
@@ -113,9 +133,22 @@ func TestFixture_ScratchCoordinated(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, os.MkdirAll(filepath.Join(dir, "hot"), 0o700))
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "hot", "ape-nats.creds"), data, 0o600))
+		if ghAPI != "" {
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "hot", "github.token"), []byte("fakegh-token\n"), 0o600))
+		}
 		run(dir, ape, "status", "--json")
 	}
 	head := strings.TrimSpace(gitOut(t, a, "rev-parse", "HEAD"))
+	mode := "local trunk (no coordination.github)"
+	lacks := `What this fixture does not have: GitHub. Milestone branches, record PRs, close PRs and take-ins are the
+coordination.github flow's and are not exercised here; a close is the local trunk's.
+`
+	if ghAPI != "" {
+		mode = "coordination.github against fakegh at " + ghAPI + " (main's queue merges each enqueued PR itself); regression ./suite.sh marks each start in " + filepath.Join(out, "regression.log")
+		lacks = `This fixture's GitHub is fakegh over origin.git: milestone branches, record and close PRs, the merge queue
+(a local merge) and take-ins are the coordination.github flow's own; no CI checks, no App service.
+`
+	}
 	readme := `# Scratch coordinated fixture for 1c rehearsals (Q-1C-4)
 
 Built by ape's TestFixture_ScratchCoordinated, on the cluster ` + url + `.
@@ -123,7 +156,7 @@ Not the mirror; nothing here reaches GitHub.
 
 - origin: ` + origin + ` (main at ` + head + `)
 - member checkouts: ` + a + ` (user ann), ` + b + ` (user bob); each hot/ape-nats.creds is minted for an unenforced cluster
-- project: scratch1c-project; main: M1 (gate ./gate1.sh) and M2 (gate ./gate2.sh), approved by a person; ensemble scratch1c; local trunk (no coordination.github)
+- project: scratch1c-project; main: M1 (gate ./gate1.sh) and M2 (gate ./gate2.sh), approved by a person; ensemble scratch1c; ` + mode + `
 - ape: ` + ape + `
 
 Start the coordination, from a (APE_TOOLCHAIN=local):
@@ -134,9 +167,7 @@ Start the coordination, from a (APE_TOOLCHAIN=local):
 Then claim per checkout (ape milestone claim M1 in a, M2 in b; a person's act), attach a conductor
 (ape conductor attach), and run the loops or the stub sessions. A claim lives while a run renews it.
 
-What this fixture does not have: GitHub. Milestone branches, record PRs, close PRs and take-ins are the
-coordination.github flow's and are not exercised here; a close is the local trunk's.
-`
+` + lacks
 	require.NoError(t, os.WriteFile(filepath.Join(out, "README.md"), []byte(readme), 0o644))
 	t.Logf("fixture at %s (main %s)", out, head)
 }
