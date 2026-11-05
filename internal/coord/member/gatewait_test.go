@@ -263,3 +263,21 @@ func TestJetStreamUnavailable(t *testing.T) {
 		})
 	}
 }
+
+// The fence's transient class is NATS being away only (research's note,
+// D808+): a lease value that does not decode refuses at once, in a run
+// too, rather than wait the whole bound and blame NATS. The control (NATS
+// down waits) is TestFenceMilestone_WaitsForNATSInARun.
+func TestFenceMilestone_AnUndecodableLeaseRefusesAtOnce(t *testing.T) {
+	p, _, js := gateRig(t)
+	ctx := t.Context()
+	kv, err := js.KeyValue(ctx, lease.LeasesBucket)
+	require.NoError(t, err)
+	_, err = kv.Put(ctx, "milestone.notes-svc.M2", []byte("not json"))
+	require.NoError(t, err)
+	start := time.Now()
+	err = FenceMilestone(WithRunWait(ctx, time.Minute, io.Discard), p, "M2")
+	require.ErrorContains(t, err, "does not decode is not a NATS outage")
+	require.False(t, Transient(err))
+	require.Less(t, time.Since(start), 5*time.Second, "at once")
+}

@@ -348,6 +348,15 @@ func jetStreamUnavailable(err error) bool {
 		errors.As(err, &api) && api.Code == http.StatusServiceUnavailable
 }
 
+// natsDown is a failed read of a lease that NATS being away explains:
+// JetStream not answering (jetStreamUnavailable) or the connection gone.
+// A lease value or epoch that does not decode is not, and refuses at once
+// (research's note on V8l, D808+).
+func natsDown(err error) bool {
+	return jetStreamUnavailable(err) || errors.Is(err, nats.ErrConnectionClosed) || errors.Is(err, nats.ErrDisconnected) ||
+		errors.Is(err, nats.ErrNoServers) || errors.Is(err, nats.ErrConnectionReconnecting) || errors.Is(err, nats.ErrConnectionDraining)
+}
+
 // FenceMilestone is apexv1.FenceMilestone (D702): right before ape pushes
 // milestone/<M>, this checkout must hold M's lease now — a holder whose
 // renewal failed, and whose lease another member took, does not push. A
@@ -370,6 +379,10 @@ func FenceMilestone(ctx context.Context, p *apexv1.Project, ms string) error {
 		defer s.close()
 		holder, key = s.holder, s.key(ms)
 		l, err = s.store.LiveHolder(ctx, key)
+		if err != nil && !natsDown(err) {
+			return false, &apexv1.FailError{Code: apexv1.CodeNotLeaseHolder, Action: apexv1.ActionPerson, Msg: fmt.Sprintf(
+				"%s's lease could not be read before the push (%v): nothing landed — a lease or epoch that does not decode is not a NATS outage, so ape does not wait it out", ms, err)}
+		}
 		if err != nil {
 			return true, &apexv1.FailError{Code: apexv1.CodeCoordNATSUnreachable, Action: apexv1.ActionRetry, Msg: fmt.Sprintf(
 				"%s's lease could not be read before the push (%v): nothing landed — run this again once NATS is back", ms, err)}
@@ -670,7 +683,7 @@ func (h *closeHold) fence(ctx context.Context) (retakes int, err error) {
 		var rerr error
 		l, rerr = h.s.store.LiveHolder(ctx, h.key)
 		if rerr != nil {
-			return true, &apexv1.FailError{Code: apexv1.CodeCloseLost, Action: apexv1.ActionRetry, Msg: fmt.Sprintf("the close lease %s could not be read before the enqueue (%v): nothing was enqueued — close again", h.key, rerr)}
+			return natsDown(rerr), &apexv1.FailError{Code: apexv1.CodeCloseLost, Action: apexv1.ActionRetry, Msg: fmt.Sprintf("the close lease %s could not be read before the enqueue (%v): nothing was enqueued — close again", h.key, rerr)}
 		}
 		return false, nil
 	})
