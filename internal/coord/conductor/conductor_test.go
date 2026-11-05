@@ -176,7 +176,7 @@ func TestDrill_ConductorAnswersOnceThenGoesSilent(t *testing.T) {
 	require.Eventually(t, func() bool { return a.seqs()["2"] >= 2 }, 6*time.Second, 50*time.Millisecond, "unacknowledged: delivered again")
 	require.Eventually(t, func() bool { return seen(".project.M2." + apexv1.EventQuestionEscalated) }, 6*time.Second, 50*time.Millisecond)
 	require.Eventually(t, func() bool { return seen(".project.M2." + apexv1.EventMilestonePaused) }, 6*time.Second, 50*time.Millisecond)
-	paused, err := Paused(ctx, js, "taskforge", "M2", "bob")
+	paused, err := Paused(ctx, js, "taskforge", "M2", "ann") // ann holds M2: her conductor paused it
 	require.NoError(t, err)
 	require.True(t, paused)
 
@@ -192,7 +192,7 @@ func TestDrill_ConductorAnswersOnceThenGoesSilent(t *testing.T) {
 	go func() { _ = Run(ctx, nc, scaled("ann", "cond-b", b)) }()
 	require.Eventually(t, func() bool { return b.seqs()["2"] >= 1 }, 6*time.Second, 50*time.Millisecond, "the takeover receives what was left unacknowledged")
 	require.Eventually(t, func() bool { return seen(".project.M2." + apexv1.EventMilestoneResumed) }, 6*time.Second, 50*time.Millisecond)
-	paused, err = Paused(ctx, js, "taskforge", "M2", "bob")
+	paused, err = Paused(ctx, js, "taskforge", "M2", "ann")
 	require.NoError(t, err)
 	require.False(t, paused)
 	_, ok := b.seqs()["1"]
@@ -655,8 +655,10 @@ func TestPaused_TheReadIsBounded(t *testing.T) {
 // only from the claim holder's user token. The T1: bob, a member of the
 // project who does not hold M2, publishes a person pause — ann, the
 // holder, is not paused by it; ann's own pause holds, and bob's person
-// resume does not lift it; ann's resume does. A conductor's pause is still
-// read from anyone (the control).
+// resume does not lift it; ann's resume does. V12-2: the same for the
+// conductor's kind, which is only the payload's word — bob's kind-less
+// pause does not hold ann, and his kind-less resume does not lift ann's
+// conductor's pause (the control: ann's conductor's own pause holds).
 func TestPaused_APersonsPauseCountsOnlyFromTheClaimHolder(t *testing.T) {
 	_, _, js := rig(t)
 	ctx := t.Context()
@@ -688,5 +690,11 @@ func TestPaused_APersonsPauseCountsOnlyFromTheClaimHolder(t *testing.T) {
 	require.False(t, paused(), "the holder's resume does")
 
 	pub("bob", apexv1.EventMilestonePaused, "")
-	require.True(t, paused(), "control: a conductor's pause is read from anyone, as before")
+	require.False(t, paused(), "V12-2: bob's pause labelled as a conductor's does not hold the holder either")
+	pub("ann", apexv1.EventMilestonePaused, "")
+	require.True(t, paused(), "control: the holder's conductor's pause holds")
+	pub("bob", apexv1.EventMilestoneResumed, "")
+	require.True(t, paused(), "V12-2: bob's kind-less resume does not lift it")
+	pub("ann", apexv1.EventMilestoneResumed, "")
+	require.False(t, paused(), "the holder's conductor's resume does")
 }
