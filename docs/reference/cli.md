@@ -2776,9 +2776,9 @@ then take over, unacknowledged events included. A NATS outage is ridden out: the
 is renewed again once NATS answers (claimed again if it lapsed meanwhile and nobody else
 took it), and deliveries resume; only another of your conductors holding the ensemble
 ends it. A durable consumer deleted under it (only an operator or a rebuild can) is bound
-again, which it logs, and delivers from the next event: an event published while it was
-gone is not delivered, so the conductor re-reads its projects with `ape status` after
-that line.
+again, which it logs, and delivers from the next event: neither the events published while
+it was gone nor the ones it held unacknowledged are delivered again, so the conductor
+re-reads its projects with `ape status` after that line.
 
 A person's act, from a terminal: refused in a model session (APE_SESSION or CLAUDECODE set), and
 the pre-tool hook denies it in any form — the conductor session it delivers into never
