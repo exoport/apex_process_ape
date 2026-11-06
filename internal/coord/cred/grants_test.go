@@ -356,7 +356,11 @@ func TestGrants_V12_3_AnotherPersonsDurable(t *testing.T) {
 			User: "ann", Ensemble: "atomix", Projects: []string{"taskforge"}, Holder: "cond-a", Nonce: "n",
 			LeaseTTL: 3 * time.Second, Renew: 500 * time.Millisecond, AckWait: time.Second,
 			Escalate: time.Minute, Pause: 2 * time.Minute, Session: a,
-			Log: func(f string, args ...any) { logMu.Lock(); logged = append(logged, fmt.Sprintf(f, args...)); logMu.Unlock() },
+			Log: func(f string, args ...any) {
+				logMu.Lock()
+				logged = append(logged, fmt.Sprintf(f, args...))
+				logMu.Unlock()
+			},
 		})
 	}()
 	require.Eventually(t, func() bool { _, err := ajs.Consumer(ctx, events.EventsStream, durable); return err == nil }, 10*time.Second, 50*time.Millisecond, "ann's conductor binds its durable on her credential")
@@ -400,7 +404,7 @@ func TestGrants_V12_3_AnotherPersonsDurable(t *testing.T) {
 	}, `Publish Violation - Subject "$JS.API.CONSUMER.CREATE.`+events.EventsStream+`.`+durable+`.ape.evt.nobody.>"`)
 	try("reads its info", func(c context.Context) error { _, err := bjs.Consumer(c, events.EventsStream, durable); return err },
 		`Publish Violation - Subject "$JS.API.CONSUMER.INFO.`+events.EventsStream+`.`+durable+`"`)
-	try("pulls from it", func(c context.Context) error {
+	try("pulls from it", func(_ context.Context) error {
 		_, err := bob.Request("$JS.API.CONSUMER.MSG.NEXT."+events.EventsStream+"."+durable, []byte(`{"batch":1,"expires":500000000}`), time.Second)
 		return err
 	}, `Publish Violation - Subject "$JS.API.CONSUMER.MSG.NEXT.`+events.EventsStream+`.`+durable+`"`)

@@ -534,7 +534,10 @@ func TestHoldMilestone_WaitsForNATSInARun(t *testing.T) {
 		err  error
 	}
 	got := make(chan held, 1)
-	go func() { s, err := HoldMilestone(WithRunWait(ctx, time.Minute, &out), p, "M2", &out); got <- held{s, err} }()
+	go func() {
+		s, err := HoldMilestone(WithRunWait(ctx, time.Minute, &out), p, "M2", &out)
+		got <- held{s, err}
+	}()
 	require.Eventually(t, func() bool { return strings.Contains(out.String(), "M2's lease for the run: waiting for NATS") }, 10*time.Second, 50*time.Millisecond)
 	for i := range 3 {
 		c.Restart(i)
