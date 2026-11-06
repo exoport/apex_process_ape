@@ -37,6 +37,7 @@ type milestones struct {
 	book   *lease.Book
 	holder string
 	m      Membership
+	root   string // the project's, for its NATS-down record
 	// denied keeps the connection's permission violations (V12d).
 	denied *denials
 }
@@ -91,7 +92,7 @@ func openMilestones(ctx context.Context, p *apexv1.Project, opts ...nats.Option)
 		}
 		return nil, fmt.Errorf("%w — the ensemble's NATS has no lease buckets yet: its supervisor declares them (`ape nats declare --new-epoch`)", err)
 	}
-	return &milestones{nc: nc, store: store, book: lease.OpenBook(runlog.CoordTokensPath(p.Root)), holder: id.SubjectToken + "/" + checkout, m: m, denied: denied}, nil
+	return &milestones{nc: nc, store: store, book: lease.OpenBook(runlog.CoordTokensPath(p.Root)), holder: id.SubjectToken + "/" + checkout, m: m, root: p.Root, denied: denied}, nil
 }
 
 func (s *milestones) close() { s.nc.Close() }
@@ -219,23 +220,38 @@ func ReleaseMilestone(ctx context.Context, p *apexv1.Project, ms string) (held b
 // the cluster refuses (the lease lapsed and moved on) is written to log and
 // renewing ends: the run's next change new or start then refuses with
 // session.not-lease-holder, at a change boundary.
+//
+// Inside a gated verb's run (WithRunWait) NATS unreachable while it takes
+// the lease is waited out (V8l-2, research's sweep after FINDING-2A-4);
+// outside one it refuses at once.
 func HoldMilestone(ctx context.Context, p *apexv1.Project, ms string, log io.Writer) (stop func(), err error) {
-	s, err := openMilestones(ctx, p)
-	if err != nil {
-		return nil, err
-	}
-	ok, err := s.claimed(ms)
-	if err != nil || !ok {
-		s.close()
-		if err == nil {
-			err = notHolder(fmt.Sprintf("this checkout has not claimed %s — a milestone's loop runs on its claim: `ape milestone claim %s`, then start the loop again", ms, ms))
+	var s *milestones
+	var l lease.Lease
+	var fresh bool
+	var before lease.Entry
+	err = waitTransient(ctx, ms+"'s lease for the run", func() (bool, error) {
+		var err error
+		s, err = openMilestones(ctx, p)
+		if err != nil {
+			return Transient(err), err
 		}
-		return nil, err
-	}
-	before, _, _ := s.book.Last(s.key(ms))
-	l, fresh, err := s.claimFresh(ctx, ms)
+		ok, err := s.claimed(ms)
+		if err == nil && !ok {
+			s.close()
+			return false, notHolder(fmt.Sprintf("this checkout has not claimed %s — a milestone's loop runs on its claim: `ape milestone claim %s`, then start the loop again", ms, ms))
+		}
+		if err == nil {
+			before, _, _ = s.book.Last(s.key(ms))
+			l, fresh, err = s.claimFresh(ctx, ms)
+		}
+		if err != nil {
+			s.close()
+			err = s.downErr(ms+"'s lease", err)
+			return Transient(err), err
+		}
+		return false, nil
+	})
 	if err != nil {
-		s.close()
 		return nil, err
 	}
 	// B3 (ANSWER-D751): claimed by this checkout, but the key was gone —
@@ -326,7 +342,7 @@ func requireMilestoneLease(ctx context.Context, p *apexv1.Project, op, ms string
 	defer s.close()
 	cur, _, err := s.store.Holder(ctx, s.key(ms))
 	if err != nil {
-		return err
+		return s.downErr(ms+"'s lease", err)
 	}
 	if cur == s.holder {
 		return nil
@@ -334,7 +350,7 @@ func requireMilestoneLease(ctx context.Context, p *apexv1.Project, op, ms string
 	// Lapsed between runs, and still this checkout's claim: taken again.
 	if ok, err := s.claimed(ms); cur == "" && err == nil && ok {
 		_, err := s.claim(ctx, ms)
-		return err
+		return s.downErr(ms+"'s lease", err)
 	}
 	if cur == "" {
 		return notHolder(fmt.Sprintf("%s refused: this checkout holds no lease on %s (never claimed, released, or lapsed with no run renewing it) — `ape milestone claim %s`, then run its loop", op, ms, ms))
@@ -361,6 +377,25 @@ func jetStreamUnavailable(err error) bool {
 func natsDown(err error) bool {
 	return jetStreamUnavailable(err) || errors.Is(err, nats.ErrConnectionClosed) || errors.Is(err, nats.ErrDisconnected) ||
 		errors.Is(err, nats.ErrNoServers) || errors.Is(err, nats.ErrConnectionReconnecting) || errors.Is(err, nats.ErrConnectionDraining)
+}
+
+// downErr is a lease call's error that NATS being away explains, made the
+// transient refusal a run waits out (V8l-2); a refusal by the server (a
+// grant gap: a denied JetStream call times out too, V12d) and any other
+// error are returned as they are.
+func (s *milestones) downErr(what string, err error) error {
+	if err == nil || Transient(err) {
+		return err
+	}
+	if gap := s.denied.gap(what, err); gap != nil {
+		return gap
+	}
+	if natsDown(err) {
+		_, _ = Down(s.root, time.Now())
+		return &apexv1.FailError{Code: apexv1.CodeCoordNATSUnreachable, Action: apexv1.ActionRetry, Msg: fmt.Sprintf(
+			"%s needs NATS, and it did not answer (%v) — run this again once NATS is back", what, err)}
+	}
+	return err
 }
 
 // FenceMilestone is apexv1.FenceMilestone (D702): right before ape pushes
@@ -561,7 +596,16 @@ func WaitClose(ctx context.Context, p *apexv1.Project, log io.Writer, onLost fun
 	deadline := time.Now().Add(maxWait)
 	said := ""
 	for {
-		release, holder, err := holdClose(ctx, p, log, onLost)
+		// Each poll connects afresh: inside a run, NATS away is waited
+		// out (V8l-2, FINDING-2A-4: the close ended exit 1 one second
+		// into an outage); outside one it refuses at once, as before.
+		var release func()
+		var holder string
+		err := waitTransient(ctx, "the close lease", func() (bool, error) {
+			var err error
+			release, holder, err = holdClose(ctx, p, log, onLost)
+			return holder == "" && Transient(err), err
+		})
 		if holder == "" || !time.Now().Before(deadline) {
 			return release, err
 		}
@@ -647,7 +691,7 @@ func holdClose(ctx context.Context, p *apexv1.Project, log io.Writer, onLost fun
 	}
 	if err != nil {
 		s.close()
-		return nil, "", err
+		return nil, "", s.downErr("the close lease", err)
 	}
 	h := &closeHold{s: s, key: key, l: l}
 	activeClose.Store(h)

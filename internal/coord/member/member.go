@@ -335,6 +335,12 @@ func gate(ctx context.Context, p *apexv1.Project, op, milestone string, now time
 			"%s is paused: a question to the conductor went unanswered (OQ24), so %s waits — the conductor's answer resumes it, or `ape milestone resume %s` from the checkout holding its claim", milestone, op, milestone)}
 	}
 	// Stage 1a: a change of a milestone is this checkout's to start only
-	// while it holds the milestone's lease (section 3.1).
-	return "", requireMilestoneLease(ctx, p, op, milestone)
+	// while it holds the milestone's lease (section 3.1). NATS lost since
+	// the connect above is waited for as it is (V8l-2's sweep).
+	if err := requireMilestoneLease(ctx, p, op, milestone); Transient(err) {
+		return waitNATS, err
+	} else if err != nil {
+		return "", err
+	}
+	return "", nil
 }

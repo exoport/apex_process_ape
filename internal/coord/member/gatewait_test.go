@@ -451,3 +451,115 @@ func TestFenceMilestone_ALapseWithAKeeperRunning(t *testing.T) {
 	require.NotContains(t, keeperLog.String(), "was lost", "the keeper never lost it to the fence: %s", keeperLog.String())
 	require.NoError(t, FenceMilestone(ctx, p, "M2"), "and it is still this checkout's")
 }
+
+// V8l-2 (FINDING-2A-4): a close waiting for another checkout's close
+// connects afresh each poll, and returned the dial's error at once — M18's
+// close ended exit 1 one second into 2a's o2. The T1: bob's close waits
+// behind ann's, every node goes down for longer than a poll, and inside a
+// run it says it waits for NATS, goes on waiting for ann's close, and
+// takes the lease once ann's ends. The control: outside a run the same
+// outage refuses at once, transient (the no-outage control is
+// TestWaitClose_WaitsForTheOtherClose).
+func TestWaitClose_WaitsForNATSInARun(t *testing.T) {
+	_, c, _ := gateRig(t)
+	ctx := t.Context()
+	defer func(d, e time.Duration) { gateWaitEvery, CloseWaitPoll = d, e }(gateWaitEvery, CloseWaitPoll)
+	gateWaitEvery, CloseWaitPoll = 200*time.Millisecond, 200*time.Millisecond
+	ann, bob := checkout(t, c.URLs(), "ann"), checkout(t, c.URLs(), "bob")
+	release, err := HoldClose(ctx, ann, io.Discard, nil)
+	require.NoError(t, err)
+
+	var out syncBuf
+	got := make(chan error, 1)
+	var bobRelease func()
+	go func() {
+		r, err := WaitClose(WithRunWait(ctx, time.Minute, &out), bob, &out, nil, time.Minute)
+		bobRelease = r
+		got <- err
+	}()
+	require.Eventually(t, func() bool { return strings.Contains(out.String(), "waiting for ann/") }, 10*time.Second, 50*time.Millisecond, "bob waits for ann's close")
+
+	for i := range 3 {
+		c.Stop(i)
+	}
+	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	_, err = WaitClose(cctx, bob, io.Discard, nil, time.Minute)
+	cancel()
+	require.True(t, Transient(err), "control: outside a run it refuses at once: %v", err)
+	require.Eventually(t, func() bool { return strings.Contains(out.String(), "the close lease: waiting for NATS") }, 10*time.Second, 50*time.Millisecond, "inside the run it says it waits for NATS")
+	time.Sleep(2 * time.Second) // ten polls
+	select {
+	case err := <-got:
+		t.Fatalf("bob's close returned during the outage: %v", err)
+	default:
+	}
+	for i := range 3 {
+		c.Restart(i)
+	}
+	time.Sleep(time.Second)
+	select {
+	case err := <-got:
+		t.Fatalf("bob's close returned before ann's ended: %v", err)
+	default:
+	}
+	release()
+	select {
+	case err := <-got:
+		require.NoError(t, err, "ann's close ended: bob's takes the lease")
+		require.Contains(t, mustHolder(t, c.URLs(), "close.notes-svc"), "bob/")
+		bobRelease()
+	case <-time.After(60 * time.Second):
+		t.Fatalf("bob's close still waits after ann's ended:\n%s", out.String())
+	}
+}
+
+// V8l-2's sweep (research, D822+): HoldMilestone, at a gated run's start
+// (a close, a change's start or archive, a take-in), dialled once and
+// refused. The T1: every node down, it waits inside a run and holds the
+// lease once they are back. The control: outside a run it refuses at once.
+func TestHoldMilestone_WaitsForNATSInARun(t *testing.T) {
+	p, c, _ := gateRig(t)
+	ctx := t.Context()
+	defer func(d time.Duration) { gateWaitEvery = d }(gateWaitEvery)
+	gateWaitEvery = 200 * time.Millisecond
+	for i := range 3 {
+		c.Stop(i)
+	}
+	_, err := HoldMilestone(ctx, p, "M2", io.Discard)
+	require.True(t, Transient(err), "control: outside a run it refuses at once: %v", err)
+
+	var out syncBuf
+	type held struct {
+		stop func()
+		err  error
+	}
+	got := make(chan held, 1)
+	go func() { s, err := HoldMilestone(WithRunWait(ctx, time.Minute, &out), p, "M2", &out); got <- held{s, err} }()
+	require.Eventually(t, func() bool { return strings.Contains(out.String(), "M2's lease for the run: waiting for NATS") }, 10*time.Second, 50*time.Millisecond)
+	for i := range 3 {
+		c.Restart(i)
+	}
+	select {
+	case h := <-got:
+		require.NoError(t, h.err, "holds once NATS is back")
+		h.stop()
+	case <-time.After(60 * time.Second):
+		t.Fatalf("still waiting after NATS came back:\n%s", out.String())
+	}
+}
+
+// downErr: an error NATS being away explains is the transient refusal a
+// run waits out; a refusal by the server is the grant gap, never waited;
+// anything else is unchanged.
+func TestDownErr(t *testing.T) {
+	s := &milestones{root: t.TempDir(), denied: &denials{}}
+	require.True(t, Transient(s.downErr("x", fmt.Errorf("claim: %w", nats.ErrNoResponders))))
+	require.True(t, Transient(s.downErr("x", fmt.Errorf("claim: %w", nats.ErrConnectionClosed))))
+	other := errors.New("lease value does not decode")
+	require.Equal(t, other, s.downErr("x", other), "control: not NATS away")
+	require.NoError(t, s.downErr("x", nil))
+	s.denied.err = errors.New(`Permissions Violation for Publish to "$KV.ape-leases.close.x"`)
+	err := s.downErr("x", fmt.Errorf("claim: %w", context.DeadlineExceeded))
+	require.False(t, Transient(err), "a denied call's timeout is the grant gap: %v", err)
+	require.ErrorContains(t, err, "the server refused this credential's call")
+}
