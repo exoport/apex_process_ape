@@ -331,7 +331,10 @@ Merge queues: read, so a queue set outside a ruleset is reported NOT judged, wit
 
 A conductor receives its ensemble's events through the durable consumer **`conductor-<user>-<ens>`** on `APE_EVENTS`.
 Only the holder of `conductor.<user>.<ens>` binds it, so a conductor that takes the lease over inherits the events the
-last one left unacknowledged, and its acknowledgements are what renews the lease.
+last one left unacknowledged, and its acknowledgements are what renews the lease. A durable deleted while a conductor
+runs (after V12-3 only the operator's credential or a rebuild can delete it) is bound again, logged
+`conductor: bound its consumer again`, and starts at the next event: what was published while it was gone is not
+delivered. The conductor re-reads its projects with `ape status` after that line.
 
 `ape conductor attach --project <dir>… --pane <tmux pane>` is that conductor's ape. It types each event into your own
 Claude Code session's tmux pane by the same rule as `ape conductor watcher` (v1.4.2): the session pinned at the first
