@@ -4481,7 +4481,7 @@ their installation ids there (the App's settings page and its installation URL s
 the NATS URL, the members who may ask for tokens and the operators who may run set-up acts
 (NATS user names: the credentials' user tokens). The keys are read through systemd's
 LoadCredential (`ape ghapp print-unit`); the act log is /var/lib/apex-ghapp/acts.jsonl, and each act is
-also one `ape ghapp: act {…}` line on stderr (the unit's journal), never a token.
+also one JSON line on stderr (the unit's journal), after "ape ghapp: act", never a token.
 
 Flags:
 
