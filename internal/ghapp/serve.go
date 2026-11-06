@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"net/http"
 	"os"
@@ -105,6 +106,10 @@ type Service struct {
 	cache   map[string]Token
 	missing map[string][]string // the optional permissions each cached token lacks
 	logMu   sync.Mutex
+	// journal gets each act's record too, as one `ape ghapp: act {…}`
+	// line (stderr: the unit's journal, which a reader in group adm can
+	// read where the 0600 act log is root's; Q-2B-APP, D824).
+	journal io.Writer
 }
 
 // NewService loads the two keys.
@@ -124,7 +129,7 @@ func NewService(cfg *Config) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Service{cfg: cfg, gh: NewClient(cfg.API), wardenKey: sk, pusherKey: mk, now: time.Now, cache: map[string]Token{}, missing: map[string][]string{}}, nil
+	return &Service{cfg: cfg, gh: NewClient(cfg.API), wardenKey: sk, pusherKey: mk, now: time.Now, cache: map[string]Token{}, missing: map[string][]string{}, journal: os.Stderr}, nil
 }
 
 // Request is a caller's request; Reply the service's answer.
@@ -331,7 +336,8 @@ func (s *Service) record(user, kind string, req Request, rep Reply) actRecord {
 	return r
 }
 
-// logged appends the act's record to the log and returns rep.
+// logged appends the act's record to the log, writes it to the journal,
+// and returns rep.
 func (s *Service) logged(user, kind string, req Request, rep Reply) Reply {
 	data, err := json.Marshal(s.record(user, kind, req, rep))
 	if err != nil {
@@ -339,6 +345,9 @@ func (s *Service) logged(user, kind string, req Request, rep Reply) Reply {
 	}
 	s.logMu.Lock()
 	defer s.logMu.Unlock()
+	if s.journal != nil {
+		_, _ = fmt.Fprintf(s.journal, "ape ghapp: act %s\n", data)
+	}
 	f, err := os.OpenFile(s.cfg.Log, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err == nil {
 		_, _ = f.Write(append(data, '\n'))

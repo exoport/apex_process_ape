@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -38,6 +39,8 @@ func TestService(t *testing.T) {
 	}
 	s, err := NewService(cfg)
 	require.NoError(t, err)
+	var journal syncBuf
+	s.journal = &journal
 
 	url := natstest.RunServer(t)
 	nc, err := nats.Connect(url)
@@ -96,6 +99,15 @@ func TestService(t *testing.T) {
 		require.NotContains(t, string(log), secret, "the act log never holds a token or a secret's value")
 	}
 	require.Contains(t, string(log), `"user":"mallory"`, "refusals are logged too")
+	// Q-2B-APP (D824): each act is a journal line too, the act log's
+	// record, never a token or a secret's value.
+	j := journal.String()
+	for _, secret := range []string{"ghs_test", "RUNNER_TOKEN", "SECRET-CREDS-TEXT"} {
+		require.NotContains(t, j, secret, "the journal never holds a token or a secret's value")
+	}
+	require.Equal(t, strings.Count(string(log), "\n"), strings.Count(j, "ape ghapp: act {"), "a journal line per act")
+	require.Contains(t, j, `ape ghapp: act {"at":`)
+	require.Contains(t, j, `"user":"ci","kind":"pusher","repo":"shop/notes","purpose":"pr","ok":true`)
 	st, err := os.Stat(cfg.Log)
 	require.NoError(t, err)
 	if runtime.GOOS != "windows" { // Windows keeps no POSIX permission bits
@@ -147,4 +159,22 @@ func TestService_ReadTokenAsksForMergeQueues(t *testing.T) {
 			require.Equal(t, "read", first["merge_queues"], "the read token asks for Merge queues: read")
 		})
 	}
+}
+
+// syncBuf is a buffer the service's goroutines write while the test reads.
+type syncBuf struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (s *syncBuf) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuf) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
 }

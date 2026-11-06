@@ -4480,7 +4480,8 @@ Print the service's config for one repository, filled in with the two Apps' ids 
 their installation ids there (the App's settings page and its installation URL show them),
 the NATS URL, the members who may ask for tokens and the operators who may run set-up acts
 (NATS user names: the credentials' user tokens). The keys are read through systemd's
-LoadCredential (`ape ghapp print-unit`); the act log is /var/lib/apex-ghapp/acts.jsonl.
+LoadCredential (`ape ghapp print-unit`); the act log is /var/lib/apex-ghapp/acts.jsonl, and each act is
+also one `ape ghapp: act {…}` line on stderr (the unit's journal), never a token.
 
 Flags:
 
