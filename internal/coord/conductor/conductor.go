@@ -307,23 +307,18 @@ func (r *runner) reachable() {
 // deliver types each event when the session is idle; a redelivery of an
 // event still pending is typed again. A fetch that fails (NATS down) is
 // tried again after a pause, and a consumer gone from the cluster is
-// bound again (V8d).
+// bound again (V8d, V12-6).
+//
+// Fetch only publishes the pull: the server's answer to it — 409 Consumer
+// Deleted, or 503 No Responders for a consumer that no longer exists —
+// reaches only batch.Error() (nats.go v1.53.1), so that is read too. Read
+// nowhere, a deleted durable left attach deaf, pulling ≈ 6,650 times a
+// second (FINDING-2A-3).
 func (r *runner) deliver(ctx context.Context) {
 	for ctx.Err() == nil {
 		batch, err := r.consumer().Fetch(1, jetstream.FetchMaxWait(time.Second))
 		if err != nil {
-			if errors.Is(err, jetstream.ErrConsumerNotFound) || errors.Is(err, jetstream.ErrConsumerDeleted) {
-				if c, berr := r.bind(ctx); berr == nil {
-					r.mu.Lock()
-					r.cons = c
-					r.mu.Unlock()
-					r.logf("conductor: bound its consumer again\n")
-				}
-			}
-			select {
-			case <-ctx.Done():
-			case <-time.After(time.Second):
-			}
+			r.fetchFailed(ctx, err)
 			continue
 		}
 		for m := range batch.Messages() {
@@ -343,6 +338,31 @@ func (r *runner) deliver(ctx context.Context) {
 			}
 			r.mu.Unlock()
 		}
+		if err := batch.Error(); err != nil {
+			r.fetchFailed(ctx, err)
+		}
+	}
+}
+
+// fetchFailed handles a fetch's error, returned or in its batch: a
+// consumer the server says is gone is bound again, once JetStream answers
+// that it is (so an outage's 503s are not taken for a deletion); then,
+// whatever the error, a pause before the next pull.
+func (r *runner) fetchFailed(ctx context.Context, err error) {
+	if errors.Is(err, jetstream.ErrConsumerNotFound) || errors.Is(err, jetstream.ErrConsumerDeleted) || errors.Is(err, nats.ErrNoResponders) {
+		name := layout.ConductorConsumer(tok(r.cfg.User), tok(r.cfg.Ensemble))
+		if _, cerr := r.js.Consumer(ctx, events.EventsStream, name); errors.Is(cerr, jetstream.ErrConsumerNotFound) {
+			if c, berr := r.bind(ctx); berr == nil {
+				r.mu.Lock()
+				r.cons = c
+				r.mu.Unlock()
+				r.logf("conductor: bound its consumer again\n")
+			}
+		}
+	}
+	select {
+	case <-ctx.Done():
+	case <-time.After(time.Second):
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"runtime"
 	"strings"
 	"sync"
@@ -697,4 +698,66 @@ func TestPaused_APersonsPauseCountsOnlyFromTheClaimHolder(t *testing.T) {
 	require.True(t, paused(), "V12-2: bob's kind-less resume does not lift it")
 	pub("ann", apexv1.EventMilestoneResumed, "")
 	require.False(t, paused(), "the holder's conductor's resume does")
+}
+
+// V12-6 (FINDING-2A-3): a durable deleted while attach is idle. Fetch only
+// publishes the pull, and the server's 409/503 reaches batch.Error() alone,
+// which deliver never read: attach stayed deaf and pulled ≈ 6,650 times a
+// second. Now it binds again within seconds, says so, gets the next event,
+// and pulls about once a second throughout. The control: the same idle
+// attach with its durable left alone pulls at that rate too and binds
+// nothing.
+func TestDrill_ConductorBindsADeletedDurableAgainWhileIdle(t *testing.T) {
+	for _, del := range []bool{true, false} {
+		t.Run(map[bool]string{true: "deleted", false: "control-left-alone"}[del], func(t *testing.T) {
+			url, _, js := rig(t)
+			ctx := t.Context()
+			// attach's own connection: its outbound count is its pulls,
+			// renewals and sweeps. A subscriber on the pull subject would
+			// count them too, but it answers the pull (no 503), which
+			// hides the spin it is there to measure.
+			nc, err := nats.Connect(url)
+			require.NoError(t, err)
+			t.Cleanup(nc.Close)
+			f := &fakeSession{nc: nc, answers: 99, acked: map[string]bool{}}
+			var logMu sync.Mutex
+			var logged []string
+			cfg := scaled("ann", "cond-a", f)
+			cfg.Log = func(format string, a ...any) {
+				logMu.Lock()
+				logged = append(logged, fmt.Sprintf(format, a...))
+				logMu.Unlock()
+			}
+			rebound := func() bool {
+				logMu.Lock()
+				defer logMu.Unlock()
+				return slices.Contains(logged, "conductor: bound its consumer again\n")
+			}
+			go func() { _ = Run(ctx, nc, cfg) }()
+			name := layout.ConductorConsumer("ann", "atomix")
+			require.Eventually(t, func() bool { _, err := js.Consumer(ctx, events.EventsStream, name); return err == nil }, 5*time.Second, 50*time.Millisecond, "bound")
+			publish(t, js, "question", 1)
+			require.Eventually(t, func() bool { return f.done.Load() == 1 }, 5*time.Second, 50*time.Millisecond, "delivered before")
+
+			if del {
+				require.NoError(t, js.DeleteConsumer(ctx, events.EventsStream, name))
+			}
+			before := nc.Stats().OutMsgs
+			time.Sleep(3 * time.Second)
+			n := nc.Stats().OutMsgs - before
+			t.Logf("attach's messages out in the 3 s after: %d", n)
+			// The control's rate is ≈ 30 (a pull a second, a renewal and a
+			// sweep each 500 ms); the spin was thousands.
+			require.LessOrEqual(t, n, uint64(60), "a bounded pull rate")
+			if !del {
+				require.False(t, rebound(), "nothing deleted, nothing bound again")
+				return
+			}
+			require.Eventually(t, rebound, 5*time.Second, 50*time.Millisecond, "bound again, and said so")
+			_, err = js.Consumer(ctx, events.EventsStream, name)
+			require.NoError(t, err, "the durable exists again")
+			publish(t, js, "question", 2)
+			require.Eventually(t, func() bool { return f.done.Load() == 2 }, 5*time.Second, 50*time.Millisecond, "the next event delivered")
+		})
+	}
 }
