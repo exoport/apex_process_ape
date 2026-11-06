@@ -334,7 +334,8 @@ Only the holder of `conductor.<user>.<ens>` binds it, so a conductor that takes 
 last one left unacknowledged, and its acknowledgements are what renews the lease. A durable deleted while a conductor
 runs (after V12-3 only the operator's credential or a rebuild can delete it) is bound again, logged
 `conductor: bound its consumer again`, and starts at the next event: neither what was published while it was gone
-nor what it held unacknowledged is delivered again. The conductor re-reads its projects with `ape status` after that
+nor what it held unacknowledged is delivered again. What it held counts as acknowledged, so a milestone the conductor
+had paused for one of those events may be resumed. The conductor re-reads its projects with `ape status` after that
 line.
 
 `ape conductor attach --project <dir>… --pane <tmux pane>` is that conductor's ape. It types each event into your own

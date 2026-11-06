@@ -2777,8 +2777,9 @@ is renewed again once NATS answers (claimed again if it lapsed meanwhile and nob
 took it), and deliveries resume; only another of your conductors holding the ensemble
 ends it. A durable consumer deleted under it (only an operator or a rebuild can) is bound
 again, which it logs, and delivers from the next event: neither the events published while
-it was gone nor the ones it held unacknowledged are delivered again, so the conductor
-re-reads its projects with `ape status` after that line.
+it was gone nor the ones it held unacknowledged are delivered again — those count as
+acknowledged, and a milestone the conductor had paused for one of them may be resumed —
+so the conductor re-reads its projects with `ape status` after that line.
 
 A person's act, from a terminal: refused in a model session (APE_SESSION or CLAUDECODE set), and
 the pre-tool hook denies it in any form — the conductor session it delivers into never
