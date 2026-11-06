@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -16,12 +17,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/exoport/apex_process_ape/internal/aped"
+	"github.com/exoport/apex_process_ape/internal/apexv1"
 	"github.com/exoport/apex_process_ape/internal/coord/conductor"
 	"github.com/exoport/apex_process_ape/internal/coord/coordinator"
 	"github.com/exoport/apex_process_ape/internal/coord/cred"
 	"github.com/exoport/apex_process_ape/internal/coord/events"
 	"github.com/exoport/apex_process_ape/internal/coord/layout"
 	"github.com/exoport/apex_process_ape/internal/coord/lease"
+	"github.com/exoport/apex_process_ape/internal/coord/member"
 	"github.com/exoport/apex_process_ape/internal/coord/slots"
 	"github.com/exoport/apex_process_ape/internal/coord/supervisor"
 	"github.com/exoport/apex_process_ape/internal/ghapp"
@@ -320,38 +323,123 @@ func TestGrants_NoWiderThanTheKindNeeds(t *testing.T) {
 	), append(others, "ape.evt.>", "ape.coord.>"))
 }
 
-// v12_3Open says V12-3 is unfixed (research's REVIEW-V12; R2): consumer
-// names carry no owner token NATS can scope, so the consumer verbs a
-// member's ephemeral readers need also reach another person's durable. The
-// test shows it — bob deletes ann's conductor consumer — and requires the
-// refusal once it is fixed.
-const v12_3Open = true
-
+// V12-3 (research's REVIEW-V12; R2, 2a rows 5a/5b): a person's credential
+// reaches no consumer but its own conductor's durable, by exact name, so
+// bob can neither delete ann's durable (5a: her attach deaf and spinning,
+// FINDING-2A-3) nor re-create it with a filter that matches nothing (5b:
+// deaf, silently), nor read it, nor make an ephemeral consumer on the
+// stream; the server refuses each. The control: ann's own conductor, on
+// her member credential, binds, delivers, and binds again after the
+// operator deletes the durable, with no refusal (Enforced fails the test
+// on any it did not expect), and her notices read by gets alone.
 func TestGrants_V12_3_AnotherPersonsDurable(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	e := natstest.StartEnforced(t)
 	admin := connect(t, e.URL, e.Admin)
 	ajs, err := jetstream.New(admin)
 	require.NoError(t, err)
+	require.NoError(t, lease.Declare(ctx, ajs, 1))
 	require.NoError(t, events.Declare(ctx, ajs, 1))
-	_, err = ajs.CreateOrUpdateConsumer(ctx, events.EventsStream, jetstream.ConsumerConfig{
-		Durable: layout.ConductorConsumer("ann", "atomix"), FilterSubjects: conductor.Filters("atomix", []string{"taskforge"}), AckPolicy: jetstream.AckExplicitPolicy,
-	})
+	als, err := lease.Open(ctx, ajs)
 	require.NoError(t, err)
-	bob := e.Mint(t, "bob", perms(cred.MemberGrant("bob", "taskforge", "atomix")))
-	bjs, err := jetstream.New(connect(t, e.URL, bob))
+	require.NoError(t, als.SetEpoch(ctx, 1))
+	durable := layout.ConductorConsumer("ann", "atomix")
+
+	annCreds := e.Mint(t, "ann", perms(cred.MemberGrant("ann", "taskforge", "atomix")))
+	cnc := connect(t, e.URL, annCreds)
+	a := &acker{nc: cnc}
+	var logMu sync.Mutex
+	var logged []string
+	go func() {
+		_ = conductor.Run(ctx, cnc, conductor.Config{
+			User: "ann", Ensemble: "atomix", Projects: []string{"taskforge"}, Holder: "cond-a", Nonce: "n",
+			LeaseTTL: 3 * time.Second, Renew: 500 * time.Millisecond, AckWait: time.Second,
+			Escalate: time.Minute, Pause: 2 * time.Minute, Session: a,
+			Log: func(f string, args ...any) { logMu.Lock(); logged = append(logged, fmt.Sprintf(f, args...)); logMu.Unlock() },
+		})
+	}()
+	require.Eventually(t, func() bool { _, err := ajs.Consumer(ctx, events.EventsStream, durable); return err == nil }, 10*time.Second, 50*time.Millisecond, "ann's conductor binds its durable on her credential")
+	before, err := ajs.Consumer(ctx, events.EventsStream, durable)
 	require.NoError(t, err)
-	dctx, dcancel := context.WithTimeout(ctx, 3*time.Second)
-	defer dcancel()
-	err = bjs.DeleteConsumer(dctx, events.EventsStream, layout.ConductorConsumer("ann", "atomix"))
-	t.Logf("V12-3: bob deletes ann's conductor consumer: %v", err)
-	if v12_3Open {
-		require.NoError(t, err, "V12-3 open: another person's durable can be deleted")
-		return
+	created := before.CachedInfo().Created
+
+	bobCreds := e.Mint(t, "bob", perms(cred.MemberGrant("bob", "taskforge", "atomix")))
+	bob := connect(t, e.URL, bobCreds)
+	bjs, err := jetstream.New(bob)
+	require.NoError(t, err)
+	_, err = events.Publish(ctx, bjs, events.Subject("bob", "taskforge", events.KindProject, "M2", "question"), "taskforge/b/1", []byte(`{"q":"one"}`))
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return a.saw("project.M2.question") }, 10*time.Second, 50*time.Millisecond, "delivered to ann")
+
+	// bob, through the API as the nats CLI would call it (5a, 5b), each
+	// refused on the server's own line; ann's durable unchanged.
+	try := func(what string, call func(context.Context) error, line string) {
+		t.Helper()
+		e.Expect(line)
+		cctx, ccancel := context.WithTimeout(ctx, 3*time.Second)
+		defer ccancel()
+		err := call(cctx)
+		t.Logf("V12-3: bob %s: %v", what, err)
+		require.Error(t, err, "bob %s", what)
+		require.Eventually(t, func() bool { return strings.Contains(strings.Join(e.Violations(), "\n"), line) }, 5*time.Second, 50*time.Millisecond, "the server refuses bob's %s", what)
 	}
-	e.Expect("CONSUMER.DELETE." + events.EventsStream + "." + layout.ConductorConsumer("ann", "atomix"))
-	require.Error(t, err)
+	try("deletes ann's durable", func(c context.Context) error { return bjs.DeleteConsumer(c, events.EventsStream, durable) },
+		`Publish Violation - Subject "$JS.API.CONSUMER.DELETE.`+events.EventsStream+`.`+durable+`"`)
+	try("re-creates it with a filter that matches nothing", func(c context.Context) error {
+		_, err := bjs.CreateOrUpdateConsumer(c, events.EventsStream, jetstream.ConsumerConfig{
+			Durable: durable, FilterSubjects: []string{"ape.evt.nobody.>", "ape.evt.none.>"}, AckPolicy: jetstream.AckExplicitPolicy,
+		})
+		return err
+	}, `Publish Violation - Subject "$JS.API.CONSUMER.CREATE.`+events.EventsStream+`.`+durable+`"`)
+	try("re-creates it on one filter", func(c context.Context) error {
+		_, err := bjs.CreateOrUpdateConsumer(c, events.EventsStream, jetstream.ConsumerConfig{
+			Durable: durable, FilterSubject: "ape.evt.nobody.>", AckPolicy: jetstream.AckExplicitPolicy,
+		})
+		return err
+	}, `Publish Violation - Subject "$JS.API.CONSUMER.CREATE.`+events.EventsStream+`.`+durable+`.ape.evt.nobody.>"`)
+	try("reads its info", func(c context.Context) error { _, err := bjs.Consumer(c, events.EventsStream, durable); return err },
+		`Publish Violation - Subject "$JS.API.CONSUMER.INFO.`+events.EventsStream+`.`+durable+`"`)
+	try("pulls from it", func(c context.Context) error {
+		_, err := bob.Request("$JS.API.CONSUMER.MSG.NEXT."+events.EventsStream+"."+durable, []byte(`{"batch":1,"expires":500000000}`), time.Second)
+		return err
+	}, `Publish Violation - Subject "$JS.API.CONSUMER.MSG.NEXT.`+events.EventsStream+`.`+durable+`"`)
+	try("makes an ordered consumer on the stream", func(c context.Context) error {
+		oc, err := bjs.OrderedConsumer(c, events.EventsStream, jetstream.OrderedConsumerConfig{FilterSubjects: []string{"ape.evt.>"}})
+		if err != nil {
+			return err
+		}
+		_, err = oc.Fetch(1, jetstream.FetchMaxWait(time.Second))
+		return err
+	}, `Publish Violation - Subject "$JS.API.CONSUMER.CREATE.`+events.EventsStream+`.`)
+	after, err := ajs.Consumer(ctx, events.EventsStream, durable)
+	require.NoError(t, err)
+	require.Equal(t, created, after.CachedInfo().Created, "ann's durable is the one her conductor made")
+	require.Equal(t, conductor.Filters("atomix", []string{"taskforge"}), after.CachedInfo().Config.FilterSubjects)
+
+	// The control: the operator deletes it; ann's conductor binds it again
+	// on her own credential and gets the next event.
+	require.NoError(t, ajs.DeleteConsumer(ctx, events.EventsStream, durable))
+	require.Eventually(t, func() bool {
+		logMu.Lock()
+		defer logMu.Unlock()
+		return slices.Contains(logged, "conductor: bound its consumer again\n")
+	}, 10*time.Second, 50*time.Millisecond, "ann's conductor binds its durable again")
+	_, err = events.Publish(ctx, bjs, events.Subject("bob", "taskforge", events.KindProject, "M3", "question"), "taskforge/b/2", []byte(`{"q":"two"}`))
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return a.saw("project.M3.question") }, 10*time.Second, 50*time.Millisecond, "the next event delivered")
+
+	// And a person's read of the stream needs no consumer: ann's notice
+	// acks, by gets.
+	ajsAnn, err := jetstream.New(cnc)
+	require.NoError(t, err)
+	for i := range 3 {
+		_, err = events.Publish(ctx, ajsAnn, events.Subject("ann", "taskforge", events.KindProject, "M1", apexv1.EventNoticeAcked), fmt.Sprintf("taskforge/a/%d", i), fmt.Appendf(nil, `{"id":"n%d"}`, i))
+		require.NoError(t, err)
+	}
+	acks, ok := member.ReadAcks(ctx, ajsAnn, "taskforge")
+	require.True(t, ok)
+	require.Len(t, acks, 3)
 }
 
 // cred names the App service's subjects itself (so ghapp's tests can

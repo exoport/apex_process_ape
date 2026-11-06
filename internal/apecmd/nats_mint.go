@@ -96,6 +96,8 @@ the subject token. A reserved token (coord, sup, vm-*) and a token another minte
 // newNatsConsumerInfoCmd is `ape nats consumer-info` (hidden, read-only;
 // D814): a consumer's configuration and state as JSON, so a watcher can
 // see a durable re-created or changed (V12-3's 2a watch) with no nats CLI.
+// On a person's credential it reads that person's own conductor durable
+// only (V12-3); another's needs the operator's.
 func newNatsConsumerInfoCmd() *cobra.Command {
 	var f coordFlags
 	cmd := &cobra.Command{

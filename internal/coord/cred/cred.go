@@ -46,9 +46,10 @@ const leaseKV = "$KV.ape-leases."
 // readStreams is the JetStream API that reads streams, for each of
 // streams: bind one (INFO), get a message (MSG.GET, and DIRECT.GET, which a
 // KV get uses), and the consumers a read makes — an ordered consumer, a KV
-// watch, the conductor's durable: create, info, next, delete, and the
-// flow control a push watch answers. Never a stream's CREATE, UPDATE,
-// DELETE, PURGE or MSG.DELETE.
+// watch: create, info, next, delete, and the flow control a push watch
+// answers. Never a stream's CREATE, UPDATE, DELETE, PURGE or MSG.DELETE.
+// The coordinator's and the supervisor's: a person's credential reads by
+// gets alone (getStreams, V12-3).
 func readStreams(streams ...string) []string {
 	out := make([]string, 0, 1+9*len(streams))
 	out = append(out, "$JS.API.INFO")
@@ -68,10 +69,44 @@ func readStreams(streams ...string) []string {
 	return out
 }
 
+// getStreams is the JetStream API that reads streams with no consumer, for
+// each of streams: bind one (INFO) and get a message (MSG.GET, and
+// DIRECT.GET, which a KV get uses). A member's and a conductor's reads are
+// all gets (V12-3): consumer names carry no owner token NATS can scope, so
+// a consumer verb on a stream reaches every person's consumer on it.
+func getStreams(streams ...string) []string {
+	out := make([]string, 0, 1+4*len(streams))
+	out = append(out, "$JS.API.INFO")
+	for _, s := range streams {
+		out = append(out,
+			"$JS.API.STREAM.INFO."+s,
+			"$JS.API.STREAM.MSG.GET."+s,
+			"$JS.API.DIRECT.GET."+s,
+			"$JS.API.DIRECT.GET."+s+".>",
+		)
+	}
+	return out
+}
+
+// durable is the consumer API for one consumer, by its exact name: create
+// or update it (with one filter subject the name is followed by it), its
+// info, and its pulls. Never its delete.
+func durable(stream, name string) []string {
+	pre := "$JS.API.CONSUMER."
+	return []string{
+		pre + "CREATE." + stream + "." + name,
+		pre + "CREATE." + stream + "." + name + ".>",
+		pre + "INFO." + stream + "." + name,
+		pre + "MSG.NEXT." + stream + "." + name,
+	}
+}
+
 // ConductorGrant is a conductor's permissions (`ape conductor attach`):
 // its own conductor lease, its durable consumer of the ensemble's events
 // and the acks of what it delivers, and the pause, resume and escalation
-// events it publishes for its projects' milestones, as its user.
+// events it publishes for its projects' milestones, as its user. Its
+// durable is the only consumer it may touch, so another person can neither
+// delete nor re-create it (V12-3).
 func ConductorGrant(user, ensemble string, projects ...string) aped.Grant {
 	u, e := natsconn.SubjectToken(user), natsconn.SubjectToken(ensemble)
 	pub := []string{
@@ -81,8 +116,9 @@ func ConductorGrant(user, ensemble string, projects ...string) aped.Grant {
 	for _, p := range projects {
 		pub = append(pub, "ape.evt."+u+"."+natsconn.SubjectToken(p)+".project.>")
 	}
+	pub = append(pub, durable(eventsStream, layout.ConductorConsumer(u, e))...)
 	return aped.Grant{
-		PubAllow: append(pub, readStreams(eventsStream, leasesStream, metaStream)...),
+		PubAllow: append(pub, getStreams(eventsStream, leasesStream, metaStream)...),
 		SubAllow: []string{inbox(u)},
 	}
 }
