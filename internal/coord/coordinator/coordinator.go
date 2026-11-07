@@ -46,6 +46,8 @@ type Config struct {
 	// Assessor, when set, batches the members' triggers for the assessor
 	// (PLAN-V15-ASSESSOR step 2).
 	Assessor *AssessorConfig
+	// Log reports what the coordinator rides out (V8n); nil: nothing.
+	Log func(format string, a ...any)
 }
 
 // AcquireRequest is ape.coord.<ens>.slot.acquire's body.
@@ -93,6 +95,8 @@ type Coordinator struct {
 
 	mu   sync.Mutex
 	held lease.Lease
+	// down: coord.<ens> could not be kept at the last tick (said once).
+	down bool
 }
 
 // ErrNotLeader: another coordinator holds coord.<ens>.
@@ -171,16 +175,85 @@ func Run(ctx context.Context, nc *nats.Conn, cfg Config) error {
 			_ = ls.Release(context.WithoutCancel(ctx), l)
 			return nil
 		case <-t.C:
-			c.mu.Lock()
-			l, err := ls.Renew(ctx, c.held)
-			if err == nil {
-				c.held = l
-			}
-			c.mu.Unlock()
-			if err != nil {
-				return fmt.Errorf("coordinator: lost coord.%s: %w", cfg.Ensemble, err)
+			if err := c.keep(ctx, ls); err != nil {
+				return err
 			}
 		}
+	}
+}
+
+// keep is one tick of coord.<ens> (V8n: the coordinator exited on the
+// first failed renewal, so every NATS outage cost a restart by the
+// supervisor). NATS being away is ridden out: said once, tried again at
+// the next tick. A lease that lapsed meanwhile is claimed again when
+// nobody holds it, or adopted at its new revision when it is still this
+// coordinator's. Another coordinator holding it ends the run.
+func (c *Coordinator) keep(ctx context.Context, ls *lease.Store) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	key := layout.CoordKey(c.cfg.Ensemble)
+	l, err := ls.Renew(ctx, c.held)
+	if err == nil {
+		c.held = l
+		c.reachable()
+		return nil
+	}
+	if !errors.Is(err, lease.ErrStale) {
+		c.unreachable(err)
+		return nil
+	}
+	cur, tok, err := ls.Holder(ctx, key)
+	switch {
+	case err != nil:
+		c.unreachable(err)
+		return nil
+	case cur == c.cfg.ID:
+		// Ours, at a revision this coordinator did not see (a renewal
+		// whose reply the outage lost).
+		l, err := ls.Renew(ctx, lease.Lease{Key: key, Holder: c.cfg.ID, Token: tok, TTL: c.cfg.TTL})
+		if err != nil {
+			c.unreachable(err)
+			return nil
+		}
+		c.held = l
+		c.reachable()
+		return nil
+	case cur == "":
+		l, err := ls.Claim(ctx, key, c.cfg.ID, c.cfg.TTL)
+		if errors.Is(err, lease.ErrHeld) {
+			return nil // taken between the read and the claim: the next tick reads who
+		}
+		if err != nil {
+			c.unreachable(err)
+			return nil
+		}
+		c.held = l
+		c.reachable()
+		c.logf("coordinator: coord.%s had lapsed during the outage; claimed again\n", c.cfg.Ensemble)
+		return nil
+	}
+	return fmt.Errorf("coordinator: lost coord.%s: %s holds it now", c.cfg.Ensemble, cur)
+}
+
+// unreachable says once per outage that coord.<ens> could not be kept.
+func (c *Coordinator) unreachable(err error) {
+	if !c.down {
+		c.down = true
+		c.logf("coordinator: coord.%s could not be renewed (%v); riding it out, trying again every %s\n", c.cfg.Ensemble, err, c.cfg.Renew)
+	}
+}
+
+// reachable ends an outage.
+func (c *Coordinator) reachable() {
+	if c.down {
+		c.down = false
+		c.logf("coordinator: coord.%s is renewed again\n", c.cfg.Ensemble)
+	}
+}
+
+func (c *Coordinator) logf(format string, a ...any) {
+	if c.cfg.Log != nil {
+		c.cfg.Log(format, a...)
 	}
 }
 

@@ -2,6 +2,9 @@ package coordinator
 
 import (
 	"context"
+	"fmt"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -79,5 +82,119 @@ func TestCoordinator_PublishesTheOutageOnReconnect(t *testing.T) {
 	require.Len(t, info.State.Subjects, 2)
 	for subj, n := range info.State.Subjects {
 		require.Equal(t, uint64(1), n, "%s stored once, retries deduplicated", subj)
+	}
+}
+
+// V8n: the coordinator exited on the first renewal an outage failed ("lost
+// coord.<ens>: lease: read epoch: context deadline exceeded"), so every
+// outage cost a restart by the supervisor (2a, and twice in 2b). Now it
+// rides one out: every node down past the lease's TTL, then back, and the
+// same coordinator runs on, holds coord.<ens> again and answers. The
+// control: another coordinator claimed the lapsed lease before this one
+// was back, and this one ends (lost).
+func TestCoordinator_RidesOutANATSOutage(t *testing.T) {
+	for _, taken := range []bool{false, true} {
+		t.Run(map[bool]string{false: "rides-it-out", true: "control-taken-over"}[taken], func(t *testing.T) {
+			c := natstest.RunCluster(t, 3)
+			nc, err := nats.Connect(c.URLs(), nats.MaxReconnects(-1), nats.ReconnectWait(100*time.Millisecond))
+			require.NoError(t, err)
+			t.Cleanup(nc.Close)
+			js, err := jetstream.New(nc)
+			require.NoError(t, err)
+			ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+			defer cancel()
+			require.NoError(t, lease.Declare(ctx, js, 3))
+			require.NoError(t, slots.Declare(ctx, js, 3))
+			require.NoError(t, events.Declare(ctx, js, 3))
+			ls, err := lease.Open(ctx, js)
+			require.NoError(t, err)
+			require.NoError(t, ls.SetEpoch(ctx, 1))
+
+			var logMu sync.Mutex
+			var logged []string
+			cfg := Config{Ensemble: "ens", ID: "c1", TTL: 2 * time.Second, Renew: 500 * time.Millisecond,
+				Log: func(f string, a ...any) { logMu.Lock(); logged = append(logged, fmt.Sprintf(f, a...)); logMu.Unlock() }}
+			var als *lease.Store
+			if taken {
+				// c2's store, bound before the outage; c1 renews slowly, so
+				// c2's claim after it comes first.
+				cfg.Renew = 5 * time.Second
+				anc, err := nats.Connect(c.URLs(), nats.MaxReconnects(-1), nats.ReconnectWait(100*time.Millisecond))
+				require.NoError(t, err)
+				t.Cleanup(anc.Close)
+				ajs, err := jetstream.New(anc)
+				require.NoError(t, err)
+				als, err = lease.Open(ctx, ajs)
+				require.NoError(t, err)
+			}
+			said := func(s string) bool {
+				logMu.Lock()
+				defer logMu.Unlock()
+				for _, l := range logged {
+					if strings.Contains(l, s) {
+						return true
+					}
+				}
+				return false
+			}
+			rctx, stop := context.WithCancel(ctx)
+			defer stop()
+			done := make(chan error, 1)
+			go func() { done <- Run(rctx, nc, cfg) }()
+			holder := func() string {
+				hctx, hcancel := context.WithTimeout(ctx, 2*time.Second)
+				defer hcancel()
+				h, _, err := ls.Holder(hctx, "coord.ens")
+				if err != nil {
+					return "?"
+				}
+				return h
+			}
+			require.Eventually(t, func() bool { return holder() == "c1" }, 10*time.Second, 50*time.Millisecond)
+
+			for i := range 3 {
+				c.Stop(i)
+			}
+			time.Sleep(3 * cfg.TTL)
+			if taken {
+				time.Sleep(cfg.Renew) // c1's tick met the outage: it is mid-wait when the nodes return
+			}
+			select {
+			case err := <-done:
+				t.Fatalf("the coordinator ended during the outage: %v", err)
+			default:
+			}
+			for i := range 3 {
+				c.Restart(i)
+			}
+			if taken {
+				// Another coordinator gets the lapsed lease first.
+				require.Eventually(t, func() bool {
+					cctx, ccancel := context.WithTimeout(ctx, 2*time.Second)
+					defer ccancel()
+					_, err := als.Claim(cctx, "coord.ens", "c2", time.Minute)
+					return err == nil
+				}, 30*time.Second, 50*time.Millisecond, "c2 claims the lapsed lease")
+				select {
+				case err := <-done:
+					require.ErrorContains(t, err, "c2 holds it now", "control: lost to another coordinator, it ends")
+				case <-time.After(30 * time.Second):
+					t.Fatal("c1 runs on beside c2")
+				}
+				return
+			}
+			require.Eventually(t, func() bool { return holder() == "c1" }, 30*time.Second, 100*time.Millisecond, "the same coordinator holds coord.ens again")
+			require.Eventually(t, func() bool {
+				m, err := nc.Request("ape.coord.ens.status", nil, time.Second)
+				return err == nil && strings.Contains(string(m.Data), `"id":"c1"`)
+			}, 20*time.Second, 100*time.Millisecond, "and answers")
+			select {
+			case err := <-done:
+				t.Fatalf("the coordinator ended after the outage: %v", err)
+			default:
+			}
+			require.True(t, said("riding it out"), "it said it rides the outage out")
+			require.Eventually(t, func() bool { return said("claimed again") || said("renewed again") }, 5*time.Second, 50*time.Millisecond, "and that it holds the lease again")
+		})
 	}
 }
