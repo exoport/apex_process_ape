@@ -84,6 +84,19 @@ jobs:
             { n = 0 }
             END { flush() }' test.log | head -n 40 || true
 
+      - name: natstest verbose (V8-WIN-4)
+        # V8-WIN-4 closes only when no Windows run leaves a store dir
+        # (D859), and a passing test's t.Logf is printed nowhere without -v.
+        # Diagnostic only: the Test step above is the gate. Each "store dir
+        # left" line becomes a public warning annotation, and one notice
+        # gives the count, so the bar reads from annotations alone.
+        if: always() && matrix.os == 'windows-latest'
+        run: |
+          go test -v -count=1 -run 'Cluster' ./internal/natstest/ > natstest-v.log 2>&1 || true
+          left=$(grep -c 'store dir left' natstest-v.log || true)
+          grep 'store dir left' natstest-v.log | head -n 10 | sed 's/^/::warning title=V8-WIN-4::/' || true
+          echo "::notice title=V8-WIN-4::store dir left lines: ${left:-0}; natstest -v: $(grep -cE '^--- (PASS|FAIL)' natstest-v.log || true) test results, $(grep -c '^--- FAIL' natstest-v.log || true) failed"
+
       - name: Smoke — ./ape version
         # Catches //go:build constraint regressions that would let a
         # package compile but produce a binary that errors on first
