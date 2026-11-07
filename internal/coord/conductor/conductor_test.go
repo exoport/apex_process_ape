@@ -306,7 +306,7 @@ func TestRun_TwoCheckoutsOfOneProjectBind(t *testing.T) {
 	cfg.Projects = []string{"taskforge", "taskforge"}
 	errc := make(chan error, 1)
 	go func() { errc <- Run(ctx, nc, cfg) }()
-	time.Sleep(500 * time.Millisecond) // the consumer bound: DeliverNew
+	bound(t, js, "ann")
 	publish(t, js, "question", 1)
 	require.Eventually(t, func() bool {
 		select {
@@ -413,6 +413,25 @@ func outageRig(t *testing.T) (*natstest.Cluster, jetstream.JetStream) {
 	return c, js
 }
 
+// bound waits for user's conductor to be pulling on its durable. The
+// durable delivers new events only, so one published before it starts is
+// never delivered (V8-FLAKE-2: a fixed 500 ms was short of a slow
+// runner's bind). Its existing is not enough on a cluster: the consumer
+// is answered for once assigned, and fixes where "new" starts only when
+// its leader runs; a pull waiting on it says the leader runs.
+func bound(t *testing.T, js jetstream.JetStream, user string) {
+	t.Helper()
+	name := layout.ConductorConsumer(user, "atomix")
+	require.Eventually(t, func() bool {
+		c, err := js.Consumer(context.Background(), events.EventsStream, name)
+		if err != nil {
+			return false
+		}
+		info, err := c.Info(context.Background())
+		return err == nil && info.NumWaiting > 0
+	}, 30*time.Second, 50*time.Millisecond, "the conductor pulls on its durable")
+}
+
 func outage(t *testing.T, c *natstest.Cluster, d time.Duration) {
 	t.Helper()
 	for i := range c.Servers {
@@ -457,7 +476,7 @@ func TestDrill_ConductorRidesOutANATSOutage(t *testing.T) {
 		})
 		errA := make(chan error, 1)
 		go func() { errA <- Run(ctx, anc, cfg) }()
-		time.Sleep(500 * time.Millisecond)
+		bound(t, js, "ann")
 		publish(t, js, "block", 1)
 		require.Eventually(t, func() bool { return a.done.Load() == 1 }, 5*time.Second, 50*time.Millisecond, "delivered and acknowledged before the outage")
 
@@ -511,7 +530,7 @@ func TestDrill_ConductorRidesOutANATSOutage(t *testing.T) {
 		cfg := scaled("ann", "cond-a", a)
 		errA := make(chan error, 1)
 		go func() { errA <- Run(ctx, anc, cfg) }()
-		time.Sleep(500 * time.Millisecond)
+		bound(t, js, "ann")
 		publish(t, js, "block", 1)
 		require.Eventually(t, func() bool { return a.done.Load() == 1 }, 10*time.Second, 50*time.Millisecond, "bound and delivering before the outage")
 
