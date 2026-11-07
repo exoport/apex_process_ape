@@ -637,7 +637,7 @@ func CloseBusy(ctx context.Context, p *apexv1.Project) error {
 	key := layout.CloseKey(s.m.Project)
 	cur, _, err := s.store.Holder(ctx, key)
 	if err != nil {
-		return err
+		return s.downErr("the close lease", err) // V12-9: NATS away is coord.nats-unreachable here too
 	}
 	if cur != "" && cur != s.holder {
 		return closeBusy(cur, key)
