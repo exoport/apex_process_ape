@@ -16,7 +16,8 @@ const QueueWorkflowRel = ".github/workflows/apex-queue.yml"
 // request it passes at once: the queue runs the checks, on the tree that
 // merges. Self-hosted runners (a project's live services, section 5.5);
 // the NATS URL and the ensemble credential are CI secrets, never a file
-// in the repository.
+// in the repository. Its token reads the repository and nothing more
+// (V12-12): no job of it writes to GitHub.
 const QueueWorkflow = `# Written by ape (APEX v1.5, section 5.5): the merge queue's check and its events.
 # Required check: "apex-queue-check". Secrets: APE_NATS_URL, APE_NATS_CREDS.
 name: apex-queue
@@ -26,6 +27,8 @@ on:
     branches: [main]
   push:
     branches: [main]
+permissions:
+  contents: read
 concurrency:
   group: apex-queue-${{ github.ref }}
   cancel-in-progress: false
