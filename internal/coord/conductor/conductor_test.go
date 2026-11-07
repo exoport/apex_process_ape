@@ -506,14 +506,19 @@ func TestDrill_ConductorRidesOutANATSOutage(t *testing.T) {
 			t.Fatalf("attach ended after the outage: %v", err)
 		default:
 		}
+		// Each read bounded, the wait as long as the drill's other waits
+		// after the outage: an unbounded read on a cluster just back can
+		// spend most of a short window (Windows CI, run 41949504519).
 		require.Eventually(t, func() bool {
-			ls, err := lease.Open(ctx, js)
+			rctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			defer cancel()
+			ls, err := lease.Open(rctx, js)
 			if err != nil {
 				return false
 			}
-			h, _, err := ls.Holder(ctx, layout.ConductorKey("ann", "atomix"))
+			h, _, err := ls.Holder(rctx, layout.ConductorKey("ann", "atomix"))
 			return err == nil && h == "cond-a"
-		}, 10*time.Second, 100*time.Millisecond, "its lease is held again")
+		}, 30*time.Second, 100*time.Millisecond, "its lease is held again")
 		logMu.Lock()
 		defer logMu.Unlock()
 		all := strings.Join(logged, "")
