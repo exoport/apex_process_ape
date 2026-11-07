@@ -3,6 +3,7 @@ package apecmd
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"syscall"
@@ -63,7 +64,7 @@ releases the lease and exits 0.`,
 			}
 			cfg := coordinator.Config{
 				Ensemble: ensemble, ID: id, Projects: projects,
-				Log: func(format string, a ...any) { fmt.Fprintf(cmd.ErrOrStderr(), format, a...) },
+				Log: coordLog(cmd.ErrOrStderr(), id),
 			}
 			if assess {
 				if cfg.Assessor, err = f.assessorConfig(cmd, ensemble, assessFrom, assessBudget, assessWindow); err != nil {
@@ -164,4 +165,14 @@ func assessBudget(v string) (int64, error) {
 		return 0, fmt.Errorf("--assess-budget: %w (tokens such as 20M, 0, or off)", err)
 	}
 	return n, nil
+}
+
+// coordLog is the coordinator's log: each line stamped with the time and the
+// coordinator's id (its pid, by default), as the supervisor's own lines are
+// stamped, since a supervisor's coordinators write into its log (Q-2C-3:
+// V8n's ride-out lines are read against an outage's times).
+func coordLog(w io.Writer, id string) func(format string, a ...any) {
+	return func(format string, a ...any) {
+		fmt.Fprintf(w, "%s %s: "+format, append([]any{time.Now().UTC().Format(time.RFC3339), id}, a...)...)
+	}
 }
