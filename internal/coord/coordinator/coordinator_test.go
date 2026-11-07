@@ -198,3 +198,38 @@ func TestCoordinator_RidesOutANATSOutage(t *testing.T) {
 		})
 	}
 }
+
+// V8n's ride-out has an end: a connection closed for good (its reconnects
+// spent, or closed by its owner) brings nothing back, so the coordinator
+// ends rather than running on holding nothing, and its supervisor's
+// restart is not left facing a process that will never answer.
+func TestCoordinator_EndsOnAClosedConnection(t *testing.T) {
+	url := natstest.RunJetStreamServer(t)
+	nc, err := nats.Connect(url)
+	require.NoError(t, err)
+	t.Cleanup(nc.Close)
+	js, err := jetstream.New(nc)
+	require.NoError(t, err)
+	ctx := t.Context()
+	require.NoError(t, lease.Declare(ctx, js, 1))
+	require.NoError(t, slots.Declare(ctx, js, 1))
+	require.NoError(t, events.Declare(ctx, js, 1))
+	ls, err := lease.Open(ctx, js)
+	require.NoError(t, err)
+	require.NoError(t, ls.SetEpoch(ctx, 1))
+
+	cnc, err := nats.Connect(url)
+	require.NoError(t, err)
+	done := make(chan error, 1)
+	go func() {
+		done <- Run(ctx, cnc, Config{Ensemble: "ens", ID: "c1", TTL: 2 * time.Second, Renew: 200 * time.Millisecond})
+	}()
+	require.Eventually(t, func() bool { h, _, err := ls.Holder(ctx, "coord.ens"); return err == nil && h == "c1" }, 10*time.Second, 50*time.Millisecond)
+	cnc.Close()
+	select {
+	case err := <-done:
+		require.ErrorContains(t, err, "its NATS connection is closed")
+	case <-time.After(5 * time.Second):
+		t.Fatal("the coordinator runs on over a closed connection")
+	}
+}

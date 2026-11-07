@@ -61,10 +61,10 @@ var procs struct {
 	list []*proc
 }
 
-func starter(t *testing.T, url string, ids *atomic.Int32) Starter {
+func starter(t *testing.T, url string, ids *atomic.Int32, opts ...nats.Option) Starter {
 	t.Helper()
 	return func(parent context.Context, ens string) (Handle, error) {
-		nc, err := nats.Connect(url)
+		nc, err := nats.Connect(url, opts...)
 		if err != nil {
 			return nil, err
 		}
@@ -316,7 +316,10 @@ func TestDrill_SupervisorRidesOutANATSOutage(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		done <- Run(sctx, snc, Config{
-			ID: "sup-a", Start: starter(t, url, &ids), Verify: true, TTL: ttl, Renew: renew, HealthDeadline: 500 * time.Millisecond,
+			// The coordinators' connections do not reconnect: the outage
+			// ends coord-1 for good (a coordinator rides out an outage it
+			// can come back from, V8n), so (b) is the supervisor's restart.
+			ID: "sup-a", Start: starter(t, url, &ids, nats.NoReconnect()), Verify: true, TTL: ttl, Renew: renew, HealthDeadline: 500 * time.Millisecond,
 			Logf: func(f string, a ...any) { logMu.Lock(); logged = append(logged, fmt.Sprintf(f, a...)); logMu.Unlock() },
 		})
 	}()

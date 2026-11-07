@@ -187,10 +187,15 @@ func Run(ctx context.Context, nc *nats.Conn, cfg Config) error {
 // supervisor). NATS being away is ridden out: said once, tried again at
 // the next tick. A lease that lapsed meanwhile is claimed again when
 // nobody holds it, or adopted at its new revision when it is still this
-// coordinator's. Another coordinator holding it ends the run.
+// coordinator's. Another coordinator holding it ends the run, and so does
+// a connection closed for good: nothing comes back on it, and a
+// coordinator riding it out would run on holding nothing.
 func (c *Coordinator) keep(ctx context.Context, ls *lease.Store) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.nc.IsClosed() {
+		return fmt.Errorf("coordinator: lost coord.%s: its NATS connection is closed", c.cfg.Ensemble)
+	}
 	key := layout.CoordKey(c.cfg.Ensemble)
 	l, err := ls.Renew(ctx, c.held)
 	if err == nil {
