@@ -906,7 +906,12 @@ func (h *closeHold) retake(ctx context.Context, what string, l lease.Live) (leas
 	}
 	err := waitTransient(ctx, what, func() (bool, error) {
 		if !h.renew(ctx, w) {
-			return false, nil // another holds it: the fence's check refuses
+			// Another holds it: the fence's check refuses, naming who holds
+			// it now, not the first read's "nobody" (R2C-3).
+			if relive, rerr := h.s.store.LiveHolder(ctx, h.key); rerr == nil {
+				l = relive
+			}
+			return false, nil
 		}
 		h.mu.Lock()
 		down := h.down

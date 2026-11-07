@@ -627,3 +627,56 @@ func TestFenceClose_ARetakeThatFailsIsTriedAgainInARun(t *testing.T) {
 	require.Contains(t, log.String(), "could not be renewed (renew: injected: JetStream not answering yet)", "the failed call is named")
 	require.Contains(t, log.String(), "close PR: enqueueing under close.notes-svc, held by this checkout")
 }
+
+// R2C-3: the close fence's re-take lost the lease to another checkout
+// between its read (lapsed, nobody) and its tick (another holds it), and
+// the refusal named the first read: "held by nobody". It names the holder
+// the tick met now. Injected through the tick's seam: the first re-take
+// tick finds zed/other's claim.
+func TestFenceClose_ARetakeLostToAnotherNamesIt(t *testing.T) {
+	shortLeases(t, time.Hour)
+	p, c, js := gateRig(t)
+	ctx := t.Context()
+	defer func(d time.Duration) { gateWaitEvery = d }(gateWaitEvery)
+	gateWaitEvery = 200 * time.Millisecond
+	release, err := HoldClose(ctx, p, io.Discard, nil)
+	require.NoError(t, err)
+	t.Cleanup(release)
+
+	for i := range 3 {
+		c.Stop(i)
+	}
+	var out syncBuf
+	done := make(chan error, 1)
+	go func() {
+		_, err := FenceClose(WithRunWait(ctx, time.Minute, &out), p, "the close PR's enqueue")
+		done <- err
+	}()
+	require.Eventually(t, func() bool { return strings.Contains(out.String(), "the close PR's enqueue: waiting for NATS") }, 20*time.Second, 100*time.Millisecond)
+	time.Sleep(2 * MilestoneTTL) // lapsed by the clock
+	var once atomic.Bool
+	closeTickFault = func() error {
+		if once.Swap(true) {
+			return nil
+		}
+		ls, err := lease.Open(ctx, js)
+		if err != nil {
+			return err
+		}
+		if h, tok, err := ls.Holder(ctx, "close.notes-svc"); err == nil && h != "" {
+			_ = ls.Release(ctx, lease.Lease{Key: "close.notes-svc", Holder: h, Token: tok})
+		}
+		_, err = ls.Claim(ctx, "close.notes-svc", "zed/other", time.Minute)
+		return err
+	}
+	t.Cleanup(func() { closeTickFault = nil })
+	for i := range 3 {
+		c.Restart(i)
+	}
+	select {
+	case err := <-done:
+		require.ErrorContains(t, err, "held by zed/other", "the refusal names who holds it now:\n%s", out.String())
+	case <-time.After(60 * time.Second):
+		t.Fatalf("still waiting after NATS came back:\n%s", out.String())
+	}
+}
