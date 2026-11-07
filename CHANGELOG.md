@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## v1.4.5 (2026-11-07)
+
+APEX v1.4.5, on v1.4.4: dependency updates only, for two Go vulnerability advisories published on
+2026-11-06. No code changed. The framework's `min_ape_version` stays 1.4.4. What it updates:
+
+- **github.com/klauspost/compress v1.19.2 → v1.20.2** (GO-2026-6865, a panic on two-block zstd
+  frames) and **github.com/andybalholm/brotli v1.2.1 → v1.2.7** (GO-2026-6888, excessive memory
+  when decompressing crafted streams). Neither is reachable in 1.4.4: ape compresses only its own
+  run transcripts, decompresses nothing in production, and its commit secret scan reads added
+  diff text, never an archive. The update keeps `govulncheck` clean for those who run it.
+
 ## v1.4.4 (2026-11-01)
 
 APEX v1.4.4, on v1.4.3: one fix found when an accepted config landed through a pull request (the
