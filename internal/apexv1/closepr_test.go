@@ -186,7 +186,7 @@ func TestClosePR_MainMovedDuringGate(t *testing.T) {
 }
 
 // useFenceClose sets FenceClose for a test.
-func useFenceClose(t *testing.T, f func(context.Context, *Project) (int, error)) {
+func useFenceClose(t *testing.T, f func(context.Context, *Project, string) (int, error)) {
 	t.Helper()
 	old := FenceClose
 	FenceClose = f
@@ -218,7 +218,7 @@ func TestClosePR_FencedBeforeTheEnqueue(t *testing.T) {
 	t.Run("held-by-another", func(t *testing.T) {
 		p, _, f := setup(t, "#!/bin/sh\nexit 0\n")
 		calls := 0
-		useFenceClose(t, func(context.Context, *Project) (int, error) {
+		useFenceClose(t, func(context.Context, *Project, string) (int, error) {
 			calls++
 			if calls == 1 {
 				return 0, nil // the close begins holding it
@@ -235,7 +235,7 @@ func TestClosePR_FencedBeforeTheEnqueue(t *testing.T) {
 		p, bare, f := setup(t, "#!/bin/sh\nexit 0\n")
 		run(t, clone, "clone", "-q", "--branch", "main", bare, ".")
 		calls := 0
-		useFenceClose(t, func(context.Context, *Project) (int, error) {
+		useFenceClose(t, func(context.Context, *Project, string) (int, error) {
 			calls++
 			if calls == 2 {
 				// The lease lapsed and was taken again while another close
@@ -315,7 +315,7 @@ func TestClosePR_DoneButUndeliveredIsDeliveredOnRerun(t *testing.T) {
 
 	t.Run("fault-after-done", func(t *testing.T) {
 		p, bare, f := setup(t)
-		useFenceClose(t, func(context.Context, *Project) (int, error) {
+		useFenceClose(t, func(context.Context, *Project, string) (int, error) {
 			return 0, &FailError{Code: CodeFetchFailed, Msg: "no read token from the coordination host's App service: lookup api.github.com: i/o timeout"}
 		})
 		_, err := p.CloseMilestone(ctx(), "M1", RunOptions{})

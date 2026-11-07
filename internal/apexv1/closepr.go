@@ -114,7 +114,7 @@ func (p *Project) mainIn(ctx context.Context, ms string) (bool, error) {
 // the close's gate, it takes main in and gates again (D708), a few rounds
 // at most: the PR goes into the queue only on the tree main will have.
 func (p *Project) openClosePR(ctx context.Context, ms string, attempts int, opt RunOptions) (*Integration, error) {
-	retakes, err := p.fenceClose(ctx)
+	retakes, err := p.fenceClose(ctx, "the close's take-in and push of "+MilestoneBranch(ms))
 	if err != nil {
 		return nil, err
 	}
@@ -168,7 +168,7 @@ func (p *Project) openClosePR(ctx context.Context, ms string, attempts int, opt 
 		// nothing is enqueued — and, when it lapsed and was taken again since
 		// main was checked, main is checked again (and taken in and gated if
 		// it moved) first.
-		now, err := p.fenceClose(ctx)
+		now, err := p.fenceClose(ctx, "the close PR's enqueue")
 		if err != nil {
 			return nil, err
 		}
@@ -228,11 +228,11 @@ func (p *Project) closeUndelivered(ctx context.Context, ms string) bool {
 }
 
 // fenceClose is FenceClose: 0 and nil when unset.
-func (p *Project) fenceClose(ctx context.Context) (int, error) {
+func (p *Project) fenceClose(ctx context.Context, what string) (int, error) {
 	if FenceClose == nil {
 		return 0, nil
 	}
-	return FenceClose(ctx, p)
+	return FenceClose(ctx, p, what)
 }
 
 // resolveClose reads a recorded close PR: done when it merged (main

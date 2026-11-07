@@ -83,7 +83,7 @@ func TestMemberGrant_TheMemberVerbsUnderIt(t *testing.T) {
 
 	release, err := HoldClose(ctx, ann, io.Discard, func() {})
 	require.NoError(t, err)
-	_, err = FenceClose(ctx, ann)
+	_, err = FenceClose(ctx, ann, "the close PR's enqueue")
 	require.NoError(t, err)
 	release()
 

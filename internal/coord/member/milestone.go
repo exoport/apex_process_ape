@@ -728,76 +728,135 @@ func holdClose(ctx context.Context, p *apexv1.Project, log io.Writer, onLost fun
 
 // closeHold is a running close's hold on close.<project> (D709): the lease,
 // and how many times it was taken again after lapsing (FINDING-V15-1A-11,
-// research's close-lease finding). One close runs per process.
+// research's close-lease finding). One close runs per process. down is set
+// while its keeper cannot renew it, said once (V8l-3).
 type closeHold struct {
 	s       *milestones
 	key     string
 	mu      sync.Mutex
 	l       lease.Lease
 	retakes int
+	down    bool
 }
 
 // activeClose is this process's close hold, nil outside a close.
 var activeClose atomic.Pointer[closeHold]
 
-// renew is one tick of the close lease's keeper: renewed; or, refused as
+// closeTickFault, set by tests, fails a tick before it reaches NATS: the
+// transient a call right after an outage can meet (V8l-3's T1).
+var closeTickFault func() error
+
+// tickResult is what one tick of the close lease did (V8l-3).
+type tickResult int
+
+const (
+	tickKept      tickResult = iota // renewed, or adopted at its current revision
+	tickRetaken                     // lapsed, nobody held it: taken again (counted)
+	tickRaced                       // taken by another between the read and the claim: the next read shows it
+	tickTransient                   // not renewed for a reason NATS being away explains; the error names the call
+	tickLost                        // another checkout holds it
+)
+
+// tick is one tick of the close lease, h.mu held: renewed; or, refused as
 // stale, taken again when nobody holds it (counted: the close re-checks
-// main before it enqueues) or adopted when this checkout does; false when
-// another checkout holds it — the close is then cancelled before it
-// enqueues anything.
-func (h *closeHold) renew(ctx context.Context, log io.Writer) bool {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+// main before it enqueues) or adopted when this checkout does. holder is
+// who holds it when it is lost.
+func (h *closeHold) tick(ctx context.Context) (r tickResult, holder string, err error) {
+	if closeTickFault != nil {
+		if err := closeTickFault(); err != nil {
+			return tickTransient, "", fmt.Errorf("renew: %w", err)
+		}
+	}
 	next, err := h.s.store.Renew(ctx, h.l)
 	switch {
 	case err == nil:
 		h.l = next
-		return true
+		return tickKept, "", nil
 	case !errors.Is(err, lease.ErrStale):
-		return true // transient: the next tick tries again within the TTL
+		return tickTransient, "", fmt.Errorf("renew: %w", err)
 	}
-	cur, tok, herr := h.s.store.Holder(ctx, h.key)
+	stale := err
+	cur, tok, err := h.s.store.Holder(ctx, h.key)
 	switch {
-	case herr != nil:
-		return true
+	case err != nil:
+		return tickTransient, "", fmt.Errorf("read its holder: %w", err)
 	case cur == "":
-		l, cerr := h.s.store.Claim(ctx, h.key, h.s.holder, MilestoneTTL)
-		if cerr != nil {
-			return true // taken by another between the read and the claim shows next tick
+		l, err := h.s.store.Claim(ctx, h.key, h.s.holder, MilestoneTTL)
+		if errors.Is(err, lease.ErrHeld) {
+			return tickRaced, "", err
+		}
+		if err != nil {
+			return tickTransient, "", fmt.Errorf("claim it again: %w", err)
 		}
 		h.l = l
 		h.retakes++
-		fmt.Fprintf(log, "ape: the close lease %s lapsed (%v) and was taken again: the close checks main again before it enqueues\n", h.key, err)
-		return true
+		return tickRetaken, "", stale
 	case cur == h.s.holder:
-		if l, rerr := h.s.store.Renew(ctx, lease.Lease{Key: h.key, Holder: h.s.holder, Token: tok, TTL: MilestoneTTL}); rerr == nil {
-			h.l = l
+		l, err := h.s.store.Renew(ctx, lease.Lease{Key: h.key, Holder: h.s.holder, Token: tok, TTL: MilestoneTTL})
+		if err != nil {
+			return tickTransient, "", fmt.Errorf("renew at its current revision: %w", err)
 		}
-		return true
+		h.l = l
+		return tickKept, "", nil
 	}
-	fmt.Fprintf(log, "ape: the close lease %s was lost (%v) and %s holds it now: this close stops before it enqueues anything\n", h.key, err, cur)
-	return false
+	return tickLost, cur, stale
 }
 
-// FenceClose is apexv1.FenceClose: right before a close enqueues its PR,
-// this close must hold close.<project> now; it returns how many times the
-// lease was taken again after lapsing, so the close re-checks main when
-// that changed. Outside a close (no hold, a project in no ensemble),
-// nothing is checked.
-func FenceClose(ctx context.Context, _ *apexv1.Project) (retakes int, err error) {
+// renew is one tick of the close lease's keeper, and says what it did: a
+// re-take, the first tick it could not renew (naming the call that failed)
+// and the one after that renewed it again (V8l-3: these were silent).
+// false when another checkout holds it — the close is then cancelled
+// before it enqueues anything.
+func (h *closeHold) renew(ctx context.Context, log io.Writer) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	r, holder, err := h.tick(ctx)
+	if log == nil {
+		log = io.Discard
+	}
+	if r != tickTransient && h.down {
+		h.down = false
+		fmt.Fprintf(log, "ape: the close lease %s is renewed again\n", h.key)
+	}
+	switch r {
+	case tickRetaken:
+		fmt.Fprintf(log, "ape: the close lease %s lapsed (%v) and was taken again: the close checks main again before it enqueues\n", h.key, err)
+	case tickTransient:
+		if !h.down {
+			h.down = true
+			fmt.Fprintf(log, "ape: the close lease %s could not be renewed (%v): kept, tried again every %s\n", h.key, err, MilestoneRenewEvery)
+		}
+	case tickLost:
+		fmt.Fprintf(log, "ape: the close lease %s was lost (%v) and %s holds it now: this close stops before it enqueues anything\n", h.key, err, holder)
+		return false
+	}
+	return true
+}
+
+// FenceClose is apexv1.FenceClose: right before what (the close's push of
+// milestone/<M>, the close PR's enqueue), this close must hold
+// close.<project> now; it returns how many times the lease was taken again
+// after lapsing, so the close re-checks main when that changed. Outside a
+// close (no hold, a project in no ensemble), nothing is checked.
+func FenceClose(ctx context.Context, _ *apexv1.Project, what string) (retakes int, err error) {
 	h := activeClose.Load()
 	if h == nil {
 		return 0, nil
 	}
-	return h.fence(ctx)
+	return h.fence(ctx, what)
 }
 
-// fence is FenceClose for this hold.
-// A lease that cannot be read is waited out inside a run (V8l); one
-// another holds refuses at once.
-func (h *closeHold) fence(ctx context.Context) (retakes int, err error) {
+// fence is FenceClose for this hold. A lease that cannot be read is waited
+// out inside a run (V8l); one another holds refuses at once. One that
+// lapsed is taken again inside the run's wait too (V8l-3, FINDING-2B-1: a
+// single attempt right after NATS came back kept nothing, and the close
+// refused).
+func (h *closeHold) fence(ctx context.Context, what string) (retakes int, err error) {
+	if what == "" {
+		what = "the close PR's enqueue"
+	}
 	var l lease.Live
-	err = waitTransient(ctx, "the close PR's enqueue", func() (bool, error) {
+	err = waitTransient(ctx, what, func() (bool, error) {
 		var rerr error
 		l, rerr = h.s.store.LiveHolder(ctx, h.key)
 		if gap := h.s.denied.gap("the close lease before the enqueue", rerr); rerr != nil && gap != nil {
@@ -812,24 +871,49 @@ func (h *closeHold) fence(ctx context.Context) (retakes int, err error) {
 		return 0, err
 	}
 	if _, inRun := ctx.Value(runWaitKey{}).(runWait); inRun && l.Holder == "" {
-		// Lapsed during the wait (FINDING-H5-DRY-1): one tick of the
-		// close's own keeper retakes it under its condition (nobody holds
-		// it; counted, so the close re-checks main), then it is read again.
+		// Lapsed during the wait (FINDING-H5-DRY-1): the close's own
+		// keeper's tick retakes it under its condition (nobody holds it;
+		// counted, so the close re-checks main), then it is read again —
+		// tried again within the run's wait while NATS is not answering
+		// yet (V8l-3), as retakeAtFence does for milestone/<M>.
 		w := FenceLog
 		if w == nil {
 			w = io.Discard
 		}
-		if h.renew(ctx, w) {
-			if relive, rerr := h.s.store.LiveHolder(ctx, h.key); rerr == nil {
-				l = relive
+		err = waitTransient(ctx, what, func() (bool, error) {
+			if !h.renew(ctx, w) {
+				return false, nil // another holds it: the check below refuses
 			}
+			h.mu.Lock()
+			down := h.down
+			h.mu.Unlock()
+			if down {
+				return true, &apexv1.FailError{Code: apexv1.CodeCloseLost, Action: apexv1.ActionRetry, Msg: fmt.Sprintf(
+					"the close lease %s lapsed and could not be taken again yet (NATS not answering): nothing was enqueued — close again", h.key)}
+			}
+			relive, rerr := h.s.store.LiveHolder(ctx, h.key)
+			if rerr != nil {
+				return natsDown(rerr), &apexv1.FailError{Code: apexv1.CodeCloseLost, Action: apexv1.ActionRetry, Msg: fmt.Sprintf(
+					"the close lease %s was taken again but could not be read back (%v): nothing was enqueued — close again", h.key, rerr)}
+			}
+			l = relive
+			return false, nil
+		})
+		if err != nil {
+			return 0, err
 		}
 	}
 	if l.Holder != h.s.holder {
 		return 0, &apexv1.FailError{Code: apexv1.CodeCloseLost, Action: apexv1.ActionRetry, Msg: fmt.Sprintf(
-			"the close lease %s is held by %s, not this close, so its PR was not enqueued: closes merge one at a time onto the main they gated (D709) — close again once that close is done", h.key, whoHolds(l))}
+			"the close lease %s is held by %s, not this close, so %s did not happen: closes merge one at a time onto the main they gated (D709) — close again once that close is done", h.key, whoHolds(l), what)}
 	}
-	fenceLogf("close PR: enqueueing under %s, held by this checkout (%s), last renewed %s", h.key, tokenText(l.Token), l.At.UTC().Format(time.RFC3339))
+	// The enqueue's line is unchanged (watchers match it); the close's
+	// earlier fence, before its take-in and push, says what it guards.
+	at := "close PR: enqueueing under"
+	if what != "the close PR's enqueue" {
+		at = what + ": closing under"
+	}
+	fenceLogf("%s %s, held by this checkout (%s), last renewed %s", at, h.key, tokenText(l.Token), l.At.UTC().Format(time.RFC3339))
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.retakes, nil

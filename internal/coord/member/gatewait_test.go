@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -189,20 +190,23 @@ func TestFenceClose_WaitsForNATSInARun(t *testing.T) {
 	release, err := HoldClose(ctx, p, io.Discard, nil)
 	require.NoError(t, err)
 	t.Cleanup(release)
-	_, err = FenceClose(ctx, p)
+	_, err = FenceClose(ctx, p, "the close PR's enqueue")
 	require.NoError(t, err, "held, NATS up")
 
 	for i := range 3 {
 		c.Stop(i)
 	}
 	fctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	_, err = FenceClose(fctx, p)
+	_, err = FenceClose(fctx, p, "the close PR's enqueue")
 	cancel()
 	require.ErrorContains(t, err, "could not be read before the enqueue", "control: outside a run it refuses")
 
 	var out syncBuf
 	done := make(chan error, 1)
-	go func() { _, err := FenceClose(WithRunWait(ctx, time.Minute, &out), p); done <- err }()
+	go func() {
+		_, err := FenceClose(WithRunWait(ctx, time.Minute, &out), p, "the close PR's enqueue")
+		done <- err
+	}()
 	require.Eventually(t, func() bool { return strings.Contains(out.String(), "the close PR's enqueue: waiting for NATS") }, 20*time.Second, 100*time.Millisecond)
 	for i := range 3 {
 		c.Restart(i)
@@ -370,7 +374,7 @@ func TestFenceClose_RetakesALeaseThatLapsedDuringTheWait(t *testing.T) {
 	}
 	retakes := make(chan int, 1)
 	go func() {
-		n, err := FenceClose(WithRunWait(ctx, time.Minute, &out), p)
+		n, err := FenceClose(WithRunWait(ctx, time.Minute, &out), p, "the close PR's enqueue")
 		retakes <- n
 		done <- err
 	}()
@@ -401,7 +405,7 @@ func TestFenceClose_RetakesALeaseThatLapsedDuringTheWait(t *testing.T) {
 	other, err := ls.Claim(ctx, "close.notes-svc", "zed/other", time.Minute)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = ls.Release(context.Background(), other) })
-	_, err = FenceClose(WithRunWait(ctx, time.Minute, &out), p)
+	_, err = FenceClose(WithRunWait(ctx, time.Minute, &out), p, "the close PR's enqueue")
 	require.ErrorContains(t, err, "zed/other")
 }
 
@@ -565,4 +569,61 @@ func TestDownErr(t *testing.T) {
 	err := s.downErr("x", fmt.Errorf("claim: %w", context.DeadlineExceeded))
 	require.False(t, Transient(err), "a denied call's timeout is the grant gap: %v", err)
 	require.ErrorContains(t, err, "the server refused this credential's call")
+}
+
+// V8l-3 (FINDING-2B-1): after an outage longer than the close lease's TTL
+// the enqueue's fence re-took the lapsed lease with one attempt, and that
+// attempt, failing right after NATS came back, kept nothing silently: the
+// close refused "held by nobody (it lapsed)". Now the re-take is tried
+// again within the run's wait, and the failure is said. The T1: the first
+// two re-take attempts fail (a transient, injected); the fence says the
+// lease could not be renewed, then takes it again and passes. The controls
+// (another holder, and outside a run, each refused at once) are
+// TestFenceClose_RetakesALeaseThatLapsedDuringTheWait and
+// TestFenceClose_WaitsForNATSInARun.
+func TestFenceClose_ARetakeThatFailsIsTriedAgainInARun(t *testing.T) {
+	shortLeases(t, time.Hour)
+	p, c, _ := gateRig(t)
+	ctx := t.Context()
+	defer func(d time.Duration) { gateWaitEvery = d }(gateWaitEvery)
+	gateWaitEvery = 200 * time.Millisecond
+	var log syncBuf
+	oldLog := FenceLog
+	FenceLog = &log
+	t.Cleanup(func() { FenceLog = oldLog })
+	release, err := HoldClose(ctx, p, io.Discard, nil)
+	require.NoError(t, err)
+	t.Cleanup(release)
+
+	for i := range 3 {
+		c.Stop(i)
+	}
+	var out syncBuf
+	done := make(chan error, 1)
+	go func() {
+		_, err := FenceClose(WithRunWait(ctx, time.Minute, &out), p, "the close PR's enqueue")
+		done <- err
+	}()
+	require.Eventually(t, func() bool { return strings.Contains(out.String(), "the close PR's enqueue: waiting for NATS") }, 20*time.Second, 100*time.Millisecond)
+	time.Sleep(2 * MilestoneTTL) // lapsed by the clock
+	var fails atomic.Int32
+	closeTickFault = func() error {
+		if fails.Add(1) <= 2 {
+			return errors.New("injected: JetStream not answering yet")
+		}
+		return nil
+	}
+	t.Cleanup(func() { closeTickFault = nil })
+	for i := range 3 {
+		c.Restart(i)
+	}
+	select {
+	case err := <-done:
+		require.NoError(t, err, "the re-take is tried again and the fence passes:\n%s\n%s", out.String(), log.String())
+	case <-time.After(60 * time.Second):
+		t.Fatalf("still waiting after NATS came back:\n%s\n%s", out.String(), log.String())
+	}
+	require.GreaterOrEqual(t, fails.Load(), int32(3), "the injected failures were met, then a tick went through")
+	require.Contains(t, log.String(), "could not be renewed (renew: injected: JetStream not answering yet)", "the failed call is named")
+	require.Contains(t, log.String(), "close PR: enqueueing under close.notes-svc, held by this checkout")
 }
