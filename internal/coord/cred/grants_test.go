@@ -176,10 +176,23 @@ func TestGrants_TheEnsembleUnderItsOwnAllowLists(t *testing.T) {
 	}
 	snc := connect(t, e.URL, supCreds)
 	sctx, stopSup := context.WithCancel(ctx)
-	defer stopSup()
+	supDone := make(chan struct{})
 	go func() {
+		defer close(supDone)
 		_ = supervisor.Run(sctx, snc, supervisor.Config{ID: "sup-a", Start: start, Verify: true, TTL: 3 * time.Second, Renew: time.Second, HeartbeatEvery: 500 * time.Millisecond})
 	}()
+	// The supervisor and its coordinators end before anything the test
+	// made goes (cleanups run last first): a supervisor still running
+	// could start a coordinator from a credential already removed.
+	t.Cleanup(func() {
+		stopSup()
+		<-supDone
+		procMu.Lock()
+		defer procMu.Unlock()
+		for _, p := range procs {
+			p.Stop()
+		}
+	})
 
 	// ann's ape: `ape supervisor ensure|status`, on her member credential.
 	ann := connect(t, e.URL, annCreds)
