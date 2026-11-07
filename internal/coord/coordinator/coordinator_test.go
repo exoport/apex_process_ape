@@ -112,8 +112,10 @@ func TestCoordinator_RidesOutANATSOutage(t *testing.T) {
 
 			var logMu sync.Mutex
 			var logged []string
-			cfg := Config{Ensemble: "ens", ID: "c1", TTL: 2 * time.Second, Renew: 500 * time.Millisecond,
-				Log: func(f string, a ...any) { logMu.Lock(); logged = append(logged, fmt.Sprintf(f, a...)); logMu.Unlock() }}
+			cfg := Config{
+				Ensemble: "ens", ID: "c1", TTL: 2 * time.Second, Renew: 500 * time.Millisecond,
+				Log: func(f string, a ...any) { logMu.Lock(); logged = append(logged, fmt.Sprintf(f, a...)); logMu.Unlock() },
+			}
 			var als *lease.Store
 			if taken {
 				// c2's store, bound before the outage; c1 renews slowly, so

@@ -61,8 +61,10 @@ releases the lease and exits 0.`,
 			if id == "" {
 				id = defaultCoordID("coord")
 			}
-			cfg := coordinator.Config{Ensemble: ensemble, ID: id, Projects: projects,
-				Log: func(format string, a ...any) { fmt.Fprintf(cmd.ErrOrStderr(), format, a...) }}
+			cfg := coordinator.Config{
+				Ensemble: ensemble, ID: id, Projects: projects,
+				Log: func(format string, a ...any) { fmt.Fprintf(cmd.ErrOrStderr(), format, a...) },
+			}
 			if assess {
 				if cfg.Assessor, err = f.assessorConfig(cmd, ensemble, assessFrom, assessBudget, assessWindow); err != nil {
 					return err

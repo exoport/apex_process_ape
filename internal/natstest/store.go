@@ -15,9 +15,9 @@ import (
 // on Windows a store file can stay in use a moment after the server
 // closed it ("being used by another process"), and t.TempDir's single
 // attempt failed a test whose body had passed.
-func storeDir(t testing.TB) string {
+func storeDir(t *testing.T) string {
 	t.Helper()
-	dir, err := os.MkdirTemp("", "natstest-")
+	dir, err := os.MkdirTemp("", "natstest-") //nolint:usetesting // t.TempDir removes once; this one tries again (V8-WIN-4)
 	if err != nil {
 		t.Fatalf("natstest: store dir: %v", err)
 	}

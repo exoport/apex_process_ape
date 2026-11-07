@@ -819,6 +819,8 @@ func (h *closeHold) renew(ctx context.Context, log io.Writer) bool {
 		fmt.Fprintf(log, "ape: the close lease %s is renewed again\n", h.key)
 	}
 	switch r {
+	case tickKept, tickRaced:
+		// Nothing to say: renewed, or the next tick reads who took it.
 	case tickRetaken:
 		fmt.Fprintf(log, "ape: the close lease %s lapsed (%v) and was taken again: the close checks main again before it enqueues\n", h.key, err)
 	case tickTransient:
@@ -871,35 +873,7 @@ func (h *closeHold) fence(ctx context.Context, what string) (retakes int, err er
 		return 0, err
 	}
 	if _, inRun := ctx.Value(runWaitKey{}).(runWait); inRun && l.Holder == "" {
-		// Lapsed during the wait (FINDING-H5-DRY-1): the close's own
-		// keeper's tick retakes it under its condition (nobody holds it;
-		// counted, so the close re-checks main), then it is read again —
-		// tried again within the run's wait while NATS is not answering
-		// yet (V8l-3), as retakeAtFence does for milestone/<M>.
-		w := FenceLog
-		if w == nil {
-			w = io.Discard
-		}
-		err = waitTransient(ctx, what, func() (bool, error) {
-			if !h.renew(ctx, w) {
-				return false, nil // another holds it: the check below refuses
-			}
-			h.mu.Lock()
-			down := h.down
-			h.mu.Unlock()
-			if down {
-				return true, &apexv1.FailError{Code: apexv1.CodeCloseLost, Action: apexv1.ActionRetry, Msg: fmt.Sprintf(
-					"the close lease %s lapsed and could not be taken again yet (NATS not answering): nothing was enqueued — close again", h.key)}
-			}
-			relive, rerr := h.s.store.LiveHolder(ctx, h.key)
-			if rerr != nil {
-				return natsDown(rerr), &apexv1.FailError{Code: apexv1.CodeCloseLost, Action: apexv1.ActionRetry, Msg: fmt.Sprintf(
-					"the close lease %s was taken again but could not be read back (%v): nothing was enqueued — close again", h.key, rerr)}
-			}
-			l = relive
-			return false, nil
-		})
-		if err != nil {
+		if l, err = h.retake(ctx, what, l); err != nil {
 			return 0, err
 		}
 	}
@@ -917,4 +891,37 @@ func (h *closeHold) fence(ctx context.Context, what string) (retakes int, err er
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.retakes, nil
+}
+
+// retake is the close fence's re-take of a lease that lapsed during its
+// read (FINDING-H5-DRY-1): the close's own keeper's tick retakes it under
+// its condition (nobody holds it; counted, so the close re-checks main),
+// then it is read again — tried again within the run's wait while NATS is
+// not answering yet (V8l-3), as retakeAtFence does for milestone/<M>. l
+// is returned as read last.
+func (h *closeHold) retake(ctx context.Context, what string, l lease.Live) (lease.Live, error) {
+	w := FenceLog
+	if w == nil {
+		w = io.Discard
+	}
+	err := waitTransient(ctx, what, func() (bool, error) {
+		if !h.renew(ctx, w) {
+			return false, nil // another holds it: the fence's check refuses
+		}
+		h.mu.Lock()
+		down := h.down
+		h.mu.Unlock()
+		if down {
+			return true, &apexv1.FailError{Code: apexv1.CodeCloseLost, Action: apexv1.ActionRetry, Msg: fmt.Sprintf(
+				"the close lease %s lapsed and could not be taken again yet (NATS not answering): nothing was enqueued — close again", h.key)}
+		}
+		relive, rerr := h.s.store.LiveHolder(ctx, h.key)
+		if rerr != nil {
+			return natsDown(rerr), &apexv1.FailError{Code: apexv1.CodeCloseLost, Action: apexv1.ActionRetry, Msg: fmt.Sprintf(
+				"the close lease %s was taken again but could not be read back (%v): nothing was enqueued — close again", h.key, rerr)}
+		}
+		l = relive
+		return false, nil
+	})
+	return l, err
 }

@@ -58,6 +58,7 @@ func (f *fakeSession) Idle() bool {
 	}
 	return true
 }
+
 func (f *fakeSession) Type(text string) error {
 	f.mu.Lock()
 	f.typed = append(f.typed, text)

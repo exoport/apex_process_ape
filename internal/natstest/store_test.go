@@ -12,7 +12,7 @@ import (
 // it is let go, not reported at the first attempt; one that stays in use
 // is still reported.
 func TestRemoveAll_TriesAgainWhileAFileIsInUse(t *testing.T) {
-	inUse := errors.New("The process cannot access the file because it is being used by another process.")
+	inUse := errors.New("the process cannot access the file because it is being used by another process")
 	calls := 0
 	err := removeAll("d", func(string) error {
 		calls++
