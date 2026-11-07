@@ -427,7 +427,7 @@ func TestGrants_V12_3_AnotherPersonsDurable(t *testing.T) {
 	require.Eventually(t, func() bool {
 		logMu.Lock()
 		defer logMu.Unlock()
-		return slices.Contains(logged, "conductor: bound its consumer again\n")
+		return slices.ContainsFunc(logged, func(l string) bool { return strings.HasPrefix(l, "conductor: bound its consumer again") })
 	}, 10*time.Second, 50*time.Millisecond, "ann's conductor binds its durable again")
 	_, err = events.Publish(ctx, bjs, events.Subject("bob", "taskforge", events.KindProject, "M3", "question"), "taskforge/b/2", []byte(`{"q":"two"}`))
 	require.NoError(t, err)

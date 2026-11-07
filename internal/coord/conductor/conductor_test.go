@@ -40,6 +40,10 @@ type fakeSession struct {
 	done    atomic.Int32
 	// hold: while set, nothing is acknowledged (a delivery stays pending).
 	hold atomic.Bool
+	// busy: while set, the session is not idle, so a delivery waits in
+	// deliver; waited counts the Idle calls that said so.
+	busy   atomic.Bool
+	waited atomic.Int32
 }
 
 var (
@@ -47,7 +51,13 @@ var (
 	seqRe = regexp.MustCompile(`seq="(\d+)"`)
 )
 
-func (f *fakeSession) Idle() bool { return true }
+func (f *fakeSession) Idle() bool {
+	if f.busy.Load() {
+		f.waited.Add(1)
+		return false
+	}
+	return true
+}
 func (f *fakeSession) Type(text string) error {
 	f.mu.Lock()
 	f.typed = append(f.typed, text)
@@ -731,7 +741,7 @@ func TestDrill_ConductorBindsADeletedDurableAgainWhileIdle(t *testing.T) {
 			rebound := func() bool {
 				logMu.Lock()
 				defer logMu.Unlock()
-				return slices.Contains(logged, "conductor: bound its consumer again\n")
+				return slices.ContainsFunc(logged, func(l string) bool { return strings.HasPrefix(l, "conductor: bound its consumer again") })
 			}
 			go func() { _ = Run(ctx, nc, cfg) }()
 			name := layout.ConductorConsumer("ann", "atomix")
@@ -760,4 +770,98 @@ func TestDrill_ConductorBindsADeletedDurableAgainWhileIdle(t *testing.T) {
 			require.Eventually(t, func() bool { return f.done.Load() == 2 }, 5*time.Second, 50*time.Millisecond, "the next event delivered")
 		})
 	}
+}
+
+// V12-8 with R2B-1 and DRY-2B-1: a durable deleted while the conductor
+// holds an unacknowledged event. V12-6's rebind re-created it DeliverNew,
+// whose ack floor is the stream's last sequence: the held event was never
+// delivered again, sweep took it as acknowledged (and could resume a
+// milestone the conductor had paused for it), and an event published while
+// the durable was gone was never delivered at all. Now the rebind starts at
+// the lowest sequence still waiting, so: the held event is delivered again
+// with a new token, which acknowledges it; a conductor's pause for it
+// stands until then; the gap's event is delivered. And the loss is noticed
+// by sweep while the delivery is held for a busy session, not only at the
+// next fetch.
+func TestDrill_ConductorKeepsWhatALostDurableHeld(t *testing.T) {
+	_, nc, js := rig(t)
+	ctx := t.Context()
+	seen := watch(t, nc, "ape.evt.>")
+	f := &fakeSession{nc: nc, answers: 99, acked: map[string]bool{}}
+	f.hold.Store(true) // the conductor does not answer yet
+	var logMu sync.Mutex
+	var logged []string
+	cfg := scaled("ann", "cond-a", f)
+	cfg.Escalate, cfg.Pause = time.Second, 2*time.Second
+	// The answers are held for longer than scaled's lease TTL: under OQ22
+	// that conductor is silent and lets its lease lapse (lease lost, Run
+	// returns; drill 4's subject), whenever the held event's redelivery is
+	// not answered first. Not this drill's question.
+	cfg.LeaseTTL = 30 * time.Second
+	cfg.Log = func(format string, a ...any) {
+		logMu.Lock()
+		logged = append(logged, fmt.Sprintf(format, a...))
+		logMu.Unlock()
+	}
+	rebound := func() bool {
+		logMu.Lock()
+		defer logMu.Unlock()
+		return slices.ContainsFunc(logged, func(l string) bool { return strings.HasPrefix(l, "conductor: bound its consumer again") })
+	}
+	errc := make(chan error, 1)
+	go func() {
+		err := Run(ctx, nc, cfg)
+		cfg.Log("Run returned: %v\n", err) // in the failure's log: a wait that never ends says why
+		errc <- err
+	}()
+	name := layout.ConductorConsumer("ann", "atomix")
+	require.Eventually(t, func() bool { _, err := js.Consumer(ctx, events.EventsStream, name); return err == nil }, 5*time.Second, 50*time.Millisecond)
+	t.Cleanup(func() {
+		if t.Failed() {
+			f.mu.Lock()
+			for _, x := range f.typed {
+				t.Log(x[:min(len(x), 160)])
+			}
+			t.Logf("acked %v done %d", f.acked, f.done.Load())
+			f.mu.Unlock()
+			logMu.Lock()
+			t.Log(strings.Join(logged, ""))
+			logMu.Unlock()
+		}
+	})
+
+	publish(t, js, "question", 1)
+	require.Eventually(t, func() bool { return f.typedWith("which port?") }, 5*time.Second, 50*time.Millisecond, "delivered, held unanswered")
+	require.Eventually(t, func() bool { return seen(".M2.milestone-paused") }, 10*time.Second, 50*time.Millisecond, "the question waited past the pause age: its milestone is paused")
+	first := f.seqs()
+
+	// The session turns busy: the held event's next redelivery waits in
+	// deliver, which fetches nothing until it is typed.
+	f.busy.Store(true)
+	require.Eventually(t, func() bool { return f.waited.Load() > 0 }, 5*time.Second, 20*time.Millisecond, "a redelivery waits for the busy session")
+	require.NoError(t, js.DeleteConsumer(ctx, events.EventsStream, name))
+	require.Eventually(t, rebound, 5*time.Second, 50*time.Millisecond, "bound again by sweep, with the delivery still held (DRY-2B-1)")
+	f.busy.Store(false)
+	_, err := events.Publish(ctx, js, events.Subject("bob", "taskforge", events.KindProject, "M3", "question"), events.MessageID("taskforge", "c1", 2), []byte(`{"q":"in the gap"}`))
+	require.NoError(t, err)
+	time.Sleep(2 * time.Second) // sweeps after the rebind
+	require.False(t, seen(".M2.milestone-resumed"), "no answer came: the conductor's pause stands (R2B-1: the re-created durable's floor is not an answer)")
+
+	f.hold.Store(false)
+	require.Eventually(t, func() bool { return f.ackedWith("which port?") }, 15*time.Second, 50*time.Millisecond, "the held event delivered again, and its new token acknowledges it")
+	require.Eventually(t, func() bool { return f.ackedWith("in the gap") }, 15*time.Second, 50*time.Millisecond, "the event published while the durable was gone is delivered")
+	require.Eventually(t, func() bool { return seen(".M2.milestone-resumed") }, 15*time.Second, 50*time.Millisecond, "answered now: the conductor's pause is lifted")
+	require.GreaterOrEqual(t, f.seqs()[firstSeq(first)], 2, "the held event was typed again after the rebind")
+	select {
+	case err := <-errc:
+		t.Fatalf("Run returned: %v", err)
+	default:
+	}
+}
+
+func firstSeq(m map[string]int) string {
+	for k := range m {
+		return k
+	}
+	return ""
 }

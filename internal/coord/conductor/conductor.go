@@ -149,7 +149,7 @@ func Run(ctx context.Context, nc *nats.Conn, cfg Config) error {
 		return err
 	}
 	r := &runner{cfg: cfg, js: js, pend: map[uint64]*pending{}, lastAck: time.Now(), reconnects: nc.Stats().Reconnects}
-	cons, err := r.bind(ctx)
+	cons, err := r.bind(ctx, 0)
 	if err != nil {
 		// Nothing was delivered: the lease is let go, so a corrected
 		// attach need not wait out its TTL (v1.5 PRE-3).
@@ -157,6 +157,9 @@ func Run(ctx context.Context, nc *nats.Conn, cfg Config) error {
 		return fmt.Errorf("conductor: bind consumer: %w", err)
 	}
 	r.cons = cons
+	// Where the durable stood when bound: a rebind after a loss with
+	// nothing typed since starts after it.
+	r.seen = cons.CachedInfo().Delivered.Stream
 	dctx, stop := context.WithCancel(ctx)
 	defer stop()
 	go r.deliver(dctx)
@@ -199,17 +202,75 @@ type runner struct {
 	// away since (said once); reconnects is the connection's count.
 	down       bool
 	reconnects uint64
+	// seen is the highest stream sequence delivered (typed, or as the
+	// durable last reported); rebindMu serialises a rebind between
+	// deliver and sweep (V12-8).
+	seen     uint64
+	rebindMu sync.Mutex
 }
 
-// bind creates or binds the conductor's durable consumer.
-func (r *runner) bind(ctx context.Context) (jetstream.Consumer, error) {
-	return r.js.CreateOrUpdateConsumer(ctx, events.EventsStream, jetstream.ConsumerConfig{
+// bind binds the conductor's durable consumer, creating it when it is not
+// there (V12-8: get, then create). One that exists is used as it is, or
+// updated to this conductor's filters and ack wait keeping where it
+// delivers from (NATS refuses a change of its deliver policy or start
+// sequence). A new one starts at stream sequence from, or with the next
+// event when from is 0 (the first bind).
+func (r *runner) bind(ctx context.Context, from uint64) (jetstream.Consumer, error) {
+	want := jetstream.ConsumerConfig{
 		Durable:        layout.ConductorConsumer(tok(r.cfg.User), tok(r.cfg.Ensemble)),
 		FilterSubjects: Filters(r.cfg.Ensemble, r.cfg.Projects),
 		AckPolicy:      jetstream.AckExplicitPolicy,
 		AckWait:        r.cfg.AckWait,
 		DeliverPolicy:  jetstream.DeliverNewPolicy,
-	})
+	}
+	c, err := r.js.Consumer(ctx, events.EventsStream, want.Durable)
+	if err == nil {
+		have := c.CachedInfo().Config
+		if slices.Equal(have.FilterSubjects, want.FilterSubjects) && have.AckWait == want.AckWait && have.AckPolicy == want.AckPolicy {
+			return c, nil
+		}
+		want.DeliverPolicy, want.OptStartSeq, want.OptStartTime = have.DeliverPolicy, have.OptStartSeq, have.OptStartTime
+		return r.js.UpdateConsumer(ctx, events.EventsStream, want)
+	}
+	if !errors.Is(err, jetstream.ErrConsumerNotFound) {
+		return nil, err
+	}
+	if from > 0 {
+		want.DeliverPolicy, want.OptStartSeq = jetstream.DeliverByStartSequencePolicy, from
+	}
+	c, err = r.js.CreateConsumer(ctx, events.EventsStream, want)
+	if errors.Is(err, jetstream.ErrConsumerExists) {
+		return r.js.Consumer(ctx, events.EventsStream, want.Durable)
+	}
+	return c, err
+}
+
+// rebind binds the durable again after the cluster lost it (V12-6,
+// V12-8): from the lowest sequence still waiting for an acknowledgement,
+// so what the lost durable held is delivered again with a fresh token
+// (R2B-1), else from after the last delivered, so what was published
+// while it was gone is delivered too. Nothing when it is there after all.
+func (r *runner) rebind(ctx context.Context) {
+	r.rebindMu.Lock()
+	defer r.rebindMu.Unlock()
+	name := layout.ConductorConsumer(tok(r.cfg.User), tok(r.cfg.Ensemble))
+	if _, err := r.js.Consumer(ctx, events.EventsStream, name); !errors.Is(err, jetstream.ErrConsumerNotFound) {
+		return
+	}
+	r.mu.Lock()
+	from := r.seen + 1
+	for seq := range r.pend {
+		from = min(from, seq)
+	}
+	r.mu.Unlock()
+	c, err := r.bind(ctx, from)
+	if err != nil {
+		return
+	}
+	r.mu.Lock()
+	r.cons = c
+	r.mu.Unlock()
+	r.logf("conductor: bound its consumer again, from stream sequence %d\n", from)
 }
 
 func (r *runner) consumer() jetstream.Consumer {
@@ -332,6 +393,7 @@ func (r *runner) deliver(ctx context.Context) {
 			reply := m.Reply()
 			_ = r.cfg.Session.Type(Format(md.Sequence.Stream, r.cfg.Nonce, m.Subject(), m.Data(), reply))
 			r.mu.Lock()
+			r.seen = max(r.seen, md.Sequence.Stream)
 			if _, ok := r.pend[md.Sequence.Stream]; !ok {
 				proj, ms := projectOf(m.Subject())
 				r.pend[md.Sequence.Stream] = &pending{first: time.Now(), project: proj, milestone: ms}
@@ -350,15 +412,7 @@ func (r *runner) deliver(ctx context.Context) {
 // whatever the error, a pause before the next pull.
 func (r *runner) fetchFailed(ctx context.Context, err error) {
 	if errors.Is(err, jetstream.ErrConsumerNotFound) || errors.Is(err, jetstream.ErrConsumerDeleted) || errors.Is(err, nats.ErrNoResponders) {
-		name := layout.ConductorConsumer(tok(r.cfg.User), tok(r.cfg.Ensemble))
-		if _, cerr := r.js.Consumer(ctx, events.EventsStream, name); errors.Is(cerr, jetstream.ErrConsumerNotFound) {
-			if c, berr := r.bind(ctx); berr == nil {
-				r.mu.Lock()
-				r.cons = c
-				r.mu.Unlock()
-				r.logf("conductor: bound its consumer again\n")
-			}
-		}
+		r.rebind(ctx)
 	}
 	select {
 	case <-ctx.Done():
@@ -368,17 +422,28 @@ func (r *runner) fetchFailed(ctx context.Context, err error) {
 
 // sweep drops what was acknowledged (the consumer's ack floor and its
 // pending set say so), records the last acknowledgement, and escalates or
-// pauses what has waited too long.
+// pauses what has waited too long. A durable the cluster no longer has is
+// bound again here too (DRY-2B-1): deliver meets it only at its next
+// fetch, which waits while a delivery is held for a busy session.
 func (r *runner) sweep(ctx context.Context, cons jetstream.Consumer) {
 	info, err := cons.Info(ctx)
+	if errors.Is(err, jetstream.ErrConsumerNotFound) {
+		r.rebind(ctx)
+		return
+	}
 	if err != nil {
 		return
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	floor := info.AckFloor.Stream
+	r.seen = max(r.seen, info.Delivered.Stream)
 	for seq, p := range r.pend {
-		if seq > floor && info.NumAckPending > 0 {
+		// Acknowledged: at or below the ack floor, or delivered with
+		// nothing waiting. Not yet delivered by this durable (one bound
+		// again after a loss starts below it, V12-8/R2B-1) is not an
+		// answer: its floor is not the old durable's.
+		if seq > floor && (info.NumAckPending > 0 || seq > info.Delivered.Stream) {
 			continue
 		}
 		delete(r.pend, seq)
