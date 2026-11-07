@@ -33,13 +33,21 @@ func RunCluster(t *testing.T, n int) *Cluster {
 		routes[i] = &url.URL{Scheme: "nats", Host: fmt.Sprintf("127.0.0.1:%d", p)}
 	}
 	c := &Cluster{t: t}
+	// Every store is made before the first node starts and Shutdown is
+	// registered after them, so the nodes are stopped before any store is
+	// removed, a setup that fails partway included (V8-WIN-4).
+	dirs := make([]string, n)
+	for i := range dirs {
+		dirs[i] = storeDir(t)
+	}
+	t.Cleanup(c.Shutdown)
 	for i := range n {
 		o := &server.Options{
 			ServerName: fmt.Sprintf("n%d", i+1),
 			Host:       "127.0.0.1",
 			Port:       -1,
 			JetStream:  true,
-			StoreDir:   t.TempDir(),
+			StoreDir:   dirs[i],
 			NoLog:      true,
 			NoSigs:     true,
 			Cluster:    server.ClusterOpts{Name: "ape-test", Host: "127.0.0.1", Port: ports[i]},
@@ -53,7 +61,6 @@ func RunCluster(t *testing.T, n int) *Cluster {
 			o.Port = a.Port
 		}
 	}
-	t.Cleanup(c.Shutdown)
 	c.WaitMetaLeader(30 * time.Second)
 	return c
 }
@@ -66,6 +73,7 @@ func (c *Cluster) start(o *server.Options) *server.Server {
 	}
 	go s.Start()
 	if !s.ReadyForConnections(10 * time.Second) {
+		stop(s)
 		c.t.Fatalf("natstest: cluster server %s not ready", o.ServerName)
 	}
 	return s
@@ -85,8 +93,7 @@ func (c *Cluster) URLs() string {
 // Stop shuts server i down, keeping its store, so Restart brings it back
 // with its data.
 func (c *Cluster) Stop(i int) {
-	c.Servers[i].Shutdown()
-	c.Servers[i].WaitForShutdown()
+	stop(c.Servers[i])
 }
 
 // Restart starts server i again on its old options and store.
@@ -97,8 +104,8 @@ func (c *Cluster) Restart(i int) {
 }
 
 // Shutdown stops every server and waits until each has closed its store:
-// on Windows an open file cannot be removed, so t.TempDir's cleanup would
-// otherwise fail on a store file still in use.
+// on Windows an open file cannot be removed, so the stores' removal would
+// otherwise fail on a file still in use.
 func (c *Cluster) Shutdown() {
 	for _, s := range c.Servers {
 		if s != nil {

@@ -40,9 +40,9 @@ func RunJetStreamServer(t *testing.T) string {
 	opts.Host = "127.0.0.1"
 	opts.Port = -1
 	opts.JetStream = true
-	opts.StoreDir = t.TempDir()
+	opts.StoreDir = storeDir(t)
 	s := natsserver.RunServer(&opts)
-	t.Cleanup(s.Shutdown)
+	t.Cleanup(func() { stop(s) })
 	if !s.ReadyForConnections(5 * time.Second) {
 		t.Fatal("natstest: JetStream server not ready in time")
 	}
@@ -80,7 +80,7 @@ func startOperatorJetStream(t *testing.T, logger server.Logger) (url string, acc
 	if err != nil {
 		t.Fatalf("natstest: encode system account jwt: %v", err)
 	}
-	opts := &server.Options{Host: "127.0.0.1", Port: -1, JetStream: true, StoreDir: t.TempDir(), SystemAccount: spub}
+	opts := &server.Options{Host: "127.0.0.1", Port: -1, JetStream: true, StoreDir: storeDir(t), SystemAccount: spub}
 	opts.TrustedKeys = []string{publicKey(t, okp)}
 	res := &server.MemAccResolver{}
 	for pub, j := range map[string]string{apub: ajwt, spub: sjwt} {
@@ -97,7 +97,7 @@ func startOperatorJetStream(t *testing.T, logger server.Logger) (url string, acc
 		s.SetLogger(logger, false, false)
 	}
 	go s.Start()
-	t.Cleanup(s.Shutdown)
+	t.Cleanup(func() { stop(s) })
 	if !s.ReadyForConnections(5 * time.Second) {
 		t.Fatal("natstest: operator server not ready in time")
 	}
