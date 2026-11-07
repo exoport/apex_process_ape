@@ -2776,10 +2776,13 @@ then take over, unacknowledged events included. A NATS outage is ridden out: the
 is renewed again once NATS answers (claimed again if it lapsed meanwhile and nobody else
 took it), and deliveries resume; only another of your conductors holding the ensemble
 ends it. A durable consumer deleted under it (only an operator or a rebuild can) is bound
-again, which it logs, and delivers from the next event: neither the events published while
-it was gone nor the ones it held unacknowledged are delivered again — those count as
-acknowledged, and a milestone the conductor had paused for one of them may be resumed —
-so the conductor re-reads its projects with `ape status` after that line.
+again, which it logs, from the oldest event it still held unacknowledged: what it held is
+delivered again with a new token, what was published while it was gone is delivered too,
+and events acknowledged after the oldest held one may come again (at least once). A
+milestone the conductor paused for a held event stays paused until that event is answered.
+After a rebuild (the events stream new, its sequences from 1) it binds from the new
+stream's first event and drops what it held of the old one. The conductor re-reads its
+projects with `ape status` after either line.
 
 A person's act, from a terminal: refused in a model session (APE_SESSION or CLAUDECODE set), and
 the pre-tool hook denies it in any form — the conductor session it delivers into never
