@@ -792,8 +792,15 @@ func TestDrill_ConductorBindsADeletedDurableAgainWhileIdle(t *testing.T) {
 			require.Eventually(t, rebound, 5*time.Second, 50*time.Millisecond, "bound again, and said so")
 			_, err = js.Consumer(ctx, events.EventsStream, name)
 			require.NoError(t, err, "the durable exists again")
-			publish(t, js, "question", 2)
-			require.Eventually(t, func() bool { return f.done.Load() == 2 }, 5*time.Second, 50*time.Millisecond, "the next event delivered")
+			// The next event by its own payload, not by counting answers: a
+			// durable deleted before sweep dropped the first event's entry is
+			// bound again from it (at least once, R2C-2), and the fake, which
+			// answers a sequence once, leaves its copy pending, so the
+			// conductor's own escalation of it is answered too (one CPU: 8
+			// in 10 runs counted 3, never 2).
+			_, err = events.Publish(ctx, js, events.Subject("bob", "taskforge", events.KindProject, "M2", "question"), events.MessageID("taskforge", "c1", 2), []byte(`{"q":"the next"}`))
+			require.NoError(t, err)
+			require.Eventually(t, func() bool { return f.ackedWith("the next") }, 5*time.Second, 50*time.Millisecond, "the next event delivered")
 		})
 	}
 }
