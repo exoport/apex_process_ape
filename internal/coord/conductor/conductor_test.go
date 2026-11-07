@@ -307,7 +307,7 @@ func TestRun_TwoCheckoutsOfOneProjectBind(t *testing.T) {
 	cfg.Projects = []string{"taskforge", "taskforge"}
 	errc := make(chan error, 1)
 	go func() { errc <- Run(ctx, nc, cfg) }()
-	bound(t, js, "ann")
+	bound(t, js)
 	publish(t, js, "question", 1)
 	require.Eventually(t, func() bool {
 		select {
@@ -414,15 +414,15 @@ func outageRig(t *testing.T) (*natstest.Cluster, jetstream.JetStream) {
 	return c, js
 }
 
-// bound waits for user's conductor to be pulling on its durable. The
+// bound waits for ann's conductor to be pulling on its durable. The
 // durable delivers new events only, so one published before it starts is
 // never delivered (V8-FLAKE-2: a fixed 500 ms was short of a slow
 // runner's bind). Its existing is not enough on a cluster: the consumer
 // is answered for once assigned, and fixes where "new" starts only when
 // its leader runs; a pull waiting on it says the leader runs.
-func bound(t *testing.T, js jetstream.JetStream, user string) {
+func bound(t *testing.T, js jetstream.JetStream) {
 	t.Helper()
-	name := layout.ConductorConsumer(user, "atomix")
+	name := layout.ConductorConsumer("ann", "atomix")
 	require.Eventually(t, func() bool {
 		c, err := js.Consumer(context.Background(), events.EventsStream, name)
 		if err != nil {
@@ -477,7 +477,7 @@ func TestDrill_ConductorRidesOutANATSOutage(t *testing.T) {
 		})
 		errA := make(chan error, 1)
 		go func() { errA <- Run(ctx, anc, cfg) }()
-		bound(t, js, "ann")
+		bound(t, js)
 		publish(t, js, "block", 1)
 		require.Eventually(t, func() bool { return a.done.Load() == 1 }, 5*time.Second, 50*time.Millisecond, "delivered and acknowledged before the outage")
 
@@ -536,7 +536,7 @@ func TestDrill_ConductorRidesOutANATSOutage(t *testing.T) {
 		cfg := scaled("ann", "cond-a", a)
 		errA := make(chan error, 1)
 		go func() { errA <- Run(ctx, anc, cfg) }()
-		bound(t, js, "ann")
+		bound(t, js)
 		publish(t, js, "block", 1)
 		require.Eventually(t, func() bool { return a.done.Load() == 1 }, 10*time.Second, 50*time.Millisecond, "bound and delivering before the outage")
 
@@ -889,4 +889,78 @@ func firstSeq(m map[string]int) string {
 		return k
 	}
 	return ""
+}
+
+// R2C-1: a rebuild re-declares APE_EVENTS, so its sequences start again at
+// 1. A rebind from the old stream's sequences (min pending, or after the
+// last seen) is past the new stream's end: the server keeps an explicit
+// start sequence, so nothing was delivered until the new stream reached
+// it, while the old pending entries escalated. Now the conductor binds the
+// new stream from its first event, and drops what it held of the old one.
+func TestDrill_ConductorHearsARebuiltEventsStream(t *testing.T) {
+	_, nc, js := rig(t)
+	ctx := t.Context()
+	seen := watch(t, nc, "ape.evt.>")
+	f := &fakeSession{nc: nc, answers: 99, acked: map[string]bool{}}
+	var logMu sync.Mutex
+	var logged []string
+	cfg := scaled("ann", "cond-a", f)
+	cfg.LeaseTTL = 30 * time.Second // a held answer is not silence here (drill 4's subject)
+	cfg.Escalate, cfg.Pause = 4*time.Second, time.Minute
+	cfg.Log = func(format string, a ...any) {
+		logMu.Lock()
+		logged = append(logged, fmt.Sprintf(format, a...))
+		logMu.Unlock()
+	}
+	said := func(prefix string) bool {
+		logMu.Lock()
+		defer logMu.Unlock()
+		return slices.ContainsFunc(logged, func(l string) bool { return strings.HasPrefix(l, prefix) })
+	}
+	t.Cleanup(func() {
+		if t.Failed() {
+			logMu.Lock()
+			t.Log(strings.Join(logged, ""))
+			logMu.Unlock()
+		}
+	})
+	go func() { _ = Run(ctx, nc, cfg) }()
+	bound(t, js)
+	for i := range int64(5) {
+		_, err := events.Publish(ctx, js, events.Subject("bob", "taskforge", events.KindProject, "M2", "question"), events.MessageID("taskforge", "c1", 10+i), []byte(fmt.Sprintf(`{"q":"old %d"}`, i)))
+		require.NoError(t, err)
+	}
+	require.Eventually(t, func() bool { return f.done.Load() == 5 }, 10*time.Second, 50*time.Millisecond, "five old events answered")
+	// Their acknowledgements reach the ack floor and a few sweeps drop them,
+	// so what is pending at the rebuild is the held event alone, at the old
+	// stream's sequence 6: a start the new stream does not reach for a while.
+	require.Eventually(t, func() bool {
+		c, err := js.Consumer(ctx, events.EventsStream, layout.ConductorConsumer("ann", "atomix"))
+		if err != nil {
+			return false
+		}
+		info, err := c.Info(ctx)
+		return err == nil && info.AckFloor.Stream == 5
+	}, 10*time.Second, 50*time.Millisecond)
+	time.Sleep(4 * cfg.Renew)
+	f.hold.Store(true)
+	publish(t, js, "question", 1) // held: pending on the old stream, at its sequence 6
+	require.Eventually(t, func() bool { return f.typedWith("which port?") }, 5*time.Second, 50*time.Millisecond)
+
+	// The rebuild: the stream deleted (its durables with it) and declared again.
+	require.NoError(t, js.DeleteStream(ctx, events.EventsStream))
+	require.NoError(t, events.Declare(ctx, js, 1))
+	// The fake keys its acknowledgements by sequence, which the new stream
+	// numbers again from 1: forget the old stream's.
+	f.mu.Lock()
+	f.acked = map[string]bool{}
+	f.mu.Unlock()
+	f.hold.Store(false)
+	start := time.Now()
+	require.Eventually(t, func() bool { return said("conductor: the events stream is new (rebuild)") }, 10*time.Second, 50*time.Millisecond, "the rebind sees a new stream")
+	_, err := events.Publish(ctx, js, events.Subject("bob", "taskforge", events.KindProject, "M3", "question"), events.MessageID("taskforge", "c2", 1), []byte(`{"q":"after the rebuild"}`))
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return f.ackedWith("after the rebuild") }, 10*time.Second, 50*time.Millisecond, "the new stream's next event is delivered within seconds")
+	time.Sleep(max(0, cfg.Escalate+time.Second-time.Since(start)))
+	require.False(t, seen(".M2.question-escalated"), "what was held of the old stream does not escalate after the rebuild")
 }

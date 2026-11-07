@@ -160,6 +160,11 @@ func Run(ctx context.Context, nc *nats.Conn, cfg Config) error {
 	// Where the durable stood when bound: a rebind after a loss with
 	// nothing typed since starts after it.
 	r.seen = cons.CachedInfo().Delivered.Stream
+	// Which stream it was bound on: a rebuild makes a new one, whose
+	// sequences start again at 1 (R2C-1).
+	if st, err := js.Stream(ctx, events.EventsStream); err == nil {
+		r.created = st.CachedInfo().Created
+	}
 	dctx, stop := context.WithCancel(ctx)
 	defer stop()
 	go r.deliver(dctx)
@@ -207,6 +212,9 @@ type runner struct {
 	// deliver and sweep (V12-8).
 	seen     uint64
 	rebindMu sync.Mutex
+	// created is when the events stream the durable was bound on was
+	// created (R2C-1: a rebuild re-declares it).
+	created time.Time
 }
 
 // bind binds the conductor's durable consumer, creating it when it is not
@@ -250,6 +258,8 @@ func (r *runner) bind(ctx context.Context, from uint64) (jetstream.Consumer, err
 // so what the lost durable held is delivered again with a fresh token
 // (R2B-1), else from after the last delivered, so what was published
 // while it was gone is delivered too. Nothing when it is there after all.
+// On an events stream a rebuild made anew (R2C-1), from that stream's first
+// event, and what was held from the old one is dropped.
 func (r *runner) rebind(ctx context.Context) {
 	r.rebindMu.Lock()
 	defer r.rebindMu.Unlock()
@@ -257,10 +267,26 @@ func (r *runner) rebind(ctx context.Context) {
 	if _, err := r.js.Consumer(ctx, events.EventsStream, name); !errors.Is(err, jetstream.ErrConsumerNotFound) {
 		return
 	}
+	st, err := r.js.Stream(ctx, events.EventsStream)
+	if err != nil {
+		return // no stream to bind on yet (a rebuild under way): the next sweep tries again
+	}
+	si := st.CachedInfo()
 	r.mu.Lock()
 	from := r.seen + 1
 	for seq := range r.pend {
 		from = min(from, seq)
+	}
+	// A rebuilt stream (R2C-1): its sequences start again at 1, so a start
+	// taken from the old one would be past its end, and the server would
+	// deliver nothing until the new stream reached it. Bound from its
+	// first event instead; what was held belongs to the old stream.
+	rebuilt := (!r.created.IsZero() && !si.Created.Equal(r.created)) || from > si.State.LastSeq+1
+	dropped := 0
+	if rebuilt {
+		from, dropped = max(si.State.FirstSeq, 1), len(r.pend)
+		r.pend, r.seen = map[uint64]*pending{}, 0
+		r.created = si.Created
 	}
 	r.mu.Unlock()
 	c, err := r.bind(ctx, from)
@@ -270,6 +296,10 @@ func (r *runner) rebind(ctx context.Context) {
 	r.mu.Lock()
 	r.cons = c
 	r.mu.Unlock()
+	if rebuilt {
+		r.logf("conductor: the events stream is new (rebuild): bound its consumer from stream sequence %d; %d event(s) held from the old stream dropped\n", from, dropped)
+		return
+	}
 	r.logf("conductor: bound its consumer again, from stream sequence %d\n", from)
 }
 
