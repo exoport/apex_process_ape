@@ -157,9 +157,12 @@ func Run(ctx context.Context, nc *nats.Conn, cfg Config) error {
 		return fmt.Errorf("conductor: bind consumer: %w", err)
 	}
 	r.cons = cons
-	// Where the durable stood when bound: a rebind after a loss with
-	// nothing typed since starts after it.
-	r.seen = cons.CachedInfo().Delivered.Stream
+	// Where the durable stood when bound: its ack floor, not what it
+	// delivered (research, D863+): an earlier attach (a crash, a lease taken
+	// over) can have left events delivered and unanswered, which this
+	// runner does not hold; a rebind after a loss before they come again
+	// starts at or below them, not after them.
+	r.seen = cons.CachedInfo().AckFloor.Stream
 	// Which stream it was bound on: a rebuild makes a new one, whose
 	// sequences start again at 1 (R2C-1).
 	if st, err := js.Stream(ctx, events.EventsStream); err == nil {
@@ -207,9 +210,10 @@ type runner struct {
 	// away since (said once); reconnects is the connection's count.
 	down       bool
 	reconnects uint64
-	// seen is the highest stream sequence delivered (typed, or as the
-	// durable last reported); rebindMu serialises a rebind between
-	// deliver and sweep (V12-8).
+	// seen is the highest stream sequence typed, or acknowledged as the
+	// durable last reported (its ack floor, never past an unanswered
+	// delivery: D863+); rebindMu serialises a rebind between deliver and
+	// sweep (V12-8).
 	seen     uint64
 	rebindMu sync.Mutex
 	// created is when the events stream the durable was bound on was
@@ -412,6 +416,7 @@ func (r *runner) deliver(ctx context.Context) {
 			r.fetchFailed(ctx, err)
 			continue
 		}
+		cons := r.consumer()
 		for m := range batch.Messages() {
 			md, err := m.Metadata()
 			if err != nil {
@@ -419,6 +424,13 @@ func (r *runner) deliver(ctx context.Context) {
 			}
 			for !r.cfg.Session.Idle() && ctx.Err() == nil {
 				time.Sleep(100 * time.Millisecond)
+			}
+			// Bound again while it waited for a busy session (FINDING-DRY-2C-1,
+			// D863+): this copy's token is the lost durable's, and the new one
+			// delivers the event again with a live one; typed, the session
+			// would see it twice and answer the dead copy.
+			if r.consumer() != cons {
+				continue
 			}
 			reply := m.Reply()
 			_ = r.cfg.Session.Type(Format(md.Sequence.Stream, r.cfg.Nonce, m.Subject(), m.Data(), reply))
@@ -467,7 +479,11 @@ func (r *runner) sweep(ctx context.Context, cons jetstream.Consumer) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	floor := info.AckFloor.Stream
-	r.seen = max(r.seen, info.Delivered.Stream)
+	// The ack floor, not what was delivered (FINDING-DRY-2C-1, D863+):
+	// delivered events this runner never typed (one fetched for a busy
+	// session, another attach's) are not answers, and a rebind must start
+	// at or below them.
+	r.seen = max(r.seen, floor)
 	for seq, p := range r.pend {
 		// Acknowledged: at or below the ack floor, or delivered with
 		// nothing waiting. Not yet delivered by this durable (one bound

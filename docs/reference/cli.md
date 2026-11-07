@@ -2776,8 +2776,9 @@ then take over, unacknowledged events included. A NATS outage is ridden out: the
 is renewed again once NATS answers (claimed again if it lapsed meanwhile and nobody else
 took it), and deliveries resume; only another of your conductors holding the ensemble
 ends it. A durable consumer deleted under it (only an operator or a rebuild can) is bound
-again, which it logs, from the oldest event it still held unacknowledged: what it held is
-delivered again with a new token, what was published while it was gone is delivered too,
+again, which it logs, from the oldest event still unanswered: what it held, an event it
+fetched for a busy session and one an earlier attach left unanswered are delivered again
+with a new token (typed once), what was published while it was gone is delivered too,
 and events acknowledged after the oldest held one may come again (at least once). A
 milestone the conductor paused for a held event stays paused until that event is answered.
 After a rebuild (the events stream new, its sequences from 1) it binds from the new

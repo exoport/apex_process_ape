@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -963,4 +964,146 @@ func TestDrill_ConductorHearsARebuiltEventsStream(t *testing.T) {
 	require.Eventually(t, func() bool { return f.ackedWith("after the rebuild") }, 10*time.Second, 50*time.Millisecond, "the new stream's next event is delivered within seconds")
 	time.Sleep(max(0, cfg.Escalate+time.Second-time.Since(start)))
 	require.False(t, seen(".M2.question-escalated"), "what was held of the old stream does not escalate after the rebuild")
+}
+
+// FINDING-DRY-2C-1: an event fetched while the session is busy waits in
+// deliver, not yet typed, while sweep raises seen to it (the durable says
+// it delivered it). A durable lost then was bound again from seen+1, past
+// it; typed later with the lost durable's token, the event was taken as
+// answered. Now it is held from the fetch: the rebind starts at or below
+// it, the stale copy is not typed, and the new durable delivers it again
+// with a live token, which acknowledges it on the server.
+func TestDrill_ConductorKeepsAnEventFetchedForABusySession(t *testing.T) {
+	_, nc, js := rig(t)
+	ctx := t.Context()
+	f := &fakeSession{nc: nc, answers: 99, acked: map[string]bool{}}
+	var logMu sync.Mutex
+	var logged []string
+	cfg := scaled("ann", "cond-a", f)
+	cfg.LeaseTTL = 30 * time.Second // a busy session is not silence here (drill 4's subject)
+	cfg.Escalate, cfg.Pause = time.Minute, 2*time.Minute
+	cfg.Log = func(format string, a ...any) {
+		logMu.Lock()
+		logged = append(logged, fmt.Sprintf(format, a...))
+		logMu.Unlock()
+	}
+	reboundFrom := func() (uint64, bool) {
+		logMu.Lock()
+		defer logMu.Unlock()
+		for _, l := range logged {
+			var n uint64
+			if _, err := fmt.Sscanf(l, "conductor: bound its consumer again, from stream sequence %d", &n); err == nil {
+				return n, true
+			}
+		}
+		return 0, false
+	}
+	t.Cleanup(func() {
+		if t.Failed() {
+			logMu.Lock()
+			t.Log(strings.Join(logged, ""))
+			logMu.Unlock()
+		}
+	})
+	go func() { _ = Run(ctx, nc, cfg) }()
+	bound(t, js)
+	name := layout.ConductorConsumer("ann", "atomix")
+
+	f.busy.Store(true)
+	publish(t, js, "question", 1)
+	st, err := js.Stream(ctx, events.EventsStream)
+	require.NoError(t, err)
+	seq := st.CachedInfo().State.LastSeq
+	require.Eventually(t, func() bool { return f.waited.Load() > 0 }, 5*time.Second, 20*time.Millisecond, "fetched, waiting for the busy session")
+	time.Sleep(4 * cfg.Renew) // sweeps raise seen to the delivered event
+	require.False(t, f.typedWith("which port?"), "not typed yet")
+
+	require.NoError(t, js.DeleteConsumer(ctx, events.EventsStream, name))
+	require.Eventually(t, func() bool { _, ok := reboundFrom(); return ok }, 10*time.Second, 50*time.Millisecond, "bound again by sweep")
+	from, _ := reboundFrom()
+	require.LessOrEqual(t, from, seq, "the rebind starts at or below the event the busy session held")
+
+	f.busy.Store(false)
+	require.Eventually(t, func() bool {
+		c, err := js.Consumer(ctx, events.EventsStream, name)
+		if err != nil {
+			return false
+		}
+		info, err := c.Info(ctx)
+		return err == nil && info.AckFloor.Stream >= seq
+	}, 15*time.Second, 50*time.Millisecond, "delivered again and acknowledged with a live token, on the server")
+	time.Sleep(2 * cfg.AckWait)
+	require.Equal(t, 1, f.seqs()[strconv.FormatUint(seq, 10)], "typed once: the copy with the lost durable's token is not typed (D863+)")
+}
+
+// D863+ (research): at attach the conductor took seen from what its
+// durable had delivered. An earlier attach that crashed (or whose lease
+// was taken over) can leave events delivered and unanswered; the new one
+// holds none of them, and a durable lost before they came again was bound
+// past them. Now seen starts at the durable's ack floor.
+func TestDrill_ConductorAttachedAfterAnotherKeepsWhatItLeft(t *testing.T) {
+	_, nc, js := rig(t)
+	ctx := t.Context()
+	name := layout.ConductorConsumer("ann", "atomix")
+	long := func(cfg Config) Config {
+		cfg.LeaseTTL, cfg.AckWait = 30*time.Second, 30*time.Second // nothing comes again on its own here
+		cfg.Escalate, cfg.Pause = time.Minute, 2*time.Minute
+		return cfg
+	}
+	// The first attach: three events delivered, none answered, then gone.
+	a := &fakeSession{nc: nc, answers: 99, acked: map[string]bool{}}
+	a.hold.Store(true)
+	actx, stopA := context.WithCancel(ctx)
+	doneA := make(chan struct{})
+	go func() { defer close(doneA); _ = Run(actx, nc, long(scaled("ann", "cond-a", a))) }()
+	bound(t, js)
+	for i := range int64(3) {
+		_, err := events.Publish(ctx, js, events.Subject("bob", "taskforge", events.KindProject, "M2", "question"), events.MessageID("taskforge", "c1", 20+i), []byte(fmt.Sprintf(`{"q":"left %d"}`, i)))
+		require.NoError(t, err)
+	}
+	require.Eventually(t, func() bool { return len(a.seqs()) == 3 }, 10*time.Second, 50*time.Millisecond, "three delivered to the first attach")
+	stopA()
+	<-doneA
+
+	// The second attach binds the same durable, then loses it before
+	// anything comes again.
+	b := &fakeSession{nc: nc, answers: 99, acked: map[string]bool{}}
+	var logMu sync.Mutex
+	var logged []string
+	cfg := long(scaled("ann", "cond-b", b))
+	cfg.Log = func(format string, args ...any) {
+		logMu.Lock()
+		logged = append(logged, fmt.Sprintf(format, args...))
+		logMu.Unlock()
+	}
+	t.Cleanup(func() {
+		if t.Failed() {
+			logMu.Lock()
+			t.Log(strings.Join(logged, ""))
+			logMu.Unlock()
+		}
+	})
+	go func() { _ = Run(ctx, nc, cfg) }()
+	require.Eventually(t, func() bool {
+		c, err := js.Consumer(ctx, events.EventsStream, name)
+		if err != nil {
+			return false
+		}
+		info, err := c.Info(ctx)
+		return err == nil && info.NumWaiting > 0 && info.NumAckPending == 3
+	}, 10*time.Second, 50*time.Millisecond, "the second attach pulls on the durable the first left three unanswered on")
+	time.Sleep(4 * cfg.Renew) // sweeps read the durable: three delivered, none acknowledged
+	require.NoError(t, js.DeleteConsumer(ctx, events.EventsStream, name))
+	require.Eventually(t, func() bool {
+		logMu.Lock()
+		defer logMu.Unlock()
+		return slices.ContainsFunc(logged, func(l string) bool { return strings.HasPrefix(l, "conductor: bound its consumer again") })
+	}, 10*time.Second, 50*time.Millisecond, "bound again")
+	logMu.Lock()
+	again := slices.IndexFunc(logged, func(l string) bool { return strings.HasPrefix(l, "conductor: bound its consumer again") })
+	line := logged[again]
+	logMu.Unlock()
+	require.Equal(t, "conductor: bound its consumer again, from stream sequence 1\n", line, "from the first unanswered event, not after what the first attach was delivered")
+	require.Eventually(t, func() bool { return b.ackedWith("left 0") && b.ackedWith("left 1") && b.ackedWith("left 2") }, 15*time.Second, 50*time.Millisecond,
+		"what the first attach left is delivered again and answered")
 }

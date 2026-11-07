@@ -334,8 +334,9 @@ Only the holder of `conductor.<user>.<ens>` binds it, so a conductor that takes 
 last one left unacknowledged, and its acknowledgements are what renews the lease. A durable deleted while a conductor
 runs (after V12-3 only the operator's credential or a rebuild can delete it) is bound again, logged
 `conductor: bound its consumer again, from stream sequence <n>`. It starts at the oldest event the conductor still
-held unacknowledged, else after the last one delivered (V12-8): what it held is delivered again with a new token, and
-what was published while it was gone is delivered too. Delivery is at least once: events acknowledged after the oldest
+held unacknowledged, else right after the durable's ack floor (V12-8, D863): what it held is delivered again with a new
+token, an event fetched for a busy session or left unanswered by an earlier attach is too (typed once, with the new
+token), and what was published while it was gone is delivered as well. Delivery is at least once: events acknowledged after the oldest
 held one come again as well (R2C-2). A milestone the conductor paused for a held event stays paused until that event is
 answered. After a rebuild re-declares `APE_EVENTS`, whose sequences start again at 1, the conductor binds from the new
 stream's first event and drops what it held of the old one, logged `conductor: the events stream is new (rebuild)`
