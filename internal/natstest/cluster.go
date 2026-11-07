@@ -72,7 +72,9 @@ func (c *Cluster) start(o *server.Options) *server.Server {
 		c.t.Fatalf("natstest: new cluster server %s: %v", o.ServerName, err)
 	}
 	go s.Start()
-	if !s.ReadyForConnections(10 * time.Second) {
+	// 30 s, as WaitMetaLeader: a node restarted on its store replays it
+	// first, which took more than 10 s under a loaded ci-local (V8-WIN-4).
+	if !s.ReadyForConnections(30 * time.Second) {
 		stop(s)
 		c.t.Fatalf("natstest: cluster server %s not ready", o.ServerName)
 	}
