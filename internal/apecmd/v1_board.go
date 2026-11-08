@@ -35,6 +35,8 @@ var boardRefreshVerbs = map[string]bool{
 	// rc.7b (rc7b-adr): it writes ADR-0001 and decisions.json, as decision
 	// new and accept do.
 	"decision standard": true,
+	// v1.5 (D876): it writes the mode status prints (integration: <mode>).
+	"project integration-mode": true,
 }
 
 // boardSkipVerbs are the v1 leaves that do not refresh: they write nothing

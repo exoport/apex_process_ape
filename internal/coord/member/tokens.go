@@ -118,6 +118,9 @@ func GitVia(ctx context.Context, p *apexv1.Project, purpose string) (url string,
 		if !appConfigured(p) {
 			return "", nil, nil // not an App project: git's own credentials
 		}
+		if fe, ok := errors.AsType[*apexv1.FailError](err); ok {
+			return "", nil, fe // coord.integration: the block makes no mode
+		}
 		return "", nil, &apexv1.FailError{Code: apexv1.CodeCoordMembership, Action: apexv1.ActionPerson, Msg: fmt.Sprintf(
 			"this project reaches GitHub only through the App service (coordination.github.app: true), and its membership cannot be used: %v"+
 				" — ape does not fall back to the remote with git's own credentials (they may be a person's); a person places the ensemble credential at %s (mode 0600, in the ignored hot/) or fixes the coordination: block, then runs the command again",

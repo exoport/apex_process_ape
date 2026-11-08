@@ -30,7 +30,12 @@ func project(t *testing.T, config string, creds bool) *apexv1.Project {
 	return p
 }
 
-const block = "project_name: Notes Svc\ncoordination:\n  ensemble: Shop\n  home: git@example.invalid:shop/home.git\n  url: nats://127.0.0.1:4222\n"
+const block = "project_name: Notes Svc\ncoordination:\n  integration: trunk\n  ensemble: Shop\n  home: git@example.invalid:shop/home.git\n  url: nats://127.0.0.1:4222\n"
+
+// queued is block as a queue project's, for a coordination.github appended to it.
+func queued(b string) string {
+	return strings.Replace(b, "  integration: trunk\n", "  integration: queue\n", 1)
+}
 
 func TestLoad(t *testing.T) {
 	m, err := Load(project(t, block, true))
@@ -42,7 +47,7 @@ func TestLoad(t *testing.T) {
 
 	_, err = Load(project(t, "project_name: x\n", true))
 	require.ErrorIs(t, err, ErrNotMember)
-	_, err = Load(project(t, "coordination:\n  ensemble: shop\n", true))
+	_, err = Load(project(t, "coordination:\n  integration: trunk\n  ensemble: shop\n", true))
 	require.ErrorIs(t, err, ErrIncomplete)
 	require.ErrorContains(t, err, "home, url")
 	_, err = Load(project(t, block, false))
@@ -50,6 +55,26 @@ func TestLoad(t *testing.T) {
 	// R8: an ensemble named as the project is refused, slug for slug.
 	_, err = Load(project(t, strings.Replace(block, "ensemble: Shop", "ensemble: notes.svc", 1), true))
 	require.ErrorIs(t, err, ErrNameClash)
+}
+
+// D876: a block that makes no integration mode is refused with its own
+// code (coord.integration), first, and the gate keeps that code rather
+// than burying it under coord.membership.
+func TestLoad_IntegrationMode(t *testing.T) {
+	noMode := strings.Replace(block, "  integration: trunk\n", "", 1)
+	for _, cfg := range []string{noMode, queued(block), block + "  events: watch\n"} {
+		p := project(t, cfg, true)
+		_, err := Load(p)
+		fe, ok := errors.AsType[*apexv1.FailError](err)
+		require.True(t, ok, "%q: %v", cfg, err)
+		require.Equal(t, apexv1.CodeCoordIntegration, fe.Code)
+		err = Gate(context.Background(), p, "start", "", time.Now())
+		fe, ok = errors.AsType[*apexv1.FailError](err)
+		require.True(t, ok, "%v", err)
+		require.Equal(t, apexv1.CodeCoordIntegration, fe.Code, "the gate keeps the code")
+	}
+	_, err := Load(project(t, block, true))
+	require.NoError(t, err, "control: trunk, coherent")
 }
 
 func TestCheckEnsemble(t *testing.T) {
@@ -134,7 +159,7 @@ func TestGate(t *testing.T) {
 // <owner>/<name>, or a missing or empty token, is ErrGitHub (a person's
 // fix); without the github key the project integrates by local trunk.
 func TestLoad_GitHub(t *testing.T) {
-	gh := block + "  github:\n    repo: exoport/atomix-mirror\n"
+	gh := queued(block) + "  github:\n    repo: exoport/atomix-mirror\n"
 	token := func(p *apexv1.Project, s string) {
 		require.NoError(t, os.WriteFile(filepath.Join(p.Root, "hot", "github.token"), []byte(s), 0o600))
 	}
@@ -154,7 +179,7 @@ func TestLoad_GitHub(t *testing.T) {
 	require.Equal(t, "github_pat_x", tok)
 
 	for _, bad := range []string{"atomix", "exoport/", "/atomix", "a/b/c"} {
-		p := project(t, block+"  github:\n    repo: "+bad+"\n", true)
+		p := project(t, queued(block)+"  github:\n    repo: "+bad+"\n", true)
 		token(p, "t")
 		_, err := Load(p)
 		require.ErrorIs(t, err, ErrGitHub, bad)

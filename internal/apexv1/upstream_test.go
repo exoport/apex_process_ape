@@ -85,7 +85,7 @@ func TestBehindUpstream_ReentryCatchUpRefuses(t *testing.T) {
 }
 
 // coordinatedConfig makes a project coordinated (coordination.github).
-const coordinatedConfig = "coordination:\n  ensemble: shop\n  home: ../home\n  url: nats://127.0.0.1:4222\n  github:\n    repo: shop/notes\n"
+const coordinatedConfig = "coordination:\n  integration: queue\n  ensemble: shop\n  home: ../home\n  url: nats://127.0.0.1:4222\n  github:\n    repo: shop/notes\n"
 
 // remoteAhead gives p a real bare origin holding main, then pushes one more
 // commit to it that the local origin/main does not know of yet: another

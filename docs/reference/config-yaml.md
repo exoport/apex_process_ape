@@ -75,7 +75,7 @@ leaves an existing `models:` alone, warning for each default skill it lacks.
 | [`plugins`](#marketplaces-and-plugins) | list | none | yes |
 | [`tools`](#tools) | `{design: [...], review: [...], advise: [...]}` | none | yes |
 | [`library`](#library) | `true` or `false` | `false` (absent: not a library) | no |
-| [`coordination`](#coordination) | `{ensemble, home, url}` | absent: in no ensemble | yes |
+| [`coordination`](#coordination) | `{integration, ensemble, home, url, events, runner_label, github}` | absent: in no ensemble (mode `solo`) | yes |
 | [`conductor`](#conductor) | `{idle_alert: <duration>, ack_alert: <duration>}` | `30m`, `15m` | no |
 
 ## `project_name`
@@ -631,18 +631,41 @@ See [How to publish a library](../how-to/publish-a-library.md).
 
 APEX v1.5 (in development; [coordination reference](coordination.md)). The project's membership in
 an ensemble: projects that run milestones in parallel and coordinate over NATS. Absent, the project
-coordinates with nobody and nothing below applies. Guarded.
+coordinates with nobody (integration mode `solo`) and nothing below applies. Guarded.
 
 ```yaml
 coordination:
+  integration: queue                      # required: trunk (ape's local merge) or queue (GitHub's merge queue)
+  events: watch                           # queue only: poll (default), watch or runner
+  # runner_label: apex-runner-1           # events: runner only: the self-hosted runner's own label
   ensemble: shop                          # the ensemble's name; its subject token is its slug
   home: git@example.com:shop/home.git     # the repository holding the ensemble's roadmap and contracts
   url: nats://nats.example.com:4222       # the NATS server, or a comma-separated list
-  github:                                 # optional (v1.5 stage 1a): the coordinated repository
+  github:                                 # queue only (v1.5 stage 1a): the coordinated repository
     repo: shop/notes                      # <owner>/<name>: where the pull requests are opened and enqueued
     # api: https://github.example.com/api/v3   # default https://api.github.com
 ```
 
+- **`integration` names the mode, and is required** (D876). With `events` and `runner_label` it makes one
+  of the integration modes, which `ape status` prints as `integration: <mode>` (`solo` for a project with no
+  block):
+
+  | Mode           | Keys                                                     | Main changes by                      |
+  | -------------- | -------------------------------------------------------- | ------------------------------------ |
+  | `solo`         | no `coordination:` block                                 | ape's local merge                    |
+  | `trunk`        | `integration: trunk`; no `github:`, `events:` or label   | ape's local merge, after a fetch     |
+  | `queue/poll`   | `integration: queue` + `github:`; `events: poll` or none | GitHub's merge queue                 |
+  | `queue/watch`  | … + `events: watch`                                      | GitHub's merge queue                 |
+  | `queue/runner` | … + `events: runner` + `runner_label:`                   | GitHub's merge queue                 |
+
+  Every other combination is refused with `coord.integration` (action `person`): `integration` missing or
+  neither `trunk` nor `queue`, `queue` without `github:`, `github:`, `events:` or `runner_label` under `trunk`,
+  `events` other than `poll`, `watch` or `runner`, `runner_label` without `events: runner`, and `events: runner`
+  without a label of the runner's own: one word of letters, digits, `.`, `_` or `-`, and not `self-hosted` or
+  another of GitHub's default runner labels (`linux`, `windows`, `macos`, `x64`, `x86`, `arm`, `arm64`, in any
+  case). `ape project check` reports it too. A block written before 1.5 has no `integration`:
+  [`ape project integration-mode`](cli.md#ape-project-integration-mode) writes it (`queue` where `github:` is
+  set, else `trunk`) in ape's own commit, which the framework's migration runs.
 - **The credential is not in the config.** ape connects with `hot/ape-nats.creds`, a credential
   scoped to the ensemble. No session reads or writes it: the edit tools are denied the file, Read, Grep and Glob are denied it
   by the `permissions.deny` rules `ape project init` writes (and every `ape task` session also gets
@@ -652,8 +675,8 @@ coordination:
 - **The GitHub token is kept the same way.** With `github:` set, ape uses `hot/github.token`, a fine-grained
   token for that repository only, which a person places there. ape reads it for its own API calls and never
   puts it in an environment. The same rules deny it to every session tool. A missing or empty token, or a
-  `repo` that is not `<owner>/<name>`, is `coord.membership` (action `person`). Without `github:`, the project
-  integrates by local trunk, as before.
+  `repo` that is not `<owner>/<name>`, is `coord.membership` (action `person`). `github:` is `queue`'s: a `trunk`
+  project integrates by local trunk and has none.
 - **An ensemble named as a member project is refused.** Both are compared as subject tokens
   (lowercase, `.`, `*`, `>` and spaces as `-`), so `notes.svc` clashes with the project `Notes Svc`.
 - **NATS is required to start and to integrate.** When it is unreachable, `ape change new` refuses with
@@ -690,6 +713,7 @@ covers the standing orders.
 | [`ape project check`](cli.md#ape-project-check) | Reports `config.changed`, `caps.over-ceiling`, `models.*`, `docs.missing`, `tools.*`, `plugins.*`, and for `library: true` `fence.*` |
 | [`ape project accept-config --by <who>`](cli.md#ape-project-accept-config) | A person accepts the guarded blocks as committed |
 | [`ape project operator-interface`](cli.md#ape-project-operator-interface) | Renames a `models.apex-orchestrator` row to `apex-loop` (migration `v1.0.0_seq-07`) |
+| [`ape project integration-mode`](cli.md#ape-project-integration-mode) | Writes `coordination.integration` into a block from before 1.5 (`queue` where `github:` is set, else `trunk`; the framework's 1.5 migration) |
 | [`ape project fence`](cli.md#ape-project-fence) | With `library: true` and a root `go.mod`, writes and commits the module fences |
 | [`ape project package-check`](cli.md#ape-project-package-check) | With `library: true`, packs the library and fails on an APEX folder in it |
 | [`ape plugins status`](cli.md#ape-plugins-status) | Reports each listed plugin's install, version against `ref`, enablement and `allow:`, and each `tools:` entry's state and advise files; `--outdated` lists each marketplace's newer tags |

@@ -144,9 +144,22 @@ type CoordinationConfig struct {
 	Home string `yaml:"home"`
 	// URL is the NATS server URL, or a comma-separated list of them.
 	URL string `yaml:"url"`
+	// Integration is how main changes (D876): trunk (ape's local merge,
+	// one person per repository) or queue (GitHub's merge queue). Required
+	// with the block; `ape project integration-mode` writes it for a block
+	// from before 1.5. Mode reads it with Events and RunnerLabel.
+	Integration string `yaml:"integration"`
+	// Events is how a queue close learns its merge (queue only): poll
+	// (default; the close reads GitHub every QueuePoll), watch (`ape ci
+	// watch` on the coordination host publishes it) or runner (the
+	// queue's workflow, on a self-hosted runner, publishes it).
+	Events string `yaml:"events,omitempty"`
+	// RunnerLabel is the self-hosted runner's own label (events: runner
+	// only): every job of `ape ci workflow` runs on [self-hosted, <label>].
+	RunnerLabel string `yaml:"runner_label,omitempty"`
 	// GitHub is the coordinated repository (v1.5 stage 1a, section 5):
 	// ape opens and enqueues its pull requests there, with the token in
-	// GitHubTokenRel. Absent, the project integrates by local trunk.
+	// GitHubTokenRel. Required by integration: queue, refused by trunk.
 	GitHub *GitHubConfig `yaml:"github"`
 }
 

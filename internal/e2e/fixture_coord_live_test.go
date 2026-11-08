@@ -99,7 +99,7 @@ func TestFixture_ScratchCoordinated(t *testing.T) {
 	cfg := filepath.Join(a, "_apex", "config.yaml")
 	data, err := os.ReadFile(cfg)
 	require.NoError(t, err)
-	block := "coordination:\n  ensemble: scratch1c\n  home: scratch-home\n  url: " + url + "\n"
+	block := "coordination:\n  integration: trunk\n  ensemble: scratch1c\n  home: scratch-home\n  url: " + url + "\n"
 	// H5 (D807+): FIXTURE_GITHUB_API puts the project on the
 	// coordination.github flow (milestone branches, record and close PRs,
 	// take-ins), against fakegh at that URL over origin.git, with a

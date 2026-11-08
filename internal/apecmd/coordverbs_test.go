@@ -55,7 +55,7 @@ func TestCoordVerbs(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(root, "hot", "ape-nats.creds"), data, 0o600))
 	cfg, err := os.ReadFile(apexv1.ConfigPath(root))
 	require.NoError(t, err)
-	block := "coordination:\n  ensemble: shop\n  home: git@example.invalid:shop/home.git\n  url: " + url + "\n"
+	block := "coordination:\n  integration: trunk\n  ensemble: shop\n  home: git@example.invalid:shop/home.git\n  url: " + url + "\n"
 	require.NoError(t, os.WriteFile(apexv1.ConfigPath(root), append(cfg, []byte(block)...), 0o644))
 	p, err := apexv1.Open(root)
 	require.NoError(t, err)

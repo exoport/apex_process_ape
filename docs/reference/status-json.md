@@ -79,6 +79,8 @@ A fresh project with one approved milestone gives, in part:
 | `base_upstream` | object or null | `{branch, upstream, ahead, behind}`: the base branch against its upstream, from the local remote-tracking ref (status never fetches). `null` with no upstream. |
 | `outside_flow` | array | Commits on the base branch since the last archive squash (else the v1 epoch) that touch paths outside `development/` and `_apex/`, carry no `Change:` trailer and have no `apex:` subject: `{sha, subject, files}`, newest first. Shown, never failed. |
 | `coordination` | string | v1.5 (in development): the project's coordination line, present only for a project with a [`coordination:`](config-yaml.md#coordination) block — `coordination: ensemble <ens> (home <repo>)`, or while NATS is unreachable `coordination: paused — NATS unreachable since <HH:MM> (in-flight work continues; new claims and merges wait)`. |
+| `integration_mode` | string | v1.5 (in development, D876): the project's integration mode — `solo` (no [`coordination:`](config-yaml.md#coordination) block), `trunk`, `queue/poll`, `queue/watch` or `queue/runner`; `""` when the block makes none, and `integration_error` says why (`coord.integration`). |
+| `integration_error` | string | Present only when `integration_mode` is `""`: why the `coordination:` block makes no mode. |
 | `archive_journal` | object | Present while an archive is in flight or after one crashed: `{id, base, base_sha, branch, branch_tip, step, written, pid, at}`. |
 | `archive_running` | bool | Present and true when that archive's process is alive. |
 | `latest_run` | object | The newest `ape task` run (below). Absent before the first. |

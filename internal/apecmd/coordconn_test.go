@@ -22,7 +22,7 @@ func TestCoordFlags_NATSCredsInAMemberProject(t *testing.T) {
 	url, acct := natstest.StartOperator(t)
 	root := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "_apex", "state"), 0o755))
-	require.NoError(t, os.WriteFile(apexv1.ConfigPath(root), []byte("project_name: notes\ncoordination:\n  ensemble: shop\n  home: git@example.invalid:shop/home.git\n  url: "+url+"\n"), 0o644))
+	require.NoError(t, os.WriteFile(apexv1.ConfigPath(root), []byte("project_name: notes\ncoordination:\n  integration: trunk\n  ensemble: shop\n  home: git@example.invalid:shop/home.git\n  url: "+url+"\n"), 0o644))
 	rejected, _ := natstest.MintStandaloneCreds(t, "stranger")
 	data, err := os.ReadFile(rejected)
 	require.NoError(t, err)

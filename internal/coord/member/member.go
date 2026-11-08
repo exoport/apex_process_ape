@@ -76,6 +76,11 @@ func Load(p *apexv1.Project) (Membership, error) {
 	if c == nil {
 		return Membership{}, ErrNotMember
 	}
+	// The mode first (D876): a block that makes no mode is refused with its
+	// own code, whatever else it lacks.
+	if _, err := c.Mode(); err != nil {
+		return Membership{}, err
+	}
 	var missing []string
 	for _, f := range []struct{ name, v string }{{"ensemble", c.Ensemble}, {"home", c.Home}, {"url", c.URL}} {
 		if strings.TrimSpace(f.v) == "" {
@@ -137,6 +142,15 @@ func (m Membership) ReadGitHubToken() (string, error) {
 		return "", fmt.Errorf("%w: %s is empty", ErrGitHub, apexv1.GitHubTokenRel)
 	}
 	return tok, nil
+}
+
+// membershipFail is Load's error as coord.membership with fix appended,
+// or a refusal Load already coded (coord.integration) as it is.
+func membershipFail(err error, fix string) error {
+	if fe, ok := errors.AsType[*apexv1.FailError](err); ok {
+		return fe
+	}
+	return &apexv1.FailError{Code: apexv1.CodeCoordMembership, Msg: err.Error() + fix}
 }
 
 // CheckEnsemble refuses an ensemble whose token equals a member project's
@@ -292,8 +306,7 @@ func gate(ctx context.Context, p *apexv1.Project, op, milestone string, now time
 		return "", nil
 	}
 	if err != nil {
-		return "", &apexv1.FailError{Code: apexv1.CodeCoordMembership, Msg: err.Error() +
-			" — a person fixes _apex/config.yaml's coordination: block or places the ensemble credential"}
+		return "", membershipFail(err, " — a person fixes _apex/config.yaml's coordination: block or places the ensemble credential")
 	}
 	var nc *nats.Conn
 	denied := &denials{}

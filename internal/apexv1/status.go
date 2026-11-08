@@ -440,6 +440,11 @@ type StatusReport struct {
 	// internal/coord/member.StatusLine); absent for a project in no
 	// ensemble. ape status sets it; the reader here cannot.
 	Coordination string `json:"coordination,omitempty"`
+	// IntegrationMode is the project's integration mode (D876): solo,
+	// trunk, queue/poll, queue/watch or queue/runner; empty when the
+	// coordination: block makes none, and IntegrationError says why.
+	IntegrationMode  string `json:"integration_mode"`
+	IntegrationError string `json:"integration_error,omitempty"`
 	// ArchiveJournal is an archive in flight, or one that crashed (H28):
 	// the next writing command rolls a crashed one back. Status only
 	// reports it. ArchiveRunning: its process is still alive.
@@ -488,6 +493,13 @@ func (p *Project) Status() *StatusReport {
 		r.Project = baseName(p.Root)
 	}
 	r.Docs = cfg.Docs
+	if cfgErr == nil {
+		if mode, err := cfg.Coordination.Mode(); err != nil {
+			r.IntegrationError = err.Error()
+		} else {
+			r.IntegrationMode = mode
+		}
+	}
 	r.Config = StatusConfig{CommitTypes: cfg.Commit.TypeList(), ReleaseScheme: cfg.Release.SchemeName(), ReleaseDocs: cfg.Release.DocsList(p.Root)}
 	r.Config.CommitSubject = cfg.Commit.SubjectTemplate()
 	if cfg.HumanReview.Delegates() {

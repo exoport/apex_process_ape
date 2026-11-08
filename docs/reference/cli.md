@@ -6529,6 +6529,7 @@ Subcommands:
 - `codes` — List the diagnostic codes v1 commands report in --json failures
 - `fence` — Keep APEX's folders out of a Go library's module zip: one go.mod fence per APEX folder
 - `init` — Create the development/ skeleton and merge ape's hooks (never overwrites)
+- `integration-mode` — Write coordination.integration into a coordination: block from before 1.5 (D876)
 - `lift` — Lift an APEX v0 project to v1 in one commit (the mechanical half of the migration)
 - `lift-disposition` — Check whether the lift's disposition list is disposed of (the v1.4.0_seq-01 migration's check)
 - `operator-interface` — Bring a project made before rc.7 to the operator interface (the v1.0.0_seq-07 migration)
@@ -7337,6 +7338,56 @@ Flags:
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
 | `--brownfield` | bool | `false` | record that the project existed before APEX |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+
+## ape project integration-mode
+
+Write coordination.integration into a coordination: block from before 1.5 (D876)
+
+```
+ape project integration-mode [--check] [flags]
+```
+
+Since 1.5 a coordination: block names how main changes: integration: trunk (ape's
+local merge, one person per repository) or integration: queue (GitHub's merge queue), and
+every coordinated command refuses a block without it (coord.integration). This writes it
+for a block from before 1.5, deterministically: queue where coordination.github is set,
+else trunk. The framework's migration runs it (command: ape project integration-mode;
+check: ape project integration-mode --check).
+
+One commit, "apex: coordination integration mode": the line integration: <value> before the
+block's first key, at its indentation; every other byte of _apex/config.yaml is kept, and
+the result is checked by parsing it. A project with no coordination: block (solo), or
+whose block names its integration, is left alone ("nothing to write", exit 0). ape's own
+commit (apex: …), so config.changed does not flag it.
+
+Refused outside a git repository (git.not-a-repo), on a change branch, with uncommitted
+changes in _apex/config.yaml (tree.dirty; changes elsewhere are left out of its commit),
+and when coordination: is written as a flow mapping ({…}), which a person edits by hand
+(project.integration-mode-pending). A command any session may run (not person-only).
+
+--check writes nothing: exit 0 when nothing is left to write, 1
+(project.integration-mode-pending) when the block lacks the key — the migration's check:
+0 applied, 1 not applied.
+
+JSON: {"integration", "commit"}; both absent when nothing was (or is) left to write.
+
+Exit codes: 0 written, or nothing to write (--check: nothing left) · 1 refused, or
+(--check) left to write.
+
+Examples:
+
+```
+  ape project integration-mode --check
+  ape project integration-mode
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--check` | bool | `false` | write nothing: exit 0 when nothing is left to write, 1 when the coordination: block lacks integration |
 | `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
 | `--json` | bool | `false` | machine output (JSON on stdout) |
 

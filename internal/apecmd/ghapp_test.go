@@ -72,7 +72,7 @@ func TestGhappSetup_CLI(t *testing.T) {
 	root := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "_apex", "state"), 0o755))
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "hot"), 0o755))
-	require.NoError(t, os.WriteFile(apexv1.ConfigPath(root), []byte("project_name: notes\ncoordination:\n  ensemble: shop\n  home: x\n  url: "+url+"\n  github:\n    repo: shop/notes\n    app: true\n"), 0o644))
+	require.NoError(t, os.WriteFile(apexv1.ConfigPath(root), []byte("project_name: notes\ncoordination:\n  integration: queue\n  ensemble: shop\n  home: x\n  url: "+url+"\n  github:\n    repo: shop/notes\n    app: true\n"), 0o644))
 	creds, _ := natstest.MintStandaloneCreds(t, "diegos")
 	data, err := os.ReadFile(creds)
 	require.NoError(t, err)
@@ -127,7 +127,7 @@ func TestGhappLand_CLI(t *testing.T) {
 	v1Git(t, root, "push", "-q", "-u", "origin", "main")
 	cfg, err := os.ReadFile(apexv1.ConfigPath(root))
 	require.NoError(t, err)
-	block := "coordination:\n  ensemble: shop\n  home: x\n  url: nats://127.0.0.1:1\n  github:\n    repo: example/notes\n"
+	block := "coordination:\n  integration: queue\n  ensemble: shop\n  home: x\n  url: nats://127.0.0.1:1\n  github:\n    repo: example/notes\n"
 	require.NoError(t, os.WriteFile(apexv1.ConfigPath(root), append(cfg, []byte(block)...), 0o644))
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "hot"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(root, "hot", "ape-nats.creds"), []byte("x"), 0o600))

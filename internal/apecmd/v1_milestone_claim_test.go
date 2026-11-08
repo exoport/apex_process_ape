@@ -45,7 +45,7 @@ func TestMilestoneClaim_CLI(t *testing.T) {
 
 	cfg, err := os.ReadFile(apexv1.ConfigPath(root))
 	require.NoError(t, err)
-	block := "coordination:\n  ensemble: shop\n  home: git@example.invalid:shop/home.git\n  url: " + url + "\n"
+	block := "coordination:\n  integration: trunk\n  ensemble: shop\n  home: git@example.invalid:shop/home.git\n  url: " + url + "\n"
 	require.NoError(t, os.WriteFile(apexv1.ConfigPath(root), append(cfg, []byte(block)...), 0o644))
 	creds, _ := natstest.MintStandaloneCreds(t, "dana")
 	data, err := os.ReadFile(creds)
@@ -108,7 +108,7 @@ func TestMilestoneTakeIn_CLI(t *testing.T) {
 	v1Git(t, root, "push", "-q", "-u", "origin", "main")
 	cfg, err := os.ReadFile(apexv1.ConfigPath(root))
 	require.NoError(t, err)
-	block := "coordination:\n  ensemble: shop\n  home: git@example.invalid:shop/home.git\n  url: " + url + "\n  github:\n    repo: shop/notes\n    api: http://127.0.0.1:1\n"
+	block := "coordination:\n  integration: queue\n  ensemble: shop\n  home: git@example.invalid:shop/home.git\n  url: " + url + "\n  github:\n    repo: shop/notes\n    api: http://127.0.0.1:1\n"
 	require.NoError(t, os.WriteFile(apexv1.ConfigPath(root), append(cfg, []byte(block)...), 0o644))
 	v1Git(t, root, "commit", "-qam", "chore: coordinated")
 	v1Git(t, root, "push", "-q", "origin", "main")
@@ -181,7 +181,7 @@ func TestCoordinatedArchiveAndCloseNeedTheLease(t *testing.T) {
 	require.NoError(t, ls.SetEpoch(ctx, 1))
 	cfg, err := os.ReadFile(apexv1.ConfigPath(root))
 	require.NoError(t, err)
-	block := "coordination:\n  ensemble: shop\n  home: git@example.invalid:shop/home.git\n  url: " + url + "\n"
+	block := "coordination:\n  integration: trunk\n  ensemble: shop\n  home: git@example.invalid:shop/home.git\n  url: " + url + "\n"
 	require.NoError(t, os.WriteFile(apexv1.ConfigPath(root), append(cfg, []byte(block)...), 0o644))
 	creds, _ := natstest.MintStandaloneCreds(t, "dana")
 	data, err := os.ReadFile(creds)
@@ -245,7 +245,7 @@ func TestMilestoneClose_HoldsTheLeaseWhileItsGateRuns(t *testing.T) {
 		// One project, two checkouts: the same project_name, so M1 is one
 		// lease key (init named each after its directory).
 		cfg = regexp.MustCompile(`(?m)^project_name:.*$`).ReplaceAll(cfg, []byte("project_name: notes"))
-		block := "coordination:\n  ensemble: shop\n  home: git@example.invalid:shop/home.git\n  url: " + url + "\n"
+		block := "coordination:\n  integration: trunk\n  ensemble: shop\n  home: git@example.invalid:shop/home.git\n  url: " + url + "\n"
 		require.NoError(t, os.WriteFile(apexv1.ConfigPath(root), append(cfg, []byte(block)...), 0o644))
 		creds, _ := natstest.MintStandaloneCreds(t, user)
 		data, err := os.ReadFile(creds)
@@ -317,7 +317,7 @@ func TestMilestoneClose_WaitZeroRefusesABusyCloseAtOnce(t *testing.T) {
 	require.NoError(t, ls.SetEpoch(ctx, 1))
 	cfg, err := os.ReadFile(apexv1.ConfigPath(root))
 	require.NoError(t, err)
-	block := "coordination:\n  ensemble: shop\n  home: git@example.invalid:shop/home.git\n  url: " + url + "\n"
+	block := "coordination:\n  integration: trunk\n  ensemble: shop\n  home: git@example.invalid:shop/home.git\n  url: " + url + "\n"
 	require.NoError(t, os.WriteFile(apexv1.ConfigPath(root), append(cfg, []byte(block)...), 0o644))
 	creds, _ := natstest.MintStandaloneCreds(t, "dana")
 	data, err := os.ReadFile(creds)

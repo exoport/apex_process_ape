@@ -37,7 +37,7 @@ func pauseRepo(t *testing.T) (root string, js jetstream.JetStream) {
 	require.NoError(t, ls.SetEpoch(ctx, 1))
 	cfg, err := os.ReadFile(apexv1.ConfigPath(root))
 	require.NoError(t, err)
-	block := "coordination:\n  ensemble: shop\n  home: git@example.invalid:shop/home.git\n  url: " + url + "\n"
+	block := "coordination:\n  integration: trunk\n  ensemble: shop\n  home: git@example.invalid:shop/home.git\n  url: " + url + "\n"
 	require.NoError(t, os.WriteFile(apexv1.ConfigPath(root), append(cfg, []byte(block)...), 0o644))
 	creds, _ := natstest.MintStandaloneCreds(t, "dana")
 	data, err := os.ReadFile(creds)

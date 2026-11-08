@@ -205,6 +205,11 @@ func (p *Project) Check() []Finding {
 		add(ValidateNextMD(p.Rel(p.NextMD()), doc)...)
 	}
 	add(p.briefFindings(context.Background())...)
+	if cfg, err := LoadConfig(p.Root); err == nil {
+		if _, err := cfg.Coordination.Mode(); err != nil {
+			add(Finding{File: configYAML, Message: "coordination integration: " + err.Error()})
+		}
+	}
 
 	for _, capName := range p.Capabilities() {
 		file := p.Rel(p.SpecFile(capName))

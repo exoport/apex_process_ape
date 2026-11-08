@@ -146,6 +146,8 @@ func TestDiagnosticCodes_PublishedListMatchesTheCode(t *testing.T) {
 		"CodeCoordNATSUnreachable": CodeCoordNATSUnreachable, "CodeCoordMembership": CodeCoordMembership, "CodeCoordMilestonePaused": CodeCoordMilestonePaused,
 		"CodeFetchFailed": CodeFetchFailed, "CodeNotLeaseHolder": CodeNotLeaseHolder, "CodeMilestoneBranchMissing": CodeMilestoneBranchMissing, "CodeIntegrationPush": CodeIntegrationPush, "CodeIntegrationPR": CodeIntegrationPR, "CodeIntegrationEjections": CodeIntegrationEjections, "CodeTakeInNeeded": CodeTakeInNeeded, "CodeCIRed": CodeCIRed, "CodeCIOutsideFlow": CodeCIOutsideFlow, "CodeQueueSettings": CodeQueueSettings, "CodeTweakNoMilestone": CodeTweakNoMilestone, "CodeMilestoneMoved": CodeMilestoneMoved, "CodeTakeInRed": CodeTakeInRed, "CodeCloseBusy": CodeCloseBusy, "CodeCoordURLRewritten": CodeCoordURLRewritten, "CodeCloseLost": CodeCloseLost, "CodeMilestoneBranchExists": CodeMilestoneBranchExists, "CodeRecordEjected": CodeRecordEjected, "CodeRecordPending": CodeRecordPending,
 		"CodeNoticeUnknown": CodeNoticeUnknown, "CodeNoticeAcked": CodeNoticeAcked,
+		// v1.5 (D876).
+		"CodeCoordIntegration": CodeCoordIntegration, "CodeIntegrationModePending": CodeIntegrationModePending,
 		// v1.4.2: standing orders and the delegated conductor.
 		"CodeOrdersMissing": CodeOrdersMissing, "CodeOrdersInvalid": CodeOrdersInvalid, "CodeOrdersUnaccepted": CodeOrdersUnaccepted,
 		"CodeOrdersRevoked": CodeOrdersRevoked, "CodeOrdersNonDelegable": CodeOrdersNonDelegable, "CodeOrdersNotNamed": CodeOrdersNotNamed,

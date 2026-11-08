@@ -596,7 +596,7 @@ func TestNesting_LoopLockPerMilestoneInAnEnsemble(t *testing.T) {
 	m1.release()
 
 	require.NoError(t, os.WriteFile(filepath.Join(root, "_apex", "config.yaml"),
-		[]byte("coordination:\n  ensemble: shop\n  home: ../home\n  url: nats://127.0.0.1:4222\n"), 0o644))
+		[]byte("coordination:\n  integration: trunk\n  ensemble: shop\n  home: ../home\n  url: nats://127.0.0.1:4222\n"), 0o644))
 	m1 = loop("M1 --resume")
 	require.Equal(t, "M1", m1.scope)
 	require.NoError(t, m1.acquire(root, "pid-1"))

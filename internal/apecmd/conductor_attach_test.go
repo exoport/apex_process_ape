@@ -51,7 +51,7 @@ func TestConductorAttach_RunsAsTheCredentialsUser(t *testing.T) {
 	v1Git(t, root, "config", "user.email", "diegos@exo.com.ar") // a git identity that is not the credential's
 	cfg, err := os.ReadFile(apexv1.ConfigPath(root))
 	require.NoError(t, err)
-	block := "coordination:\n  ensemble: shop\n  home: git@example.invalid:shop/home.git\n  url: " + e.URL + "\n"
+	block := "coordination:\n  integration: trunk\n  ensemble: shop\n  home: git@example.invalid:shop/home.git\n  url: " + e.URL + "\n"
 	require.NoError(t, os.WriteFile(apexv1.ConfigPath(root), append(cfg, []byte(block)...), 0o644))
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "hot"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(root, "hot", "ape-nats.creds"), []byte("x"), 0o600))

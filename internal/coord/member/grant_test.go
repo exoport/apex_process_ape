@@ -208,7 +208,7 @@ func TestMemberGrant_TheAppTokenUnderIt(t *testing.T) {
 	_, err = admin.Subscribe(ghapp.TokenSubject+".*", func(m *nats.Msg) { _ = m.Respond([]byte(`{"ok":true,"token":"ghs_x"}`)) })
 	require.NoError(t, err)
 	require.NoError(t, admin.Flush())
-	ann := enforcedCheckout(t, e, block+"  github:\n    repo: shop/notes\n    app: true\n")
+	ann := enforcedCheckout(t, e, queued(block)+"  github:\n    repo: shop/notes\n    app: true\n")
 	m, err := Load(ann)
 	require.NoError(t, err)
 	for _, purpose := range []string{"push", "read", "pr"} {

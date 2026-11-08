@@ -25,7 +25,7 @@ func TestV1Commands_CoordinationNeedsNATS(t *testing.T) {
 
 	cfg, err := os.ReadFile(apexv1.ConfigPath(root))
 	require.NoError(t, err)
-	block := "coordination:\n  ensemble: shop\n  home: git@example.invalid:shop/home.git\n  url: nats://127.0.0.1:1\n"
+	block := "coordination:\n  integration: trunk\n  ensemble: shop\n  home: git@example.invalid:shop/home.git\n  url: nats://127.0.0.1:1\n"
 	require.NoError(t, os.WriteFile(apexv1.ConfigPath(root), append(cfg, []byte(block)...), 0o644))
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "hot"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(root, "hot", "ape-nats.creds"), []byte("unused: nothing listens"), 0o600))

@@ -54,7 +54,7 @@ func githubCoordRepoOn(t *testing.T, url string) string {
 	v1Git(t, root, "push", "-q", "-u", "origin", "main")
 	cfg, err := os.ReadFile(apexv1.ConfigPath(root))
 	require.NoError(t, err)
-	block := "coordination:\n  ensemble: shop\n  home: git@example.invalid:shop/home.git\n  url: " + url + "\n  github:\n    repo: shop/notes\n    api: http://127.0.0.1:1\n"
+	block := "coordination:\n  integration: queue\n  ensemble: shop\n  home: git@example.invalid:shop/home.git\n  url: " + url + "\n  github:\n    repo: shop/notes\n    api: http://127.0.0.1:1\n"
 	require.NoError(t, os.WriteFile(apexv1.ConfigPath(root), append(cfg, []byte(block)...), 0o644))
 	v1Git(t, root, "commit", "-qam", "chore: coordinated")
 	v1Git(t, root, "push", "-q", "origin", "main")

@@ -28,6 +28,8 @@ func newProjectCmd() *cobra.Command {
 	cmd.AddCommand(newProjectOperatorInterfaceCmd())
 	// v1.1 W7.
 	cmd.AddCommand(newProjectFenceCmd(), newProjectPackageCheckCmd())
+	// v1.5 (D876).
+	cmd.AddCommand(newProjectIntegrationModeCmd())
 	return cmd
 }
 
@@ -881,6 +883,75 @@ some left · 3 a folder's new place exists.`,
 	return cmd
 }
 
+func newProjectIntegrationModeCmd() *cobra.Command {
+	var f v1Flags
+	var check bool
+	cmd := &cobra.Command{
+		Use:   "integration-mode [--check]",
+		Short: "Write coordination.integration into a coordination: block from before 1.5 (D876)",
+		Long: `Since 1.5 a coordination: block names how main changes: integration: trunk (ape's
+local merge, one person per repository) or integration: queue (GitHub's merge queue), and
+every coordinated command refuses a block without it (coord.integration). This writes it
+for a block from before 1.5, deterministically: queue where coordination.github is set,
+else trunk. The framework's migration runs it (command: ape project integration-mode;
+check: ape project integration-mode --check).
+
+One commit, "` + apexv1.IntegrationModeSubject + `": the line integration: <value> before the
+block's first key, at its indentation; every other byte of _apex/config.yaml is kept, and
+the result is checked by parsing it. A project with no coordination: block (solo), or
+whose block names its integration, is left alone ("nothing to write", exit 0). ape's own
+commit (apex: …), so config.changed does not flag it.
+
+Refused outside a git repository (git.not-a-repo), on a change branch, with uncommitted
+changes in _apex/config.yaml (tree.dirty; changes elsewhere are left out of its commit),
+and when coordination: is written as a flow mapping ({…}), which a person edits by hand
+(project.integration-mode-pending). A command any session may run (not person-only).
+
+--check writes nothing: exit 0 when nothing is left to write, 1
+(project.integration-mode-pending) when the block lacks the key — the migration's check:
+0 applied, 1 not applied.
+
+JSON: {"integration", "commit"}; both absent when nothing was (or is) left to write.
+
+Exit codes: 0 written, or nothing to write (--check: nothing left) · 1 refused, or
+(--check) left to write.`,
+		Example: "  ape project integration-mode --check\n  ape project integration-mode",
+		Args:    cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			p, err := v1Project(&f)
+			if err != nil {
+				return err
+			}
+			if err := v1RequireInit(cmd, &f, p); err != nil {
+				return err
+			}
+			if check {
+				res, err := p.IntegrationModeCheck()
+				if err != nil {
+					return v1FailWith(cmd, &f, err, nil, map[string]any{"integration": res.Integration})
+				}
+				return v1Emit(cmd.OutOrStdout(), &f, res, func(w io.Writer) {
+					fmt.Fprintln(w, "integration mode: nothing left to write")
+				})
+			}
+			res, err := p.WriteIntegrationMode(cmd.Context())
+			if err != nil {
+				return v1Fail(cmd, &f, err, res)
+			}
+			return v1Emit(cmd.OutOrStdout(), &f, res, func(w io.Writer) {
+				if res.Commit == "" {
+					fmt.Fprintln(w, "integration mode: nothing to write")
+					return
+				}
+				fmt.Fprintf(w, "wrote coordination.integration: %s\ncommit %.7s %s\n", res.Integration, res.Commit, apexv1.IntegrationModeSubject)
+			})
+		},
+	}
+	addV1Flags(cmd, &f)
+	cmd.Flags().BoolVar(&check, "check", false, "write nothing: exit 0 when nothing is left to write, 1 when the coordination: block lacks integration")
+	return cmd
+}
+
 func newProjectOperatorInterfaceCmd() *cobra.Command {
 	var f v1Flags
 	var check bool
@@ -1311,8 +1382,9 @@ func statusLong(r *apexv1.StatusReport) string {
 		}
 	}
 	b.WriteString(fullSkippedLines(r))
+	b.WriteString("\n" + integrationLine(r) + "\n")
 	if r.Coordination != "" {
-		b.WriteString("\n" + r.Coordination + "\n")
+		b.WriteString(r.Coordination + "\n")
 	}
 	if len(r.Questions) > 0 {
 		fmt.Fprintf(&b, "\nOpen questions for the person (%d; each answered with \"answer Q<n>: <answer>\", or `ape question answer`):\n", len(r.Questions))
@@ -1389,13 +1461,29 @@ func attachNotices(ctx context.Context, p *apexv1.Project, r *apexv1.StatusRepor
 	}
 }
 
+// integrationLine is status's mode line (D876), printed for every project,
+// solo included.
+func integrationLine(r *apexv1.StatusReport) string {
+	if r.IntegrationMode == "" {
+		if r.IntegrationError == "" {
+			return "integration: unknown (_apex/config.yaml cannot be read)"
+		}
+		return "integration: none — " + r.IntegrationError + " (" + apexv1.CodeCoordIntegration + ")"
+	}
+	return "integration: " + r.IntegrationMode
+}
+
 func coordinationLine(p *apexv1.Project) string {
 	m, err := member.Load(p)
 	switch {
 	case errors.Is(err, member.ErrNotMember):
 		return ""
 	case err != nil:
-		return "coordination: not usable — " + err.Error() + " (" + apexv1.CodeCoordMembership + ")"
+		code := apexv1.CodeCoordMembership
+		if fe, ok := errors.AsType[*apexv1.FailError](err); ok {
+			code = fe.Code
+		}
+		return "coordination: not usable — " + err.Error() + " (" + code + ")"
 	}
 	return member.StatusLine(&m, member.ReadLink(p.Root))
 }

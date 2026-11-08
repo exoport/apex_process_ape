@@ -52,8 +52,7 @@ func openMilestones(ctx context.Context, p *apexv1.Project, opts ...nats.Option)
 		return nil, err
 	}
 	if err != nil {
-		return nil, &apexv1.FailError{Code: apexv1.CodeCoordMembership, Msg: err.Error() +
-			" — a person fixes _apex/config.yaml's coordination: block or places the ensemble credential"}
+		return nil, membershipFail(err, " — a person fixes _apex/config.yaml's coordination: block or places the ensemble credential")
 	}
 	id, err := natsconn.DecodeIdentity(m.Creds)
 	if err != nil {
