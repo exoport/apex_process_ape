@@ -26,7 +26,8 @@ import (
 // FIXTURE_OUT: a bare origin, two member checkouts (a: user ann, b: user
 // bob), each with its own credential in hot/ (minted for an unenforced
 // cluster), main holding M1 and M2 approved by a person, the coordination:
-// block (ensemble scratch1c, no github: — local trunk), and the skills of
+// block (ensemble scratch1c; integration trunk, or queue with
+// FIXTURE_GITHUB_API) accepted by a person, and the skills of
 // FIXTURE_PAYLOAD (a payload dir holding .claude/skills) committed. The
 // ape is FIXTURE_APE, else one built from this tree. README.md there says
 // how to start the supervisor and the coordinator. Opt-in: skipped unless
@@ -51,7 +52,15 @@ func TestFixture_ScratchCoordinated(t *testing.T) {
 	defer nc.Close()
 	js, err := jetstream.New(nc)
 	require.NoError(t, err)
-	require.Eventually(t, func() bool { return rebuild.Declare(ctx, js, 3) == nil }, time.Minute, time.Second)
+	// A fresh R3 cluster takes a few tries to place the first streams. Each
+	// try gets its own deadline: under ctx's 3 minutes one stuck try
+	// outlasted the whole wait, where `ape nats declare` (5 s a request)
+	// passes on its second.
+	require.Eventually(t, func() bool {
+		c, stop := context.WithTimeout(ctx, 10*time.Second)
+		defer stop()
+		return rebuild.Declare(c, js, 3) == nil
+	}, 2*time.Minute, time.Second)
 	ls, err := lease.Open(ctx, js)
 	require.NoError(t, err)
 	if ep, err := ls.Epoch(ctx); err != nil || ep == 0 {
@@ -99,12 +108,17 @@ func TestFixture_ScratchCoordinated(t *testing.T) {
 	cfg := filepath.Join(a, "_apex", "config.yaml")
 	data, err := os.ReadFile(cfg)
 	require.NoError(t, err)
-	block := "coordination:\n  integration: trunk\n  ensemble: scratch1c\n  home: scratch-home\n  url: " + url + "\n"
 	// H5 (D807+): FIXTURE_GITHUB_API puts the project on the
 	// coordination.github flow (milestone branches, record and close PRs,
 	// take-ins), against fakegh at that URL over origin.git, with a
-	// regression command of a fixed length that marks its start.
+	// regression command of a fixed length that marks its start. github:
+	// is queue's (D876; trunk refuses it), events poll by default.
 	ghAPI := os.Getenv("FIXTURE_GITHUB_API")
+	integration := "trunk"
+	if ghAPI != "" {
+		integration = "queue"
+	}
+	block := "coordination:\n  integration: " + integration + "\n  ensemble: scratch1c\n  home: scratch-home\n  url: " + url + "\n"
 	if ghAPI != "" {
 		block += "  github:\n    repo: scratch/notes\n    api: " + ghAPI + "\n"
 		secs := os.Getenv("FIXTURE_REGRESSION_SECS")
@@ -118,11 +132,10 @@ func TestFixture_ScratchCoordinated(t *testing.T) {
 	require.NoError(t, os.WriteFile(cfg, append(data, []byte(block)...), 0o644))
 	run(a, "git", "add", "-A")
 	run(a, "git", "commit", "-q", "-m", "chore: the coordination block (scratch1c)")
-	if ghAPI != "" {
-		// The block and the regression are guarded keys: a person accepts
-		// them (H3 did by hand).
-		run(a, ape, "project", "accept-config", "--by", "fixture")
-	}
+	// The block (and the regression) are guarded keys on either flow: a
+	// person accepts them (H3 did by hand), or change start refuses
+	// config.changed.
+	run(a, ape, "project", "accept-config", "--by", "fixture")
 	run(a, "git", "push", "-q", "origin", "HEAD:main")
 
 	b := filepath.Join(out, "b")
