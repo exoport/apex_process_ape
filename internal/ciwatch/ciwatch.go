@@ -1,7 +1,7 @@
 // Package ciwatch is `ape ci watch` (APEX v1.5, D876, queue/watch): the
 // coordination host's process that tells a project's waiting closes their
 // merge queue moved, with nothing run on GitHub and no secret on the
-// repository. Every Every it reads, over REST and conditionally (an ETag;
+// repository. Every tick (Config.Every) it reads, over REST and conditionally (an ETag;
 // a 304 costs no rate limit), main's tip and the merge groups' branches
 // (gh-readonly-queue/main/pr-<n>-…), and publishes what CI's apex-queue.yml
 // would have: close-merged when main's tip moved, ejected when a pull
@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -132,13 +133,13 @@ func (w *Watcher) get(ctx context.Context, path, etag string, out any) (status i
 		if err != nil {
 			return 0, "", fmt.Errorf("ciwatch: the watch token: %w", err)
 		}
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, w.cfg.API+path, nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, w.cfg.API+path, http.NoBody)
 		if err != nil {
 			return 0, "", err
 		}
 		req.Header.Set("Authorization", "Bearer "+tok)
 		req.Header.Set("Accept", "application/vnd.github+json")
-		req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+		req.Header.Set("X-Github-Api-Version", "2022-11-28")
 		if etag != "" {
 			req.Header.Set("If-None-Match", etag)
 		}
@@ -172,7 +173,7 @@ func (w *Watcher) get(ctx context.Context, path, etag string, out any) (status i
 
 // limited: a 403 that is GitHub's rate limit, not a permission refusal.
 func limited(resp *http.Response) bool {
-	return resp.Header.Get("Retry-After") != "" || resp.Header.Get("X-RateLimit-Remaining") == "0"
+	return resp.Header.Get("Retry-After") != "" || resp.Header.Get("X-Ratelimit-Remaining") == "0"
 }
 
 // retryAt is when GitHub says to try again: Retry-After (seconds), else
@@ -182,7 +183,7 @@ func (w *Watcher) retryAt(resp *http.Response) time.Time {
 	if s, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil {
 		return now.Add(time.Duration(s) * time.Second)
 	}
-	if s, err := strconv.ParseInt(resp.Header.Get("X-RateLimit-Reset"), 10, 64); err == nil {
+	if s, err := strconv.ParseInt(resp.Header.Get("X-Ratelimit-Reset"), 10, 64); err == nil {
 		return time.Unix(s, 0)
 	}
 	return now.Add(time.Minute)
@@ -199,15 +200,33 @@ func (w *Watcher) event(name, ref, sha string) Published {
 }
 
 // Look is one tick: main's tip, then the merge groups. The first look of
-// each is a baseline (nothing published). A group whose pull request has
-// no group branch left is compared with main (DIM-1: merged iff its sha
-// is in main — compare {sha}...main is identical or ahead); not merged,
-// it is ejected, with the ref and sha last seen (DIM-2: keyed by pull
-// request, so a group re-created under a new sha is no ejection).
+// each is a baseline (nothing published). A pull request with no group
+// branch left is compared with main, every group sha last seen for it
+// (DIM-1: a sha is in main iff compare {sha}...main is identical or
+// ahead; DIM-4: merged iff any is): merged, nothing (its tip's move is
+// close-merged); else ejected, with the ref and sha listed last. Keyed by
+// pull request (DIM-2), so a group re-created under a new sha is no
+// ejection. The watcher's state moves only once the look's events are
+// published (DIM-6): a failed publish is looked at, and published, again.
 func (w *Watcher) Look(ctx context.Context) (Report, error) {
 	r := Report{Groups: map[int][]Ref{}}
+	next := *w
+	err := next.lookMain(ctx, &r)
+	if err == nil {
+		err = next.lookGroups(ctx, &r)
+	}
+	if perr := w.publish(ctx, r); perr != nil {
+		return r, errors.Join(err, perr)
+	}
+	*w = next
+	r.Main = w.main
+	maps.Copy(r.Groups, w.groups)
+	return r, err
+}
+
+// lookMain reads main's tip into next, and its move as close-merged.
+func (w *Watcher) lookMain(ctx context.Context, r *Report) error {
 	var ref struct {
-		Ref    string `json:"ref"`
 		Object struct {
 			SHA string `json:"sha"`
 		} `json:"object"`
@@ -215,90 +234,103 @@ func (w *Watcher) Look(ctx context.Context) (Report, error) {
 	status, etag, err := w.get(ctx, "/repos/"+w.cfg.Repo+"/git/ref/heads/main", w.mainETag, &ref)
 	r.MainStatus = status
 	if err != nil {
-		return r, err
+		return err
 	}
 	if status == http.StatusOK {
 		w.mainETag = etag
-		if ref.Object.SHA != "" && ref.Object.SHA != w.main {
+		if sha := ref.Object.SHA; sha != "" && sha != w.main {
 			if w.mainKnown {
-				r.Events = append(r.Events, w.event("close-merged", "main", ref.Object.SHA))
-				w.logf("main moved %.7s → %.7s", w.main, ref.Object.SHA)
+				r.Events = append(r.Events, w.event("close-merged", "main", sha))
+				w.logf("main moved %.7s → %.7s", w.main, sha)
 			}
-			w.main = ref.Object.SHA
+			w.main = sha
 		}
 	}
 	if !w.mainKnown && w.main != "" {
 		w.mainKnown, r.Baseline = true, true
 	}
-	r.Main = w.main
+	return nil
+}
 
+// lookGroups reads the merge groups into next, and judges each pull
+// request whose groups are all gone.
+func (w *Watcher) lookGroups(ctx context.Context, r *Report) error {
 	var refs []struct {
 		Ref    string `json:"ref"`
 		Object struct {
 			SHA string `json:"sha"`
 		} `json:"object"`
 	}
-	status, etag, err = w.get(ctx, "/repos/"+w.cfg.Repo+"/git/matching-refs/"+strings.TrimPrefix(GroupPrefix, "refs/"), w.groupsETag, &refs)
+	status, etag, err := w.get(ctx, "/repos/"+w.cfg.Repo+"/git/matching-refs/"+strings.TrimPrefix(GroupPrefix, "refs/"), w.groupsETag, &refs)
 	r.GroupsStatus = status
-	if err != nil {
-		return r, w.publish(ctx, r, err)
+	if err != nil || status != http.StatusOK && status != http.StatusNotFound {
+		return err
 	}
-	if status == http.StatusOK || status == http.StatusNotFound {
-		w.groupsETag = etag
-		now := map[int][]Ref{}
-		for _, g := range refs {
-			m := groupRe.FindStringSubmatch(g.Ref)
-			if m == nil {
-				continue
-			}
+	now := map[int][]Ref{}
+	for _, g := range refs {
+		if m := groupRe.FindStringSubmatch(g.Ref); m != nil {
 			n, _ := strconv.Atoi(m[1])
 			now[n] = append(now[n], Ref{Ref: g.Ref, SHA: g.Object.SHA})
 		}
-		if w.groupsKnown {
-			for _, n := range sortedKeys(w.groups) {
-				if _, still := now[n]; still {
-					continue
-				}
-				last := w.groups[n][len(w.groups[n])-1]
-				c, err := w.compare(ctx, n, last)
-				r.Compares = append(r.Compares, c)
-				if err != nil {
-					w.logf("pr #%d's group %s left the queue; its compare with main failed (%v): nothing published, the close's poll reads GitHub", n, last.Ref, err)
-					continue
-				}
-				switch c.Status {
-				case "identical", "ahead":
-					w.logf("pr #%d's group %.7s is in main (%s)", n, last.SHA, c.Status)
-				case "":
-					w.logf("pr #%d's group %s left the queue and its sha is unknown to GitHub: nothing published", n, last.Ref)
-				default:
-					r.Events = append(r.Events, w.event("ejected", last.Ref, last.SHA))
-					w.logf("pr #%d's group %.7s left the queue without reaching main (%s): ejected", n, last.SHA, c.Status)
-				}
+	}
+	if !w.groupsKnown {
+		r.Baseline = true
+	}
+	for _, n := range sortedKeys(w.groups) {
+		if _, still := now[n]; !still && w.groupsKnown {
+			if err := w.judge(ctx, r, n, w.groups[n]); err != nil {
+				return err // the groups stay as they were: judged again next look
 			}
-		} else {
-			r.Baseline = true
 		}
-		w.groups, w.groupsKnown = now, true
 	}
-	for n, g := range w.groups {
-		r.Groups[n] = g
+	w.groups, w.groupsKnown, w.groupsETag = now, true, etag
+	return nil
+}
+
+// judge is a gone pull request's verdict (DIM-1, DIM-4): merged when any
+// of its last-seen group shas is in main; ejected (the ref listed last)
+// when none is and GitHub knows at least one; nothing when GitHub knows
+// none. A failed compare is the look's error.
+func (w *Watcher) judge(ctx context.Context, r *Report, n int, groups []Ref) error {
+	known := false
+	for _, g := range groups {
+		c, err := w.compare(ctx, n, g)
+		r.Compares = append(r.Compares, c)
+		if err != nil {
+			return fmt.Errorf("ciwatch: pr #%d's group %s left the queue, and its compare with main failed: %w", n, g.Ref, err)
+		}
+		switch c.Status {
+		case "identical", "ahead":
+			w.logf("pr #%d's group %.7s is in main (%s)", n, g.SHA, c.Status)
+			return nil
+		case "":
+		default:
+			known = true
+		}
 	}
-	return r, w.publish(ctx, r, nil)
+	last := groups[len(groups)-1]
+	if !known {
+		w.logf("pr #%d's group %s left the queue and GitHub knows none of its shas: nothing published", n, last.Ref)
+		return nil
+	}
+	r.Events = append(r.Events, w.event("ejected", last.Ref, last.SHA))
+	w.logf("pr #%d's group %.7s left the queue without reaching main: ejected", n, last.SHA)
+	return nil
 }
 
 // publish publishes r's events in order (a dry run publishes none).
-func (w *Watcher) publish(ctx context.Context, r Report, err error) error {
+func (w *Watcher) publish(ctx context.Context, r Report) error {
 	if w.cfg.Publish == nil {
-		return err
+		return nil
 	}
-	for _, p := range r.Events {
-		if perr := w.cfg.Publish(ctx, p); perr != nil {
-			return errors.Join(err, fmt.Errorf("ciwatch: publish %s: %w", p.MsgID, perr))
+	for i := range r.Events {
+		p := &r.Events[i]
+		if err := w.cfg.Publish(ctx, *p); err != nil {
+			return fmt.Errorf("ciwatch: publish %s: %w", p.MsgID, err)
 		}
 		w.logf("published %s (%s) as %s", p.Event.Event, p.Event.Reason, p.MsgID)
 	}
-	return err
+	return nil
 }
 
 // compare is GitHub's compare of the group's sha with main: base...head is
@@ -323,7 +355,7 @@ func sortedKeys(m map[int][]Ref) []int {
 	return out
 }
 
-// Backoff bounds: a failed look waits from Every up to MaxBackoff.
+// MaxBackoff bounds a failed look's wait: from Every, doubling, up to it.
 var MaxBackoff = 5 * time.Minute
 
 // Run looks every Every until ctx ends. A failed look backs off

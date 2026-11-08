@@ -273,7 +273,10 @@ Exit codes: 0 stopped, or --once looked · 1 refused, or the look failed · 2 us
 			w := ciwatch.New(ciwatch.Config{API: api, Repo: repo, Token: token, Publish: publish, Every: every, Log: cmd.ErrOrStderr()})
 			if once {
 				r, err := w.Look(ctx)
-				data, _ := json.MarshalIndent(r, "", "  ")
+				data, merr := json.MarshalIndent(r, "", "  ")
+				if merr != nil {
+					return failErr(merr)
+				}
 				fmt.Fprintln(cmd.OutOrStdout(), string(data))
 				if err != nil {
 					return failErr(err)

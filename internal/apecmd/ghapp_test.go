@@ -37,8 +37,10 @@ func TestGhappPrintConfigAndUnit(t *testing.T) {
 	_, _, err = v1Exec(t, newGhappCmd, "print-config", "--repo", "x/y")
 	require.Equal(t, ExitUsage, exitCodeOf(t, err))
 	// D871: queue/runner's label rides in the config; a default label is refused.
-	args := []string{"print-config", "--repo", "example/notes", "--warden-app-id", "11", "--warden-installation", "21", "--pusher-app-id", "12",
-		"--pusher-installation", "22", "--nats-url", "nats://127.0.0.1:14222", "--members", "diegos", "--operators", "diegos"}
+	args := []string{
+		"print-config", "--repo", "example/notes", "--warden-app-id", "11", "--warden-installation", "21", "--pusher-app-id", "12",
+		"--pusher-installation", "22", "--nats-url", "nats://127.0.0.1:14222", "--members", "diegos", "--operators", "diegos",
+	}
 	stdout, _, err = v1Exec(t, newGhappCmd, append(args, "--runner-label", "apex-r1")...)
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(path, []byte(stdout), 0o644))

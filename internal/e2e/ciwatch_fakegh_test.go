@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -67,7 +66,7 @@ func TestCIWatch_AgainstFakegh(t *testing.T) {
 	t.Cleanup(func() { _ = srv.Process.Kill(); _ = srv.Wait() })
 	api := "http://" + addr
 	require.Eventually(t, func() bool {
-		resp, err := http.Get(api + "/repos/shop/notes/git/ref/heads/main") //nolint:noctx // a test's readiness probe
+		resp, err := http.Get(api + "/repos/shop/notes/git/ref/heads/main")
 		if err != nil {
 			return false
 		}
@@ -77,8 +76,9 @@ func TestCIWatch_AgainstFakegh(t *testing.T) {
 
 	post := func(path string, body any) map[string]any {
 		t.Helper()
-		data, _ := json.Marshal(body)
-		resp, err := http.Post(api+path, "application/json", bytes.NewReader(data)) //nolint:noctx // a test's fixture call
+		data, err := json.Marshal(body)
+		require.NoError(t, err)
+		resp, err := http.Post(api+path, "application/json", bytes.NewReader(data))
 		require.NoError(t, err)
 		defer resp.Body.Close()
 		var out map[string]any
@@ -93,7 +93,8 @@ func TestCIWatch_AgainstFakegh(t *testing.T) {
 	}
 
 	var got []ciwatch.Published
-	w := ciwatch.New(ciwatch.Config{API: api, Repo: "shop/notes",
+	w := ciwatch.New(ciwatch.Config{
+		API: api, Repo: "shop/notes",
 		Token:   func(context.Context, bool) (string, error) { return "fakegh-token", nil },
 		Publish: func(_ context.Context, p ciwatch.Published) error { got = append(got, p); return nil },
 	})
@@ -112,7 +113,7 @@ func TestCIWatch_AgainstFakegh(t *testing.T) {
 	r := look()
 	require.Len(t, r.Groups[1], 1)
 	group := r.Groups[1][0]
-	require.Equal(t, fmt.Sprintf("refs/heads/gh-readonly-queue/main/pr-1-%s", base), group.Ref)
+	require.Equal(t, "refs/heads/gh-readonly-queue/main/pr-1-"+base, group.Ref)
 	require.Empty(t, got, "queued: nothing yet")
 	require.Eventually(t, func() bool { return git(bare, "rev-parse", "main") != base }, 10*time.Second, 100*time.Millisecond)
 	r = look()

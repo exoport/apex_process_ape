@@ -55,7 +55,7 @@ func TestIntegrator_TheConfiguredRepository(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	p := project(t, queued(block)+"  github:\n    repo: shop/notes\n    api: "+srv.URL+"\n", true)
+	p := project(t, queuedBlock+"  github:\n    repo: shop/notes\n    api: "+srv.URL+"\n", true)
 	require.NoError(t, os.WriteFile(filepath.Join(p.Root, "hot", "github.token"), []byte("github_pat_t\n"), 0o600))
 	in, err := Integrator(context.Background(), p)
 	require.NoError(t, err)
@@ -74,7 +74,7 @@ func TestIntegrator_TheConfiguredRepository(t *testing.T) {
 		require.True(t, strings.HasSuffix(line, " Bearer github_pat_t"), line)
 	}
 
-	_, err = Integrator(context.Background(), project(t, queued(block)+"  github:\n    repo: shop/notes\n", true))
+	_, err = Integrator(context.Background(), project(t, queuedBlock+"  github:\n    repo: shop/notes\n", true))
 	var fe *apexv1.FailError
 	require.ErrorAs(t, err, &fe, "no token")
 	require.Equal(t, apexv1.CodeCoordMembership, fe.Code)

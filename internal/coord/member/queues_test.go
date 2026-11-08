@@ -45,7 +45,7 @@ func TestQueueFindings(t *testing.T) {
 
 	require.Nil(t, QueueFindings(context.Background(), project(t, block, true), io.Discard), "no coordination.github: nothing read")
 
-	p := project(t, queued(block)+"  github:\n    repo: shop/notes\n    api: "+srv.URL+"\n", true)
+	p := project(t, queuedBlock+"  github:\n    repo: shop/notes\n    api: "+srv.URL+"\n", true)
 	require.NoError(t, os.WriteFile(filepath.Join(p.Root, "hot", "github.token"), []byte("t\n"), 0o600))
 	git := func(args ...string) {
 		out, err := exec.Command("git", append([]string{"-C", p.Root}, args...)...).CombinedOutput()

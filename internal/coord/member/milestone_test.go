@@ -52,9 +52,9 @@ func checkout(t *testing.T, url, user string) *apexv1.Project {
 }
 
 // checkoutHolder is the holder p's claims take: <user>/<checkout>.
-func checkoutHolder(t *testing.T, p *apexv1.Project) string {
+func checkoutHolder(ctx context.Context, t *testing.T, p *apexv1.Project) string {
 	t.Helper()
-	s, err := openMilestones(context.Background(), p)
+	s, err := openMilestones(ctx, p)
 	require.NoError(t, err)
 	defer s.close()
 	return s.holder
@@ -249,7 +249,7 @@ func TestMilestoneLease_LoopHoldRetakesALapsedLease(t *testing.T) {
 	})
 	t.Run("control-taken-by-another", func(t *testing.T) {
 		ann, bob := checkout(t, url, "ann"), checkout(t, url, "ann")
-		bobID := checkoutHolder(t, bob)
+		bobID := checkoutHolder(ctx, t, bob)
 		_, err := ClaimMilestone(ctx, ann, "M2")
 		require.NoError(t, err)
 		var log syncBuf

@@ -66,7 +66,7 @@ func TestQueueFindings_RulesetsFirst(t *testing.T) {
 			})
 			require.NoError(t, err)
 			require.NoError(t, nc.Flush())
-			cfg := strings.Replace(queued(block), "nats://127.0.0.1:4222", url, 1) + "  github:\n    repo: shop/notes\n    api: " + gh.URL + "\n    app: true\n"
+			cfg := strings.Replace(queuedBlock, "nats://127.0.0.1:4222", url, 1) + "  github:\n    repo: shop/notes\n    api: " + gh.URL + "\n    app: true\n"
 			p := project(t, cfg, false)
 			creds, _ := natstest.MintStandaloneCreds(t, "dana")
 			data, err := os.ReadFile(creds)

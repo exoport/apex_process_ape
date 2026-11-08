@@ -173,6 +173,7 @@ func TestBook_HandoverRecordedByBothSides(t *testing.T) {
 // D876 (c): Own creates once, with no TTL, and reports the owner after;
 // HandOwner moves it only from its owner, at its revision.
 func testOwner(t *testing.T, s *Store) {
+	t.Helper()
 	ctx := context.Background()
 	const key = "milestone.p._trunk-owner"
 	cur, created, err := s.Own(ctx, key, "ann")

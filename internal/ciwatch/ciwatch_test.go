@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -20,19 +21,24 @@ import (
 // fake is GitHub's REST for the watcher: main's ref and the merge groups
 // with ETags (304 on a match), a compare per sha, and the token it takes.
 type fake struct {
-	mu       sync.Mutex
-	main     string
-	groups   []Ref
-	compare  map[string]string // sha → status; absent: 404
-	token    string
-	limited  bool
-	gets     map[string]int
-	notMod   int
-	authSeen []string
+	mu      sync.Mutex
+	main    string
+	groups  []Ref
+	compare map[string]string // sha → status; absent: 404
+	token   string
+	limited bool
+	// compareFails answers every compare 500.
+	compareFails bool
+	gets         map[string]int
+	notMod       int
+	authSeen     []string
 }
 
 func (f *fake) etag(v any) string {
-	data, _ := json.Marshal(v)
+	data, err := json.Marshal(v)
+	if err != nil {
+		panic(err)
+	}
 	return fmt.Sprintf(`"%x"`, sha256.Sum256(data))
 }
 
@@ -46,8 +52,8 @@ func (f *fake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if f.limited {
-		w.Header().Set("X-RateLimit-Remaining", "0")
-		w.Header().Set("X-RateLimit-Reset", "4102444800")
+		w.Header().Set("X-Ratelimit-Remaining", "0")
+		w.Header().Set("X-Ratelimit-Reset", "4102444800")
 		w.WriteHeader(http.StatusForbidden)
 		return
 	}
@@ -59,7 +65,9 @@ func (f *fake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("ETag", tag)
-		_ = json.NewEncoder(w).Encode(v)
+		if err := json.NewEncoder(w).Encode(v); err != nil {
+			panic(err)
+		}
 	}
 	switch p := r.URL.Path; {
 	case p == "/repos/shop/notes/git/ref/heads/main":
@@ -70,6 +78,8 @@ func (f *fake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			out = append(out, map[string]any{"ref": g.Ref, "object": map[string]string{"sha": g.SHA}})
 		}
 		reply(out)
+	case strings.HasPrefix(p, "/repos/shop/notes/compare/") && f.compareFails:
+		w.WriteHeader(http.StatusInternalServerError)
 	case strings.HasPrefix(p, "/repos/shop/notes/compare/"):
 		sha := strings.TrimSuffix(strings.TrimPrefix(p, "/repos/shop/notes/compare/"), "...main")
 		st, ok := f.compare[sha]
@@ -77,7 +87,9 @@ func (f *fake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]string{"status": st})
+		if err := json.NewEncoder(w).Encode(map[string]string{"status": st}); err != nil {
+			panic(err)
+		}
 	default:
 		w.WriteHeader(http.StatusNotFound)
 	}
@@ -115,9 +127,9 @@ func newWatcher(t *testing.T, f *fake, published *[]Published) *Watcher {
 }
 
 func events(ps []Published) []string {
-	out := []string{}
-	for _, p := range ps {
-		out = append(out, p.Event.Event+" "+p.Event.Reason)
+	out := make([]string, 0, len(ps))
+	for i := range ps {
+		out = append(out, ps[i].Event.Event+" "+ps[i].Event.Reason)
 	}
 	return out
 }
@@ -251,4 +263,89 @@ func TestEvent_EqualsCIEvent(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, string(want), string(got))
 	}
+}
+
+// DIM-4 (research's probe): a pull request listing two group refs at its
+// last look is merged when any of their shas is in main — here the one
+// listed first — so its leaving is close-merged and no ejected.
+func TestLook_TwoGroupsOneMerged(t *testing.T) {
+	f := &fake{
+		main: "m1", token: "tok1", gets: map[string]int{}, compare: map[string]string{"aanew": "ahead", "zzold": "diverged"},
+		groups: []Ref{{Ref: GroupPrefix + "pr-7-aaaa", SHA: "aanew"}, {Ref: GroupPrefix + "pr-7-zzzz", SHA: "zzold"}},
+	}
+	var got []Published
+	w := newWatcher(t, f, &got)
+	_, err := w.Look(context.Background())
+	require.NoError(t, err)
+	f.set(func() { f.groups, f.main = nil, "aanew" })
+	_, err = w.Look(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, []string{"close-merged main aanew"}, events(got), "no false ejection of a merged pull request")
+
+	// The control: neither sha in main is an ejection, of the ref listed last.
+	f2 := &fake{
+		main: "m1", token: "tok1", gets: map[string]int{}, compare: map[string]string{"aanew": "behind", "zzold": "diverged"},
+		groups: []Ref{{Ref: GroupPrefix + "pr-7-aaaa", SHA: "aanew"}, {Ref: GroupPrefix + "pr-7-zzzz", SHA: "zzold"}},
+	}
+	var got2 []Published
+	w2 := newWatcher(t, f2, &got2)
+	_, err = w2.Look(context.Background())
+	require.NoError(t, err)
+	f2.set(func() { f2.groups = nil })
+	_, err = w2.Look(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, []string{"ejected " + GroupPrefix + "pr-7-zzzz zzold"}, events(got2))
+}
+
+// DIM-6: the watcher's state moves only once the look's events are
+// published. A publish that fails (NATS down) leaves it as it was, so the
+// next look sees the same move — not a 304 — and publishes it; an
+// ejection likewise. A failed compare is retried the same way.
+func TestLook_StateOnlyAfterAPublish(t *testing.T) {
+	f := &fake{main: "m1", token: "tok1", gets: map[string]int{}, compare: map[string]string{"g7": "diverged"}, groups: []Ref{group(7, "g7")}}
+	var got []Published
+	failing := true
+	srv := httptest.NewServer(f)
+	t.Cleanup(srv.Close)
+	w := New(Config{
+		API: srv.URL, Repo: "shop/notes",
+		Token: func(context.Context, bool) (string, error) { return "tok1", nil },
+		Publish: func(_ context.Context, p Published) error {
+			if failing {
+				return errors.New("nats: no servers available")
+			}
+			got = append(got, p)
+			return nil
+		},
+	})
+	_, err := w.Look(context.Background())
+	require.NoError(t, err, "a baseline publishes nothing, so nothing fails")
+	f.set(func() { f.main, f.groups = "m2", nil })
+	_, err = w.Look(context.Background())
+	require.ErrorContains(t, err, "no servers available")
+	require.Empty(t, got)
+	_, err = w.Look(context.Background())
+	require.Error(t, err, "still failing: still not moved")
+
+	failing = false
+	_, err = w.Look(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, []string{"close-merged main m2", "ejected " + group(7, "g7").Ref + " g7"}, events(got), "published once NATS is back")
+	_, err = w.Look(context.Background())
+	require.NoError(t, err)
+	require.Len(t, got, 2, "and then the state moved: nothing again")
+
+	// A compare that fails (here a 500) keeps the groups: judged again.
+	f3 := &fake{main: "m1", token: "tok1", gets: map[string]int{}, compare: map[string]string{}, groups: []Ref{group(9, "g9")}, compareFails: true}
+	var got3 []Published
+	w3 := newWatcher(t, f3, &got3)
+	_, err = w3.Look(context.Background())
+	require.NoError(t, err)
+	f3.set(func() { f3.groups = nil })
+	_, err = w3.Look(context.Background())
+	require.ErrorContains(t, err, "compare with main failed")
+	f3.set(func() { f3.compareFails, f3.compare["g9"] = false, "diverged" })
+	_, err = w3.Look(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, []string{"ejected " + group(9, "g9").Ref + " g9"}, events(got3))
 }

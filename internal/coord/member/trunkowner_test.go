@@ -66,7 +66,7 @@ func TestTrunkOwner(t *testing.T) {
 
 	// The control: a queue project (here through the App, so no token
 	// file) writes no owner key, and another person claims.
-	app := queued(block) + "  github:\n    repo: shop/notes\n    app: true\n"
+	app := queuedBlock + "  github:\n    repo: shop/notes\n    app: true\n"
 	q := checkoutOf(t, url, "ann", "queue-svc", app)
 	s, err := openMilestones(ctx, q)
 	require.NoError(t, err)
@@ -152,7 +152,7 @@ func TestHandTrunkOwner(t *testing.T) {
 func TestTrunkOwner_QueueProjectTwoPeopleOneMilestone(t *testing.T) {
 	ctx := context.Background()
 	url := leaseCluster(t)
-	app := queued(block) + "  github:\n    repo: shop/notes\n    app: true\n"
+	app := queuedBlock + "  github:\n    repo: shop/notes\n    app: true\n"
 	ann, bob := checkoutOf(t, url, "ann", "queue-svc", app), checkoutOf(t, url, "bob", "queue-svc", app)
 	s, err := openMilestones(ctx, ann)
 	require.NoError(t, err)

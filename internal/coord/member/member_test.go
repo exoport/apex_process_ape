@@ -32,10 +32,8 @@ func project(t *testing.T, config string, creds bool) *apexv1.Project {
 
 const block = "project_name: Notes Svc\ncoordination:\n  integration: trunk\n  ensemble: Shop\n  home: git@example.invalid:shop/home.git\n  url: nats://127.0.0.1:4222\n"
 
-// queued is block as a queue project's, for a coordination.github appended to it.
-func queued(b string) string {
-	return strings.Replace(b, "  integration: trunk\n", "  integration: queue\n", 1)
-}
+// queuedBlock is block as a queue project's, for a coordination.github appended to it.
+var queuedBlock = strings.Replace(block, "  integration: trunk\n", "  integration: queue\n", 1)
 
 func TestLoad(t *testing.T) {
 	m, err := Load(project(t, block, true))
@@ -62,7 +60,7 @@ func TestLoad(t *testing.T) {
 // than burying it under coord.membership.
 func TestLoad_IntegrationMode(t *testing.T) {
 	noMode := strings.Replace(block, "  integration: trunk\n", "", 1)
-	for _, cfg := range []string{noMode, queued(block), block + "  events: watch\n"} {
+	for _, cfg := range []string{noMode, queuedBlock, block + "  events: watch\n"} {
 		p := project(t, cfg, true)
 		_, err := Load(p)
 		fe, ok := errors.AsType[*apexv1.FailError](err)
@@ -159,7 +157,7 @@ func TestGate(t *testing.T) {
 // <owner>/<name>, or a missing or empty token, is ErrGitHub (a person's
 // fix); without the github key the project integrates by local trunk.
 func TestLoad_GitHub(t *testing.T) {
-	gh := queued(block) + "  github:\n    repo: exoport/atomix-mirror\n"
+	gh := queuedBlock + "  github:\n    repo: exoport/atomix-mirror\n"
 	token := func(p *apexv1.Project, s string) {
 		require.NoError(t, os.WriteFile(filepath.Join(p.Root, "hot", "github.token"), []byte(s), 0o600))
 	}
@@ -179,7 +177,7 @@ func TestLoad_GitHub(t *testing.T) {
 	require.Equal(t, "github_pat_x", tok)
 
 	for _, bad := range []string{"atomix", "exoport/", "/atomix", "a/b/c"} {
-		p := project(t, queued(block)+"  github:\n    repo: "+bad+"\n", true)
+		p := project(t, queuedBlock+"  github:\n    repo: "+bad+"\n", true)
 		token(p, "t")
 		_, err := Load(p)
 		require.ErrorIs(t, err, ErrGitHub, bad)

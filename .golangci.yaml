@@ -216,6 +216,11 @@ linters:
       - linters:
           - tagliatelle
         path: internal/ghapp/
+      # `ape ci watch --once`'s JSON is snake_case like every ape --json
+      # payload, and its fakes speak GitHub's REST (D876).
+      - linters:
+          - tagliatelle
+        path: internal/ciwatch/
       - linters:
           - tagliatelle
         path: internal/cost/(formula|line|overrides|rollup|rollup_walk)\.go

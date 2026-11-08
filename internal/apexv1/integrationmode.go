@@ -66,7 +66,7 @@ var defaultRunnerLabels = []string{"self-hosted", "linux", "windows", "macos", "
 func CheckRunnerLabel(label string) error {
 	switch {
 	case label == "":
-		return fmt.Errorf("no runner_label: the queue's jobs would run on any self-hosted runner that matches")
+		return errors.New("no runner_label: the queue's jobs would run on any self-hosted runner that matches")
 	case !runnerLabelRe.MatchString(label):
 		return fmt.Errorf("runner_label %q is not one word of letters, digits, '.', '_' or '-' (at most 64)", label)
 	case slices.Contains(defaultRunnerLabels, strings.ToLower(label)):

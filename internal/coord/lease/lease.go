@@ -194,7 +194,7 @@ func (s *Store) Own(ctx context.Context, key, owner string) (current string, cre
 	return cur, false, err
 }
 
-// HandOwner moves owner key from from to to, by a compare-and-swap at the
+// HandOwner moves the owner key named key from owner "from" to owner "to", by a compare-and-swap at the
 // key's current revision: ErrHeld when from is not its owner (or none
 // is), ErrStale when it moved on meanwhile.
 func (s *Store) HandOwner(ctx context.Context, key, from, to, by string) error {

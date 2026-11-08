@@ -41,7 +41,7 @@ func TestAppTokensAndPushVia(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, nc.Flush())
 
-	app := strings.Replace(queued(block), "nats://127.0.0.1:4222", url, 1) + "  github:\n    repo: shop/notes\n    app: true\n"
+	app := strings.Replace(queuedBlock, "nats://127.0.0.1:4222", url, 1) + "  github:\n    repo: shop/notes\n    app: true\n"
 	p := project(t, app, false)
 	creds, _ := natstest.MintStandaloneCreds(t, "dana")
 	data, err := os.ReadFile(creds)
@@ -78,7 +78,7 @@ func TestAppTokensAndPushVia(t *testing.T) {
 	mu.Unlock()
 
 	// The control: no app — git's own credentials, no service asked.
-	q := project(t, queued(block)+"  github:\n    repo: shop/notes\n", true)
+	q := project(t, queuedBlock+"  github:\n    repo: shop/notes\n", true)
 	require.NoError(t, os.WriteFile(filepath.Join(q.Root, "hot", "github.token"), []byte("github_pat_x\n"), 0o600))
 	u, env, err = GitVia(context.Background(), q, "push")
 	require.NoError(t, err)

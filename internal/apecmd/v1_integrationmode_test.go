@@ -46,7 +46,7 @@ func TestProjectIntegrationMode(t *testing.T) {
 	stdout, _, err = v1Exec(t, newStatusCmd, "--json", "--cwd", root)
 	require.NoError(t, err)
 	var st struct {
-		Mode string `json:"integration_mode"`
+		Mode string `json:"integration_mode"` //nolint:tagliatelle // ape status --json's key
 	}
 	require.NoError(t, json.Unmarshal([]byte(stdout), &st), stdout)
 	require.Equal(t, apexv1.ModeQueuePoll, st.Mode)

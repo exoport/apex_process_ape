@@ -70,8 +70,10 @@ func TestCheckRunnerLabel(t *testing.T) {
 	for _, ok := range []string{"apex-v12-7-mmr7", "r1", "a.b_c-d"} {
 		require.NoError(t, CheckRunnerLabel(ok), ok)
 	}
-	for _, bad := range []string{"", "self-hosted", "SELF-HOSTED", "Linux", "linux", "X64", "x86", "ARM64", "arm", "macOS", "Windows",
-		"a,b", "a b", "[a]", "a:b", strings.Repeat("a", 65)} {
+	for _, bad := range []string{
+		"", "self-hosted", "SELF-HOSTED", "Linux", "linux", "X64", "x86", "ARM64", "arm", "macOS", "Windows",
+		"a,b", "a b", "[a]", "a:b", strings.Repeat("a", 65),
+	} {
 		require.Error(t, CheckRunnerLabel(bad), bad)
 	}
 }

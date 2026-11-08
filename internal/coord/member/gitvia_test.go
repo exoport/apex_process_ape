@@ -128,7 +128,7 @@ func TestGitVia_AppProjectRefusesOrFetchesAsTheApp(t *testing.T) {
 	plain := filepath.Join(t.TempDir(), "gitconfig-plain")
 	require.NoError(t, os.WriteFile(plain, nil, 0o644))
 
-	cfg := strings.Replace(queued(block), "nats://127.0.0.1:4222", url, 1) + "  github:\n    repo: shop/notes\n    api: " + remote.srv.URL + "/api/v3\n    app: true\n"
+	cfg := strings.Replace(queuedBlock, "nats://127.0.0.1:4222", url, 1) + "  github:\n    repo: shop/notes\n    api: " + remote.srv.URL + "/api/v3\n    app: true\n"
 	checkout := func(t *testing.T, withCreds bool) *apexv1.Project {
 		t.Helper()
 		p := project(t, cfg, false)

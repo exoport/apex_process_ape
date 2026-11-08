@@ -61,7 +61,7 @@ func appRig(t *testing.T) (*apexv1.Project, *natstest.Cluster, *appService) {
 	t.Cleanup(nc.Close)
 	a := &appService{nc: nc}
 	a.start(t)
-	app := strings.Replace(queued(block), "nats://127.0.0.1:4222", c.URLs(), 1) + "  github:\n    repo: shop/notes\n    app: true\n"
+	app := strings.Replace(queuedBlock, "nats://127.0.0.1:4222", c.URLs(), 1) + "  github:\n    repo: shop/notes\n    app: true\n"
 	p := project(t, app, false)
 	creds, _ := natstest.MintStandaloneCreds(t, "dana")
 	data, err := os.ReadFile(creds)
@@ -148,7 +148,7 @@ func TestGitVia_TheTokenWaitsForNATSInARun(t *testing.T) {
 // waits in a run: TestGitVia_TheTokenWaitsForNATSInARun).
 func TestGitHubTokenFor_ARefusedCredentialDoesNotWait(t *testing.T) {
 	e, _ := enforcedCluster(t)
-	app := queued(block) + "  github:\n    repo: shop/notes\n    app: true\n"
+	app := queuedBlock + "  github:\n    repo: shop/notes\n    app: true\n"
 	run := WithRunWait(context.Background(), time.Minute, io.Discard)
 	refusesAtOnce := func(name string, p *apexv1.Project, want string) {
 		t.Helper()
