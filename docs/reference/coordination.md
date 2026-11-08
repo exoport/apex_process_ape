@@ -319,6 +319,48 @@ The workflow:
 - On a red group it publishes `ejected`, and on a push to main `close-merged`, with `ape ci event` and the ensemble
   credential from the `APE_NATS_CREDS` secret. They wake the waiting close, which then reads GitHub.
 
+**In `queue/watch`, `ape ci watch` tells the waiting closes instead** (D876), with nothing run on GitHub and no
+secret on the repository. It runs on the coordination host beside `apex-ghapp.service`. Every 10 s (`--every`) it
+reads two refs over REST, conditionally: a 304 costs no rate limit. One is main's tip; the other is the merge
+groups' branches, `refs/heads/gh-readonly-queue/main/pr-<n>-<sha>`. Then:
+
+- **main's tip moved:** it publishes `close-merged` with ref `main` and the new tip, as the workflow's push job did.
+- **a pull request has no merge group branch left:** it asks GitHub's compare `<sha>...main` about the group's sha
+  as last seen. `identical` or `ahead` means the sha is in main: merged, and the tip's move says so. Any other status
+  is `ejected`, with that ref and sha. Groups are keyed by pull request, so a group rebuilt under a new sha is no
+  ejection. A sha GitHub does not know publishes nothing.
+
+Each event is `ape ci event`'s payload (one builder, `apexv1.CIEvent`), under the watcher credential's user, with the
+message id `ci-watch-<event>-<sha>`, so two watchers publish a merge once. The first look after a start is a baseline
+and publishes nothing; a merge while the watcher was down waits for the close's 1-min poll, which stays the fallback
+in every queue mode. An entry ejected before GitHub built its group branch has none to see, as the workflow's
+`merge_group` never ran for it either; the close's poll finds it. Rate limits wait for GitHub's reset; other failures
+back off from 10 s to 5 min. `ape ci watch --once --dry-run` is one read-only look, printed as JSON.
+
+Its credential is the `watch` kind (`ape nats mint user --kind watch --name ci-watch --project <p>`). It may publish
+the project's events and ask the App service for its token, nothing else; a `ci` credential, which may sit in a
+GitHub secret, cannot ask for a token at all. The service serves the `watch` purpose only to the users listed under
+the repository's `watchers:` (`ape ghapp print-config --watchers ci-watch`), and they may ask for nothing else. The
+watch token is `contents: read` and `metadata: read`: refs and compares are all it reads. A unit, for example:
+
+```ini
+[Unit]
+Description=ape ci watch (queue/watch) for <project>
+After=network-online.target apex-ghapp.service
+
+[Service]
+User=apex-ghapp
+ExecStart=/opt/apex-ghapp/bin/ape ci watch --cwd /var/lib/apex-ghapp/<project> --nats-creds /var/lib/apex-ghapp/watch.creds
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+The `--cwd` checkout is a plain clone of main, for its `_apex/config.yaml`. The watcher refuses any mode but
+`queue/watch` (`ci.watch-mode`).
+
 **Tokens come from the GitHub App service** when `coordination.github.app` is true (PLAN-V15-GHAPP). `ape ghapp serve`
 runs on the coordination host as `apex-ghapp.service` under its own user and holds the keys of two Apps:
 
@@ -326,7 +368,7 @@ runs on the coordination host as `apex-ghapp.service` under its own user and hol
 - **apex-warden** (administration, secrets and workflows): set-up acts only.
 
 ape asks it over NATS, as the member's user, for a one-hour token narrowed to the repository and a purpose: `push`,
-`pr` or `read`, never `workflows`. A push goes to the repository over https, with the token in an `http.extraHeader`
+`pr` or `read` (or, for a watcher, `watch`), never `workflows`. A push goes to the repository over https, with the token in an `http.extraHeader`
 passed only through git's `GIT_CONFIG_*` environment, never argv, a URL or disk. Without `app`, `hot/github.token`
 and git's own credentials are used, as before. The operator's set-up acts are `ape ghapp setup rulesets|workflow|
 secrets|runner-token`. `ape ghapp print-config` and `ape ghapp print-unit` print the files the operator installs.

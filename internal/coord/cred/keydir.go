@@ -30,7 +30,7 @@ const (
 )
 
 // Kinds are the credential kinds MintUserIn mints, each with its grant.
-var Kinds = []string{"member", "conductor", "coordinator", "supervisor", "ghapp", "ci", "admin"}
+var Kinds = []string{"member", "conductor", "coordinator", "supervisor", "ghapp", "ci", "watch", "admin"}
 
 // InitKeyDir creates an operator, SYS and APP (JetStream unlimited, as
 // natstest.StartOperatorJetStream) in dir, and the resolver.conf a
@@ -160,6 +160,11 @@ func GrantFor(s UserSpec) (aped.Grant, error) {
 			return aped.Grant{}, err
 		}
 		return CIGrant(s.Name, s.Projects...), nil
+	case "watch":
+		if err := need("its projects", len(s.Projects) > 0); err != nil {
+			return aped.Grant{}, err
+		}
+		return WatchGrant(s.Name, s.Projects...), nil
 	case "admin":
 		return aped.Grant{}, nil // the operator's own: unrestricted, for `ape nats declare` and reads
 	}

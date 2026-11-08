@@ -45,6 +45,12 @@ func TestGhappPrintConfigAndUnit(t *testing.T) {
 	cfg, err = ghapp.LoadConfig(path)
 	require.NoError(t, err, stdout)
 	require.Equal(t, "apex-r1", cfg.Repos["example/notes"].RunnerLabel)
+	stdout, _, err = v1Exec(t, newGhappCmd, append(args, "--watchers", "ci-watch")...)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, []byte(stdout), 0o644))
+	cfg, err = ghapp.LoadConfig(path)
+	require.NoError(t, err, stdout)
+	require.Equal(t, []string{"ci-watch"}, cfg.Repos["example/notes"].Watchers)
 	_, _, err = v1Exec(t, newGhappCmd, append(args, "--runner-label", "Linux")...)
 	require.Equal(t, ExitUsage, exitCodeOf(t, err))
 

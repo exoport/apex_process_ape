@@ -54,6 +54,9 @@ type AppConfig struct {
 type RepoPolicy struct {
 	Members   []string `yaml:"members"`
 	Operators []string `yaml:"operators"`
+	// Watchers are the NATS users of `ape ci watch` on the coordination
+	// host (D876): they may ask for the watch token, and only for it.
+	Watchers []string `yaml:"watchers"`
 	// RunnerLabel is the repository's own self-hosted runner's label, which
 	// the workflow act writes into every job's runs-on (D871, V12-15): the
 	// operator's config says it, never a request.
@@ -194,10 +197,15 @@ func (s *Service) token(ctx context.Context, user string, req Request) Reply {
 	perms, ok := Purposes[req.Purpose]
 	pol, known := s.cfg.Repos[req.Repo]
 	inst := s.cfg.Pusher.Installations[req.Repo]
+	watcher := slices.Contains(pol.Watchers, user)
 	switch {
 	case !known || inst == 0:
 		return s.logged(user, "pusher", req, refuse("repository %q is not served", req.Repo))
-	case !slices.Contains(pol.Members, user):
+	case req.Purpose == WatchPurpose && !watcher:
+		return s.logged(user, "pusher", req, refuse("%s is not a watcher of %s: the watch token is `ape ci watch`'s", user, req.Repo))
+	case watcher && req.Purpose != WatchPurpose:
+		return s.logged(user, "pusher", req, refuse("%s is a watcher of %s, which asks for the watch token only", user, req.Repo))
+	case !watcher && !slices.Contains(pol.Members, user):
 		return s.logged(user, "pusher", req, refuse("%s is not a member of %s", user, req.Repo))
 	case !ok:
 		return s.logged(user, "pusher", req, refuse("purpose %q: push, pr or read", req.Purpose))

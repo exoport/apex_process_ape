@@ -2,9 +2,13 @@ package apecmd
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,9 +18,11 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/exoport/apex_process_ape/internal/apexv1"
+	"github.com/exoport/apex_process_ape/internal/ciwatch"
 	"github.com/exoport/apex_process_ape/internal/coord/cred"
 	"github.com/exoport/apex_process_ape/internal/coord/events"
 	"github.com/exoport/apex_process_ape/internal/coord/member"
+	"github.com/exoport/apex_process_ape/internal/ghapp"
 	"github.com/exoport/apex_process_ape/internal/natstest"
 )
 
@@ -105,6 +111,17 @@ func TestCIEvent_WakesTheMember(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("the member's waiting ape did not wake on CI's event")
 	}
+	// D876 (d): `ape ci watch`'s event, under its own user and message id,
+	// wakes it the same way.
+	m, err := member.Load(p)
+	require.NoError(t, err)
+	_, err = events.PublishProjectID(ctx, js, "ci-watch", m.Project, "ci-watch-close-merged-abc123", apexv1.CIEvent("close-merged", "main", "abc123", "", time.Now()))
+	require.NoError(t, err)
+	select {
+	case <-wake:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the member's waiting ape did not wake on ci watch's event")
+	}
 }
 
 func TestCICheck_CLI(t *testing.T) {
@@ -159,4 +176,74 @@ func TestCIEvent_UnderTheCIGrant(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("the member's waiting ape did not wake on CI's event")
 	}
+}
+
+// D876 (d): `ape ci watch` is queue/watch's (ci.watch-mode elsewhere); its
+// --once --dry-run is one read-only look — the watch token asked for over
+// NATS as the credential's user, main's tip and the groups read, nothing
+// published.
+func TestCIWatch_ModeAndOnceDryRun(t *testing.T) {
+	url := natstest.RunJetStreamServer(t)
+	nc, err := nats.Connect(url)
+	require.NoError(t, err)
+	t.Cleanup(nc.Close)
+	js, err := jetstream.New(nc)
+	require.NoError(t, err)
+	ctx := context.Background()
+	require.NoError(t, events.Declare(ctx, js, 1))
+	var asked []string
+	var mu sync.Mutex
+	sub, err := nc.Subscribe(ghapp.TokenSubject+".*", func(m *nats.Msg) {
+		var req ghapp.Request
+		_ = json.Unmarshal(m.Data, &req)
+		mu.Lock()
+		asked = append(asked, m.Subject+" "+req.Purpose+" "+req.Repo)
+		mu.Unlock()
+		data, _ := json.Marshal(ghapp.Reply{OK: true, Token: "ghs_watch", ExpiresAt: time.Now().Add(time.Hour)})
+		_ = m.Respond(data)
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sub.Unsubscribe() })
+	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer ghs_watch" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		switch r.URL.Path {
+		case "/repos/shop/notes/git/ref/heads/main":
+			_, _ = w.Write([]byte(`{"ref":"refs/heads/main","object":{"sha":"abc123"}}`))
+		case "/repos/shop/notes/git/matching-refs/heads/gh-readonly-queue/main/":
+			_, _ = w.Write([]byte(`[{"ref":"refs/heads/gh-readonly-queue/main/pr-4-abc123","object":{"sha":"def456"}}]`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(gh.Close)
+
+	root := v1Repo(t)
+	base, err := os.ReadFile(apexv1.ConfigPath(root))
+	require.NoError(t, err)
+	setBlock := func(extra string) {
+		block := "coordination:\n  integration: queue\n" + extra + "  ensemble: shop\n  home: h\n  url: " + url + "\n  github:\n    repo: shop/notes\n    api: " + gh.URL + "\n    app: true\n"
+		require.NoError(t, os.WriteFile(apexv1.ConfigPath(root), append(append([]byte(nil), base...), []byte(block)...), 0o644))
+	}
+	watchCreds, _ := natstest.MintStandaloneCreds(t, "ci-watch")
+	setBlock("")
+	stdout, _, err := v1Exec(t, newCICmd, "watch", "--once", "--cwd", root, "--nats-url", url, "--nats-creds", watchCreds)
+	require.Error(t, err)
+	require.Equal(t, 1, exitCodeOf(t, err), "queue/poll: refused")
+	require.Contains(t, stdout+err.Error(), apexv1.CodeCIWatchMode)
+
+	setBlock("  events: watch\n")
+	stdout, _, err = v1Exec(t, newCICmd, "watch", "--once", "--dry-run", "--cwd", root, "--nats-url", url, "--nats-creds", watchCreds)
+	require.NoError(t, err, stdout)
+	var r ciwatch.Report
+	require.NoError(t, json.Unmarshal([]byte(stdout), &r), stdout)
+	require.Equal(t, "abc123", r.Main)
+	require.Equal(t, []ciwatch.Ref{{Ref: "refs/heads/gh-readonly-queue/main/pr-4-abc123", SHA: "def456"}}, r.Groups[4])
+	require.True(t, r.Baseline)
+	require.Empty(t, r.Events)
+	mu.Lock()
+	require.Equal(t, []string{ghapp.TokenSubject + ".ci-watch watch shop/notes"}, asked, "the watch token, as the credential's user")
+	mu.Unlock()
 }

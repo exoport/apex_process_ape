@@ -200,6 +200,46 @@ func TestService_WorkflowActOnTheRunnersLabel(t *testing.T) {
 	}
 }
 
+// D876 (d): the watch token is a watcher's, and a watcher's only token:
+// contents: read and metadata: read, nothing else. A member asking for it
+// is refused, a watcher asking for anything else is refused.
+func TestService_WatchToken(t *testing.T) {
+	key, pemBytes := appKey(t)
+	f := newFake(t, &key.PublicKey)
+	srv := httptest.NewServer(f)
+	t.Cleanup(srv.Close)
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, "key.pem")
+	require.NoError(t, os.WriteFile(keyPath, pemBytes, 0o600))
+	s, err := NewService(&Config{
+		API:    srv.URL,
+		Warden: AppConfig{AppID: 42, Key: keyPath, Installations: map[string]int64{"shop/notes": 8}},
+		Pusher: AppConfig{AppID: 42, Key: keyPath, Installations: map[string]int64{"shop/notes": 7}},
+		Repos:  map[string]RepoPolicy{"shop/notes": {Members: []string{"dana"}, Watchers: []string{"ci-watch"}}},
+		Log:    filepath.Join(dir, "acts.jsonl"),
+	})
+	require.NoError(t, err)
+	rep := s.token(context.Background(), "ci-watch", Request{Repo: "shop/notes", Purpose: WatchPurpose})
+	require.True(t, rep.OK, rep.Error)
+	require.Len(t, f.tokenReqs, 1)
+	perms, _ := f.tokenReqs[0]["permissions"].(map[string]any)
+	require.Equal(t, map[string]any{"contents": "read", "metadata": "read"}, perms, "read-only, two permissions")
+
+	for _, tc := range []struct{ user, purpose, refused string }{
+		{"dana", WatchPurpose, "not a watcher"},
+		{"ci-watch", "read", "watch token only"},
+		{"ci-watch", "push", "watch token only"},
+		{"mallory", WatchPurpose, "not a watcher"},
+	} {
+		rep := s.token(context.Background(), tc.user, Request{Repo: "shop/notes", Purpose: tc.purpose})
+		require.False(t, rep.OK, "%s %s", tc.user, tc.purpose)
+		require.Contains(t, rep.Error, tc.refused)
+	}
+	require.Len(t, f.tokenReqs, 1, "no refused request minted anything")
+	rep = s.token(context.Background(), "dana", Request{Repo: "shop/notes", Purpose: "read"})
+	require.True(t, rep.OK, "control: a member's read token, as before")
+}
+
 // syncBuf is a buffer the service's goroutines write while the test reads.
 type syncBuf struct {
 	mu sync.Mutex

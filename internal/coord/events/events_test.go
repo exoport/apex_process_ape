@@ -131,3 +131,29 @@ func TestPublishProject_ReplayStoresOnce(t *testing.T) {
 	require.NoError(t, err, "an event with no milestone has id -")
 	require.Equal(t, "taskforge/c1/2", m.Header.Get(jetstream.MsgIDHeader))
 }
+
+// D876 (d), research's DIM point 3: two watchers that see one merge
+// publish it under one message id (ci-watch-<event>-<sha>), whatever their
+// Seq and At, and the stream keeps it once.
+func TestPublishProjectID_TwoWatchersStoreOnce(t *testing.T) {
+	_, j := js(t)
+	ctx := context.Background()
+	first := apexv1.CIEvent("close-merged", "main", "abc", "", time.Unix(100, 0))
+	second := apexv1.CIEvent("close-merged", "main", "abc", "", time.Unix(103, 7))
+	dup, err := PublishProjectID(ctx, j, "ci-watch", "notes", "ci-watch-close-merged-abc", first)
+	require.NoError(t, err)
+	require.False(t, dup)
+	dup, err = PublishProjectID(ctx, j, "ci-watch", "notes", "ci-watch-close-merged-abc", second)
+	require.NoError(t, err)
+	require.True(t, dup, "the second watcher's is a duplicate")
+	_, err = PublishProjectID(ctx, j, "ci-watch", "notes", "ci-watch-close-merged-def", apexv1.CIEvent("close-merged", "main", "def", "", time.Unix(104, 0)))
+	require.NoError(t, err)
+	s, err := j.Stream(ctx, EventsStream)
+	require.NoError(t, err)
+	info, err := s.Info(ctx)
+	require.NoError(t, err)
+	require.Equal(t, uint64(2), info.State.Msgs)
+	m, err := s.GetLastMsgForSubject(ctx, "ape.evt.ci-watch.notes.project.-.close-merged")
+	require.NoError(t, err)
+	require.Equal(t, "ci-watch-close-merged-def", m.Header.Get(jetstream.MsgIDHeader))
+}

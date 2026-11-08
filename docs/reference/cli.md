@@ -2493,6 +2493,7 @@ Subcommands:
 
 - `check` — Main's merge queue check: run what the merge group carries
 - `event` — Publish a merge queue event for the waiting ape
+- `watch` — Watch main's merge queue and publish close-merged and ejected (queue/watch, the coordination host)
 - `workflow` — Print, or write, the merge queue's workflow (.github/workflows/apex-queue.yml)
 
 ## ape ci check
@@ -2571,6 +2572,61 @@ Flags:
 | `--nats-url` | string | `—` | NATS URL, instead of the project's (env APE_NATS_URL) |
 | `--ref` | string | `—` | the branch or merge group ref the event is about |
 | `--sha` | string | `—` | its sha |
+
+## ape ci watch
+
+Watch main's merge queue and publish close-merged and ejected (queue/watch, the coordination host)
+
+```
+ape ci watch [--once] [--dry-run] [--every 10s] [flags]
+```
+
+queue/watch's process (D876), on the coordination host: every --every it reads, over
+GitHub's REST API and conditionally (a 304 costs no rate limit), main's tip and the merge
+groups' branches (refs/heads/gh-readonly-queue/main/pr-<n>-…), and publishes what the queue's
+workflow would have, so a waiting close wakes in seconds rather than at its 1-min poll —
+with nothing run on GitHub and no secret on the repository:
+
+  close-merged  main's tip moved (ref main, the new tip's sha)
+  ejected       a pull request's merge group left the queue and its sha is not in main
+                (GitHub's compare <sha>...main neither identical nor ahead), with the
+                group's ref and sha as last seen; a group re-created under a new sha is
+                no ejection, and a sha GitHub does not know publishes nothing
+
+Each event is `ape ci event`'s payload (one builder), under the credential's user, with the
+message id ci-watch-<event>-<sha>, so two watchers publish a merge once. The events decide
+nothing: the close reads GitHub, and its poll stays the fallback. Stateless: the first look
+after a start is a baseline and publishes nothing.
+
+Its GitHub token is the App service's watch token (contents: read, metadata: read), asked
+for over NATS as the credential's user, which the service's config lists under the
+repository's watchers. Its credential is the watch kind (`ape nats mint user --kind watch`):
+the project's events and that one request. Refused unless the project's mode is
+queue/watch (ci.watch-mode). Rate limits wait for GitHub's reset; other failures back off
+from --every to 5 min; each is one line on stderr.
+
+--once looks once and prints what it read and decided as JSON (exit 0, or 1 when the
+look failed); with --dry-run it publishes nothing (a read-only look).
+
+Exit codes: 0 stopped, or --once looked · 1 refused, or the look failed · 2 usage.
+
+Examples:
+
+```
+  ape ci watch --nats-creds /var/lib/apex-ghapp/watch.creds
+  ape ci watch --once --dry-run --nats-creds /var/lib/apex-ghapp/watch.creds
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | the project whose coordination: block and hot/ape-nats.creds to use (default: the current directory) |
+| `--dry-run` | bool | `false` | decide, but publish nothing |
+| `--every` | duration | `10s` | how often to look |
+| `--nats-creds` | string | `—` | NATS credentials file, instead of the project's hot/ape-nats.creds (env APE_NATS_CREDS) |
+| `--nats-url` | string | `—` | NATS URL, instead of the project's (env APE_NATS_URL) |
+| `--once` | bool | `false` | look once, print what it read and decided as JSON, and exit |
 
 ## ape ci workflow
 
@@ -4495,7 +4551,8 @@ Print the service's config for one repository, filled in with the two Apps' ids 
 their installation ids there (the App's settings page and its installation URL show them),
 the NATS URL, the members who may ask for tokens and the operators who may run set-up acts
 (NATS user names: the credentials' user tokens), and for queue/runner the repository's own
-runner label, which the workflow set-up act writes into every job (D871). The keys are read through systemd's
+runner label, which the workflow set-up act writes into every job (D871), and for queue/watch the
+NATS users of `ape ci watch` (--watchers), who may ask for the read-only watch token and nothing else. The keys are read through systemd's
 LoadCredential (`ape ghapp print-unit`); the act log is /var/lib/apex-ghapp/acts.jsonl, and each act is
 also one JSON line on stderr (the unit's journal), after "ape ghapp: act", never a token.
 
@@ -4513,6 +4570,7 @@ Flags:
 | `--runner-label` | string | `—` | queue/runner: the repository's own self-hosted runner label, for the workflow act (never self-hosted or a default label) |
 | `--warden-app-id` | int64 | `0` | apex-warden's App id |
 | `--warden-installation` | int64 | `0` | apex-warden's installation id on the repository |
+| `--watchers` | string | `—` | queue/watch: the NATS users of `ape ci watch`, comma-separated (the watch token only) |
 
 ## ape ghapp print-unit
 

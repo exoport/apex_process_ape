@@ -233,6 +233,17 @@ func CIGrant(name string, projects ...string) aped.Grant {
 	return aped.Grant{PubAllow: pub, SubAllow: []string{inbox(u)}}
 }
 
+// WatchGrant is `ape ci watch`'s (D876, queue/watch): CIGrant's project
+// events, plus asking the coordination host's App service for its read-only
+// watch token (ape.sup.ghapp.pusher.<own user>). It runs on that host and
+// never on a CI runner; a ci credential, which may sit in a GitHub secret,
+// never gets the token subject.
+func WatchGrant(name string, projects ...string) aped.Grant {
+	g := CIGrant(name, projects...)
+	g.PubAllow = append(g.PubAllow, appTokenSubject+"."+natsconn.SubjectToken(name))
+	return g
+}
+
 // Mint issues a member credential for user's project of ensemble,
 // refusing a name whose subject token is reserved (`coord`, `sup`,
 // `vm-*`): a member must not be able to publish as the coordinator, a

@@ -1,6 +1,8 @@
 package apecmd
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -12,7 +14,10 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/exoport/apex_process_ape/internal/apexv1"
+	"github.com/exoport/apex_process_ape/internal/ciwatch"
 	"github.com/exoport/apex_process_ape/internal/coord/events"
+	"github.com/exoport/apex_process_ape/internal/coord/member"
+	"github.com/exoport/apex_process_ape/internal/ghapp"
 	"github.com/exoport/apex_process_ape/internal/natsconn"
 )
 
@@ -28,6 +33,8 @@ waiting ape a group merged or was ejected, and ` + "`ape ci workflow`" + ` write
 runs both.`,
 	}
 	cmd.AddCommand(newCICheckCmd(), newCIEventCmd(), newCIWorkflowCmd())
+	// v1.5 (D876): queue/watch.
+	cmd.AddCommand(newCIWatchCmd())
 	return cmd
 }
 
@@ -155,13 +162,7 @@ Exit codes: 0 published · 1 publish failed · 2 usage, or no NATS.`,
 					user = id.SubjectToken
 				}
 			}
-			if milestone == "" {
-				milestone, _ = strings.CutPrefix(ref, apexv1.MilestoneBranchPrefix)
-				if milestone == ref {
-					milestone = ""
-				}
-			}
-			ev := apexv1.Event{Seq: time.Now().UnixNano(), At: apexv1.Stamp(), Event: name, Milestone: milestone, Reason: strings.TrimSpace(ref + " " + sha)}
+			ev := apexv1.CIEvent(name, ref, sha, milestone, time.Now())
 			if _, err := events.PublishProject(ctx, js, user, natsconn.SubjectToken(project), "ci-"+strconv.FormatInt(time.Now().UnixNano(), 36), ev); err != nil {
 				return failErr(err)
 			}
@@ -173,6 +174,120 @@ Exit codes: 0 published · 1 publish failed · 2 usage, or no NATS.`,
 	cmd.Flags().StringVar(&ref, "ref", "", "the branch or merge group ref the event is about")
 	cmd.Flags().StringVar(&sha, "sha", "", "its sha")
 	cmd.Flags().StringVar(&milestone, "milestone", "", "the milestone (default: from a milestone/<M> ref)")
+	return cmd
+}
+
+func newCIWatchCmd() *cobra.Command {
+	var f coordFlags
+	var once, dry bool
+	var every time.Duration
+	cmd := &cobra.Command{
+		Use:   "watch [--once] [--dry-run] [--every 10s]",
+		Short: "Watch main's merge queue and publish close-merged and ejected (queue/watch, the coordination host)",
+		Long: `queue/watch's process (D876), on the coordination host: every --every it reads, over
+GitHub's REST API and conditionally (a 304 costs no rate limit), main's tip and the merge
+groups' branches (refs/heads/gh-readonly-queue/main/pr-<n>-…), and publishes what the queue's
+workflow would have, so a waiting close wakes in seconds rather than at its 1-min poll —
+with nothing run on GitHub and no secret on the repository:
+
+  close-merged  main's tip moved (ref main, the new tip's sha)
+  ejected       a pull request's merge group left the queue and its sha is not in main
+                (GitHub's compare <sha>...main neither identical nor ahead), with the
+                group's ref and sha as last seen; a group re-created under a new sha is
+                no ejection, and a sha GitHub does not know publishes nothing
+
+Each event is ` + "`ape ci event`" + `'s payload (one builder), under the credential's user, with the
+message id ci-watch-<event>-<sha>, so two watchers publish a merge once. The events decide
+nothing: the close reads GitHub, and its poll stays the fallback. Stateless: the first look
+after a start is a baseline and publishes nothing.
+
+Its GitHub token is the App service's watch token (contents: read, metadata: read), asked
+for over NATS as the credential's user, which the service's config lists under the
+repository's watchers. Its credential is the watch kind (` + "`ape nats mint user --kind watch`" + `):
+the project's events and that one request. Refused unless the project's mode is
+queue/watch (ci.watch-mode). Rate limits wait for GitHub's reset; other failures back off
+from --every to 5 min; each is one line on stderr.
+
+--once looks once and prints what it read and decided as JSON (exit 0, or 1 when the
+look failed); with --dry-run it publishes nothing (a read-only look).
+
+Exit codes: 0 stopped, or --once looked · 1 refused, or the look failed · 2 usage.`,
+		Example: "  ape ci watch --nats-creds /var/lib/apex-ghapp/watch.creds\n  ape ci watch --once --dry-run --nats-creds /var/lib/apex-ghapp/watch.creds",
+		Args:    cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			ctx := cmd.Context()
+			p, err := f.project()
+			if err != nil {
+				return usageErr(err)
+			}
+			project, repo, api, err := p.WatchTarget()
+			if fe, ok := errors.AsType[*apexv1.FailError](err); ok {
+				return failErr(fmt.Errorf("%w (%s)", err, fe.Code))
+			}
+			if err != nil {
+				return usageErr(err)
+			}
+			if api == "" {
+				api = member.DefaultGitHubAPI
+			}
+			nc, m, err := f.connect(ctx, "ape-ci-watch")
+			if err != nil {
+				return err
+			}
+			defer nc.Close()
+			js, err := jetstream.New(nc)
+			if err != nil {
+				return err
+			}
+			credsFile := natsconn.Resolve(f.url, f.creds).CredsFile
+			if credsFile == "" && m != nil {
+				credsFile = m.Creds
+			}
+			id, err := natsconn.DecodeIdentity(credsFile)
+			if err != nil {
+				return failErr(err)
+			}
+			user := id.SubjectToken
+			var tok string
+			var until time.Time
+			token := func(ctx context.Context, refresh bool) (string, error) {
+				if !refresh && tok != "" && time.Now().Before(until) {
+					return tok, nil
+				}
+				actx, cancel := context.WithTimeout(ctx, 30*time.Second)
+				defer cancel()
+				rep, err := ghapp.Ask(actx, nc, ghapp.TokenSubject, user, ghapp.Request{Repo: repo, Purpose: ghapp.WatchPurpose})
+				if err != nil {
+					return "", err
+				}
+				tok, until = rep.Token, rep.ExpiresAt.Add(-10*time.Minute)
+				return tok, nil
+			}
+			var publish func(context.Context, ciwatch.Published) error
+			if !dry {
+				publish = func(ctx context.Context, pub ciwatch.Published) error {
+					_, err := events.PublishProjectID(ctx, js, user, natsconn.SubjectToken(project), pub.MsgID, pub.Event)
+					return err
+				}
+			}
+			w := ciwatch.New(ciwatch.Config{API: api, Repo: repo, Token: token, Publish: publish, Every: every, Log: cmd.ErrOrStderr()})
+			if once {
+				r, err := w.Look(ctx)
+				data, _ := json.MarshalIndent(r, "", "  ")
+				fmt.Fprintln(cmd.OutOrStdout(), string(data))
+				if err != nil {
+					return failErr(err)
+				}
+				return nil
+			}
+			fmt.Fprintf(cmd.ErrOrStderr(), "%s ape ci watch: watching %s's main queue every %s for %s, as %s (dry run: %v)\n", time.Now().UTC().Format(time.RFC3339), repo, every, project, user, dry)
+			return w.Run(ctx)
+		},
+	}
+	f.add(cmd)
+	cmd.Flags().BoolVar(&once, "once", false, "look once, print what it read and decided as JSON, and exit")
+	cmd.Flags().BoolVar(&dry, "dry-run", false, "decide, but publish nothing")
+	cmd.Flags().DurationVar(&every, "every", 10*time.Second, "how often to look")
 	return cmd
 }
 

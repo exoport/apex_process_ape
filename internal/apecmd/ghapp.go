@@ -79,7 +79,7 @@ Exit codes: 0 stopped · 1 the config, a key or NATS failed · 2 usage.`,
 }
 
 func newGhappPrintConfigCmd() *cobra.Command {
-	var repo, natsURL, members, operators, notify, runnerLabel string
+	var repo, natsURL, members, operators, notify, runnerLabel, watchers string
 	var wardenID, pusherID, wardenInst, pusherInst int64
 	cmd := &cobra.Command{
 		Use:   "print-config --repo <owner>/<name> --warden-app-id N --warden-installation N --pusher-app-id N --pusher-installation N --nats-url URL --members a,b --operators a",
@@ -88,7 +88,8 @@ func newGhappPrintConfigCmd() *cobra.Command {
 their installation ids there (the App's settings page and its installation URL show them),
 the NATS URL, the members who may ask for tokens and the operators who may run set-up acts
 (NATS user names: the credentials' user tokens), and for queue/runner the repository's own
-runner label, which the workflow set-up act writes into every job (D871). The keys are read through systemd's
+runner label, which the workflow set-up act writes into every job (D871), and for queue/watch the
+NATS users of ` + "`ape ci watch`" + ` (--watchers), who may ask for the read-only watch token and nothing else. The keys are read through systemd's
 LoadCredential (` + "`ape ghapp print-unit`" + `); the act log is /var/lib/apex-ghapp/acts.jsonl, and each act is
 also one JSON line on stderr (the unit's journal), after "ape ghapp: act", never a token.`,
 		Args: cobra.NoArgs,
@@ -109,6 +110,9 @@ also one JSON line on stderr (the unit's journal), after "ape ghapp: act", never
 					parts[i] = strings.TrimSpace(parts[i])
 				}
 				return "[" + strings.Join(parts, ", ") + "]"
+			}
+			if watchers != "" {
+				labelLine += "\n    watchers: " + list(watchers)
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), `# /etc/apex-ghapp/config.yaml — written by `+"`ape ghapp print-config`"+` (PLAN-V15-GHAPP §7).
 # Root-owned, mode 0644; no secrets in it (the keys come through LoadCredential).
@@ -146,6 +150,7 @@ notify: %q
 	f.StringVar(&members, "members", "", "NATS users who may ask for member tokens, comma-separated")
 	f.StringVar(&operators, "operators", "", "NATS users who may run set-up acts, comma-separated")
 	f.StringVar(&notify, "notify", "", "a command (sh -c) run after secrets and runner-token, the act's record on stdin")
+	f.StringVar(&watchers, "watchers", "", "queue/watch: the NATS users of `ape ci watch`, comma-separated (the watch token only)")
 	f.StringVar(&runnerLabel, "runner-label", "", "queue/runner: the repository's own self-hosted runner label, for the workflow act (never self-hosted or a default label)")
 	return cmd
 }

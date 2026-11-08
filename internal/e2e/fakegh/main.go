@@ -5,10 +5,18 @@
 // queue's MERGE method makes) and ejecting one that conflicts. It is never
 // linked into ape and never talks to GitHub.
 //
+// For `ape ci watch` (D876, queue/watch) it keeps each queued pull request's
+// merge group as GitHub does, a branch refs/heads/gh-readonly-queue/main/
+// pr-<n>-<main's sha> at the group's merge commit, which main fast-forwards
+// to on the merge, and serves main's ref and those branches with ETags
+// (304 on If-None-Match) and compare <a>...<b>. A pull request whose title
+// holds "[fakegh:eject]" has its group built and then ejected.
+//
 //	fakegh -addr 127.0.0.1:25300 -bare <origin.git> [-delay 2s]
 package main
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -38,6 +46,9 @@ type pr struct {
 	MergedAt    string
 	Queued      bool
 	Events      []event
+	// Group is its merge group's branch while it is queued, and GroupSHA
+	// the merge commit there.
+	Group, GroupSHA string
 }
 
 type server struct {
@@ -74,6 +85,37 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		write(w, []any{})
+	case strings.HasSuffix(path, "/git/ref/heads/main") && r.Method == http.MethodGet:
+		s.mu.Lock()
+		sha, err := s.git("rev-parse", "refs/heads/main")
+		s.mu.Unlock()
+		if err != nil {
+			http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+			return
+		}
+		conditional(w, r, map[string]any{"ref": "refs/heads/main", "object": map[string]string{"sha": sha, "type": "commit"}})
+	case strings.Contains(path, "/git/matching-refs/heads/gh-readonly-queue/") && r.Method == http.MethodGet:
+		prefix := "refs/" + path[strings.Index(path, "/git/matching-refs/")+len("/git/matching-refs/"):]
+		s.mu.Lock()
+		out, _ := s.git("for-each-ref", "--format=%(refname) %(objectname)", prefix)
+		s.mu.Unlock()
+		refs := []map[string]any{}
+		for line := range strings.Lines(out) {
+			if f := strings.Fields(line); len(f) == 2 {
+				refs = append(refs, map[string]any{"ref": f[0], "object": map[string]string{"sha": f[1], "type": "commit"}})
+			}
+		}
+		conditional(w, r, refs)
+	case strings.Contains(path, "/compare/") && r.Method == http.MethodGet:
+		a, b, _ := strings.Cut(path[strings.Index(path, "/compare/")+len("/compare/"):], "...")
+		s.mu.Lock()
+		status, err := s.compare(a, b)
+		s.mu.Unlock()
+		if err != nil {
+			http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+			return
+		}
+		write(w, map[string]any{"status": status})
 	case strings.HasSuffix(path, "/pulls") && r.Method == http.MethodPost:
 		s.open(w, r)
 	case strings.HasSuffix(path, "/pulls") && r.Method == http.MethodGet:
@@ -81,6 +123,51 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, `{"message":"fakegh: not served"}`, http.StatusNotFound)
 	}
+}
+
+// conditional writes v with an ETag, or 304 when the request's
+// If-None-Match is it (GitHub's conditional request: no rate limit spent).
+func conditional(w http.ResponseWriter, r *http.Request, v any) {
+	data, err := json.Marshal(v)
+	if err != nil {
+		http.Error(w, `{"message":"fakegh: encode"}`, http.StatusInternalServerError)
+		return
+	}
+	tag := fmt.Sprintf(`"%x"`, sha256.Sum256(data))
+	if r.Header.Get("If-None-Match") == tag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	w.Header().Set("ETag", tag)
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(data)
+}
+
+// compare is GitHub's compare base...head status: identical, ahead (head
+// has base in it), behind (base has head in it), else diverged.
+func (s *server) compare(base, head string) (string, error) {
+	b, err := s.git("rev-parse", "--verify", "--quiet", base+"^{commit}")
+	if err != nil {
+		return "", err
+	}
+	h, err := s.git("rev-parse", "--verify", "--quiet", head+"^{commit}")
+	if err != nil {
+		return "", err
+	}
+	switch {
+	case b == h:
+		return "identical", nil
+	case s.ancestor(b, h):
+		return "ahead", nil
+	case s.ancestor(h, b):
+		return "behind", nil
+	}
+	return "diverged", nil
+}
+
+func (s *server) ancestor(a, b string) bool {
+	_, err := s.git("merge-base", "--is-ancestor", a, b)
+	return err == nil
 }
 
 func write(w http.ResponseWriter, v any) {
@@ -172,6 +259,7 @@ func (s *server) graphql(w http.ResponseWriter, r *http.Request) {
 		if !p.Queued {
 			p.Queued = true
 			p.Events = append(p.Events, event{kind: "added", at: now})
+			s.buildGroup(p)
 			go s.mergeLater(p.NodeID)
 		}
 		data["enqueuePullRequest"] = map[string]any{"mergeQueueEntry": map[string]any{"state": "QUEUED"}}
@@ -179,6 +267,7 @@ func (s *server) graphql(w http.ResponseWriter, r *http.Request) {
 		if p := s.find(id, 0); p != nil && p.Queued {
 			p.Queued = false
 			p.Events = append(p.Events, event{kind: "removed", at: now, reason: "DEQUEUED"})
+			s.dropGroup(p)
 		}
 		data["dequeuePullRequest"] = map[string]any{"clientMutationId": nil}
 	case strings.Contains(q, "mergeQueue(branch"):
@@ -234,9 +323,35 @@ func prState(p *pr) map[string]any {
 	return map[string]any{"state": state, "merged": p.Merged, "mergeCommit": mc, "mergeQueueEntry": queueEntry(p)}
 }
 
-// mergeLater is main's queue: after the delay it merges the pull request's
-// head into its base in the bare repository (a merge commit), or ejects it
-// on a conflict.
+// buildGroup makes p's merge group as GitHub does on enqueue: its merge
+// commit onto main, on gh-readonly-queue/main/pr-<n>-<main's sha>. A
+// conflict builds none (the merge ejects it).
+func (s *server) buildGroup(p *pr) {
+	base, err := s.git("rev-parse", "refs/heads/"+p.Base)
+	if err != nil {
+		return
+	}
+	sha, err := s.mergeCommit(p, base)
+	if err != nil {
+		return
+	}
+	p.Group, p.GroupSHA = fmt.Sprintf("refs/heads/gh-readonly-queue/%s/pr-%d-%s", p.Base, p.Number, base), sha
+	if _, err := s.git("update-ref", p.Group, sha); err != nil {
+		log.Printf("fakegh: #%d group: %v", p.Number, err)
+		p.Group, p.GroupSHA = "", ""
+	}
+}
+
+func (s *server) dropGroup(p *pr) {
+	if p.Group != "" {
+		_, _ = s.git("update-ref", "-d", p.Group)
+	}
+	p.Group, p.GroupSHA = "", ""
+}
+
+// mergeLater is main's queue: after the delay it fast-forwards the base to
+// the pull request's merge group (a merge commit; rebuilt if the base
+// moved meanwhile), or ejects it on a conflict or the title's eject knob.
 func (s *server) mergeLater(id string) {
 	time.Sleep(s.delay)
 	s.mu.Lock()
@@ -246,8 +361,16 @@ func (s *server) mergeLater(id string) {
 		return
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
+	if strings.Contains(p.Title, "[fakegh:eject]") {
+		p.Queued = false
+		p.Events = append(p.Events, event{kind: "removed", at: now, reason: "FAILED_CHECKS"})
+		s.dropGroup(p)
+		log.Printf("fakegh: #%d ejected (the title's knob)", p.Number)
+		return
+	}
 	sha, err := s.merge(p)
 	p.Queued = false
+	s.dropGroup(p)
 	if err != nil {
 		log.Printf("fakegh: #%d ejected: %v", p.Number, err)
 		p.Events = append(p.Events, event{kind: "removed", at: now, reason: "MERGE_CONFLICT"})
@@ -273,6 +396,21 @@ func (s *server) merge(p *pr) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	sha := p.GroupSHA
+	if sha == "" || !strings.HasSuffix(p.Group, "-"+base) {
+		if sha, err = s.mergeCommit(p, base); err != nil {
+			return "", err
+		}
+	}
+	if _, err := s.git("update-ref", "refs/heads/"+p.Base, sha, base); err != nil {
+		return "", err
+	}
+	return sha, nil
+}
+
+// mergeCommit is p's head merged onto base: a merge commit, as the
+// queue's MERGE method makes.
+func (s *server) mergeCommit(p *pr, base string) (string, error) {
 	head, err := s.git("rev-parse", "refs/heads/"+p.Head)
 	if err != nil {
 		return "", err
@@ -283,12 +421,5 @@ func (s *server) merge(p *pr) (string, error) {
 	}
 	tree = strings.Fields(tree)[0]
 	msg := fmt.Sprintf("Merge pull request #%d from %s\n\n%s", p.Number, p.Head, p.Title)
-	sha, err := s.git("commit-tree", tree, "-p", base, "-p", head, "-m", msg)
-	if err != nil {
-		return "", err
-	}
-	if _, err := s.git("update-ref", "refs/heads/"+p.Base, sha, base); err != nil {
-		return "", err
-	}
-	return sha, nil
+	return s.git("commit-tree", tree, "-p", base, "-p", head, "-m", msg)
 }

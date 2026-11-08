@@ -44,6 +44,10 @@ const CodeCoordIntegration = "coord.integration"
 // handover of its owner key refused.
 const CodeTrunkOneMember = "coord.trunk-one-member"
 
+// CodeCIWatchMode: `ape ci watch` in a project whose mode is not
+// queue/watch (D876).
+const CodeCIWatchMode = "ci.watch-mode"
+
 // IntegrationModeCommand writes coordination.integration into a block from
 // before 1.5 (the framework's derivable migration runs it).
 const IntegrationModeCommand = "ape project integration-mode"
@@ -129,6 +133,29 @@ func (c *CoordinationConfig) Mode() (string, error) {
 	return "", integrationErr("events: %q is not poll, watch or runner", events)
 }
 
+// WatchTarget is what `ape ci watch` watches (D876): the project's name
+// and its coordinated repository with the API's base (empty: GitHub's).
+// Refused (CodeCIWatchMode) unless the mode is queue/watch, and without a
+// project_name, which the events' subject names.
+func (p *Project) WatchTarget() (project, repo, api string, err error) {
+	cfg, err := LoadConfig(p.Root)
+	if err != nil {
+		return "", "", "", err
+	}
+	mode, err := cfg.Coordination.Mode()
+	if err != nil {
+		return "", "", "", err
+	}
+	if mode != ModeQueueWatch {
+		return "", "", "", &FailError{Code: CodeCIWatchMode, Action: ActionPerson, Msg: "ape ci watch is queue/watch's, and this project's integration mode is " + mode +
+			" — the coordination: block says integration: queue and events: watch for it"}
+	}
+	if cfg.ProjectName == "" {
+		return "", "", "", &FailError{Code: CodeCIWatchMode, Action: ActionPerson, Msg: "_apex/config.yaml has no project_name: the events' subject names the project"}
+	}
+	return cfg.ProjectName, strings.TrimSpace(cfg.Coordination.GitHub.Repo), strings.TrimSpace(cfg.Coordination.GitHub.API), nil
+}
+
 // IntegrationMode is the project's mode from its config, or why it has
 // none: an unreadable config is an error too.
 func (p *Project) IntegrationMode() (string, error) {
@@ -142,6 +169,7 @@ func (p *Project) IntegrationMode() (string, error) {
 func init() {
 	findingRules = append(findingRules, rule("", `^coordination integration: `, CodeCoordIntegration))
 	DiagnosticCodes = append(DiagnosticCodes,
+		CodeDoc{CodeCIWatchMode, 1, ActionPerson, "`ape ci watch` (D876) in a project whose integration mode is not queue/watch: the watcher is queue/watch's, the coordination host's process that publishes close-merged and ejected for its waiting closes — the coordination: block says integration: queue, events: watch and coordination.github.repo"},
 		CodeDoc{CodeTrunkOneMember, 1, ActionPerson, "a trunk project (integration: trunk, D876) is for one person per repository: its first milestone claim records the claimant's NATS user as the project's owner (milestone.<project>._trunk-owner, create-only), and a claim by any other user is refused — for several people the project moves to integration: queue (queue/poll, queue/watch or queue/runner), or the owner hands it over with `ape milestone owner --to <user> --by <who>` (a person's act; refused unless the caller is the owner and holds no live milestone lease in the project). A lost owner's key is removed by an operator with the cluster's admin credential. A refusal of a mistake, not a security boundary: any member's credential may write the project's milestone keys"},
 		CodeDoc{CodeIntegrationModePending, 1, ActionPerson, "`ape project integration-mode --check` (the framework's migration's check, D876): the coordination: block in _apex/config.yaml names no integration — `ape project integration-mode` writes it in one commit (queue where coordination.github is set, else trunk). Also its refusal when ape cannot write the key itself (coordination: written as a flow mapping): a person adds it by hand"},
 		CodeDoc{CodeCoordIntegration, 1, ActionPerson, "the coordination: block in _apex/config.yaml does not make one of the integration modes (D876): integration missing (a block from before 1.5 — `ape project integration-mode` writes it: queue where coordination.github is set, else trunk) or neither trunk nor queue; queue without coordination.github; github:, events: or runner_label under trunk; events not poll, watch or runner; runner_label without events: runner; or events: runner without a runner_label of the runner's own (one word, not self-hosted or another of GitHub's default labels: linux, windows, macos, x64, x86, arm, arm64, compared case-insensitively) — a person fixes the block"},
