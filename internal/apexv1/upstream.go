@@ -20,7 +20,7 @@ const CoordinatedScope = "v1.5 (in development): a coordinated project — main 
 // ScopeLine is the scope init states: CoordinatedScope in a coordinated
 // project, else Scope.
 func (p *Project) ScopeLine() string {
-	if p.coordinated() {
+	if p.queued() {
 		return CoordinatedScope
 	}
 	return Scope
@@ -36,7 +36,8 @@ const CodeFetchFailed = "base.fetch-failed"
 
 // BaseUpstream is a base branch measured against its upstream, as the
 // local remote-tracking ref has it: status never fetches; start, archive
-// and catch-up fetch first only in a coordinated project (coordinated).
+// and catch-up fetch first only in a coordinated project
+// (fetchesBeforeJudging).
 type BaseUpstream struct {
 	Branch   string `json:"branch"`
 	Upstream string `json:"upstream"`
@@ -84,12 +85,24 @@ func (u *BaseUpstream) Describe() string {
 // pushes run unattended, and fail instead.
 var noPromptEnv = []string{"GIT_TERMINAL_PROMPT=0"}
 
-// coordinated: the project integrates through a coordinated repository
-// (coordination.github, v1.5 stage 1a), so other members push to its
-// trunk and ape must fetch before judging the base.
-func (p *Project) coordinated() bool {
+// queued: the project integrates through a coordinated repository's merge
+// queue (coordination.github, v1.5 stage 1a; mode queue/*, D876): main
+// changes only through the queue, milestone/<M> branches are ape's, and
+// records reach main by pull request. Read from github.repo alone, so a
+// block from before 1.5 (no integration yet, which member.Load refuses)
+// keeps the queue's behaviour rather than falling back to a local merge.
+func (p *Project) queued() bool {
 	cfg, err := LoadConfig(p.Root)
 	return err == nil && cfg.Coordination != nil && cfg.Coordination.GitHub != nil && strings.TrimSpace(cfg.Coordination.GitHub.Repo) != ""
+}
+
+// fetchesBeforeJudging: the project has a coordination: block — trunk or
+// queue (D876) — so someone else may have moved its trunk, and a start,
+// archive or catch-up fetches it before judging the base. The one reader:
+// refuseBehindUpstream. A solo project never fetches (D45).
+func (p *Project) fetchesBeforeJudging() bool {
+	cfg, err := LoadConfig(p.Root)
+	return err == nil && cfg.Coordination != nil
 }
 
 // fetchUpstreams fetches the upstream of base and of main (section 5.5:
@@ -165,9 +178,10 @@ func (p *Project) fetchUpstream(ctx context.Context, remote, merge string) error
 // refuseBehindUpstream refuses starting a change from, or archiving one
 // onto, a base branch behind its upstream: v1.0 works on a local trunk
 // that is up to date (D45). No upstream configured, no check. A
-// coordinated project fetches first; an uncoordinated one never fetches.
+// coordinated project (trunk or queue) fetches first; a solo one never
+// fetches.
 func (p *Project) refuseBehindUpstream(ctx context.Context, base, what string) error {
-	if p.coordinated() {
+	if p.fetchesBeforeJudging() {
 		if err := p.fetchUpstreams(ctx, base, what); err != nil {
 			return err
 		}

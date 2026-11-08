@@ -132,7 +132,7 @@ func init() {
 // refuseTweakWithoutMilestone refuses starting, in a coordinated
 // project, a tweak whose approval names no milestone (D692).
 func (p *Project) refuseTweakWithoutMilestone(ctx context.Context, id string) error {
-	if !p.coordinated() {
+	if !p.queued() {
 		return nil
 	}
 	ci, err := p.requireChange(ctx, id)

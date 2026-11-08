@@ -242,7 +242,7 @@ func (p *Project) fenceClose(ctx context.Context, what string) (int, error) {
 // attempt, up to limits.attempts. done false: no close PR recorded.
 func (p *Project) resolveClose(ctx context.Context, ms string, opt RunOptions, progress func(string)) (*GateResult, bool, error) {
 	rec := p.LoadIntegration(closeID(ms))
-	if rec == nil || rec.Kind != KindClose || !p.coordinated() {
+	if rec == nil || rec.Kind != KindClose || !p.queued() {
 		return nil, false, nil
 	}
 	g := &GateResult{Milestone: ms, Status: MilestoneDone, Integration: rec}

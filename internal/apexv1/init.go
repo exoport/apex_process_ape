@@ -363,7 +363,7 @@ func Init(ctx context.Context, root string, brownfield bool) (*InitResult, error
 // returns it with the branch it left; anywhere else, or in a project that
 // is not coordinated, nothing ("").
 func (p *Project) initBranch(ctx context.Context) (from, branch string, err error) {
-	if !p.coordinated() || !p.isWorkTree(ctx) {
+	if !p.queued() || !p.isWorkTree(ctx) {
 		return "", "", nil
 	}
 	cur := CurrentBranch(ctx, p.Root)

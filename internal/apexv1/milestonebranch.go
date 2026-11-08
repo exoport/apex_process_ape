@@ -23,7 +23,7 @@ func MilestoneBranch(ms string) string { return MilestoneBranchPrefix + ms }
 // milestone/<M> in a coordinated project (coordination.github), "" for a
 // tweak, no milestone, or an uncoordinated project (any branch, D38).
 func (p *Project) MilestoneBase(ms string) string {
-	if ms == "" || ms == MilestoneNone || !p.coordinated() {
+	if ms == "" || ms == MilestoneNone || !p.queued() {
 		return ""
 	}
 	return MilestoneBranch(ms)

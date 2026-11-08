@@ -294,7 +294,7 @@ func (p *Project) Archive(ctx context.Context, id string, allowPendingHuman bool
 	if err := p.squashOntoBase(ctx, ci, updates, dest, pending, res, j); err != nil {
 		return res, err
 	}
-	if ms, ok := strings.CutPrefix(base, MilestoneBranchPrefix); ok && p.coordinated() {
+	if ms, ok := strings.CutPrefix(base, MilestoneBranchPrefix); ok && p.queued() {
 		p.emitTrigger(ctx, Trigger{Event: EventChangeArchived, Milestone: ms, Change: id, Commit: res.Commit, Paths: p.changedPaths(ctx, res.Commit), Key: id})
 	}
 	// Landed: nothing is left to roll back, so the journal goes before
@@ -310,7 +310,7 @@ func (p *Project) Archive(ctx context.Context, id string, allowPendingHuman bool
 // apex-apply); archiving the change again lands its resolution.
 func (p *Project) takeInAtLanding(ctx context.Context, base string, opt RunOptions, res *ArchiveResult) error {
 	ms, ok := strings.CutPrefix(base, MilestoneBranchPrefix)
-	if !ok || !p.coordinated() {
+	if !ok || !p.queued() {
 		return nil
 	}
 	tr, err := p.TakeIn(ctx, ms, opt)
@@ -350,7 +350,7 @@ func (p *Project) ArchivedChangeMilestone(id string) string {
 // refusal (change.archived in a project not integrating through GitHub).
 func (p *Project) archivedTakeIn(ctx context.Context, id string, opt RunOptions, notFound error) (res *ArchiveResult, ok bool) {
 	var fe *FailError
-	if !p.coordinated() || !errors.As(notFound, &fe) || fe.Code != "change.archived" {
+	if !p.queued() || !errors.As(notFound, &fe) || fe.Code != "change.archived" {
 		return nil, false
 	}
 	st := p.archivedState(id)
@@ -527,7 +527,7 @@ func (p *Project) squashOntoBase(ctx context.Context, ci ChangeInfo, updates []S
 	}
 	// D702: a coordinated change lands on milestone/<M> with one push,
 	// the lease fenced, a fast-forward only; refused, nothing landed.
-	if strings.HasPrefix(base, MilestoneBranchPrefix) && p.coordinated() {
+	if strings.HasPrefix(base, MilestoneBranchPrefix) && p.queued() {
 		if err := p.pushMilestone(ctx, base, HeadSHA(ctx, p.Root)); err != nil {
 			return undo(err)
 		}

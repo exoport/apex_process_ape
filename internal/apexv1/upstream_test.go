@@ -164,3 +164,36 @@ func TestBehindUpstream_UncoordinatedNeverFetches(t *testing.T) {
 	require.Equal(t, before, run(t, p.Root, "rev-parse", "refs/remotes/origin/main"), "no fetch")
 	require.Equal(t, "change/add-wave", CurrentBranch(ctx(), p.Root))
 }
+
+// trunkConfig is a trunk project's block (D876): coordinated, no queue.
+const trunkConfig = "coordination:\n  integration: trunk\n  ensemble: shop\n  home: ../home\n  url: nats://127.0.0.1:4222\n"
+
+// D876 (b): a trunk project fetches its trunk before judging it, as a
+// queue project does — another person's push to main is fetched, and this
+// checkout's unpushed plan commit is replayed onto it — and is no queue
+// project otherwise: init's scope is the local trunk's, and no
+// milestone/<M> branch is cut (research's negative controls).
+func TestBehindUpstream_TrunkFetches(t *testing.T) {
+	files := baseFiles()
+	files["_apex/config.yaml"] = trunkConfig
+	p := fixture(t, files)
+	bare, before := remoteAhead(t, p)
+	theirs := run(t, bare, "rev-parse", "refs/heads/main")
+	require.NotEqual(t, before, theirs)
+	addChange(t, p, "add-wave", changeDoc("add-wave", "greeting", addedWave, "- T1 wave — check: ./wave.sh"))
+	commitAll(t, p, "plan: add-wave")
+
+	_, err := p.Start(ctx(), "add-wave", RunOptions{})
+	require.NoError(t, err)
+	require.Equal(t, theirs, run(t, p.Root, "rev-parse", "refs/remotes/origin/main"), "fetched")
+	require.Equal(t, theirs, run(t, p.Root, "rev-parse", "main^"), "the plan commit sits on the other push")
+	require.Equal(t, "plan: add-wave", run(t, p.Root, "log", "-1", "--format=%s", "main"))
+	run(t, p.Root, "merge-base", "--is-ancestor", "main", "change/add-wave")
+
+	require.False(t, p.queued())
+	require.Equal(t, Scope, p.ScopeLine(), "no queue scope")
+	branch, created, err := p.PrepareMilestoneBranch(ctx(), "M1")
+	require.NoError(t, err)
+	require.False(t, created)
+	require.False(t, p.branchExists(ctx(), "milestone/M1"), "no milestone branch: %q", branch)
+}

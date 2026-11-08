@@ -36,7 +36,7 @@ func init() {
 // commit of an earlier call that did not reach its PR. Nothing for an
 // uncoordinated project.
 func (p *Project) prepareRecordOnMain(ctx context.Context, what string) error {
-	if !p.coordinated() || !p.isWorkTree(ctx) {
+	if !p.queued() || !p.isWorkTree(ctx) {
 		return nil
 	}
 	remote := p.trunkRemote(ctx)
@@ -52,7 +52,7 @@ func (p *Project) prepareRecordOnMain(ctx context.Context, what string) error {
 // sendPendingRecords sends main's tip in a record PR when main holds
 // commits its remote lacks and no record PR carries that tip yet.
 func (p *Project) sendPendingRecords(ctx context.Context) error {
-	if !p.coordinated() || !p.isWorkTree(ctx) {
+	if !p.queued() || !p.isWorkTree(ctx) {
 		return nil
 	}
 	u := p.upstreamOf(ctx, "main")
@@ -204,7 +204,7 @@ func recordSlug(subject string) string {
 // commit with no change on the remote's main, sent as a record PR; the
 // checkout is untouched. Nothing for an uncoordinated project.
 func (p *Project) RecordClaim(ctx context.Context, ms, holder string) (*Integration, error) {
-	if !p.coordinated() {
+	if !p.queued() {
 		return nil, nil //nolint:nilnil // no record PRs
 	}
 	remote := p.trunkRemote(ctx)
