@@ -151,6 +151,56 @@ Exit codes: 0 released · 1 refused (no ensemble, NATS) · 2 usage.`,
 	return cmd
 }
 
+func newMilestoneOwnerCmd() *cobra.Command {
+	var f v1Flags
+	var to, by string
+	cmd := &cobra.Command{
+		Use:   "owner --to <user> --by <who>",
+		Short: "Hand a trunk project over to another person (a person's act)",
+		Long: `A trunk project (integration: trunk, D876) is for one person per repository: its first
+milestone claim records the claimant's NATS user as its owner
+(milestone.<project>._trunk-owner, create-only, no TTL), and a claim by any other user is
+refused (coord.trunk-one-member, which names queue/* for several people). This hands the
+project to <user> (a NATS user name, the credential's user token), by a compare-and-swap
+of the owner key, recording --by. Only the owner may, and only while it holds no live
+milestone lease in the project (release them first: ` + "`ape milestone release <M>`" + `). A lost
+owner's key is removed by an operator with the cluster's admin credential.
+
+The owner key refuses a mistake, not an attack: any member's credential may write the
+project's milestone keys. A person's act: refused in a model session. Needs NATS.
+
+Exit codes: 0 handed over · 1 refused (not the owner, a lease still held, not trunk, NATS) · 2 usage.`,
+		Example: `  ape milestone owner --to bob --by diegos`,
+		Args:    cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := apexv1.RequirePersonFlag(apexv1.PersonMilestoneOwner); err != nil {
+				return usageErr(err)
+			}
+			if strings.TrimSpace(to) == "" || strings.TrimSpace(by) == "" {
+				return usageErr(errors.New("--to <user> and --by <who> are required"))
+			}
+			p, err := v1Project(&f)
+			if err != nil {
+				return err
+			}
+			from, err := member.HandTrunkOwner(cmd.Context(), p, to, strings.TrimSpace(by))
+			if errors.Is(err, member.ErrNotMember) {
+				return usageErr(errNotInEnsemble)
+			}
+			if err != nil {
+				return v1Fail(cmd, &f, err, nil)
+			}
+			return v1Emit(cmd.OutOrStdout(), &f, map[string]any{"from": from, "to": to, "by": by}, func(w io.Writer) {
+				fmt.Fprintf(w, "the project is %s's now (handed over by %s, decided by %s)\n", to, from, by)
+			})
+		},
+	}
+	addV1Flags(cmd, &f)
+	cmd.Flags().StringVar(&to, "to", "", "the NATS user who owns the project after this")
+	cmd.Flags().StringVar(&by, "by", "", "the person who decided the handover")
+	return cmd
+}
+
 func newMilestonePauseCmd() *cobra.Command { return milestonePauseCmd(true) }
 
 func newMilestoneResumeCmd() *cobra.Command { return milestonePauseCmd(false) }

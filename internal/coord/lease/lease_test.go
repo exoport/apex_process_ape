@@ -43,6 +43,7 @@ func TestLease(t *testing.T) {
 			t.Run("expiry frees the key; renewal keeps it", func(t *testing.T) { testExpiry(t, s(t)) })
 			t.Run("handover is recorded by both sides", func(t *testing.T) { testHandover(t, s(t)) })
 			t.Run("an older epoch is stale", func(t *testing.T) { testEpoch(t, s(t)) })
+			t.Run("an owner key is create-only and handed over by its owner", func(t *testing.T) { testOwner(t, s(t)) })
 		})
 	}
 }
@@ -167,4 +168,33 @@ func TestBook_HandoverRecordedByBothSides(t *testing.T) {
 	_, ok, err = bobBook.Last(layout.StewardKey("atomix"))
 	require.NoError(t, err)
 	require.False(t, ok, "a lease never held has no entry: the ape pauses rather than re-claims")
+}
+
+// D876 (c): Own creates once, with no TTL, and reports the owner after;
+// HandOwner moves it only from its owner, at its revision.
+func testOwner(t *testing.T, s *Store) {
+	ctx := context.Background()
+	const key = "milestone.p._trunk-owner"
+	cur, created, err := s.Own(ctx, key, "ann")
+	require.NoError(t, err)
+	require.True(t, created)
+	require.Equal(t, "ann", cur)
+	cur, created, err = s.Own(ctx, key, "bob")
+	require.NoError(t, err)
+	require.False(t, created)
+	require.Equal(t, "ann", cur, "the second owner finds the first")
+	cur, created, err = s.Own(ctx, key, "ann")
+	require.NoError(t, err)
+	require.False(t, created)
+	require.Equal(t, "ann", cur)
+
+	require.ErrorIs(t, s.HandOwner(ctx, key, "bob", "carol", "x"), ErrHeld, "only from its owner")
+	require.ErrorIs(t, s.HandOwner(ctx, "milestone.p.none", "ann", "bob", "x"), ErrHeld, "no owner to hand over")
+	require.NoError(t, s.HandOwner(ctx, key, "ann", "bob", "diegos"))
+	got, _, err := s.Holder(ctx, key)
+	require.NoError(t, err)
+	require.Equal(t, "bob", got)
+	keys, err := s.Keys(ctx, "milestone.p.")
+	require.NoError(t, err)
+	require.Equal(t, []string{key}, keys)
 }

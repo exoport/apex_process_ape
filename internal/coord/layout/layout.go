@@ -46,7 +46,7 @@ const byRunner = "the ape that ran it"
 // the page lists them.
 var Stores = []Store{
 	{Name: "ape-meta", Type: "KV", Keys: []string{"epoch"}, Class: Native, Writer: "the `sup.leader` holder", Retention: "no TTL; rewritten at each rebuild"},
-	{Name: "ape-leases", Type: "KV, per-key TTL", Keys: []string{"steward.<ens>", "coord.<ens>", "sup.leader", "milestone.<project>.<M>", "close.<project>", "conductor.<user>.<ens>"}, Class: Native, Writer: "the claimant", Retention: "TTL; deleted on release or close"},
+	{Name: "ape-leases", Type: "KV, per-key TTL", Keys: []string{"steward.<ens>", "coord.<ens>", "sup.leader", "milestone.<project>.<M>", "milestone.<project>._trunk-owner", "close.<project>", "conductor.<user>.<ens>"}, Class: Native, Writer: "the claimant", Retention: "TTL; deleted on release or close (a trunk owner key: no TTL, moved only by a handover)"},
 	{Name: "ape-slots", Type: "KV, per-key TTL", Keys: []string{"slot.<host>.<resource>.<n>"}, Class: Native, Writer: "the holder", Retention: "TTL"},
 	{Name: "ape-runs", Type: "KV", Keys: []string{"run.<project>.<run-id>"}, Class: Native, Writer: byRunner, Retention: "90 days"},
 	{Name: "ape-attempts", Type: "KV", Keys: []string{"attempt.<project>.<change>.<n>"}, Class: Native, Writer: "the change's ape", Retention: "deleted at milestone close"},
@@ -111,6 +111,14 @@ func CoordKey(ens string) string { return "coord." + ens }
 
 // MilestoneKey is a milestone's lease, held by its orchestrator.
 func MilestoneKey(project, m string) string { return "milestone." + project + "." + m }
+
+// TrunkOwnerMilestone is the owner key's last token: never a milestone id
+// (^M\d+$), and under milestone.<project>. so a member's grant covers it.
+const TrunkOwnerMilestone = "_trunk-owner"
+
+// TrunkOwnerKey is a trunk project's owner (D876): the one person (NATS
+// user) whose checkouts may claim its milestones. No TTL.
+func TrunkOwnerKey(project string) string { return MilestoneKey(project, TrunkOwnerMilestone) }
 
 // CloseKey is a project's close lease (D709): held by the one close that
 // is taking main in, gating, enqueuing and waiting for its merge.

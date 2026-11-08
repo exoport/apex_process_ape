@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/nats-io/nats.go/jetstream"
@@ -45,6 +46,8 @@ type Value struct {
 	// as not held, whatever the server still has. Absent (a value written
 	// before), no client-side check.
 	TTLSecs float64 `json:"ttl_secs,omitempty"` //nolint:tagliatelle // ape's NATS payloads are snake_case (events.md)
+	// By is who handed an owner key over (HandOwner); absent otherwise.
+	By string `json:"by,omitempty"`
 }
 
 // ExpirySkew is the margin a fence gives clocks that disagree: a lease
@@ -160,6 +163,81 @@ func (s *Store) Claim(ctx context.Context, key, holder string, ttl time.Duration
 		return Lease{}, fmt.Errorf("lease: claim %s: %w", key, err)
 	}
 	return Lease{Key: key, Holder: holder, Token: layout.Token{Epoch: epoch, Revision: rev}, TTL: ttl}, nil
+}
+
+// Own takes key for owner with no TTL, create-only (D876, a trunk
+// project's owner): of two first owners exactly one creates it. It
+// returns the key's owner after the call — owner itself when created now
+// or already its — and whether this call created it.
+func (s *Store) Own(ctx context.Context, key, owner string) (current string, created bool, err error) {
+	val, err := json.Marshal(Value{Holder: owner, At: s.now().UTC()})
+	if err != nil {
+		return "", false, err
+	}
+	_, err = s.leases.Create(ctx, key, val)
+	if err == nil {
+		return owner, true, nil
+	}
+	if !errors.Is(err, jetstream.ErrKeyExists) && !kvttl.Conflict(err) {
+		return "", false, fmt.Errorf("lease: own %s: %w", key, err)
+	}
+	cur, _, err := s.Holder(ctx, key)
+	if err != nil {
+		return "", false, err
+	}
+	if cur == "" { // deleted between the create and the read: try once more
+		if _, err := s.leases.Create(ctx, key, val); err == nil {
+			return owner, true, nil
+		}
+		cur, _, err = s.Holder(ctx, key)
+	}
+	return cur, false, err
+}
+
+// HandOwner moves owner key from from to to, by a compare-and-swap at the
+// key's current revision: ErrHeld when from is not its owner (or none
+// is), ErrStale when it moved on meanwhile.
+func (s *Store) HandOwner(ctx context.Context, key, from, to, by string) error {
+	e, err := s.leases.Get(ctx, key)
+	if errors.Is(err, jetstream.ErrKeyNotFound) {
+		return fmt.Errorf("%w: %s has no owner", ErrHeld, key)
+	}
+	if err != nil {
+		return fmt.Errorf("lease: read %s: %w", key, err)
+	}
+	var v Value
+	if err := json.Unmarshal(e.Value(), &v); err != nil {
+		return fmt.Errorf("lease: %s value: %w", key, err)
+	}
+	if v.Holder != from {
+		return fmt.Errorf("%w: %s is owned by %s", ErrHeld, key, v.Holder)
+	}
+	val, err := json.Marshal(Value{Holder: to, At: s.now().UTC(), By: by})
+	if err != nil {
+		return err
+	}
+	if _, err := s.leases.Update(ctx, key, val, e.Revision()); err != nil {
+		if kvttl.Conflict(err) || errors.Is(err, jetstream.ErrKeyExists) {
+			return fmt.Errorf("%w: %s moved on", ErrStale, key)
+		}
+		return fmt.Errorf("lease: hand %s over: %w", key, err)
+	}
+	return nil
+}
+
+// Keys are the leases' keys starting with prefix.
+func (s *Store) Keys(ctx context.Context, prefix string) ([]string, error) {
+	l, err := s.leases.ListKeys(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for k := range l.Keys() {
+		if strings.HasPrefix(k, prefix) {
+			out = append(out, k)
+		}
+	}
+	return out, nil
 }
 
 // Renew extends l's TTL by an update at its revision, and returns the

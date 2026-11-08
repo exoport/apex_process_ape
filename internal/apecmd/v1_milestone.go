@@ -46,6 +46,8 @@ every change in flight wherever it is worked.`,
 	cmd.AddCommand(newMilestoneGateTestCmd(), newMilestoneFullCmd())
 	// v1.5 stage 1a: milestone leases in an ensemble's project.
 	cmd.AddCommand(newMilestoneClaimCmd(), newMilestoneReleaseCmd(), newMilestoneTakeInCmd(), newMilestonePauseCmd(), newMilestoneResumeCmd())
+	// v1.5 (D876): a trunk project's owner handover.
+	cmd.AddCommand(newMilestoneOwnerCmd())
 	return cmd
 }
 

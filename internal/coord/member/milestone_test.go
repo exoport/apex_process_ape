@@ -51,6 +51,15 @@ func checkout(t *testing.T, url, user string) *apexv1.Project {
 	return p
 }
 
+// checkoutHolder is the holder p's claims take: <user>/<checkout>.
+func checkoutHolder(t *testing.T, p *apexv1.Project) string {
+	t.Helper()
+	s, err := openMilestones(context.Background(), p)
+	require.NoError(t, err)
+	defer s.close()
+	return s.holder
+}
+
 func leaseCode(t *testing.T, err error) string {
 	t.Helper()
 	var fe *apexv1.FailError
@@ -76,7 +85,10 @@ func TestMilestoneLease_ClaimGateRelease(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now()
 	url := leaseCluster(t)
-	ann, bob := checkout(t, url, "ann"), checkout(t, url, "bob")
+	// A trunk project is one person's (D876): the second holder is a second
+	// checkout of ann's, which a milestone's lease fences as it would
+	// another person's (TestTrunkOwner covers another person).
+	ann, bob := checkout(t, url, "ann"), checkout(t, url, "ann")
 
 	c, err := ClaimMilestone(ctx, ann, "M1")
 	require.NoError(t, err)
@@ -124,7 +136,7 @@ func TestMilestoneLease_LoopHoldRenews(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now()
 	url := leaseCluster(t)
-	ann, bob := checkout(t, url, "ann"), checkout(t, url, "bob")
+	ann, bob := checkout(t, url, "ann"), checkout(t, url, "ann") // two checkouts of one person (D876)
 
 	_, err := HoldMilestone(ctx, ann, "M1", io.Discard)
 	require.Equal(t, apexv1.CodeNotLeaseHolder, leaseCode(t, err))
@@ -219,7 +231,7 @@ func TestMilestoneLease_LoopHoldRetakesALapsedLease(t *testing.T) {
 	}
 
 	t.Run("retaken", func(t *testing.T) {
-		ann, bob := checkout(t, url, "ann"), checkout(t, url, "bob")
+		ann, bob := checkout(t, url, "ann"), checkout(t, url, "ann") // two checkouts of one person (D876)
 		_, err := ClaimMilestone(ctx, ann, "M1")
 		require.NoError(t, err)
 		var log syncBuf
@@ -236,7 +248,8 @@ func TestMilestoneLease_LoopHoldRetakesALapsedLease(t *testing.T) {
 		require.NoError(t, FenceMilestone(ctx, ann, "M1"), "a close's fenced push goes through")
 	})
 	t.Run("control-taken-by-another", func(t *testing.T) {
-		ann, bob := checkout(t, url, "ann2"), checkout(t, url, "bob2")
+		ann, bob := checkout(t, url, "ann"), checkout(t, url, "ann")
+		bobID := checkoutHolder(t, bob)
 		_, err := ClaimMilestone(ctx, ann, "M2")
 		require.NoError(t, err)
 		var log syncBuf
@@ -247,8 +260,8 @@ func TestMilestoneLease_LoopHoldRetakesALapsedLease(t *testing.T) {
 		_, err = ClaimMilestone(ctx, bob, "M2")
 		require.NoError(t, err, "bob takes the lapsed lease first")
 		require.Eventually(t, func() bool { return strings.Contains(log.String(), "holds it now") }, 10*time.Second, 50*time.Millisecond, log.String())
-		require.Contains(t, log.String(), "bob2/")
-		require.ErrorContains(t, FenceMilestone(ctx, ann, "M2"), "bob2/", "ann does not push")
+		require.Contains(t, log.String(), bobID)
+		require.ErrorContains(t, FenceMilestone(ctx, ann, "M2"), bobID, "ann's first checkout does not push")
 	})
 }
 

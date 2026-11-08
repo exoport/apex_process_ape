@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -113,6 +114,9 @@ func (s *milestones) claim(ctx context.Context, ms string) (lease.Lease, error) 
 // claimFresh is claim, reporting whether the key was created now (fresh)
 // rather than this checkout's live key kept.
 func (s *milestones) claimFresh(ctx context.Context, ms string) (lease.Lease, bool, error) {
+	if err := s.ownTrunk(ctx); err != nil {
+		return lease.Lease{}, false, err
+	}
 	key := s.key(ms)
 	l, err := s.store.Claim(ctx, key, s.holder, MilestoneTTL)
 	fresh := err == nil
@@ -153,6 +157,81 @@ type Claim struct {
 	// had: a leftover with nothing of its own fast-forwarded to main
 	// (D736); "" otherwise.
 	Note string
+}
+
+// user is the NATS user this checkout claims as: the holder's part before
+// "/<checkout>".
+func (s *milestones) user() string {
+	u, _, _ := strings.Cut(s.holder, "/")
+	return u
+}
+
+// ownTrunk is a trunk project's one-person rule (D876): every claim first
+// creates the project's owner key, create-only, for this checkout's user,
+// or finds it this user's already; another user's is
+// coord.trunk-one-member. A queue project has no owner. Two first claims
+// by two users at once: one creates the key, the other is refused.
+func (s *milestones) ownTrunk(ctx context.Context) error {
+	if s.m.Mode != apexv1.ModeTrunk {
+		return nil
+	}
+	owner, _, err := s.store.Own(ctx, layout.TrunkOwnerKey(s.m.Project), s.user())
+	if err != nil {
+		return err
+	}
+	if owner != s.user() {
+		return &apexv1.FailError{Code: apexv1.CodeTrunkOneMember, Action: apexv1.ActionPerson, Msg: fmt.Sprintf(
+			"%s is a trunk project owned by %s, and trunk is for one person per repository (D876) — for several people, move it to integration: queue (queue/poll, queue/watch or queue/runner), or have %s hand it over (`ape milestone owner --to %s`)",
+			s.m.Project, owner, owner, s.user())}
+	}
+	return nil
+}
+
+// HandTrunkOwner is `ape milestone owner --to <user>`: a trunk project's
+// owner hands it to another person, by a compare-and-swap of the owner key
+// (D876). Only the owner may, and only while this user holds no live
+// milestone lease in the project, so no run of the old owner's goes on
+// under the new one's. by is the person who decided it, recorded with it.
+func HandTrunkOwner(ctx context.Context, p *apexv1.Project, to, by string) (from string, err error) {
+	s, err := openMilestones(ctx, p, nats.NoReconnect())
+	if err != nil {
+		return "", err
+	}
+	defer s.close()
+	if s.m.Mode != apexv1.ModeTrunk {
+		return "", &apexv1.FailError{Code: apexv1.CodeTrunkOneMember, Action: apexv1.ActionPerson, Msg: "this project's integration mode is " + s.m.Mode + ": only a trunk project has an owner to hand over"}
+	}
+	to = natsconn.SubjectToken(to)
+	key := layout.TrunkOwnerKey(s.m.Project)
+	owner, _, err := s.store.Holder(ctx, key)
+	if err != nil {
+		return "", err
+	}
+	if owner != s.user() {
+		return owner, &apexv1.FailError{Code: apexv1.CodeTrunkOneMember, Action: apexv1.ActionPerson, Msg: fmt.Sprintf(
+			"%s's owner is %q, not %s: only the owner hands a trunk project over (an operator removes a lost owner's key, %s, with the cluster's admin credential)", s.m.Project, owner, s.user(), key)}
+	}
+	keys, err := s.store.Keys(ctx, layout.MilestoneKey(s.m.Project, ""))
+	if err != nil {
+		return owner, err
+	}
+	for _, k := range keys {
+		if k == key {
+			continue
+		}
+		live, err := s.store.LiveHolder(ctx, k)
+		if err != nil {
+			return owner, err
+		}
+		if u, _, _ := strings.Cut(live.Holder, "/"); u == s.user() {
+			return owner, &apexv1.FailError{Code: apexv1.CodeTrunkOneMember, Action: apexv1.ActionPerson, Msg: fmt.Sprintf(
+				"%s still holds %s (%s): release it (`ape milestone release`) before handing the project over", s.user(), k, live.Holder)}
+		}
+	}
+	if err := s.store.HandOwner(ctx, key, owner, to, by); err != nil {
+		return owner, err
+	}
+	return owner, nil
 }
 
 // ClaimMilestone is `ape milestone claim <M>`: the person's act that takes

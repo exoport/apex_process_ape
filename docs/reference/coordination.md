@@ -181,7 +181,7 @@ coordinator judges that file and publishes it. Why it is built this way is in
 | Name | Type | Keys | Class | Single writer | Live retention |
 | ---- | ---- | ---- | ----- | ------------- | -------------- |
 | `ape-meta` | KV | `epoch` | native | the `sup.leader` holder | no TTL; rewritten at each rebuild |
-| `ape-leases` | KV, per-key TTL | `steward.<ens>`, `coord.<ens>`, `sup.leader`, `milestone.<project>.<M>`, `close.<project>`, `conductor.<user>.<ens>` | native | the claimant | TTL; deleted on release or close |
+| `ape-leases` | KV, per-key TTL | `steward.<ens>`, `coord.<ens>`, `sup.leader`, `milestone.<project>.<M>`, `milestone.<project>._trunk-owner`, `close.<project>`, `conductor.<user>.<ens>` | native | the claimant | TTL; deleted on release or close (a trunk owner key: no TTL, moved only by a handover) |
 | `ape-slots` | KV, per-key TTL | `slot.<host>.<resource>.<n>` | native | the holder | TTL |
 | `ape-runs` | KV | `run.<project>.<run-id>` | native | the ape that ran it | 90 days |
 | `ape-attempts` | KV | `attempt.<project>.<change>.<n>` | native | the change's ape | deleted at milestone close |
@@ -215,6 +215,7 @@ release = delete at the last revision; expiry = the key's TTL.
 | Lease | Held by | TTL, renewal |
 | ----- | ------- | ------------ |
 | `milestone.<project>.<M>` | one checkout of the project, as `<user>/<checkout>`: taken by `ape milestone claim <M>`, renewed by the milestone's `apex-loop` run | 30 s, renewed every 10 s while the run lives |
+| `milestone.<project>._trunk-owner` | a trunk project's owner (D876), a NATS user: created by its first milestone claim, create-only | none; moved only by `ape milestone owner` |
 | `close.<project>` | the one close of the project in progress (D709): taken by `ape milestone close` before it fetches main, held while it gates on the merge, enqueues and waits for the merge, released then | 30 s, renewed every 10 s while the close runs |
 | `steward.<ens>` | the ensemble's steward, any eligible member's conductor | 30 s, renewed every 10 s |
 | `coord.<ens>` | the ensemble's coordinator | 30 s, renewed every 10 s |
@@ -249,6 +250,16 @@ at launch and renews it for the run's life. A loop on a milestone this checkout 
 refused before any session starts. In an ensemble's project the loop lock is per milestone, so loops on two
 milestones run side by side; a second loop on the same one is `session.loop-running`. `change new --milestone <M>` and
 `change start` of M's change need this checkout to hold the lease.
+
+**A trunk project is one person's** (`integration: trunk`, D876). Its first milestone claim also creates the owner
+key `milestone.<project>._trunk-owner` for the claimant's NATS user, create-only: of two first claims at once exactly
+one creates it. Every later claim, a loop's re-take included, checks it. A claim by another user is refused with
+`coord.trunk-one-member`, which names the owner and the way out: several people move the project to
+`integration: queue`. The owner's other checkouts claim as before. The owner hands the project over with
+`ape milestone owner --to <user> --by <who>`, a person's act, refused unless the caller is the owner and holds no
+live milestone lease in the project. An operator removes a lost owner's key with the cluster's admin credential. The
+key refuses a mistake, not an attack: any member's credential may write the project's milestone keys. A cluster
+rebuild does not replay it, so after one the next claim records the owner again. A queue project has no owner key.
 
 Between runs the lease can lapse. A later run or change start takes it again from this checkout's lease book
 (`_apex/state/coord/tokens.json`), unless another member claimed M meanwhile. In that case it is refused, and never

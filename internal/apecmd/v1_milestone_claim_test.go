@@ -254,7 +254,9 @@ func TestMilestoneClose_HoldsTheLeaseWhileItsGateRuns(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(root, "hot", "ape-nats.creds"), data, 0o600))
 		return root
 	}
-	dana, eve := checkoutOf("dana", true), checkoutOf("eve", false)
+	// A trunk project is one person's (D876): eve is dana's second checkout,
+	// which M1's lease fences as it would another person's.
+	dana, eve := checkoutOf("dana", true), checkoutOf("dana", false)
 	_, _, err = v1Exec(t, newMilestoneCmd, "claim", "M1", "--cwd", dana)
 	require.NoError(t, err)
 

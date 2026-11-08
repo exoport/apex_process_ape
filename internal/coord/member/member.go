@@ -63,6 +63,8 @@ type Membership struct {
 	// GitHubApp: tokens come from the coordination host's GitHub App
 	// service over NATS (PLAN-V15-GHAPP); GitHubToken is then unused.
 	GitHubApp bool
+	// Mode is the project's integration mode (D876): trunk or queue/*.
+	Mode string
 }
 
 // Load resolves the project's membership. A block that names its own
@@ -78,7 +80,8 @@ func Load(p *apexv1.Project) (Membership, error) {
 	}
 	// The mode first (D876): a block that makes no mode is refused with its
 	// own code, whatever else it lacks.
-	if _, err := c.Mode(); err != nil {
+	mode, err := c.Mode()
+	if err != nil {
 		return Membership{}, err
 	}
 	var missing []string
@@ -100,6 +103,7 @@ func Load(p *apexv1.Project) (Membership, error) {
 		Home:     c.Home,
 		URL:      c.URL,
 		Creds:    filepath.Join(p.Root, filepath.FromSlash(apexv1.NATSCredsRel)),
+		Mode:     mode,
 	}
 	if err := CheckEnsemble(m.Ensemble, []string{m.Project}); err != nil {
 		return Membership{}, err

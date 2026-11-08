@@ -5125,6 +5125,7 @@ Subcommands:
 - `gate` — Run the milestone's gate and record the result
 - `gate-test` — Self-test a gate folder before its milestone exists: the stub run passes, the plain gate is red
 - `new` — Append a milestone (Status: proposed) to roadmap.md
+- `owner` — Hand a trunk project over to another person (a person's act)
 - `pause` — Pause a milestone: its next change, take-in and close wait (a person's act; a project in an ensemble)
 - `release` — Give up a milestone's lease (a project in an ensemble)
 - `resume` — Resume a paused milestone (a person's act; a project in an ensemble)
@@ -5802,6 +5803,43 @@ Flags:
 | `--gate` | string | `—` | the one command that is red until the milestone is done (required) |
 | `--goal` | string | `—` | the Goal: paragraph (else a placeholder to fill in) |
 | `--json` | bool | `false` | machine output (JSON on stdout) |
+
+## ape milestone owner
+
+Hand a trunk project over to another person (a person's act)
+
+```
+ape milestone owner --to <user> --by <who> [flags]
+```
+
+A trunk project (integration: trunk, D876) is for one person per repository: its first
+milestone claim records the claimant's NATS user as its owner
+(milestone.<project>._trunk-owner, create-only, no TTL), and a claim by any other user is
+refused (coord.trunk-one-member, which names queue/* for several people). This hands the
+project to <user> (a NATS user name, the credential's user token), by a compare-and-swap
+of the owner key, recording --by. Only the owner may, and only while it holds no live
+milestone lease in the project (release them first: `ape milestone release <M>`). A lost
+owner's key is removed by an operator with the cluster's admin credential.
+
+The owner key refuses a mistake, not an attack: any member's credential may write the
+project's milestone keys. A person's act: refused in a model session. Needs NATS.
+
+Exit codes: 0 handed over · 1 refused (not the owner, a lease still held, not trunk, NATS) · 2 usage.
+
+Examples:
+
+```
+  ape milestone owner --to bob --by diegos
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--by` | string | `—` | the person who decided the handover |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+| `--to` | string | `—` | the NATS user who owns the project after this |
 
 ## ape milestone pause
 

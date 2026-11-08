@@ -36,6 +36,7 @@ var (
 	PersonMilestoneRelease = personOnly("ape milestone release", "", "milestone", "release")
 	PersonMilestonePause   = personOnly("ape milestone pause", "", "milestone", "pause")
 	PersonMilestoneResume  = personOnly("ape milestone resume", "", "milestone", "resume")
+	PersonMilestoneOwner   = personOnly("ape milestone owner", "", "milestone", "owner")
 	PersonTaskUsageOK      = personOnly("--usage-ok", "--usage-ok", "task")
 	PersonOrdersAcceptFrom = personOnly("ape orders accept --from", "--from", "orders", "accept")
 	PersonOrdersAccept     = personOnly("ape orders accept", "", "orders", "accept")

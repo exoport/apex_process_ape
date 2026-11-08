@@ -39,6 +39,11 @@ const (
 // runner_label do not make one of the modes (D876).
 const CodeCoordIntegration = "coord.integration"
 
+// CodeTrunkOneMember: a trunk project's milestone claim by a person other
+// than its owner (D876: trunk is for one person per repository), or a
+// handover of its owner key refused.
+const CodeTrunkOneMember = "coord.trunk-one-member"
+
 // IntegrationModeCommand writes coordination.integration into a block from
 // before 1.5 (the framework's derivable migration runs it).
 const IntegrationModeCommand = "ape project integration-mode"
@@ -137,6 +142,7 @@ func (p *Project) IntegrationMode() (string, error) {
 func init() {
 	findingRules = append(findingRules, rule("", `^coordination integration: `, CodeCoordIntegration))
 	DiagnosticCodes = append(DiagnosticCodes,
+		CodeDoc{CodeTrunkOneMember, 1, ActionPerson, "a trunk project (integration: trunk, D876) is for one person per repository: its first milestone claim records the claimant's NATS user as the project's owner (milestone.<project>._trunk-owner, create-only), and a claim by any other user is refused — for several people the project moves to integration: queue (queue/poll, queue/watch or queue/runner), or the owner hands it over with `ape milestone owner --to <user> --by <who>` (a person's act; refused unless the caller is the owner and holds no live milestone lease in the project). A lost owner's key is removed by an operator with the cluster's admin credential. A refusal of a mistake, not a security boundary: any member's credential may write the project's milestone keys"},
 		CodeDoc{CodeIntegrationModePending, 1, ActionPerson, "`ape project integration-mode --check` (the framework's migration's check, D876): the coordination: block in _apex/config.yaml names no integration — `ape project integration-mode` writes it in one commit (queue where coordination.github is set, else trunk). Also its refusal when ape cannot write the key itself (coordination: written as a flow mapping): a person adds it by hand"},
 		CodeDoc{CodeCoordIntegration, 1, ActionPerson, "the coordination: block in _apex/config.yaml does not make one of the integration modes (D876): integration missing (a block from before 1.5 — `ape project integration-mode` writes it: queue where coordination.github is set, else trunk) or neither trunk nor queue; queue without coordination.github; github:, events: or runner_label under trunk; events not poll, watch or runner; runner_label without events: runner; or events: runner without a runner_label of the runner's own (one word, not self-hosted or another of GitHub's default labels: linux, windows, macos, x64, x86, arm, arm64, compared case-insensitively) — a person fixes the block"},
 	)
