@@ -25,9 +25,14 @@ import (
 // is idempotent.
 func TestCIWorkflow(t *testing.T) {
 	root := v1Repo(t)
-	stdout, _, err := v1Exec(t, newCICmd, "workflow")
+	_, _, err := v1Exec(t, newCICmd, "workflow", "--cwd", root)
+	require.Equal(t, 1, exitCodeOf(t, err), "solo: the workflow is queue/runner's")
+	writeAndCommit(t, root, "_apex/config.yaml", "project_name: notes\ncoordination:\n  integration: queue\n  events: runner\n  runner_label: apex-r1\n  ensemble: shop\n  home: h\n  url: nats://127.0.0.1:1\n  github:\n    repo: shop/notes\n", "chore: queue/runner")
+	want, err := apexv1.QueueWorkflowFor("apex-r1")
 	require.NoError(t, err)
-	require.Equal(t, apexv1.QueueWorkflow, stdout)
+	stdout, _, err := v1Exec(t, newCICmd, "workflow", "--cwd", root)
+	require.NoError(t, err)
+	require.Equal(t, want, stdout)
 	var wf struct {
 		On   map[string]any `yaml:"on"`
 		Jobs map[string]struct {
@@ -55,7 +60,7 @@ func TestCIWorkflow(t *testing.T) {
 	require.Contains(t, stdout, "wrote .github/workflows/apex-queue.yml")
 	data, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "apex-queue.yml"))
 	require.NoError(t, err)
-	require.Equal(t, apexv1.QueueWorkflow, string(data))
+	require.Equal(t, want, string(data))
 	stdout, _, err = v1Exec(t, newCICmd, "workflow", "--write", "--cwd", root)
 	require.NoError(t, err)
 	require.Contains(t, stdout, "is up to date")

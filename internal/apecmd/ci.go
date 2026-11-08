@@ -187,20 +187,31 @@ func newCIWorkflowCmd() *cobra.Command {
 ` + "`ape ci check`" + ` (main's queue's required check, "apex-queue-check") and publishes
 ejected when it is red; on a push to main it publishes close-merged; on a pull request it
 passes at once, since the queue checks the tree that merges. Milestone branches have no
-queue: ape lands on them itself (D702). It runs on self-hosted runners with ape installed, and reads two secrets,
-APE_NATS_URL and APE_NATS_CREDS (the ensemble credential's text), which a person sets on
-the repository. ape writes the file; committing it is the person's, through main's queue.
+queue: ape lands on them itself (D702). It is queue/runner's (D876): every job runs on
+[self-hosted, <runner_label>], the project's own self-hosted runner with ape installed, and
+it is refused (ci.workflow-mode) unless the coordination: block says integration: queue,
+events: runner and a runner_label of the runner's own — never self-hosted or another of
+GitHub's default labels (D871: a bare self-hosted sent the jobs and the credential to
+another org runner). The label narrows where the jobs go; only the runner group's
+repository access isolates them. It reads two secrets, APE_NATS_URL and APE_NATS_CREDS
+(the ensemble credential's text), which a person sets on the repository. ape writes the
+file; committing it is the person's, through main's queue.
 
-Exit codes: 0 printed or written · 1 the write failed · 2 usage.`,
+Exit codes: 0 printed or written · 1 refused (ci.workflow-mode, coord.integration) or the
+write failed · 2 usage.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if !write {
-				_, _ = io.WriteString(cmd.OutOrStdout(), apexv1.QueueWorkflow)
-				return nil
-			}
 			p, err := v1Project(&f)
 			if err != nil {
 				return err
+			}
+			if !write {
+				wf, err := p.QueueWorkflow()
+				if err != nil {
+					return v1Fail(cmd, &f, err, nil)
+				}
+				_, _ = io.WriteString(cmd.OutOrStdout(), wf)
+				return nil
 			}
 			changed, err := p.WriteQueueWorkflow()
 			if err != nil {

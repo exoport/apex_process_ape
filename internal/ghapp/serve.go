@@ -54,6 +54,10 @@ type AppConfig struct {
 type RepoPolicy struct {
 	Members   []string `yaml:"members"`
 	Operators []string `yaml:"operators"`
+	// RunnerLabel is the repository's own self-hosted runner's label, which
+	// the workflow act writes into every job's runs-on (D871, V12-15): the
+	// operator's config says it, never a request.
+	RunnerLabel string `yaml:"runner_label"`
 }
 
 // Config is the service's config (/etc/apex-ghapp/config.yaml).
@@ -286,7 +290,11 @@ func (s *Service) setup(ctx context.Context, user string, req Request) Reply {
 			rep.Error = err.Error()
 		}
 	case "workflow":
-		u, err := s.gh.WorkflowPR(ctx, tok, req.Repo, apexv1.QueueWorkflowRel, apexv1.QueueWorkflow)
+		wf, err := apexv1.QueueWorkflowFor(pol.RunnerLabel)
+		if err != nil {
+			return s.logged(user, "warden", req, refuse("the workflow act needs repos.%s.runner_label in the service's config, the repository's own runner label: %v", req.Repo, err))
+		}
+		u, err := s.gh.WorkflowPR(ctx, tok, req.Repo, apexv1.QueueWorkflowRel, wf)
 		rep = Reply{OK: err == nil, Result: []string{u}}
 		if err != nil {
 			rep.Error = err.Error()

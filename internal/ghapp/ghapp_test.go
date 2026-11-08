@@ -35,6 +35,8 @@ type fakeGitHub struct {
 	secrets   map[string]string
 	prs       []string
 	branch    bool
+	// workflowPut is the workflow file the last PUT wrote (decoded).
+	workflowPut string
 	// noMergeQueues: the App has not got Merge queues (FINDING-V15-1A-7 c):
 	// a token asking for it is refused, as GitHub does.
 	noMergeQueues bool
@@ -124,6 +126,12 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.branch = true
 		w.WriteHeader(http.StatusCreated)
 	case r.Method == http.MethodPut && path == "/repos/shop/notes/contents/.github/workflows/apex-queue.yml":
+		var put struct {
+			Content string `json:"content"`
+		}
+		_ = json.Unmarshal(body, &put)
+		data, _ := base64.StdEncoding.DecodeString(put.Content)
+		f.workflowPut = string(data)
 		w.WriteHeader(http.StatusCreated)
 	case r.Method == http.MethodPost && path == "/repos/shop/notes/pulls":
 		u := "https://github.example/shop/notes/pull/1"

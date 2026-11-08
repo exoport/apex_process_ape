@@ -79,7 +79,7 @@ Exit codes: 0 stopped · 1 the config, a key or NATS failed · 2 usage.`,
 }
 
 func newGhappPrintConfigCmd() *cobra.Command {
-	var repo, natsURL, members, operators, notify string
+	var repo, natsURL, members, operators, notify, runnerLabel string
 	var wardenID, pusherID, wardenInst, pusherInst int64
 	cmd := &cobra.Command{
 		Use:   "print-config --repo <owner>/<name> --warden-app-id N --warden-installation N --pusher-app-id N --pusher-installation N --nats-url URL --members a,b --operators a",
@@ -87,13 +87,21 @@ func newGhappPrintConfigCmd() *cobra.Command {
 		Long: `Print the service's config for one repository, filled in with the two Apps' ids and
 their installation ids there (the App's settings page and its installation URL show them),
 the NATS URL, the members who may ask for tokens and the operators who may run set-up acts
-(NATS user names: the credentials' user tokens). The keys are read through systemd's
+(NATS user names: the credentials' user tokens), and for queue/runner the repository's own
+runner label, which the workflow set-up act writes into every job (D871). The keys are read through systemd's
 LoadCredential (` + "`ape ghapp print-unit`" + `); the act log is /var/lib/apex-ghapp/acts.jsonl, and each act is
 also one JSON line on stderr (the unit's journal), after "ape ghapp: act", never a token.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if repo == "" || natsURL == "" || wardenID == 0 || pusherID == 0 || wardenInst == 0 || pusherInst == 0 || members == "" || operators == "" {
-				return usageErr(errors.New("every flag but --notify is required"))
+				return usageErr(errors.New("every flag but --notify and --runner-label is required"))
+			}
+			labelLine := ""
+			if runnerLabel != "" {
+				if err := apexv1.CheckRunnerLabel(runnerLabel); err != nil {
+					return usageErr(err)
+				}
+				labelLine = "\n    runner_label: " + runnerLabel
 			}
 			list := func(s string) string {
 				parts := strings.Split(s, ",")
@@ -121,10 +129,10 @@ pusher:
 repos:
   %s:
     members: %s
-    operators: %s
+    operators: %s%s
 log: /var/lib/apex-ghapp/acts.jsonl
 notify: %q
-`, natsURL, wardenID, repo, wardenInst, pusherID, repo, pusherInst, repo, list(members), list(operators), notify)
+`, natsURL, wardenID, repo, wardenInst, pusherID, repo, pusherInst, repo, list(members), list(operators), labelLine, notify)
 			return nil
 		},
 	}
@@ -138,6 +146,7 @@ notify: %q
 	f.StringVar(&members, "members", "", "NATS users who may ask for member tokens, comma-separated")
 	f.StringVar(&operators, "operators", "", "NATS users who may run set-up acts, comma-separated")
 	f.StringVar(&notify, "notify", "", "a command (sh -c) run after secrets and runner-token, the act's record on stdin")
+	f.StringVar(&runnerLabel, "runner-label", "", "queue/runner: the repository's own self-hosted runner label, for the workflow act (never self-hosted or a default label)")
 	return cmd
 }
 

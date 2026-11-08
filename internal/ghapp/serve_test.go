@@ -90,6 +90,11 @@ func TestService(t *testing.T) {
 	rep, err = ask(SetupSubject, "dana", Request{Repo: "shop/notes", Act: "runner-token"})
 	require.NoError(t, err)
 	require.Equal(t, "RUNNER_TOKEN", rep.Token)
+	// D871, V12-15: the workflow act writes every job onto the repository's
+	// own runner label, from the operator's config — none there, refused.
+	_, err = ask(SetupSubject, "dana", Request{Repo: "shop/notes", Act: "workflow"})
+	require.ErrorContains(t, err, "runner_label")
+	require.Empty(t, f.prs, "nothing opened")
 	_, err = ask(SetupSubject, "dana", Request{Repo: "shop/notes", Act: "delete-everything"})
 	require.ErrorContains(t, err, "act \"delete-everything\"")
 
@@ -158,6 +163,40 @@ func TestService_ReadTokenAsksForMergeQueues(t *testing.T) {
 			first, _ := f.tokenReqs[0]["permissions"].(map[string]any)
 			require.Equal(t, "read", first["merge_queues"], "the read token asks for Merge queues: read")
 		})
+	}
+}
+
+// D871, V12-15: the workflow act opens the PR with every job on
+// [self-hosted, <repos.<repo>.runner_label>]; a default label in the
+// config is refused like none.
+func TestService_WorkflowActOnTheRunnersLabel(t *testing.T) {
+	for _, tc := range []struct{ label, refused string }{{"apex-r1", ""}, {"Self-Hosted", "default runner labels"}, {"linux", "default runner labels"}} {
+		key, pemBytes := appKey(t)
+		f := newFake(t, &key.PublicKey)
+		srv := httptest.NewServer(f)
+		t.Cleanup(srv.Close)
+		dir := t.TempDir()
+		keyPath := filepath.Join(dir, "key.pem")
+		require.NoError(t, os.WriteFile(keyPath, pemBytes, 0o600))
+		s, err := NewService(&Config{
+			API:    srv.URL,
+			Warden: AppConfig{AppID: 42, Key: keyPath, Installations: map[string]int64{"shop/notes": 8}},
+			Pusher: AppConfig{AppID: 42, Key: keyPath, Installations: map[string]int64{"shop/notes": 7}},
+			Repos:  map[string]RepoPolicy{"shop/notes": {Operators: []string{"dana"}, RunnerLabel: tc.label}},
+			Log:    filepath.Join(dir, "acts.jsonl"),
+		})
+		require.NoError(t, err)
+		rep := s.setup(context.Background(), "dana", Request{Repo: "shop/notes", Act: "workflow"})
+		if tc.refused != "" {
+			require.False(t, rep.OK, tc.label)
+			require.Contains(t, rep.Error, tc.refused)
+			require.Empty(t, f.prs)
+			continue
+		}
+		require.True(t, rep.OK, rep.Error)
+		require.Len(t, f.prs, 1)
+		require.Equal(t, 2, strings.Count(f.workflowPut, "runs-on: [self-hosted, apex-r1]\n"), f.workflowPut)
+		require.NotContains(t, f.workflowPut, "runs-on: [self-hosted]")
 	}
 }
 

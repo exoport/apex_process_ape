@@ -292,8 +292,14 @@ nothing lands, and running the command again fetches and catches up. The single 
 
 The rulesets R1–R4, set once per repository, keep everyone else off on GitHub's side.
 
-Main's merge queue check runs in CI. `ape ci workflow --write` writes `.github/workflows/apex-queue.yml`, which runs on
-self-hosted runners:
+In `queue/runner` (D876), main's merge queue check runs in CI. `ape ci workflow --write` writes
+`.github/workflows/apex-queue.yml`, whose every job runs on `[self-hosted, <runner_label>]`: the project's own
+runner only. `ape ci workflow` refuses any other mode (`ci.workflow-mode`), and `runner_label` must be the runner's
+own label, never `self-hosted` or another of GitHub's default labels (`coord.integration`). A bare `self-hosted`
+sent both jobs, and the credential, to an org runner that was not the project's (D871). The label narrows where the
+jobs go; only the runner group's repository access isolates them, so restrict the group to the repository. The App
+service's `workflow` set-up act writes the same file, on the label in its config's `repos.<repo>.runner_label`.
+The workflow:
 
 - On a merge group into main it runs `ape ci check`, the required check. A milestone's close PR, which carries the
   milestone's changes and take-ins, gets the milestone gate with its full run, where an accepted red passes only on

@@ -2585,11 +2585,18 @@ Print the merge queue's GitHub Actions workflow, or with --write put it at
 `ape ci check` (main's queue's required check, "apex-queue-check") and publishes
 ejected when it is red; on a push to main it publishes close-merged; on a pull request it
 passes at once, since the queue checks the tree that merges. Milestone branches have no
-queue: ape lands on them itself (D702). It runs on self-hosted runners with ape installed, and reads two secrets,
-APE_NATS_URL and APE_NATS_CREDS (the ensemble credential's text), which a person sets on
-the repository. ape writes the file; committing it is the person's, through main's queue.
+queue: ape lands on them itself (D702). It is queue/runner's (D876): every job runs on
+[self-hosted, <runner_label>], the project's own self-hosted runner with ape installed, and
+it is refused (ci.workflow-mode) unless the coordination: block says integration: queue,
+events: runner and a runner_label of the runner's own — never self-hosted or another of
+GitHub's default labels (D871: a bare self-hosted sent the jobs and the credential to
+another org runner). The label narrows where the jobs go; only the runner group's
+repository access isolates them. It reads two secrets, APE_NATS_URL and APE_NATS_CREDS
+(the ensemble credential's text), which a person sets on the repository. ape writes the
+file; committing it is the person's, through main's queue.
 
-Exit codes: 0 printed or written · 1 the write failed · 2 usage.
+Exit codes: 0 printed or written · 1 refused (ci.workflow-mode, coord.integration) or the
+write failed · 2 usage.
 
 Flags:
 
@@ -4487,7 +4494,8 @@ ape ghapp print-config --repo <owner>/<name> --warden-app-id N --warden-installa
 Print the service's config for one repository, filled in with the two Apps' ids and
 their installation ids there (the App's settings page and its installation URL show them),
 the NATS URL, the members who may ask for tokens and the operators who may run set-up acts
-(NATS user names: the credentials' user tokens). The keys are read through systemd's
+(NATS user names: the credentials' user tokens), and for queue/runner the repository's own
+runner label, which the workflow set-up act writes into every job (D871). The keys are read through systemd's
 LoadCredential (`ape ghapp print-unit`); the act log is /var/lib/apex-ghapp/acts.jsonl, and each act is
 also one JSON line on stderr (the unit's journal), after "ape ghapp: act", never a token.
 
@@ -4502,6 +4510,7 @@ Flags:
 | `--pusher-app-id` | int64 | `0` | apex-pusher's App id |
 | `--pusher-installation` | int64 | `0` | apex-pusher's installation id on the repository |
 | `--repo` | string | `—` | the repository, <owner>/<name> |
+| `--runner-label` | string | `—` | queue/runner: the repository's own self-hosted runner label, for the workflow act (never self-hosted or a default label) |
 | `--warden-app-id` | int64 | `0` | apex-warden's App id |
 | `--warden-installation` | int64 | `0` | apex-warden's installation id on the repository |
 
