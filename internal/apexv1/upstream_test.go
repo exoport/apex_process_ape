@@ -196,4 +196,13 @@ func TestBehindUpstream_TrunkFetches(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, created)
 	require.False(t, p.branchExists(ctx(), "milestone/M1"), "no milestone branch: %q", branch)
+	// INT-2: no record PR — a trunk claim's record opens no integration,
+	// and fetches and writes nothing.
+	head, remote := HeadSHA(ctx(), p.Root), run(t, bare, "rev-parse", "refs/heads/main")
+	rec, err := p.RecordClaim(ctx(), "M1", "ann/c1")
+	require.NoError(t, err)
+	require.Nil(t, rec, "no record PR in a trunk project")
+	require.Equal(t, head, HeadSHA(ctx(), p.Root))
+	require.Equal(t, remote, run(t, bare, "rev-parse", "refs/heads/main"))
+	require.Empty(t, run(t, bare, "for-each-ref", "--format=%(refname)", "refs/heads/apex/"), "no record branch pushed")
 }

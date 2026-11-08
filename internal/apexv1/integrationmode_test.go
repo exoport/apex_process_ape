@@ -41,6 +41,12 @@ func TestMode(t *testing.T) {
 		{"integration missing, github set", coordHead + coordGH, "writes queue where coordination.github is set"},
 		{"unknown integration", "coordination:\n  integration: merge\n", `"merge" is neither trunk nor queue`},
 		{"queue without github", "coordination:\n  integration: queue\n", "queue without coordination.github"},
+		// INT-1: a github: block naming no repository is no repository.
+		{"queue, github without repo", "coordination:\n  integration: queue\n  github: {}\n", "queue without coordination.github.repo"},
+		{"queue, empty repo", "coordination:\n  integration: queue\n  github:\n    repo: \"\"\n", "queue without coordination.github.repo"},
+		{"queue, blank repo", "coordination:\n  integration: queue\n  github:\n    repo: \"  \"\n", "queue without coordination.github.repo"},
+		{"watch, empty repo", "coordination:\n  integration: queue\n  events: watch\n  github:\n    repo: \"\"\n", "queue without coordination.github.repo"},
+		{"trunk, empty github block", "coordination:\n  integration: trunk\n  github:\n    repo: \"\"\n", "trunk with coordination.github"},
 		{"trunk with github", "coordination:\n  integration: trunk\n" + coordGH, "trunk with coordination.github"},
 		{"trunk with events", "coordination:\n  integration: trunk\n  events: watch\n", "trunk with events: watch"},
 		{"trunk with a label", "coordination:\n  integration: trunk\n  runner_label: r1\n", "trunk with runner_label"},

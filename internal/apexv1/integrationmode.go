@@ -78,14 +78,18 @@ func (c *CoordinationConfig) Mode() (string, error) {
 		return ModeSolo, nil
 	}
 	integration, events, label := strings.TrimSpace(c.Integration), strings.TrimSpace(c.Events), strings.TrimSpace(c.RunnerLabel)
-	hasGitHub := c.GitHub != nil
+	// A github: block names a repository only with a non-empty repo, as
+	// queued() and member.Load read it (INT-1): queue needs one; trunk
+	// refuses the block whatever it holds.
+	ghBlock := c.GitHub != nil
+	hasRepo := ghBlock && strings.TrimSpace(c.GitHub.Repo) != ""
 	switch integration {
 	case "":
 		return "", &FailError{Code: CodeCoordIntegration, Action: ActionPerson, Msg: "the coordination: block names no integration (trunk or queue), which 1.5 requires — run `" + IntegrationModeCommand +
 			"` (the framework's migration does): it writes queue where coordination.github is set, else trunk"}
 	case IntegrationTrunk:
 		switch {
-		case hasGitHub:
+		case ghBlock:
 			return "", integrationErr("integration: trunk with coordination.github: trunk integrates by ape's local merge, and a GitHub repository is queue's")
 		case events != "":
 			return "", integrationErr("integration: trunk with events: %s: events are how a queue close learns its merge", events)
@@ -97,8 +101,8 @@ func (c *CoordinationConfig) Mode() (string, error) {
 	default:
 		return "", integrationErr("integration: %q is neither trunk nor queue", integration)
 	}
-	if !hasGitHub {
-		return "", integrationErr("integration: queue without coordination.github: the queue is the repository's on GitHub")
+	if !hasRepo {
+		return "", integrationErr("integration: queue without coordination.github.repo: the queue is the repository's on GitHub (<owner>/<name>)")
 	}
 	switch events {
 	case "", EventsPoll:
