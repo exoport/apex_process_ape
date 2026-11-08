@@ -163,7 +163,9 @@ milestone claim records the claimant's NATS user as its owner
 refused (coord.trunk-one-member, which names queue/* for several people). This hands the
 project to <user> (a NATS user name, the credential's user token), by a compare-and-swap
 of the owner key, recording --by. Only the owner may, and only while it holds no live
-milestone lease in the project (release them first: ` + "`ape milestone release <M>`" + `). A lost
+milestone lease in the project (release them first: ` + "`ape milestone release <M>`" + `). The check and
+the swap are two steps, so a claim by another of the owner's checkouts between them would run on
+under the new owner: hand over with the old owner's loops stopped. A lost
 owner's key is removed by an operator with the cluster's admin credential.
 
 The owner key refuses a mistake, not an attack: any member's credential may write the

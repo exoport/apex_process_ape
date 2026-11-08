@@ -257,7 +257,9 @@ one creates it. Every later claim, a loop's re-take included, checks it. A claim
 `coord.trunk-one-member`, which names the owner and the way out: several people move the project to
 `integration: queue`. The owner's other checkouts claim as before. The owner hands the project over with
 `ape milestone owner --to <user> --by <who>`, a person's act, refused unless the caller is the owner and holds no
-live milestone lease in the project. An operator removes a lost owner's key with the cluster's admin credential. The
+live milestone lease in the project. That check and the swap are two steps: a claim by one of the owner's other
+checkouts in the milliseconds between them would run on under the new owner, so hand over with the old owner's loops
+stopped. An operator removes a lost owner's key with the cluster's admin credential. The
 key refuses a mistake, not an attack: any member's credential may write the project's milestone keys. A cluster
 rebuild does not replay it, so after one the next claim records the owner again. A queue project has no owner key.
 

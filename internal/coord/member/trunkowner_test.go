@@ -144,3 +144,27 @@ func TestHandTrunkOwner(t *testing.T) {
 	require.Equal(t, apexv1.CodeTrunkOneMember, leaseCode(t, err), "the old owner is refused now")
 	require.ErrorContains(t, err, "owned by bob")
 }
+
+// (c-1), research: 2c's topology — two people on one queue project — is
+// the lease's, never the owner rule's: the second person's claim of a held
+// milestone is session.not-lease-holder (lease.ErrHeld), not
+// coord.trunk-one-member, and no owner key appears.
+func TestTrunkOwner_QueueProjectTwoPeopleOneMilestone(t *testing.T) {
+	ctx := context.Background()
+	url := leaseCluster(t)
+	app := queued(block) + "  github:\n    repo: shop/notes\n    app: true\n"
+	ann, bob := checkoutOf(t, url, "ann", "queue-svc", app), checkoutOf(t, url, "bob", "queue-svc", app)
+	s, err := openMilestones(ctx, ann)
+	require.NoError(t, err)
+	defer s.close()
+	l, err := s.claim(ctx, "M1")
+	require.NoError(t, err)
+
+	_, err = ClaimMilestone(ctx, bob, "M1")
+	require.Equal(t, apexv1.CodeNotLeaseHolder, leaseCode(t, err), "the lease refuses bob, not the owner rule")
+	require.ErrorContains(t, err, "M1 is held by "+l.Holder)
+	cur, _, err := s.store.Holder(ctx, layout.TrunkOwnerKey(s.m.Project))
+	require.NoError(t, err)
+	require.Empty(t, cur, "no owner key in a queue project")
+	require.NoError(t, s.ownTrunk(ctx), "the owner rule is no queue project's")
+}

@@ -192,6 +192,9 @@ func (s *milestones) ownTrunk(ctx context.Context) error {
 // (D876). Only the owner may, and only while this user holds no live
 // milestone lease in the project, so no run of the old owner's goes on
 // under the new one's. by is the person who decided it, recorded with it.
+// The lease check and the swap are two steps (research's c-2): a claim by
+// another checkout of the owner's between them runs on under the new
+// owner; a person's act, documented rather than fenced.
 func HandTrunkOwner(ctx context.Context, p *apexv1.Project, to, by string) (from string, err error) {
 	s, err := openMilestones(ctx, p, nats.NoReconnect())
 	if err != nil {
