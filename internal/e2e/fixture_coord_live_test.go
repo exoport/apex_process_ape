@@ -145,6 +145,9 @@ func TestFixture_ScratchCoordinated(t *testing.T) {
 		data, err := os.ReadFile(creds)
 		require.NoError(t, err)
 		require.NoError(t, os.MkdirAll(filepath.Join(dir, "hot"), 0o700))
+		// hot/.gitignore ignores itself, so b's clone has none: write it
+		// as project init does, or b's project check refuses hot/.
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "hot", ".gitignore"), []byte("*\n"), 0o644))
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "hot", "ape-nats.creds"), data, 0o600))
 		if ghAPI != "" {
 			require.NoError(t, os.WriteFile(filepath.Join(dir, "hot", "github.token"), []byte("fakegh-token\n"), 0o600))
