@@ -3,8 +3,10 @@ package apecmd
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -70,6 +72,9 @@ func TestGhappPrintConfigAndUnit(t *testing.T) {
 // user, for its coordinated repository; a secret's value comes from the
 // file and is never echoed.
 func TestGhappSetup_CLI(t *testing.T) {
+	was := apexv1.RunnerModeReleased
+	apexv1.RunnerModeReleased = true // queue/runner's acts themselves, as a release that ships it (D884)
+	t.Cleanup(func() { apexv1.RunnerModeReleased = was })
 	url := natstest.RunServer(t)
 	nc, err := nats.Connect(url)
 	require.NoError(t, err)
@@ -172,4 +177,51 @@ func TestGhappLand_CLI(t *testing.T) {
 	require.Error(t, err, "milestone branches are ape's")
 	_, _, err = v1Exec(t, newGhappCmd, "land", "main", "--cwd", root)
 	require.Error(t, err)
+}
+
+// D884 (RQR-4): this release ships no queue/runner, so ape ghapp setup
+// refuses workflow, secrets and runner-token itself, before the secret's
+// file is read (one that does not exist would be a usage error) or NATS is
+// dialled (the project's URL is a listener that counts connections).
+func TestGhappSetup_RunnerActsNotInRelease(t *testing.T) {
+	require.False(t, apexv1.RunnerModeReleased)
+	var lc net.ListenConfig
+	l, err := lc.Listen(context.Background(), "tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = l.Close() })
+	var dials atomic.Int32
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			dials.Add(1)
+			_ = c.Close()
+		}
+	}()
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "_apex", "state"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "hot"), 0o755))
+	require.NoError(t, os.WriteFile(apexv1.ConfigPath(root), []byte("project_name: notes\ncoordination:\n  integration: queue\n  ensemble: shop\n  home: x\n  url: nats://"+l.Addr().String()+"\n  github:\n    repo: shop/notes\n    app: true\n"), 0o644))
+	creds, _ := natstest.MintStandaloneCreds(t, "diegos")
+	data, err := os.ReadFile(creds)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(root, "hot", "ape-nats.creds"), data, 0o600))
+	missing := filepath.Join(root, "hot", "no-such-file")
+	for _, args := range [][]string{
+		{"setup", "workflow"},
+		{"setup", "secrets", "--name", "APE_NATS_CREDS", "--value-file", missing},
+		{"setup", "runner-token"},
+	} {
+		_, _, err := v1Exec(t, newGhappCmd, append(args, "--cwd", root)...)
+		require.Equal(t, ExitRunFailed, exitCodeOf(t, err), "%v: refused, not a usage error from reading the file", args)
+		require.ErrorContains(t, err, "not available in this release", "%v", args)
+		require.ErrorContains(t, err, "queue/watch", "%v", args)
+	}
+	require.Zero(t, dials.Load(), "NATS was never dialled")
+	// The control: rulesets, this release's one act, does dial.
+	_, _, err = v1Exec(t, newGhappCmd, "setup", "rulesets", "--cwd", root)
+	require.Error(t, err)
+	require.Positive(t, dials.Load(), "rulesets reached for NATS")
 }

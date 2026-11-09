@@ -247,6 +247,13 @@ Exit codes: 0 done · 1 refused or failed (the service's message) · 2 usage, or
 		RunE: func(cmd *cobra.Command, args []string) error {
 			act := args[0]
 			req := ghapp.Request{Act: act}
+			// D884 (RQR-4): queue/runner's acts are refused here, before a
+			// secret's file is read or NATS is reached.
+			if act == "workflow" || act == "secrets" || act == "runner-token" {
+				if err := apexv1.RunnerModeAvailable(); err != nil {
+					return failErr(err)
+				}
+			}
 			switch act {
 			case "rulesets", "workflow", "runner-token":
 			case "secrets":
