@@ -25,7 +25,9 @@ Keep both bases below Linux's ephemeral range (`/proc/sys/net/ipv4/ip_local_port
 outgoing connection can take a port in that range while its node is down, and the node's restart then cannot bind
 it. `up` and `start` refuse such a port unless it is listed in `net.ipv4.ip_local_reserved_ports`.
 `NATSLOCAL_ALLOW_EPHEMERAL=1` goes on with a warning. A node that fails to start, for example on a port that is
-taken, is reported with its own log line and exit 1. `natslocal.sh check-ports` runs only the check.
+taken, is reported with its own log line and exit 1. Each node gets `NATSLOCAL_READY_WAIT` seconds (default 60) to
+say it is ready, since a node restarted on a large store replays it first. `natslocal.sh check-ports` runs only the
+check.
 
 ## What each drill checks
 

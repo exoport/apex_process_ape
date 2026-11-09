@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -133,4 +134,34 @@ func freeTCPPort(t *testing.T) int {
 	require.NoError(t, err)
 	defer func() { _ = l.Close() }()
 	return l.Addr().(*net.TCPAddr).Port //nolint:forcetypeassert // a TCP listener's address
+}
+
+// R-5a: a node gets NATSLOCAL_READY_WAIT seconds (default 60, natstest's
+// store-replay allowance) to say it is ready, not a fixed 30 s, so a
+// healthy node on a large store is not reported failed. A stand-in
+// nats-server that stays up and never says ready is reported after the
+// wait given, and stopped.
+func TestNatslocal_ReadyWait(t *testing.T) {
+	script, err := filepath.Abs("../../deploy/natslocal/natslocal.sh")
+	require.NoError(t, err)
+	dir := t.TempDir()
+	fake := filepath.Join(dir, "nats-server")
+	require.NoError(t, os.WriteFile(fake, []byte("#!/bin/sh\n[ \"$1\" = --version ] && { echo 'nats-server: v2.14.5'; exit 0; }\nexec sleep 60\n"), 0o755))
+	nl := filepath.Join(dir, "nl")
+	env := append(os.Environ(), "NATSLOCAL_DIR="+nl, "NATS_SERVER="+fake, "NATSLOCAL_ALLOW_EPHEMERAL=1", "NATSLOCAL_READY_WAIT=1")
+	cfg := exec.Command("bash", script, "config")
+	cfg.Env = env
+	out, err := cfg.CombinedOutput()
+	require.NoError(t, err, "%s", out)
+	start := time.Now()
+	c := exec.Command("bash", script, "start", "1")
+	c.Env = env
+	out, err = c.CombinedOutput()
+	require.Error(t, err, "%s", out)
+	require.Contains(t, string(out), "natslocal: n1 is not ready after 1 s")
+	require.Less(t, time.Since(start), 10*time.Second, "the wait given, not 30 or 60 s")
+	require.NoFileExists(t, filepath.Join(nl, "n1.pid"), "and the node is stopped")
+	data, err := os.ReadFile(script)
+	require.NoError(t, err)
+	require.Contains(t, string(data), "${NATSLOCAL_READY_WAIT:-60}", "the default is natstest's 60 s")
 }

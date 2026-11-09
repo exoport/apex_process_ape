@@ -30,7 +30,9 @@
 # (PORT-EPHEMERAL, HOLD-2C-O1). Pick bases below the range (the defaults
 # are), reserve the ports, or set NATSLOCAL_ALLOW_EPHEMERAL=1 to go on with a
 # warning. A node that fails to start (a port taken, a bad config) is
-# reported with its own log line, exit 1.
+# reported with its own log line, exit 1. A node is given
+# NATSLOCAL_READY_WAIT seconds (default 60, natstest's allowance for a
+# store replay) to say it is ready.
 set -euo pipefail
 
 DIR=${NATSLOCAL_DIR:-${TMPDIR:-/tmp}/ape-natslocal}
@@ -134,7 +136,8 @@ wait_node() {
   local n=$1 pid from new fatal
   pid=$(cat "$DIR/n$n.pid")
   from=$(cat "$DIR/n$n.logpos" 2>/dev/null || echo 0)
-  for _ in $(seq 300); do
+  local wait=${NATSLOCAL_READY_WAIT:-60}
+  for _ in $(seq $((wait * 10))); do
     new=$(tail -n +"$((from + 1))" "$DIR/n$n.log")
     fatal=$(printf '%s\n' "$new" | grep -E '\[FTL\]' | tail -1 || true)
     if [ -n "$fatal" ] || ! kill -0 "$pid" 2>/dev/null; then
@@ -147,7 +150,9 @@ wait_node() {
     printf '%s\n' "$new" | grep -q 'Server is ready' && return 0
     sleep 0.1
   done
-  echo "natslocal: n$n is not ready after 30 s (pid $pid; see $DIR/n$n.log)" >&2
+  kill "$pid" 2>/dev/null || true
+  rm -f "$DIR/n$n.pid"
+  echo "natslocal: n$n is not ready after $wait s (pid $pid; see $DIR/n$n.log; NATSLOCAL_READY_WAIT)" >&2
   exit 1
 }
 
