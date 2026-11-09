@@ -2,6 +2,7 @@ package ghapp
 
 import (
 	"context"
+	"encoding/json"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -305,4 +306,46 @@ func TestService_WorkflowActNotInRelease(t *testing.T) {
 	log, err := os.ReadFile(filepath.Join(dir, "acts.jsonl"))
 	require.NoError(t, err)
 	require.Contains(t, string(log), "not available in this release", "the refusal is logged")
+}
+
+// S-N2-1: a pusher token's act line carries the permissions GitHub's
+// access_tokens answer says it granted, so a read-out reads them from
+// GitHub itself; a cached token's act line too; never in the reply. The
+// control: a refused request's line has none.
+func TestService_ActLineHasTheGrantedPermissions(t *testing.T) {
+	key, pemBytes := appKey(t)
+	f := newFake(t, &key.PublicKey)
+	srv := httptest.NewServer(f)
+	t.Cleanup(srv.Close)
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, "key.pem")
+	require.NoError(t, os.WriteFile(keyPath, pemBytes, 0o600))
+	logPath := filepath.Join(dir, "acts.jsonl")
+	s, err := NewService(&Config{
+		API:    srv.URL,
+		Warden: AppConfig{AppID: 42, Key: keyPath, Installations: map[string]int64{"shop/notes": 8}},
+		Pusher: AppConfig{AppID: 42, Key: keyPath, Installations: map[string]int64{"shop/notes": 7}},
+		Repos:  map[string]RepoPolicy{"shop/notes": {Members: []string{"dana"}, Watchers: []string{"ci-watch"}}},
+		Log:    logPath,
+	})
+	require.NoError(t, err)
+	for range 2 { // the second is the cached token's
+		rep := s.token(context.Background(), "ci-watch", Request{Repo: "shop/notes", Purpose: WatchPurpose})
+		require.True(t, rep.OK, rep.Error)
+		wire, err := json.Marshal(rep)
+		require.NoError(t, err)
+		require.NotContains(t, string(wire), "granted", "not sent")
+	}
+	rep := s.token(context.Background(), "mallory", Request{Repo: "shop/notes", Purpose: "push"})
+	require.False(t, rep.OK)
+	data, err := os.ReadFile(logPath)
+	require.NoError(t, err)
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	require.Len(t, lines, 3)
+	for _, l := range lines[:2] {
+		var r actRecord
+		require.NoError(t, json.Unmarshal([]byte(l), &r))
+		require.Equal(t, map[string]string{"contents": "read", "metadata": "read"}, r.Granted, l)
+	}
+	require.NotContains(t, lines[2], "granted", "control: a refusal grants nothing")
 }

@@ -72,7 +72,13 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte(`{"message":"The permissions requested are not granted to this installation."}`))
 			return
 		}
-		_, _ = w.Write([]byte(`{"token":"ghs_test","expires_at":"2030-01-01T00:00:00Z","permissions":{"contents":"write"}}`))
+		// GitHub answers with the permissions it granted: here, those asked.
+		granted, err := json.Marshal(req["permissions"])
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		_, _ = w.Write([]byte(`{"token":"ghs_test","expires_at":"2030-01-01T00:00:00Z","permissions":` + string(granted) + `}`))
 	case r.Method == http.MethodGet && strings.HasSuffix(path, "/contents/.github/workflows/apex-queue.yml"):
 		if !f.workflow {
 			w.WriteHeader(http.StatusNotFound)

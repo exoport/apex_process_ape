@@ -160,6 +160,9 @@ type Reply struct {
 	// Missing are the optional permissions the token was minted without,
 	// as "<key>: <level>", because the App has not got them.
 	Missing []string `json:"missing,omitempty"`
+	// granted is what GitHub says the token carries (its access_tokens
+	// answer): for the act line only, not sent (S-N2-1).
+	granted map[string]string
 }
 
 // Serve subscribes the two subjects on nc until ctx ends.
@@ -224,7 +227,7 @@ func (s *Service) token(ctx context.Context, user string, req Request) Reply {
 		s.cache[key], s.missing[key] = t, missing
 		s.mu.Unlock()
 	}
-	return s.logged(user, "pusher", req, Reply{OK: true, Token: t.Token, ExpiresAt: t.ExpiresAt, Missing: missing})
+	return s.logged(user, "pusher", req, Reply{OK: true, Token: t.Token, ExpiresAt: t.ExpiresAt, Missing: missing, granted: t.Permissions})
 }
 
 // mintPusher mints a pusher token for repo with perms. An App that lacks
@@ -356,10 +359,14 @@ type actRecord struct {
 	OK        bool   `json:"ok"`
 	Error     string `json:"error,omitempty"`
 	ExpiresAt string `json:"expires_at,omitempty"`
+	// Granted is the token's permissions as GitHub's answer gives them,
+	// not as ape asked (S-N2-1): a read-out shows them from GitHub itself.
+	// Not secret.
+	Granted map[string]string `json:"granted,omitempty"`
 }
 
 func (s *Service) record(user, kind string, req Request, rep Reply) actRecord {
-	r := actRecord{At: s.now().UTC().Format(time.RFC3339), User: user, Kind: kind, Repo: req.Repo, Purpose: req.Purpose, Act: req.Act, Name: req.Name, OK: rep.OK, Error: rep.Error}
+	r := actRecord{At: s.now().UTC().Format(time.RFC3339), User: user, Kind: kind, Repo: req.Repo, Purpose: req.Purpose, Act: req.Act, Name: req.Name, OK: rep.OK, Error: rep.Error, Granted: rep.granted}
 	if !rep.ExpiresAt.IsZero() {
 		r.ExpiresAt = rep.ExpiresAt.UTC().Format(time.RFC3339)
 	}

@@ -4559,7 +4559,8 @@ the NATS URL, the members who may ask for tokens and the operators who may run s
 runner label, which the workflow set-up act writes into every job (D871), and for queue/watch the
 NATS users of `ape ci watch` (--watchers), who may ask for the read-only watch token and nothing else. The keys are read through systemd's
 LoadCredential (`ape ghapp print-unit`); the act log is /var/lib/apex-ghapp/acts.jsonl, and each act is
-also one JSON line on stderr (the unit's journal), after "ape ghapp: act", never a token.
+also one JSON line on stderr (the unit's journal), after "ape ghapp: act", never a token. A
+pusher token's line carries "granted": the permissions GitHub's answer says the token has.
 
 Flags:
 
