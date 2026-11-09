@@ -101,7 +101,10 @@ func TestCoordinator_RidesOutANATSOutage(t *testing.T) {
 			t.Cleanup(nc.Close)
 			js, err := jetstream.New(nc)
 			require.NoError(t, err)
-			ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+			// V8-WIN-5: the restart of three nodes on their stores, and the
+			// waits after it, outlasted 90 s and their 30/20/5 s on GitHub's
+			// Windows runners (~3 runs in 5); each wait logs how long it took.
+			ctx, cancel := context.WithTimeout(context.Background(), 240*time.Second)
 			defer cancel()
 			require.NoError(t, lease.Declare(ctx, js, 3))
 			require.NoError(t, slots.Declare(ctx, js, 3))
@@ -169,6 +172,10 @@ func TestCoordinator_RidesOutANATSOutage(t *testing.T) {
 			for i := range 3 {
 				c.Restart(i)
 			}
+			back := time.Now()
+			waitedFor := func(what string) {
+				t.Logf("V8-WIN-5: %s %v after the nodes were back", what, time.Since(back).Round(100*time.Millisecond))
+			}
 			if taken {
 				// Another coordinator gets the lapsed lease first.
 				require.Eventually(t, func() bool {
@@ -185,18 +192,21 @@ func TestCoordinator_RidesOutANATSOutage(t *testing.T) {
 				}
 				return
 			}
-			require.Eventually(t, func() bool { return holder() == "c1" }, 30*time.Second, 100*time.Millisecond, "the same coordinator holds coord.ens again")
+			require.Eventually(t, func() bool { return holder() == "c1" }, 60*time.Second, 100*time.Millisecond, "the same coordinator holds coord.ens again")
+			waitedFor("holds coord.ens again")
 			require.Eventually(t, func() bool {
 				m, err := nc.Request("ape.coord.ens.status", nil, time.Second)
 				return err == nil && strings.Contains(string(m.Data), `"id":"c1"`)
-			}, 20*time.Second, 100*time.Millisecond, "and answers")
+			}, 60*time.Second, 100*time.Millisecond, "and answers")
+			waitedFor("answers")
 			select {
 			case err := <-done:
 				t.Fatalf("the coordinator ended after the outage: %v", err)
 			default:
 			}
 			require.True(t, said("riding it out"), "it said it rides the outage out")
-			require.Eventually(t, func() bool { return said("claimed again") || said("renewed again") }, 5*time.Second, 50*time.Millisecond, "and that it holds the lease again")
+			require.Eventually(t, func() bool { return said("claimed again") || said("renewed again") }, 20*time.Second, 50*time.Millisecond, "and that it holds the lease again")
+			waitedFor("says it holds the lease again")
 		})
 	}
 }

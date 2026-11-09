@@ -454,6 +454,18 @@ func outage(t *testing.T, c *natstest.Cluster, d time.Duration) {
 // on its data, and the same conductor still runs, holds its lease and gets
 // the next event. The control: another conductor of the person took the
 // lapsed lease before this one was back, and it stops (ErrLost).
+// afterOutage bounds each of the outage drills' waits once the nodes are
+// back: three nodes replay their stores before they answer, which took
+// more than 20 s on GitHub's Windows runners (V8-WIN-5, ~3 runs in 5) and
+// once on a loaded Linux ci-local. Each wait logs how long it took.
+const afterOutage = 60 * time.Second
+
+// waited logs how long a wait after the outage took, from back.
+func waited(t *testing.T, what string, back time.Time) {
+	t.Helper()
+	t.Logf("V8-WIN-5: %s %v after the nodes were back", what, time.Since(back).Round(100*time.Millisecond))
+}
+
 func TestDrill_ConductorRidesOutANATSOutage(t *testing.T) {
 	t.Run("rides-it-out", func(t *testing.T) {
 		c, js := outageRig(t)
@@ -492,18 +504,22 @@ func TestDrill_ConductorRidesOutANATSOutage(t *testing.T) {
 		require.Eventually(t, func() bool { return a.typedWith("held across") }, 5*time.Second, 50*time.Millisecond, "delivered, not yet acknowledged")
 
 		outage(t, c, 3*cfg.LeaseTTL)
+		back := time.Now()
 		select {
 		case err := <-errA:
 			t.Fatalf("attach ended during the outage: %v", err)
 		default:
 		}
 		a.hold.Store(false)
-		require.Eventually(t, func() bool { return a.ackedWith("held across") }, 20*time.Second, 100*time.Millisecond, "redelivered to the same conductor after the outage, acknowledged")
+		require.Eventually(t, func() bool { return a.ackedWith("held across") }, afterOutage, 100*time.Millisecond, "redelivered to the same conductor after the outage, acknowledged")
+		waited(t, "the held event acknowledged", back)
 		require.Eventually(t, func() bool {
 			_, err := events.Publish(context.Background(), js, events.Subject("bob", "taskforge", events.KindProject, "M2", "question"), events.MessageID("taskforge", "c1", 3), []byte(`{"q":"after"}`))
 			return err == nil
-		}, 30*time.Second, 200*time.Millisecond)
-		require.Eventually(t, func() bool { return a.ackedWith(`"after"`) }, 20*time.Second, 100*time.Millisecond, "the next event reaches it too, acknowledged")
+		}, afterOutage, 200*time.Millisecond)
+		waited(t, "the next event published", back)
+		require.Eventually(t, func() bool { return a.ackedWith(`"after"`) }, afterOutage, 100*time.Millisecond, "the next event reaches it too, acknowledged")
+		waited(t, "the next event acknowledged", back)
 		select {
 		case err := <-errA:
 			t.Fatalf("attach ended after the outage: %v", err)
@@ -521,7 +537,8 @@ func TestDrill_ConductorRidesOutANATSOutage(t *testing.T) {
 			}
 			h, _, err := ls.Holder(rctx, layout.ConductorKey("ann", "atomix"))
 			return err == nil && h == "cond-a"
-		}, 30*time.Second, 100*time.Millisecond, "its lease is held again")
+		}, afterOutage, 100*time.Millisecond, "its lease is held again")
+		waited(t, "the lease held again", back)
 		logMu.Lock()
 		defer logMu.Unlock()
 		all := strings.Join(logged, "")
