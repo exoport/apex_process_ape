@@ -83,6 +83,9 @@ func TestCheckEnsemble(t *testing.T) {
 	require.ErrorIs(t, CheckEnsemble("Shop-Assessor", []string{"notes"}), ErrReservedEnsemble)
 	require.NoError(t, CheckEnsemble("assessor-shop", []string{"notes"}), "control: only the suffix is reserved")
 	require.NoError(t, CheckEnsemble("shop-assessors", []string{"notes"}))
+	// V12-10: _ joins the conductor's durable name.
+	require.ErrorIs(t, CheckEnsemble("at_omix", []string{"notes"}), ErrEnsembleSeparator)
+	require.NoError(t, CheckEnsemble("at-omix", []string{"notes"}), "control")
 }
 
 // §4.5 / OQ5: a start needs NATS; the outage is recorded from its first

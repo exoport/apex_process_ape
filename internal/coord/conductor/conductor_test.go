@@ -1234,3 +1234,71 @@ func TestBind_UpdateKeepsTheRecordedStart(t *testing.T) {
 	require.Equal(t, "3", c.CachedInfo().Config.Metadata[StartSeqMeta], "and the recorded start kept")
 	require.Equal(t, uint64(2), boundFloor(c.CachedInfo()))
 }
+
+// V12-10: the first attach under the durable's new name finds the old one
+// (conductor-<user>-<ens>) and starts after its floor, so what it delivered
+// and was not acknowledged comes again: event 1 was acked there, 2 and 3
+// were not. The old durable is left in place. The control: with no old
+// durable, the new one starts fresh, recording its start.
+func TestConductor_MovesFromTheLegacyDurable(t *testing.T) {
+	for _, legacy := range []bool{true, false} {
+		t.Run(map[bool]string{true: "legacy", false: "control-none"}[legacy], func(t *testing.T) {
+			_, nc, js := rig(t)
+			ctx := t.Context()
+			old := layout.LegacyConductorConsumer("ann", "atomix")
+			if legacy {
+				lc, err := js.CreateConsumer(ctx, events.EventsStream, jetstream.ConsumerConfig{Durable: old, FilterSubjects: Filters("atomix", []string{"taskforge"}), AckPolicy: jetstream.AckExplicitPolicy, AckWait: time.Minute})
+				require.NoError(t, err)
+				for i, q := range []string{"one", "two", "three"} {
+					_, err := events.Publish(ctx, js, events.Subject("bob", "taskforge", events.KindProject, "M2", "question"), events.MessageID("taskforge", "c1", int64(i+1)), []byte(`{"q":"`+q+`"}`))
+					require.NoError(t, err)
+				}
+				b, err := lc.Fetch(3, jetstream.FetchMaxWait(5*time.Second))
+				require.NoError(t, err)
+				n := 0
+				for m := range b.Messages() {
+					if n == 0 {
+						require.NoError(t, m.DoubleAck(ctx))
+					}
+					n++
+				}
+				require.Equal(t, 3, n)
+				require.Eventually(t, func() bool { i, err := lc.Info(ctx); return err == nil && i.AckFloor.Stream == 1 }, 5*time.Second, 50*time.Millisecond)
+			}
+			f := &fakeSession{nc: nc, answers: 99, acked: map[string]bool{}}
+			var logMu sync.Mutex
+			var logged []string
+			cfg := scaled("ann", "cond-a", f)
+			cfg.Log = func(format string, a ...any) {
+				logMu.Lock()
+				logged = append(logged, fmt.Sprintf(format, a...))
+				logMu.Unlock()
+			}
+			go func() { _ = Run(ctx, nc, cfg) }()
+			name := layout.ConductorConsumer("ann", "atomix")
+			require.Eventually(t, func() bool { _, err := js.Consumer(ctx, events.EventsStream, name); return err == nil }, 10*time.Second, 50*time.Millisecond, "bound under the new name")
+			moved := func() string {
+				logMu.Lock()
+				defer logMu.Unlock()
+				for _, l := range logged {
+					if strings.HasPrefix(l, "conductor: moved from the durable") {
+						return l
+					}
+				}
+				return ""
+			}
+			if !legacy {
+				c, err := js.Consumer(ctx, events.EventsStream, name)
+				require.NoError(t, err)
+				require.NotEmpty(t, c.CachedInfo().Config.Metadata[StartSeqMeta], "a fresh start, recorded")
+				require.Empty(t, moved())
+				return
+			}
+			require.Contains(t, moved(), "conductor: moved from the durable "+old+" to "+name+" (V12-10), from stream sequence 2")
+			require.Eventually(t, func() bool { return f.ackedWith(`"two"`) && f.ackedWith(`"three"`) }, 10*time.Second, 50*time.Millisecond, "what the old durable left unacknowledged comes again")
+			require.False(t, f.typedWith(`"one"`), "what it acknowledged does not")
+			_, err := js.Consumer(ctx, events.EventsStream, old)
+			require.NoError(t, err, "the old durable is left for an admin")
+		})
+	}
+}

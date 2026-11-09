@@ -399,7 +399,15 @@ It reads the merge method from the `merge_queue` rule of the rulesets that apply
 Metadata: read, which every App token has). GitHub's GraphQL refuses an App token the queue's configuration, even with
 Merge queues: read, so a queue set outside a ruleset is reported NOT judged, with the route: set it in a ruleset.
 
-A conductor receives its ensemble's events through the durable consumer **`conductor-<user>-<ens>`** on `APE_EVENTS`.
+A conductor receives its ensemble's events through the durable consumer **`conductor_<user>_<ens>`** on `APE_EVENTS`.
+`_` joins the parts, and neither a user's nor an ensemble's name may contain it (`ape nats mint` and the
+coordination: block refuse one), so two people's durables never share a name (V12-10: `conductor-ann-x-y` was both
+ann's in ensemble `x-y` and `ann-x`'s in `y`). The first attach after an upgrade finds the old `conductor-<user>-<ens>`
+durable and starts the new one after its acknowledged floor, so what it left unacknowledged comes again. It logs
+`conductor: moved from the durable …`, and leaves the old durable for the operator to delete. A credential minted before
+that change must be minted again, since it grants the old name only. On a first attach, the durable records where it
+starts (the stream's last sequence + 1) in its own metadata, `ape.start-seq`. A durable lost before its first
+acknowledgement is then bound again from there, not from sequence 1 (V12-13).
 Only the holder of `conductor.<user>.<ens>` binds it, so a conductor that takes the lease over inherits the events the
 last one left unacknowledged, and its acknowledgements are what renews the lease. A durable deleted while a conductor
 runs (after V12-3 only the operator's credential or a rebuild can delete it) is bound again, logged

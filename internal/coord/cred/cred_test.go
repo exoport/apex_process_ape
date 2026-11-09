@@ -34,6 +34,12 @@ func TestMint_RefusesReservedTokens(t *testing.T) {
 	require.NoError(t, err, "control: the same name again (a re-mint) is fine")
 	_, err = Mint(acct, "carl", "taskforge", "atomix", time.Hour, "Ann Lee", "bob")
 	require.NoError(t, err, "control: a token nobody has")
+
+	// V12-10: _ joins the conductor's durable name, so no token holds it.
+	_, err = Mint(acct, "ann_x", "taskforge", "atomix", time.Hour)
+	require.ErrorContains(t, err, "the separator of the conductor's durable")
+	_, err = Mint(acct, "ann-x", "taskforge", "atomix", time.Hour)
+	require.NoError(t, err, "control: - is fine")
 }
 
 // §4.6 (D546), server-enforced: a member writes its own conductor lease and

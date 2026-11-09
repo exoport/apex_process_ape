@@ -19,6 +19,7 @@ import (
 
 	"github.com/exoport/apex_process_ape/internal/apexv1"
 	"github.com/exoport/apex_process_ape/internal/coord/conductor"
+	"github.com/exoport/apex_process_ape/internal/coord/layout"
 	"github.com/exoport/apex_process_ape/internal/natsconn"
 )
 
@@ -34,6 +35,9 @@ var (
 	// scope of another ensemble's assessor records (step 8): its
 	// conductors would be delivered them.
 	ErrReservedEnsemble = errors.New("member: an ensemble's name may not end in -assessor")
+	// ErrEnsembleSeparator: the ensemble's token holds layout.NameSep, the
+	// separator of the conductor's durable (V12-10).
+	ErrEnsembleSeparator = errors.New("member: an ensemble's name may not hold " + layout.NameSep)
 	// ErrNoCreds: hot/ape-nats.creds is missing.
 	ErrNoCreds = errors.New("member: no NATS credential at " + apexv1.NATSCredsRel)
 	// ErrGitHub: coordination.github names no <owner>/<name> repository,
@@ -164,6 +168,9 @@ func membershipFail(err error, fix string) error {
 // conductors (ape.evt.coord.<name>.>) would be delivered.
 func CheckEnsemble(ens string, members []string) error {
 	ens = natsconn.SubjectToken(ens)
+	if strings.Contains(ens, layout.NameSep) {
+		return fmt.Errorf("%w: %q — rename the ensemble in coordination.ensemble", ErrEnsembleSeparator, ens)
+	}
 	if strings.HasSuffix(ens, AssessorScopeSuffix) {
 		return fmt.Errorf("%w: %q — rename the ensemble in coordination.ensemble", ErrReservedEnsemble, ens)
 	}

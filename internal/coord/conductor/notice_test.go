@@ -69,7 +69,7 @@ func TestConductor_DeliversNoticesAsAckedDeliveries(t *testing.T) {
 	}
 	t.Logf("delivered: %s", typedOf("impact-notice"))
 
-	cons, err := js.Consumer(ctx, events.EventsStream, "conductor-ann-atomix")
+	cons, err := js.Consumer(ctx, events.EventsStream, "conductor_ann_atomix")
 	require.NoError(t, err)
 	require.Eventually(t, func() bool {
 		info, err := cons.Info(ctx)

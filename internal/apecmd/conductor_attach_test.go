@@ -86,9 +86,9 @@ func TestConductorAttach_RunsAsTheCredentialsUser(t *testing.T) {
 			if err != nil || h == "" {
 				return false
 			}
-			_, err = ajs.Consumer(ctx, events.EventsStream, "conductor-ann-shop")
+			_, err = ajs.Consumer(ctx, events.EventsStream, "conductor_ann_shop")
 			return err == nil
-		}, 15*time.Second, 100*time.Millisecond, "%v: holds conductor.ann.shop and binds conductor-ann-shop; stderr %s", args, errb.String())
+		}, 15*time.Second, 100*time.Millisecond, "%v: holds conductor.ann.shop and binds conductor_ann_shop; stderr %s", args, errb.String())
 		cancel()
 		select {
 		case err := <-done:

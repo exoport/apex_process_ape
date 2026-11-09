@@ -319,7 +319,7 @@ func TestGrants_NoWiderThanTheKindNeeds(t *testing.T) {
 		"ape.evt.bob.taskforge.project.M1.milestone-paused", "ape.evt.coord.atomix.coord.x.impact-notice", "ape.evt.ann.other.project.M1.gate-green",
 		"$KV.ape-leases.sup.leader", "$KV.ape-leases.coord.atomix", "$KV.ape-leases.milestone.other.M1", "$KV.ape-leases.close.other",
 		"$KV.ape-leases.conductor.bob.atomix", "$KV.ape-meta.epoch", "$KV.ape-slots.slot.h.p.0",
-		"ape.sup.ghapp.pusher.bob", "ape.sup.ghapp.warden.bob", "_INBOX.bob.x", "$JS.ACK.APE_EVENTS.conductor-bob-atomix.1.1.1.1.0",
+		"ape.sup.ghapp.pusher.bob", "ape.sup.ghapp.warden.bob", "_INBOX.bob.x", "$JS.ACK.APE_EVENTS.conductor_bob_atomix.1.1.1.1.0",
 	), append(others, "ape.evt.*.other.project.>", "ape.evt.coord.>", "ape.coord.atomix.>", "ape.sup.ensure", "$SRV.>"))
 
 	coord := e.Mint(t, "coordinator", perms(cred.CoordinatorGrant("coordinator", "atomix")))
@@ -468,4 +468,28 @@ func TestGrants_AppSubjectsAreGHApps(t *testing.T) {
 	m := cred.MemberGrant("ann", "taskforge", "atomix")
 	require.Contains(t, m.PubAllow, ghapp.TokenSubject+".ann")
 	require.Contains(t, m.PubAllow, ghapp.SetupSubject+".ann")
+}
+
+// V12-10: under the old name conductor-<user>-<ens>, ann in ensemble x-y
+// and ann-x in ensemble y shared one durable, conductor-ann-x-y, and each
+// credential reached the other's. Now each has its own
+// (conductor_ann_x-y, conductor_ann-x_y), and the server refuses ann-x
+// every subject of ann's: create, info, pull and ack.
+func TestGrants_V12_10_CollidingPairsHaveTheirOwnDurables(t *testing.T) {
+	require.Equal(t, layout.LegacyConductorConsumer("ann", "x-y"), layout.LegacyConductorConsumer("ann-x", "y"), "the old names collide")
+	ann, annX := layout.ConductorConsumer("ann", "x-y"), layout.ConductorConsumer("ann-x", "y")
+	require.NotEqual(t, ann, annX)
+	e := natstest.StartEnforced(t)
+	creds := e.Mint(t, "ann-x", perms(cred.MemberGrant("ann-x", "taskforge", "y")))
+	pre := "$JS.API.CONSUMER."
+	e.RequireRefused(t, creds, inboxOf(t, creds)[1:], []string{
+		pre + "CREATE." + events.EventsStream + "." + ann,
+		pre + "INFO." + events.EventsStream + "." + ann,
+		pre + "MSG.NEXT." + events.EventsStream + "." + ann,
+		"$JS.ACK." + events.EventsStream + "." + ann + ".1.1.1.1.0",
+		pre + "CREATE." + events.EventsStream + "." + layout.LegacyConductorConsumer("ann-x", "y"),
+	}, nil)
+	g := cred.MemberGrant("ann-x", "taskforge", "y")
+	require.Contains(t, g.PubAllow, pre+"CREATE."+events.EventsStream+"."+annX, "the control: its own durable")
+	require.Contains(t, g.PubAllow, pre+"INFO."+events.EventsStream+"."+layout.LegacyConductorConsumer("ann-x", "y"), "and the old name, read only")
 }

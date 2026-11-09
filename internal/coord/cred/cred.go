@@ -17,6 +17,7 @@ package cred
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/exoport/apex_process_ape/internal/aped"
@@ -117,6 +118,9 @@ func ConductorGrant(user, ensemble string, projects ...string) aped.Grant {
 		pub = append(pub, "ape.evt."+u+"."+natsconn.SubjectToken(p)+".project.>")
 	}
 	pub = append(pub, durable(eventsStream, layout.ConductorConsumer(u, e))...)
+	// The durable's name before V12-10, read once to move from it: INFO
+	// only, since two pairs could share that name.
+	pub = append(pub, "$JS.API.CONSUMER.INFO."+eventsStream+"."+layout.LegacyConductorConsumer(u, e))
 	return aped.Grant{
 		PubAllow: append(pub, getStreams(eventsStream, leasesStream, metaStream)...),
 		SubAllow: []string{inbox(u)},
@@ -264,6 +268,9 @@ func checkName(user string, inUse []string) error {
 	tok := natsconn.SubjectToken(user)
 	if tok == "" {
 		return errors.New("cred: empty user name")
+	}
+	if strings.Contains(tok, layout.NameSep) {
+		return fmt.Errorf("cred: %q's subject token %q holds %q, the separator of the conductor's durable conductor_<user>_<ensemble> (V12-10); name the member otherwise", user, tok, layout.NameSep)
 	}
 	if layout.Reserved(tok) {
 		return fmt.Errorf("cred: %q's subject token %q is reserved (coord, sup and vm-* are ape's own); name the member otherwise", user, tok)

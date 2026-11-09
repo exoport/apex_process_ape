@@ -138,8 +138,18 @@ func MessageID(project, checkout string, seq uint64) string {
 // ConductorConsumer is the durable consumer on APE_EVENTS through which a
 // conductor receives its ensemble's events (R4): only the holder of
 // ConductorKey(user, ens) binds it, and its acks are the lease's renewal
-// signal (OQ22).
-func ConductorConsumer(user, ens string) string { return "conductor-" + user + "-" + ens }
+// signal (OQ22). Its parts are joined by NameSep, which neither a user's
+// nor an ensemble's token may hold, so two pairs never share it (V12-10:
+// conductor-ann-x-y was both ann's in x-y and ann-x's in y).
+func ConductorConsumer(user, ens string) string { return "conductor" + NameSep + user + NameSep + ens }
+
+// LegacyConductorConsumer is the durable's name before V12-10, which a
+// conductor reads once to move to ConductorConsumer.
+func LegacyConductorConsumer(user, ens string) string { return "conductor-" + user + "-" + ens }
+
+// NameSep joins the parts of ConductorConsumer; no user or ensemble token
+// may hold it (cred's checkName, member's CheckEnsemble).
+const NameSep = "_"
 
 // ReservedTokens are the <user> tokens no member credential may carry
 // (R1): the coordinator's and the supervisors' own, so a member cannot

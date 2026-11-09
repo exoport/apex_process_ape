@@ -60,5 +60,6 @@ func TestReservedTokens(t *testing.T) {
 	for _, tok := range []string{"diego", "coordinator", "supper", "v-m"} {
 		require.False(t, Reserved(tok), tok)
 	}
-	require.Equal(t, "conductor-diego-atomix", ConductorConsumer("diego", "atomix"))
+	require.Equal(t, "conductor_diego_atomix", ConductorConsumer("diego", "atomix"))
+	require.Equal(t, "conductor-diego-atomix", LegacyConductorConsumer("diego", "atomix"))
 }

@@ -1,7 +1,7 @@
 // Package conductor is APEX v1.5's conductor liveness (stage 0, step 7;
 // proposal §3.1 requirements 1–4, OQ22, OQ24, OQ25): the ape process that
 // owns a conductor's terminal receives the ensemble's events through the
-// durable consumer conductor-<user>-<ens>, types each into the session when
+// durable consumer conductor_<user>_<ens>, types each into the session when
 // it is idle, marked as ape's, and renews the conductor lease only while
 // the conductor acknowledges what it is sent. An event left unacknowledged
 // is delivered again; past the escalation age it is escalated, past the
@@ -255,6 +255,10 @@ func (r *runner) bind(ctx context.Context, from uint64) (jetstream.Consumer, err
 	if !errors.Is(err, jetstream.ErrConsumerNotFound) {
 		return nil, err
 	}
+	moved := ""
+	if from == 0 {
+		from, moved = r.legacyStart(ctx)
+	}
 	if from > 0 {
 		want.DeliverPolicy, want.OptStartSeq = jetstream.DeliverByStartSequencePolicy, from
 	} else {
@@ -265,10 +269,33 @@ func (r *runner) bind(ctx context.Context, from uint64) (jetstream.Consumer, err
 		want.Metadata = map[string]string{StartSeqMeta: strconv.FormatUint(st.CachedInfo().State.LastSeq+1, 10)}
 	}
 	c, err = r.js.CreateConsumer(ctx, events.EventsStream, want)
+	if err == nil && moved != "" {
+		r.logf("conductor: moved from the durable %s to %s (V12-10), from stream sequence %d; %s is left for an admin to delete\n", moved, want.Durable, from, moved)
+	}
 	if errors.Is(err, jetstream.ErrConsumerExists) {
 		return r.js.Consumer(ctx, events.EventsStream, want.Durable)
 	}
 	return c, err
+}
+
+// legacyStart is where a conductor's first durable under its V12-10 name
+// starts when its durable of before V12-10 is there: after that one's
+// floor, so what it delivered and was not acknowledged comes again. A
+// floor of 0 with nothing pending is a durable that never got an event:
+// none (0), and the new one starts fresh. It is only read: two pairs could
+// share the old name.
+func (r *runner) legacyStart(ctx context.Context) (from uint64, legacy string) {
+	legacy = layout.LegacyConductorConsumer(tok(r.cfg.User), tok(r.cfg.Ensemble))
+	lc, err := r.js.Consumer(ctx, events.EventsStream, legacy)
+	if err != nil {
+		return 0, ""
+	}
+	info := lc.CachedInfo()
+	floor := boundFloor(info)
+	if floor == 0 && info.NumAckPending == 0 {
+		return 0, ""
+	}
+	return floor + 1, legacy
 }
 
 // StartSeqMeta is the conductor durable's metadata key holding the stream
