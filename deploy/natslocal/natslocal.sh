@@ -10,6 +10,7 @@
 #   natslocal.sh urls    print the client URLs, comma-joined
 #   natslocal.sh status  one line per node
 #   natslocal.sh config  write the three configs only (no server started)
+#   natslocal.sh check-ports  refuse ports inside the ephemeral range (below)
 #
 # NATSLOCAL_CLIENT_BASE and NATSLOCAL_ROUTE_BASE (default 14221 and 16221)
 # move the ports — node N listens on BASE+N — so a second cluster (a drill's)
@@ -21,6 +22,15 @@
 # copied into NATSLOCAL_DIR as include.conf and included by every node: an
 # operator-mode, enforcing cluster (stage 2a). NATSLOCAL_CLUSTER names the
 # cluster (default ape-local).
+#
+# up and start refuse a client or route port inside Linux's ephemeral range
+# (/proc/sys/net/ipv4/ip_local_port_range) unless it is reserved
+# (ip_local_reserved_ports): an outgoing connection can take such a port
+# while its node is down, and the node's restart then fails to bind
+# (PORT-EPHEMERAL, HOLD-2C-O1). Pick bases below the range (the defaults
+# are), reserve the ports, or set NATSLOCAL_ALLOW_EPHEMERAL=1 to go on with a
+# warning. A node that fails to start (a port taken, a bad config) is
+# reported with its own log line, exit 1.
 set -euo pipefail
 
 DIR=${NATSLOCAL_DIR:-${TMPDIR:-/tmp}/ape-natslocal}
@@ -61,6 +71,8 @@ start_node() {
   local n=$1
   [ -f "$DIR/n$n.pid" ] && kill -0 "$(cat "$DIR/n$n.pid")" 2>/dev/null && return 0
   mkdir -p "$DIR/data/n$n"
+  touch "$DIR/n$n.log"
+  wc -l < "$DIR/n$n.log" > "$DIR/n$n.logpos"
   "$BIN" -c "$DIR/n$n.conf" >> "$DIR/n$n.log" 2>&1 &
   echo $! > "$DIR/n$n.pid"
 }
@@ -77,18 +89,75 @@ stop_node() {
   rm -f "$DIR/n$n.pid"
 }
 
+RANGE_FILE=${NATSLOCAL_PORT_RANGE_FILE:-/proc/sys/net/ipv4/ip_local_port_range}
+RESERVED_FILE=${NATSLOCAL_RESERVED_PORTS_FILE:-/proc/sys/net/ipv4/ip_local_reserved_ports}
+
+# reserved P: P is listed in ip_local_reserved_ports (a comma list of ports
+# and lo-hi ranges).
+reserved() {
+  local p=$1 item lo hi
+  [ -r "$RESERVED_FILE" ] || return 1
+  for item in $(tr ',' ' ' < "$RESERVED_FILE"); do
+    lo=${item%-*}; hi=${item#*-}
+    [ "$p" -ge "$lo" ] && [ "$p" -le "$hi" ] && return 0
+  done
+  return 1
+}
+
+# check_ports N...: refuse (exit 1) the client and route ports of nodes N
+# inside the ephemeral range and not reserved; no range file (not Linux),
+# no check.
+check_ports() {
+  [ -r "$RANGE_FILE" ] || return 0
+  local lo hi n p bad=""
+  read -r lo hi < "$RANGE_FILE"
+  for n in "$@"; do
+    for p in "$(client_port "$n")" "$(route_port "$n")"; do
+      if [ "$p" -ge "$lo" ] && [ "$p" -le "$hi" ] && ! reserved "$p"; then bad+=" $p"; fi
+    done
+  done
+  [ -z "$bad" ] && return 0
+  local msg="natslocal: port(s)$bad inside the ephemeral range $lo-$hi ($RANGE_FILE) and not in $RESERVED_FILE: an outgoing connection can take one while its node is down, and its restart then fails to bind (PORT-EPHEMERAL). Use NATSLOCAL_CLIENT_BASE/NATSLOCAL_ROUTE_BASE below $lo, or reserve them (sysctl -w net.ipv4.ip_local_reserved_ports=...)"
+  if [ "${NATSLOCAL_ALLOW_EPHEMERAL:-}" = 1 ]; then
+    echo "$msg; going on: NATSLOCAL_ALLOW_EPHEMERAL=1" >&2
+    return 0
+  fi
+  echo "$msg" >&2
+  exit 1
+}
+
+# wait_node N: wait until node N says it is ready in its log (since this
+# start), or fails: an [FTL] line or its process gone is reported with the
+# node's own line (exit 1). Its port answering proves nothing: another
+# process can hold it (PORT-EPHEMERAL).
+wait_node() {
+  local n=$1 pid from new fatal
+  pid=$(cat "$DIR/n$n.pid")
+  from=$(cat "$DIR/n$n.logpos" 2>/dev/null || echo 0)
+  for _ in $(seq 300); do
+    new=$(tail -n +"$((from + 1))" "$DIR/n$n.log")
+    fatal=$(printf '%s\n' "$new" | grep -E '\[FTL\]' | tail -1 || true)
+    if [ -n "$fatal" ] || ! kill -0 "$pid" 2>/dev/null; then
+      kill "$pid" 2>/dev/null || true
+      rm -f "$DIR/n$n.pid"
+      [ -z "$fatal" ] && fatal=$(printf '%s\n' "$new" | grep -E '\[(ERR|FTL)\]' | tail -1 || true)
+      echo "natslocal: n$n did not start: ${fatal:-its process exited (see $DIR/n$n.log)}" >&2
+      exit 1
+    fi
+    printf '%s\n' "$new" | grep -q 'Server is ready' && return 0
+    sleep 0.1
+  done
+  echo "natslocal: n$n is not ready after 30 s (pid $pid; see $DIR/n$n.log)" >&2
+  exit 1
+}
+
 urls() { echo "nats://127.0.0.1:$(client_port 1),nats://127.0.0.1:$(client_port 2),nats://127.0.0.1:$(client_port 3)"; }
 
 case "${1:-}" in
   up)
-    need_bin; mkdir -p "$DIR"
+    need_bin; check_ports 1 2 3; mkdir -p "$DIR"
     for n in 1 2 3; do config "$n"; start_node "$n"; done
-    for n in 1 2 3; do
-      for _ in $(seq 100); do
-        (exec 3<>"/dev/tcp/127.0.0.1/$(client_port "$n")") 2>/dev/null && break
-        sleep 0.1
-      done
-    done
+    for n in 1 2 3; do wait_node "$n"; done
     echo "natslocal: up — $(urls) (dir $DIR)"
     ;;
   down)
@@ -97,7 +166,8 @@ case "${1:-}" in
     echo "natslocal: down"
     ;;
   stop) stop_node "${2:?node 1..3}" ;;
-  start) need_bin; start_node "${2:?node 1..3}" ;;
+  start) need_bin; check_ports "${2:?node 1..3}"; start_node "$2"; wait_node "$2" ;;
+  check-ports) check_ports 1 2 3 ;;
   urls) urls ;;
   config) mkdir -p "$DIR"; for n in 1 2 3; do config "$n"; done; echo "natslocal: configs in $DIR" ;;
   status)
@@ -105,5 +175,5 @@ case "${1:-}" in
       if [ -f "$DIR/n$n.pid" ] && kill -0 "$(cat "$DIR/n$n.pid")" 2>/dev/null; then echo "n$n up (pid $(cat "$DIR/n$n.pid"), :$(client_port "$n"))"; else echo "n$n down"; fi
     done
     ;;
-  *) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  *) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

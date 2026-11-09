@@ -18,6 +18,15 @@ which must fail where the drill passes. That control is what shows the protectio
 
 `make test` runs everything `make check-coord` does. The other two are local only and never run in CI.
 
+### Ports for a local cluster
+
+`natslocal.sh` puts node N on `NATSLOCAL_CLIENT_BASE + N` and `NATSLOCAL_ROUTE_BASE + N` (default 14221 and 16221).
+Keep both bases below Linux's ephemeral range (`/proc/sys/net/ipv4/ip_local_port_range`, often 32768–60999). An
+outgoing connection can take a port in that range while its node is down, and the node's restart then cannot bind
+it. `up` and `start` refuse such a port unless it is listed in `net.ipv4.ip_local_reserved_ports`.
+`NATSLOCAL_ALLOW_EPHEMERAL=1` goes on with a warning. A node that fails to start, for example on a port that is
+taken, is reported with its own log line and exit 1. `natslocal.sh check-ports` runs only the check.
+
 ## What each drill checks
 
 | Drill | Breaks | Passes when | Control |
