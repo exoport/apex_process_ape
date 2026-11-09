@@ -379,7 +379,10 @@ ape asks it over NATS, as the member's user, for a one-hour token narrowed to th
 `pr` or `read` (or, for a watcher, `watch`), never `workflows`. A push goes to the repository over https, with the token in an `http.extraHeader`
 passed only through git's `GIT_CONFIG_*` environment, never argv, a URL or disk. Without `app`, `hot/github.token`
 and git's own credentials are used, as before. The operator's set-up acts are `ape ghapp setup rulesets|workflow|
-secrets|runner-token`. `ape ghapp print-config` and `ape ghapp print-unit` print the files the operator installs.
+secrets|runner-token`. **In this release `rulesets` is the only one a mode uses** (D884): R4 then carries no
+required check, since queue/poll and queue/watch run nothing on GitHub (D878). `workflow`, `secrets` and
+`runner-token` are queue/runner's and are refused with `ci.runner-not-in-release`; the secrets would only put a NATS
+credential into GitHub. `ape ghapp print-config` and `ape ghapp print-unit` print the files the operator installs.
 
 **Stage 1a has no self-hosted runner (D708).** The gate the queue's check would run, ape runs locally on
 `milestone/<M>` with the current main taken in before it enqueues the close PR. If main moves meanwhile, it takes it

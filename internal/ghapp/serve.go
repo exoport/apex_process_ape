@@ -312,6 +312,12 @@ func (s *Service) setup(ctx context.Context, user string, req Request) Reply {
 			rep.Error = err.Error()
 		}
 	case "secrets":
+		// D884 (RQR-1): the secrets are read only by queue/runner's
+		// workflow, which this release cannot write; setting them would
+		// only put a NATS credential into GitHub.
+		if err := apexv1.RunnerModeAvailable(); err != nil {
+			return s.logged(user, "warden", req, refuse("%v", err))
+		}
 		if !SecretNames[req.Name] || req.Value == "" {
 			return s.logged(user, "warden", req, refuse("secret %q: only APE_NATS_URL and APE_NATS_CREDS, with a value", req.Name))
 		}
@@ -322,6 +328,10 @@ func (s *Service) setup(ctx context.Context, user string, req Request) Reply {
 		}
 		s.notify(ctx, user, req, rep)
 	case "runner-token":
+		// D884 (RQR-1): a self-hosted runner is queue/runner's only.
+		if err := apexv1.RunnerModeAvailable(); err != nil {
+			return s.logged(user, "warden", req, refuse("%v", err))
+		}
 		t, err := s.gh.RunnerToken(ctx, tok, req.Repo)
 		rep = Reply{OK: err == nil, Token: t.Token, ExpiresAt: t.ExpiresAt}
 		if err != nil {

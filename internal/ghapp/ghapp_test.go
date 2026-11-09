@@ -20,6 +20,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/nacl/box"
+
+	"github.com/exoport/apex_process_ape/internal/apexv1"
 )
 
 // fakeGitHub is the slice of GitHub's REST API the service calls.
@@ -213,7 +215,22 @@ func TestSetupActs(t *testing.T) {
 	ctx := context.Background()
 	const wf = ".github/workflows/apex-queue.yml"
 
+	// D884 (RQR-2): this release ships no queue/runner, so R4 carries no
+	// required check even with a queue workflow on main (a disabled one, as
+	// the mirror's): nothing would ever pass it, and every merge would hold.
+	f.workflow = true
 	done, err := c.ApplyRulesets(ctx, "ghs_setup", "shop/notes", 99, wf)
+	require.NoError(t, err)
+	require.Len(t, f.rulesets, 4)
+	require.Contains(t, done[0], "R4 without a required check: this release's queue modes")
+	require.NotContains(t, rulesJSON(f.rulesets[RulesetR4]), RequiredCheck)
+	f.workflow = false
+	f.rulesets = map[string]Ruleset{}
+	was := apexv1.RunnerModeReleased
+	apexv1.RunnerModeReleased = true // queue/runner's own set-up, as a release that ships it
+	t.Cleanup(func() { apexv1.RunnerModeReleased = was })
+
+	done, err = c.ApplyRulesets(ctx, "ghs_setup", "shop/notes", 99, wf)
 	require.NoError(t, err)
 	require.Len(t, f.rulesets, 4)
 	require.Contains(t, done[0], "R4 without its required check", "no workflow on main yet: no PR could pass it")

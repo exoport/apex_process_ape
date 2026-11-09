@@ -131,7 +131,7 @@ func (p *Project) QueueWorkflow() (string, error) {
 	}
 	if mode != ModeQueueRunner {
 		return "", &FailError{Code: CodeCIWorkflowMode, Action: ActionPerson, Msg: fmt.Sprintf(
-			"the merge queue's workflow is queue/runner's, and this project's integration mode is %s — with events: runner and a runner_label of the runner's own in the coordination: block it runs on that runner only; queue/poll and queue/watch run nothing on GitHub", mode)}
+			"the merge queue's workflow is queue/runner's, and this project's integration mode is %s — queue/poll and queue/watch run nothing on GitHub, and queue/runner is not available in this release (D884)", mode)}
 	}
 	return QueueWorkflowFor(strings.TrimSpace(cfg.Coordination.RunnerLabel))
 }
@@ -156,6 +156,6 @@ func (p *Project) WriteQueueWorkflow() (changed bool, err error) {
 func init() {
 	DiagnosticCodes = append(DiagnosticCodes,
 		CodeDoc{CodeCIRunnerNotInRelease, 1, ActionPerson, "`ape ci workflow` (print or --write), or the App service's workflow set-up act, for queue/runner, which this release does not ship (D884): ape 1.5 has solo, trunk, queue/poll and queue/watch. events: runner still resolves as a mode, but no merge-queue workflow is written — a person sets events: watch (`ape ci watch` on the coordination host publishes each merge, nothing on GitHub) or events: poll"},
-		CodeDoc{CodeCIWorkflowMode, 1, ActionPerson, "`ape ci workflow` (print or --write) in a project whose integration mode is not queue/runner (D876, V12-15): the merge queue's workflow runs on the project's own self-hosted runner, every job on [self-hosted, <runner_label>], so it needs integration: queue, events: runner and a runner_label of the runner's own in the coordination: block — a bare self-hosted, or a default label, would send the jobs and APE_NATS_CREDS to any runner that matches (D871). queue/poll and queue/watch run nothing on GitHub"},
+		CodeDoc{CodeCIWorkflowMode, 1, ActionPerson, "`ape ci workflow` (print or --write) in a project whose integration mode is not queue/runner (D876, V12-15): the merge queue's workflow is queue/runner's only. queue/poll and queue/watch run nothing on GitHub and need no workflow; queue/runner is not available in this release (ci.runner-not-in-release, D884)"},
 	)
 }

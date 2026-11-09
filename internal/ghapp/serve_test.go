@@ -83,6 +83,18 @@ func TestService(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, f.rulesets, 4)
 	require.NotEmpty(t, rep.Result)
+	// D884 (RQR-1): this release ships no queue/runner, so the secrets
+	// (read only by its workflow) and a runner registration are refused,
+	// logged, and nothing reaches GitHub.
+	_, err = ask(SetupSubject, "dana", Request{Repo: "shop/notes", Act: "secrets", Name: "APE_NATS_CREDS", Value: "SECRET-CREDS-TEXT"})
+	require.ErrorContains(t, err, "not available in this release")
+	require.Empty(t, f.secrets, "no credential put into GitHub")
+	rep, err = ask(SetupSubject, "dana", Request{Repo: "shop/notes", Act: "runner-token"})
+	require.ErrorContains(t, err, "not available in this release")
+	require.Empty(t, rep.Token)
+	was := apexv1.RunnerModeReleased
+	apexv1.RunnerModeReleased = true // queue/runner's acts themselves, as a release that ships it
+	t.Cleanup(func() { apexv1.RunnerModeReleased = was })
 	_, err = ask(SetupSubject, "dana", Request{Repo: "shop/notes", Act: "secrets", Name: "GITHUB_TOKEN", Value: "x"})
 	require.ErrorContains(t, err, "only APE_NATS_URL and APE_NATS_CREDS")
 	_, err = ask(SetupSubject, "dana", Request{Repo: "shop/notes", Act: "secrets", Name: "APE_NATS_CREDS", Value: "SECRET-CREDS-TEXT"})
@@ -91,10 +103,11 @@ func TestService(t *testing.T) {
 	rep, err = ask(SetupSubject, "dana", Request{Repo: "shop/notes", Act: "runner-token"})
 	require.NoError(t, err)
 	require.Equal(t, "RUNNER_TOKEN", rep.Token)
-	// D884: this release does not ship queue/runner, so the workflow act
-	// is refused before anything is opened (its label rule: below).
+	// D871, V12-15: with the mode shipped, the workflow act writes every
+	// job onto the repository's own runner label — none there, refused
+	// (D884's refusal of the act: TestService_WorkflowActNotInRelease).
 	_, err = ask(SetupSubject, "dana", Request{Repo: "shop/notes", Act: "workflow"})
-	require.ErrorContains(t, err, "not available in this release")
+	require.ErrorContains(t, err, "runner_label")
 	require.Empty(t, f.prs, "nothing opened")
 	_, err = ask(SetupSubject, "dana", Request{Repo: "shop/notes", Act: "delete-everything"})
 	require.ErrorContains(t, err, "act \"delete-everything\"")

@@ -228,20 +228,21 @@ func newGhappSetupCmd() *cobra.Command {
 (coordination.github.repo), as this checkout's NATS user — the service runs it only for an
 operator of that repository (PLAN-V15-GHAPP §4):
 
-  rulesets       create or update R1–R4 (R4's required check once the queue workflow is on
-                 the default branch: run it again after the workflow PR merges)
-  workflow       open the PR adding .github/workflows/apex-queue.yml
-  secrets        set APE_NATS_URL or APE_NATS_CREDS (--name), the value read from
-                 --value-file (or - for stdin); never echoed
-  runner-token   print a self-hosted runner registration token (one hour) for the person
-                 who registers the runner
+  rulesets       create or update R1–R4. In this release R4 carries no required check:
+                 queue/poll and queue/watch run nothing on GitHub (D878, D884)
+  workflow       queue/runner's: open the PR adding .github/workflows/apex-queue.yml
+  secrets        queue/runner's: set APE_NATS_URL or APE_NATS_CREDS (--name), the value
+                 read from --value-file (or - for stdin); never echoed
+  runner-token   queue/runner's: print a self-hosted runner registration token (one hour)
+                 for the person who registers the runner
 
-The order for a new repository: workflow, then (once its PR merged) rulesets, then the two
-secrets; runner-token when the runner is registered. Every act is logged by the service, and
-secrets and runner-token notify the operator.
+rulesets is the only act this release's modes use: a new repository needs it once. The
+three queue/runner acts are refused (ci.runner-not-in-release), since this release does not
+ship queue/runner (D884) — the secrets would only put a NATS credential into GitHub. Every
+act is logged by the service, refusals too.
 
 Exit codes: 0 done · 1 refused or failed (the service's message) · 2 usage, or no service.`,
-		Example: "  ape ghapp setup workflow\n  ape ghapp setup secrets --name APE_NATS_CREDS --value-file hot/ci-nats.creds",
+		Example: "  ape ghapp setup rulesets",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			act := args[0]

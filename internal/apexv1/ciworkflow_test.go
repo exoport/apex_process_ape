@@ -150,4 +150,11 @@ func TestRunnerMode_NotInRelease(t *testing.T) {
 	fe, ok = errors.AsType[*FailError](err)
 	require.True(t, ok, "%v", err)
 	require.Equal(t, CodeCIWorkflowMode, fe.Code)
+	require.NotContains(t, fe.Msg, "events: runner", "RQR-3: no advice into the second refusal")
+	require.Contains(t, fe.Msg, "not available in this release")
+	for _, d := range DiagnosticCodes {
+		if d.Code == CodeCIWorkflowMode {
+			require.NotContains(t, d.Meaning, "events: runner and a runner_label")
+		}
+	}
 }

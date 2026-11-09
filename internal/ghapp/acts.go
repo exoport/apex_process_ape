@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	"golang.org/x/crypto/nacl/box"
+
+	"github.com/exoport/apex_process_ape/internal/apexv1"
 )
 
 // The set-up acts (PLAN-V15-GHAPP §4, §6): templated, nothing else. Each
@@ -92,17 +94,27 @@ func Rulesets(pusherAppID int64, withCheck bool) []Ruleset {
 }
 
 // ApplyRulesets creates R1–R4, or updates the ones that exist by name;
-// R4 gets its required check once workflowPath is on the default branch.
-// It returns what it did, one line each.
+// R4 gets its required check once workflowPath is on the default branch,
+// and never while this release does not ship queue/runner (D884): the
+// queue/poll and queue/watch modes run nothing on GitHub, so a required
+// check would hold every merge (D878). It returns what it did, one line
+// each.
 func (c *Client) ApplyRulesets(ctx context.Context, token, repo string, pusherAppID int64, workflowPath string) ([]string, error) {
+	var done []string
 	withCheck := true
-	err := c.do(ctx, http.MethodGet, "/repos/"+repo+"/contents/"+workflowPath, token, nil, nil)
-	var ae *APIError
-	switch {
-	case errors.As(err, &ae) && ae.Status == http.StatusNotFound:
+	if apexv1.RunnerModeAvailable() != nil {
 		withCheck = false
-	case err != nil:
-		return nil, err
+		done = append(done, "R4 without a required check: this release's queue modes (queue/poll, queue/watch) run nothing on GitHub, so main's queue merges with no check of ape's (D878, D884)")
+	} else {
+		err := c.do(ctx, http.MethodGet, "/repos/"+repo+"/contents/"+workflowPath, token, nil, nil)
+		var ae *APIError
+		switch {
+		case errors.As(err, &ae) && ae.Status == http.StatusNotFound:
+			withCheck = false
+			done = append(done, "R4 without its required check "+RequiredCheck+": the queue workflow is not on the default branch yet — merge its PR (setup act workflow), then run rulesets again")
+		case err != nil:
+			return nil, err
+		}
 	}
 	var have []Ruleset
 	if err := c.do(ctx, http.MethodGet, "/repos/"+repo+"/rulesets?includes_parents=false", token, nil, &have); err != nil {
@@ -111,10 +123,6 @@ func (c *Client) ApplyRulesets(ctx context.Context, token, repo string, pusherAp
 	byName := map[string]int64{}
 	for _, r := range have {
 		byName[r.Name] = r.ID
-	}
-	var done []string
-	if !withCheck {
-		done = append(done, "R4 without its required check "+RequiredCheck+": the queue workflow is not on the default branch yet — merge its PR (setup act workflow), then run rulesets again")
 	}
 	for _, r := range Rulesets(pusherAppID, withCheck) {
 		if id, ok := byName[r.Name]; ok {
