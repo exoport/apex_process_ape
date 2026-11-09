@@ -67,17 +67,21 @@ func TestStopHook_UnknownLengthRunsUnderTheBudget(t *testing.T) {
 }
 
 // The cumulative budget: once one hook run has spent it, the rest are
-// judged from the last verify at HEAD.
+// judged from the last verify at HEAD. The numbers hold under load
+// (V8-FLAKE-5): with both checks at 1 s against 1.5 s, a loaded host's
+// verify recorded T1 over the budget and it was never re-run. T1 (0.5 s)
+// now fits 3.5 s at a sevenfold slowdown, and T2 (4 s) is over what is
+// left after T1 at any load, which only lengthens both.
 func TestStopHook_CumulativeBudget(t *testing.T) {
-	stopBudget(t, 2*time.Second, 1500*time.Millisecond)
+	stopBudget(t, 10*time.Second, 3500*time.Millisecond)
 	p := fixture(t, baseFiles())
 	addChange(t, p, "add-wave", changeDoc("add-wave", "greeting", addedWave,
 		"- T1 add wave — check: ./a.sh\n- T2 wave twice — check: ./b.sh\n"))
 	commitAll(t, p, "plan: add-wave")
 	_, err := p.Start(ctx(), "add-wave", RunOptions{})
 	require.NoError(t, err)
-	write(t, p, "a.sh", "#!/bin/sh\nsleep 1\necho a-red\nexit 1\n")
-	write(t, p, "b.sh", "#!/bin/sh\nsleep 1\necho b-red\nexit 1\n")
+	write(t, p, "a.sh", "#!/bin/sh\nsleep 0.5\necho a-red\nexit 1\n")
+	write(t, p, "b.sh", "#!/bin/sh\nsleep 4\necho b-red\nexit 1\n")
 	commitAll(t, p, "feat: wave\n\nChange: add-wave")
 	_, err = p.Verify(ctx(), "add-wave", RunOptions{})
 	require.NoError(t, err)
