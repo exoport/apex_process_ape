@@ -305,6 +305,12 @@ nothing lands, and running the command again fetches and catches up. The single 
 
 The rulesets R1–R4, set once per repository, keep everyone else off on GitHub's side.
 
+**`queue/runner` is not in this release (D884).** ape 1.5 ships `solo`, `trunk`, `queue/poll` and `queue/watch`.
+`events: runner` still resolves as a mode, but `ape ci workflow` (print and `--write`) and the App service's
+`workflow` set-up act refuse it with `ci.runner-not-in-release`, before the label is read, and write nothing. Use
+`events: watch` (below) for a fast wake-up with nothing on GitHub, or `events: poll`. What follows describes the
+mode as built, for the release that ships it.
+
 In `queue/runner` (D876), main's merge queue check runs in CI. `ape ci workflow --write` writes
 `.github/workflows/apex-queue.yml`, whose every job runs on `[self-hosted, <runner_label>]`: the project's own
 runner only. `ape ci workflow` refuses any other mode (`ci.workflow-mode`), and `runner_label` must be the runner's

@@ -2651,7 +2651,12 @@ repository access isolates them. It reads two secrets, APE_NATS_URL and APE_NATS
 (the ensemble credential's text), which a person sets on the repository. ape writes the
 file; committing it is the person's, through main's queue.
 
-Exit codes: 0 printed or written · 1 refused (ci.workflow-mode, coord.integration) or the
+This release does not ship queue/runner (D884): with events: runner the command is refused
+(ci.runner-not-in-release) before the label is read, and writes nothing. queue/watch
+(`ape ci watch` on the coordination host) and queue/poll run nothing on GitHub.
+
+Exit codes: 0 printed or written · 1 refused (ci.runner-not-in-release, ci.workflow-mode,
+coord.integration) or the
 write failed · 2 usage.
 
 Flags:

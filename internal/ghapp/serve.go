@@ -298,6 +298,10 @@ func (s *Service) setup(ctx context.Context, user string, req Request) Reply {
 			rep.Error = err.Error()
 		}
 	case "workflow":
+		// D884: refused before the label is read, as `ape ci workflow` is.
+		if err := apexv1.RunnerModeAvailable(); err != nil {
+			return s.logged(user, "warden", req, refuse("%v", err))
+		}
 		wf, err := apexv1.QueueWorkflowFor(pol.RunnerLabel)
 		if err != nil {
 			return s.logged(user, "warden", req, refuse("the workflow act needs repos.%s.runner_label in the service's config, the repository's own runner label: %v", req.Repo, err))

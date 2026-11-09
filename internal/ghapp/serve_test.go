@@ -14,6 +14,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/stretchr/testify/require"
 
+	"github.com/exoport/apex_process_ape/internal/apexv1"
 	"github.com/exoport/apex_process_ape/internal/natstest"
 )
 
@@ -90,10 +91,10 @@ func TestService(t *testing.T) {
 	rep, err = ask(SetupSubject, "dana", Request{Repo: "shop/notes", Act: "runner-token"})
 	require.NoError(t, err)
 	require.Equal(t, "RUNNER_TOKEN", rep.Token)
-	// D871, V12-15: the workflow act writes every job onto the repository's
-	// own runner label, from the operator's config — none there, refused.
+	// D884: this release does not ship queue/runner, so the workflow act
+	// is refused before anything is opened (its label rule: below).
 	_, err = ask(SetupSubject, "dana", Request{Repo: "shop/notes", Act: "workflow"})
-	require.ErrorContains(t, err, "runner_label")
+	require.ErrorContains(t, err, "not available in this release")
 	require.Empty(t, f.prs, "nothing opened")
 	_, err = ask(SetupSubject, "dana", Request{Repo: "shop/notes", Act: "delete-everything"})
 	require.ErrorContains(t, err, "act \"delete-everything\"")
@@ -170,7 +171,10 @@ func TestService_ReadTokenAsksForMergeQueues(t *testing.T) {
 // [self-hosted, <repos.<repo>.runner_label>]; a default label in the
 // config is refused like none.
 func TestService_WorkflowActOnTheRunnersLabel(t *testing.T) {
-	for _, tc := range []struct{ label, refused string }{{"apex-r1", ""}, {"Self-Hosted", "default runner labels"}, {"linux", "default runner labels"}} {
+	was := apexv1.RunnerModeReleased
+	apexv1.RunnerModeReleased = true // the act itself, as a release that ships queue/runner (D884)
+	t.Cleanup(func() { apexv1.RunnerModeReleased = was })
+	for _, tc := range []struct{ label, refused string }{{"apex-r1", ""}, {"", "runner_label"}, {"Self-Hosted", "default runner labels"}, {"linux", "default runner labels"}} {
 		key, pemBytes := appKey(t)
 		f := newFake(t, &key.PublicKey)
 		srv := httptest.NewServer(f)
@@ -256,4 +260,36 @@ func (s *syncBuf) String() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.b.String()
+}
+
+// D884: 1.5 does not ship queue/runner. The workflow act is refused, the
+// refusal naming queue/watch and logged, before the label is read: a good
+// label opens nothing either.
+func TestService_WorkflowActNotInRelease(t *testing.T) {
+	require.False(t, apexv1.RunnerModeReleased)
+	key, pemBytes := appKey(t)
+	f := newFake(t, &key.PublicKey)
+	srv := httptest.NewServer(f)
+	t.Cleanup(srv.Close)
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, "key.pem")
+	require.NoError(t, os.WriteFile(keyPath, pemBytes, 0o600))
+	s, err := NewService(&Config{
+		API:    srv.URL,
+		Warden: AppConfig{AppID: 42, Key: keyPath, Installations: map[string]int64{"shop/notes": 8}},
+		Pusher: AppConfig{AppID: 42, Key: keyPath, Installations: map[string]int64{"shop/notes": 7}},
+		Repos:  map[string]RepoPolicy{"shop/notes": {Operators: []string{"dana"}, RunnerLabel: "apex-r1"}},
+		Log:    filepath.Join(dir, "acts.jsonl"),
+	})
+	require.NoError(t, err)
+	rep := s.setup(context.Background(), "dana", Request{Repo: "shop/notes", Act: "workflow"})
+	require.False(t, rep.OK)
+	require.Contains(t, rep.Error, "not available in this release")
+	require.Contains(t, rep.Error, "queue/watch")
+	require.NotContains(t, rep.Error, "runner_label in the service's config", "the release refusal, not the label's")
+	require.Empty(t, f.prs, "nothing opened")
+	require.Empty(t, f.workflowPut)
+	log, err := os.ReadFile(filepath.Join(dir, "acts.jsonl"))
+	require.NoError(t, err)
+	require.Contains(t, string(log), "not available in this release", "the refusal is logged")
 }

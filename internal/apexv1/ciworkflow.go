@@ -84,10 +84,34 @@ const runnerLabelSlot = "RUNNER-LABEL"
 // (D876, V12-15).
 const CodeCIWorkflowMode = "ci.workflow-mode"
 
+// CodeCIRunnerNotInRelease: queue/runner's workflow asked for, in a
+// release that does not ship the mode (D884).
+const CodeCIRunnerNotInRelease = "ci.runner-not-in-release"
+
+// RunnerModeReleased: whether this release ships queue/runner. 1.5 does
+// not (D884): it is the one mode that puts a NATS credential into GitHub,
+// and it is not measured live yet. events: runner still resolves as a
+// mode, but nothing writes its workflow. Tests of the workflow itself set
+// it.
+var RunnerModeReleased = false
+
+// RunnerModeAvailable is nil when this release ships queue/runner, else
+// CodeCIRunnerNotInRelease.
+func RunnerModeAvailable() error {
+	if RunnerModeReleased {
+		return nil
+	}
+	return &FailError{Code: CodeCIRunnerNotInRelease, Action: ActionPerson, Msg: "integration mode queue/runner (events: runner) is not available in this release: ape ships solo, trunk, queue/poll and queue/watch, and writes no merge-queue workflow (D884) — use events: watch (`ape ci watch` on the coordination host publishes each merge, with nothing on GitHub), or events: poll"}
+}
+
 // QueueWorkflowFor is the workflow for the runner labelled label, every
-// job on [self-hosted, label]; a label that is not the runner's own
-// (CheckRunnerLabel) is refused.
+// job on [self-hosted, label]; refused while this release does not ship
+// queue/runner (RunnerModeAvailable), then a label that is not the
+// runner's own (CheckRunnerLabel).
 func QueueWorkflowFor(label string) (string, error) {
+	if err := RunnerModeAvailable(); err != nil {
+		return "", err
+	}
 	if err := CheckRunnerLabel(label); err != nil {
 		return "", err
 	}
@@ -131,6 +155,7 @@ func (p *Project) WriteQueueWorkflow() (changed bool, err error) {
 
 func init() {
 	DiagnosticCodes = append(DiagnosticCodes,
+		CodeDoc{CodeCIRunnerNotInRelease, 1, ActionPerson, "`ape ci workflow` (print or --write), or the App service's workflow set-up act, for queue/runner, which this release does not ship (D884): ape 1.5 has solo, trunk, queue/poll and queue/watch. events: runner still resolves as a mode, but no merge-queue workflow is written — a person sets events: watch (`ape ci watch` on the coordination host publishes each merge, nothing on GitHub) or events: poll"},
 		CodeDoc{CodeCIWorkflowMode, 1, ActionPerson, "`ape ci workflow` (print or --write) in a project whose integration mode is not queue/runner (D876, V12-15): the merge queue's workflow runs on the project's own self-hosted runner, every job on [self-hosted, <runner_label>], so it needs integration: queue, events: runner and a runner_label of the runner's own in the coordination: block — a bare self-hosted, or a default label, would send the jobs and APE_NATS_CREDS to any runner that matches (D871). queue/poll and queue/watch run nothing on GitHub"},
 	)
 }

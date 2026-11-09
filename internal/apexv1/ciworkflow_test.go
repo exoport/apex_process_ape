@@ -2,6 +2,7 @@ package apexv1
 
 import (
 	"errors"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -14,6 +15,7 @@ import (
 // grants write wherever the repository's setting says so, so the workflow
 // says contents: read itself, and no job widens it.
 func TestQueueWorkflow_TokenReadsOnly(t *testing.T) {
+	openRunnerMode(t)
 	wf, err := QueueWorkflowFor("apex-r1")
 	require.NoError(t, err)
 	var doc yaml.Node
@@ -49,6 +51,7 @@ func mapValue(m *yaml.Node, key string) *yaml.Node {
 // label, parsed from the YAML; a label that is not the runner's own is
 // refused, and no slot or bare self-hosted is left.
 func TestQueueWorkflow_RunsOnTheRunnersOwnLabel(t *testing.T) {
+	openRunnerMode(t)
 	wf, err := QueueWorkflowFor("apex-v12-7-mmr7")
 	require.NoError(t, err)
 	var doc struct {
@@ -72,6 +75,7 @@ func TestQueueWorkflow_RunsOnTheRunnersOwnLabel(t *testing.T) {
 // D876: the project's workflow is queue/runner's; every other mode is
 // ci.workflow-mode, a block that makes no mode coord.integration.
 func TestProjectQueueWorkflow_Mode(t *testing.T) {
+	openRunnerMode(t)
 	gh := "  github:\n    repo: shop/notes\n"
 	runner := "coordination:\n  integration: queue\n  events: runner\n  runner_label: apex-r1\n" + gh
 	p, err := Open(writeConfig(t, runner))
@@ -96,4 +100,54 @@ func TestProjectQueueWorkflow_Mode(t *testing.T) {
 		_, err = p.WriteQueueWorkflow()
 		require.Error(t, err, cfg)
 	}
+}
+
+// openRunnerMode opens the D884 gate for a test of queue/runner's workflow
+// itself, as a release that ships the mode would.
+func openRunnerMode(t *testing.T) {
+	t.Helper()
+	was := RunnerModeReleased
+	RunnerModeReleased = true
+	t.Cleanup(func() { RunnerModeReleased = was })
+}
+
+// D884: 1.5 does not ship queue/runner. events: runner still resolves as
+// the mode, but its workflow is refused, ci.runner-not-in-release naming
+// queue/watch, before the label is read; every other mode is refused
+// ci.workflow-mode as before.
+func TestRunnerMode_NotInRelease(t *testing.T) {
+	require.False(t, RunnerModeReleased, "this release does not ship queue/runner")
+	for _, label := range []string{"apex-r1", "", "self-hosted"} {
+		_, err := QueueWorkflowFor(label)
+		fe, ok := errors.AsType[*FailError](err)
+		require.True(t, ok, "%q: %v", label, err)
+		require.Equal(t, CodeCIRunnerNotInRelease, fe.Code, "refused before the label (%q)", label)
+		require.Contains(t, fe.Msg, "queue/watch")
+		require.Contains(t, fe.Msg, "not available in this release")
+	}
+	gh := "  github:\n    repo: shop/notes\n"
+	runner := "coordination:\n  integration: queue\n  events: runner\n  runner_label: apex-r1\n" + gh
+	root := writeConfig(t, runner)
+	p, err := Open(root)
+	require.NoError(t, err)
+	cfg, err := LoadConfig(root)
+	require.NoError(t, err)
+	mode, err := cfg.Coordination.Mode()
+	require.NoError(t, err)
+	require.Equal(t, ModeQueueRunner, mode, "events: runner still resolves")
+	_, err = p.QueueWorkflow()
+	fe, ok := errors.AsType[*FailError](err)
+	require.True(t, ok, "%v", err)
+	require.Equal(t, CodeCIRunnerNotInRelease, fe.Code)
+	changed, err := p.WriteQueueWorkflow()
+	require.Error(t, err)
+	require.False(t, changed)
+	require.NoFileExists(t, filepath.Join(root, filepath.FromSlash(QueueWorkflowRel)), "nothing written")
+	// The control: queue/watch is ci.workflow-mode, as before D884.
+	p, err = Open(writeConfig(t, "coordination:\n  integration: queue\n  events: watch\n"+gh))
+	require.NoError(t, err)
+	_, err = p.QueueWorkflow()
+	fe, ok = errors.AsType[*FailError](err)
+	require.True(t, ok, "%v", err)
+	require.Equal(t, CodeCIWorkflowMode, fe.Code)
 }

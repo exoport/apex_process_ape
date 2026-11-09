@@ -33,6 +33,9 @@ func TestCIWorkflow(t *testing.T) {
 	root := v1Repo(t)
 	_, _, err := v1Exec(t, newCICmd, "workflow", "--cwd", root)
 	require.Equal(t, 1, exitCodeOf(t, err), "solo: the workflow is queue/runner's")
+	was := apexv1.RunnerModeReleased
+	apexv1.RunnerModeReleased = true // the workflow itself, as a release that ships queue/runner (D884)
+	t.Cleanup(func() { apexv1.RunnerModeReleased = was })
 	writeAndCommit(t, root, "_apex/config.yaml", "project_name: notes\ncoordination:\n  integration: queue\n  events: runner\n  runner_label: apex-r1\n  ensemble: shop\n  home: h\n  url: nats://127.0.0.1:1\n  github:\n    repo: shop/notes\n", "chore: queue/runner")
 	want, err := apexv1.QueueWorkflowFor("apex-r1")
 	require.NoError(t, err)
@@ -246,4 +249,21 @@ func TestCIWatch_ModeAndOnceDryRun(t *testing.T) {
 	mu.Lock()
 	require.Equal(t, []string{ghapp.TokenSubject + ".ci-watch watch shop/notes"}, asked, "the watch token, as the credential's user")
 	mu.Unlock()
+}
+
+// D884: 1.5 does not ship queue/runner, so `ape ci workflow` refuses it,
+// printing and with --write, ci.runner-not-in-release naming queue/watch,
+// and writes nothing; the label is not read first.
+func TestCIWorkflow_RunnerNotInRelease(t *testing.T) {
+	require.False(t, apexv1.RunnerModeReleased, "this release does not ship queue/runner")
+	root := v1Repo(t)
+	writeAndCommit(t, root, "_apex/config.yaml", "project_name: notes\ncoordination:\n  integration: queue\n  events: runner\n  runner_label: apex-r1\n  ensemble: shop\n  home: h\n  url: nats://127.0.0.1:1\n  github:\n    repo: shop/notes\n", "chore: queue/runner")
+	for _, args := range [][]string{{"workflow"}, {"workflow", "--write"}} {
+		stdout, _, err := v1Exec(t, newCICmd, append(args, "--json", "--cwd", root)...)
+		require.Equal(t, 1, exitCodeOf(t, err), "%v", args)
+		require.Contains(t, stdout, `"code": "ci.runner-not-in-release"`, "%v", args)
+		require.Contains(t, stdout, "queue/watch", "%v", args)
+		require.NotContains(t, stdout, "runs-on", "%v: no workflow printed", args)
+	}
+	require.NoFileExists(t, filepath.Join(root, ".github", "workflows", "apex-queue.yml"))
 }
