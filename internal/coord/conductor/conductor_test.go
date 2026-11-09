@@ -2,6 +2,7 @@ package conductor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -1113,4 +1114,123 @@ func TestDrill_ConductorAttachedAfterAnotherKeepsWhatItLeft(t *testing.T) {
 	require.Equal(t, "conductor: bound its consumer again, from stream sequence 1\n", line, "from the first unanswered event, not after what the first attach was delivered")
 	require.Eventually(t, func() bool { return b.ackedWith("left 0") && b.ackedWith("left 1") && b.ackedWith("left 2") }, 15*time.Second, 50*time.Millisecond,
 		"what the first attach left is delivered again and answered")
+}
+
+// V12-13 (OBS-DRY-2C-2): on an R3 stream a DeliverNew durable reports ack
+// floor 0 until its first ack, so a durable lost before the conductor's
+// first ack was bound again from stream sequence 1 and the whole history
+// was delivered again. Now its first bind records its start in its own
+// config, and the rebind starts there: only what came after is delivered.
+// On R3 only: on one server the floor is the start, and the bug does not
+// show (research, D865+).
+func TestDrill_ConductorLostBeforeItsFirstAckReplaysNoHistory(t *testing.T) {
+	_, js := outageRig(t)
+	ctx := t.Context()
+	for seq := int64(1); seq <= 5; seq++ {
+		_, err := events.Publish(ctx, js, events.Subject("bob", "taskforge", events.KindProject, "M2", "question"), events.MessageID("taskforge", "c1", seq), []byte(`{"q":"history"}`))
+		require.NoError(t, err)
+	}
+	nc, err := nats.Connect(js.Conn().ConnectedUrl(), nats.MaxReconnects(-1))
+	require.NoError(t, err)
+	t.Cleanup(nc.Close)
+	f := &fakeSession{nc: nc, answers: 99, acked: map[string]bool{}}
+	var logMu sync.Mutex
+	var logged []string
+	cfg := scaled("ann", "cond-a", f)
+	cfg.Log = func(format string, a ...any) {
+		logMu.Lock()
+		logged = append(logged, fmt.Sprintf(format, a...))
+		logMu.Unlock()
+	}
+	said := func(prefix string) bool {
+		logMu.Lock()
+		defer logMu.Unlock()
+		return slices.ContainsFunc(logged, func(l string) bool { return strings.HasPrefix(l, prefix) })
+	}
+	t.Cleanup(func() {
+		if t.Failed() {
+			logMu.Lock()
+			t.Log(strings.Join(logged, ""))
+			logMu.Unlock()
+		}
+	})
+	go func() {
+		err := Run(ctx, nc, cfg)
+		cfg.Log("Run returned: %v\n", err)
+	}()
+	name := layout.ConductorConsumer("ann", "atomix")
+	var c jetstream.Consumer
+	require.Eventually(t, func() bool {
+		st, err := js.Stream(ctx, events.EventsStream)
+		if err != nil {
+			return false
+		}
+		for n := range st.ConsumerNames(ctx).Name() {
+			if n == name {
+				return true
+			}
+		}
+		return false
+	}, 15*time.Second, 200*time.Millisecond, "bound")
+	c, err = js.Consumer(ctx, events.EventsStream, name)
+	require.NoError(t, err)
+	cc := c.CachedInfo().Config
+	require.Equal(t, "6", cc.Metadata[StartSeqMeta], "the start, after the stream's last event, is in the durable's own config")
+	require.Equal(t, jetstream.DeliverNewPolicy, cc.DeliverPolicy, "created DeliverNew, as before")
+	// Lost before any ack: nothing was delivered, so nothing was acked. An
+	// R3 delete can outlast one request's 5 s under load: tried again.
+	require.Eventually(t, func() bool {
+		err := js.DeleteConsumer(ctx, events.EventsStream, name)
+		return err == nil || errors.Is(err, jetstream.ErrConsumerNotFound)
+	}, 30*time.Second, 200*time.Millisecond, "the durable deleted")
+	require.Eventually(t, func() bool { return said("conductor: bound its consumer again") }, 15*time.Second, 50*time.Millisecond, "bound again")
+	logMu.Lock()
+	again := ""
+	for _, l := range logged {
+		if strings.HasPrefix(l, "conductor: bound its consumer again") {
+			again = l
+		}
+	}
+	logMu.Unlock()
+	require.Contains(t, again, "from stream sequence 6", "the rebind starts after the history, not at 1")
+	_, err = events.Publish(ctx, js, events.Subject("bob", "taskforge", events.KindProject, "M2", "question"), events.MessageID("taskforge", "c1", 6), []byte(`{"q":"the new one"}`))
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return f.ackedWith("the new one") }, 15*time.Second, 50*time.Millisecond, "the new event delivered")
+	time.Sleep(time.Second)
+	require.False(t, f.typedWith("history"), "no event from before the bind was delivered")
+}
+
+// V12-13: a bound durable stands at its ack floor, or before the start its
+// own config records when that is higher; one from before V12-13 has its
+// floor only.
+func TestBoundFloor(t *testing.T) {
+	info := func(floor uint64, cfg jetstream.ConsumerConfig) *jetstream.ConsumerInfo {
+		return &jetstream.ConsumerInfo{Config: cfg, AckFloor: jetstream.SequenceInfo{Stream: floor}}
+	}
+	recorded := jetstream.ConsumerConfig{DeliverPolicy: jetstream.DeliverNewPolicy, Metadata: map[string]string{StartSeqMeta: "6"}}
+	require.Equal(t, uint64(5), boundFloor(info(0, recorded)), "R3, before the first ack: the recorded start")
+	require.Equal(t, uint64(9), boundFloor(info(9, recorded)), "acked past it: the floor")
+	require.Equal(t, uint64(0), boundFloor(info(0, jetstream.ConsumerConfig{DeliverPolicy: jetstream.DeliverNewPolicy})), "from before V12-13: the floor only")
+	require.Equal(t, uint64(3), boundFloor(info(0, jetstream.ConsumerConfig{DeliverPolicy: jetstream.DeliverByStartSequencePolicy, OptStartSeq: 4})), "a rebind's start")
+	require.Equal(t, uint64(0), boundFloor(info(0, jetstream.ConsumerConfig{Metadata: map[string]string{StartSeqMeta: "x"}})), "an unreadable record is ignored")
+}
+
+// V12-13: an attach that updates the durable (another ack wait) keeps the
+// start its first bind recorded, so a later conductor still reads it.
+func TestBind_UpdateKeepsTheRecordedStart(t *testing.T) {
+	_, _, js := rig(t)
+	ctx := t.Context()
+	publish(t, js, "question", 1)
+	publish(t, js, "question", 2)
+	r := &runner{cfg: scaled("ann", "cond-a", nil), js: js}
+	c, err := r.bind(ctx, 0)
+	require.NoError(t, err)
+	require.Equal(t, "3", c.CachedInfo().Config.Metadata[StartSeqMeta])
+	r2 := &runner{cfg: scaled("ann", "cond-b", nil), js: js}
+	r2.cfg.AckWait = 3 * time.Second
+	c, err = r2.bind(ctx, 0)
+	require.NoError(t, err)
+	require.Equal(t, 3*time.Second, c.CachedInfo().Config.AckWait, "updated")
+	require.Equal(t, "3", c.CachedInfo().Config.Metadata[StartSeqMeta], "and the recorded start kept")
+	require.Equal(t, uint64(2), boundFloor(c.CachedInfo()))
 }

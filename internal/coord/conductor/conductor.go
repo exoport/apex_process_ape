@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -162,7 +163,7 @@ func Run(ctx context.Context, nc *nats.Conn, cfg Config) error {
 	// over) can have left events delivered and unanswered, which this
 	// runner does not hold; a rebind after a loss before they come again
 	// starts at or below them, not after them.
-	r.seen = cons.CachedInfo().AckFloor.Stream
+	r.seen = boundFloor(cons.CachedInfo())
 	// Which stream it was bound on: a rebuild makes a new one, whose
 	// sequences start again at 1 (R2C-1).
 	if st, err := js.Stream(ctx, events.EventsStream); err == nil {
@@ -226,7 +227,13 @@ type runner struct {
 // updated to this conductor's filters and ack wait keeping where it
 // delivers from (NATS refuses a change of its deliver policy or start
 // sequence). A new one starts at stream sequence from, or with the next
-// event when from is 0 (the first bind).
+// event when from is 0 (the first bind), which also writes where that is,
+// the stream's last sequence + 1, into the durable's own config as
+// StartSeqMeta (V12-13): a DeliverNew durable on an R3 stream reports ack
+// floor 0 until its first ack, so a rebind after a loss before that
+// replayed the whole stream. DeliverNew stays the create: one by start
+// sequence took ≈ 10 s on R3 while a consumer info for it was in flight,
+// and its reply timed out.
 func (r *runner) bind(ctx context.Context, from uint64) (jetstream.Consumer, error) {
 	want := jetstream.ConsumerConfig{
 		Durable:        layout.ConductorConsumer(tok(r.cfg.User), tok(r.cfg.Ensemble)),
@@ -242,6 +249,7 @@ func (r *runner) bind(ctx context.Context, from uint64) (jetstream.Consumer, err
 			return c, nil
 		}
 		want.DeliverPolicy, want.OptStartSeq, want.OptStartTime = have.DeliverPolicy, have.OptStartSeq, have.OptStartTime
+		want.Metadata = have.Metadata // its recorded start (V12-13) stays
 		return r.js.UpdateConsumer(ctx, events.EventsStream, want)
 	}
 	if !errors.Is(err, jetstream.ErrConsumerNotFound) {
@@ -249,12 +257,39 @@ func (r *runner) bind(ctx context.Context, from uint64) (jetstream.Consumer, err
 	}
 	if from > 0 {
 		want.DeliverPolicy, want.OptStartSeq = jetstream.DeliverByStartSequencePolicy, from
+	} else {
+		st, err := r.js.Stream(ctx, events.EventsStream)
+		if err != nil {
+			return nil, err
+		}
+		want.Metadata = map[string]string{StartSeqMeta: strconv.FormatUint(st.CachedInfo().State.LastSeq+1, 10)}
 	}
 	c, err = r.js.CreateConsumer(ctx, events.EventsStream, want)
 	if errors.Is(err, jetstream.ErrConsumerExists) {
 		return r.js.Consumer(ctx, events.EventsStream, want.Durable)
 	}
 	return c, err
+}
+
+// StartSeqMeta is the conductor durable's metadata key holding the stream
+// sequence it was first bound at (V12-13).
+const StartSeqMeta = "ape.start-seq"
+
+// boundFloor is where a bound durable stands: its ack floor, or the
+// sequence before the start its own config records (StartSeqMeta, or a
+// rebind's start sequence) when that is higher, since an R3 durable
+// reports floor 0 until its first ack (V12-13). A durable from before
+// V12-13 records no start, and has its floor only.
+func boundFloor(info *jetstream.ConsumerInfo) uint64 {
+	floor := info.AckFloor.Stream
+	c := info.Config
+	if c.DeliverPolicy == jetstream.DeliverByStartSequencePolicy && c.OptStartSeq > 0 {
+		floor = max(floor, c.OptStartSeq-1)
+	}
+	if v, err := strconv.ParseUint(c.Metadata[StartSeqMeta], 10, 64); err == nil && v > 0 {
+		floor = max(floor, v-1)
+	}
+	return floor
 }
 
 // rebind binds the durable again after the cluster lost it (V12-6,
