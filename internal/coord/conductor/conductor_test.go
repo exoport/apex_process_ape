@@ -432,7 +432,7 @@ func bound(t *testing.T, js jetstream.JetStream) {
 		}
 		info, err := c.Info(context.Background())
 		return err == nil && info.NumWaiting > 0
-	}, 30*time.Second, 50*time.Millisecond, "the conductor pulls on its durable")
+	}, 30*time.Second, 250*time.Millisecond, "the conductor pulls on its durable") // not faster: a CONSUMER.INFO poll every 50 ms while an R3 durable is created disturbs it (FINDING-V12-13-1)
 }
 
 func outage(t *testing.T, c *natstest.Cluster, d time.Duration) {
