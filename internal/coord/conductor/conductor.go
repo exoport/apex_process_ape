@@ -164,6 +164,7 @@ func Run(ctx context.Context, nc *nats.Conn, cfg Config) error {
 	// runner does not hold; a rebind after a loss before they come again
 	// starts at or below them, not after them.
 	r.seen = boundFloor(cons.CachedInfo())
+	r.logf("conductor: bound its consumer %s, from stream sequence %d\n", cons.CachedInfo().Name, r.seen+1)
 	// Which stream it was bound on: a rebuild makes a new one, whose
 	// sequences start again at 1 (R2C-1).
 	if st, err := js.Stream(ctx, events.EventsStream); err == nil {
@@ -268,7 +269,7 @@ func (r *runner) bind(ctx context.Context, from uint64) (jetstream.Consumer, err
 		}
 		want.Metadata = map[string]string{StartSeqMeta: strconv.FormatUint(st.CachedInfo().State.LastSeq+1, 10)}
 	}
-	c, err = r.js.CreateConsumer(ctx, events.EventsStream, want)
+	c, err = r.createDurable(ctx, want)
 	if err == nil && moved != "" {
 		r.logf("conductor: moved from the durable %s to %s (V12-10), from stream sequence %d; %s is left for an admin to delete\n", moved, want.Durable, from, moved)
 	}
@@ -276,6 +277,34 @@ func (r *runner) bind(ctx context.Context, from uint64) (jetstream.Consumer, err
 		return r.js.Consumer(ctx, events.EventsStream, want.Durable)
 	}
 	return c, err
+}
+
+// bindCreateTries bounds a durable's create when its reply times out
+// (FINDING-V12-13-1), bindCreateWait apart.
+var (
+	bindCreateTries = 5
+	bindCreateWait  = time.Second
+)
+
+// createDurable creates the durable, trying again when the reply timed
+// out: on R3 a create's reply was lost while the durable was there or
+// came later (GitHub's Windows runners, and a CONSUMER.INFO poller at
+// 50 ms locally), and the conductor's attach ended "bind consumer:
+// context deadline exceeded". The same config created again is the
+// existing durable, or a new one if the first never landed.
+func (r *runner) createDurable(ctx context.Context, want jetstream.ConsumerConfig) (jetstream.Consumer, error) {
+	for try := 1; ; try++ {
+		c, err := r.js.CreateConsumer(ctx, events.EventsStream, want)
+		if !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, nats.ErrTimeout) || try == bindCreateTries || ctx.Err() != nil {
+			return c, err
+		}
+		r.logf("conductor: creating its durable %s timed out (%v); trying again (%d of %d)\n", want.Durable, err, try+1, bindCreateTries)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(bindCreateWait):
+		}
+	}
 }
 
 // legacyStart is where a conductor's first durable under its V12-10 name

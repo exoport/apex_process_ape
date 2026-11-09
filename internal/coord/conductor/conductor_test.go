@@ -1177,18 +1177,9 @@ func TestDrill_ConductorLostBeforeItsFirstAckReplaysNoHistory(t *testing.T) {
 	}()
 	name := layout.ConductorConsumer("ann", "atomix")
 	var c jetstream.Consumer
-	require.Eventually(t, func() bool {
-		st, err := js.Stream(ctx, events.EventsStream)
-		if err != nil {
-			return false
-		}
-		for n := range st.ConsumerNames(ctx).Name() {
-			if n == name {
-				return true
-			}
-		}
-		return false
-	}, 15*time.Second, 200*time.Millisecond, "bound")
+	// Bound by the conductor's own line: a poll of the durable while it is
+	// created disturbed the create on R3 (FINDING-V12-13-1).
+	require.Eventually(t, func() bool { return said("conductor: bound its consumer " + name) }, 30*time.Second, 100*time.Millisecond, "bound")
 	c, err = js.Consumer(ctx, events.EventsStream, name)
 	require.NoError(t, err)
 	cc := c.CachedInfo().Config
@@ -1293,7 +1284,11 @@ func TestConductor_MovesFromTheLegacyDurable(t *testing.T) {
 			}
 			go func() { _ = Run(ctx, nc, cfg) }()
 			name := layout.ConductorConsumer("ann", "atomix")
-			require.Eventually(t, func() bool { _, err := js.Consumer(ctx, events.EventsStream, name); return err == nil }, 10*time.Second, 50*time.Millisecond, "bound under the new name")
+			require.Eventually(t, func() bool {
+				logMu.Lock()
+				defer logMu.Unlock()
+				return slices.ContainsFunc(logged, func(l string) bool { return strings.HasPrefix(l, "conductor: bound its consumer "+name) })
+			}, 30*time.Second, 100*time.Millisecond, "bound under the new name")
 			moved := func() string {
 				logMu.Lock()
 				defer logMu.Unlock()
@@ -1374,4 +1369,42 @@ func TestConductor_MoveKeepsWhatWasPublishedWhileDown(t *testing.T) {
 			require.False(t, f.typedWith("which port?"), "and nothing from before the legacy durable")
 		})
 	}
+}
+
+// FINDING-V12-13-1: on R3 a durable's create can lose its reply while the
+// durable is made (GitHub's Windows runners: the attach ended "bind
+// consumer: context deadline exceeded", 2 runs in 2). The create is tried
+// again, which for the same config is the durable made. Here the first
+// create makes it and answers with a timeout, as the lost reply did.
+func TestBind_TriesACreateWhoseReplyTimedOutAgain(t *testing.T) {
+	_, _, js := rig(t)
+	ctx := t.Context()
+	lost := &lostReply{JetStream: js}
+	var logged []string
+	r := &runner{cfg: scaled("ann", "cond-a", nil), js: lost}
+	r.cfg.Log = func(format string, a ...any) { logged = append(logged, fmt.Sprintf(format, a...)) }
+	was := bindCreateWait
+	bindCreateWait = 10 * time.Millisecond
+	t.Cleanup(func() { bindCreateWait = was })
+	c, err := r.bind(ctx, 0)
+	require.NoError(t, err, "bound on the second try")
+	require.Equal(t, layout.ConductorConsumer("ann", "atomix"), c.CachedInfo().Name)
+	require.Equal(t, 2, lost.creates)
+	require.Contains(t, strings.Join(logged, ""), "timed out", "and said so")
+	require.Contains(t, strings.Join(logged, ""), "trying again (2 of 5)")
+}
+
+// lostReply makes the first consumer create and answers it with a timeout.
+type lostReply struct {
+	jetstream.JetStream
+	creates int
+}
+
+func (l *lostReply) CreateConsumer(ctx context.Context, stream string, cfg jetstream.ConsumerConfig) (jetstream.Consumer, error) {
+	l.creates++
+	c, err := l.JetStream.CreateConsumer(ctx, stream, cfg)
+	if l.creates == 1 && err == nil {
+		return nil, context.DeadlineExceeded
+	}
+	return c, err
 }
