@@ -280,10 +280,12 @@ func (r *runner) bind(ctx context.Context, from uint64) (jetstream.Consumer, err
 
 // legacyStart is where a conductor's first durable under its V12-10 name
 // starts when its durable of before V12-10 is there: after that one's
-// floor, so what it delivered and was not acknowledged comes again. A
-// floor of 0 with nothing pending is a durable that never got an event:
-// none (0), and the new one starts fresh. It is only read: two pairs could
-// share the old name.
+// floor, so what it delivered and was not acknowledged comes again. With
+// nothing ack-pending, after what it delivered (V12-10-1): on R3 a durable
+// that never got an event reads floor 0, and starting fresh skipped what
+// was published while the conductor was down for the upgrade. A floor of
+// 0 then is a durable that never delivered anything: none (0), and the new
+// one starts fresh. It is only read: two pairs could share the old name.
 func (r *runner) legacyStart(ctx context.Context) (from uint64, legacy string) {
 	legacy = layout.LegacyConductorConsumer(tok(r.cfg.User), tok(r.cfg.Ensemble))
 	lc, err := r.js.Consumer(ctx, events.EventsStream, legacy)
@@ -292,6 +294,9 @@ func (r *runner) legacyStart(ctx context.Context) (from uint64, legacy string) {
 	}
 	info := lc.CachedInfo()
 	floor := boundFloor(info)
+	if info.NumAckPending == 0 {
+		floor = max(floor, info.Delivered.Stream)
+	}
 	if floor == 0 && info.NumAckPending == 0 {
 		return 0, ""
 	}

@@ -1302,3 +1302,59 @@ func TestConductor_MovesFromTheLegacyDurable(t *testing.T) {
 		})
 	}
 }
+
+// V12-10-1 (research's probe): a production-shaped legacy durable
+// (DeliverNew, never delivered anything) and two events published while
+// the conductor was down for the upgrade. On R3 its ack floor reads 0 with
+// nothing pending (V12-13's condition), so the move started fresh and the
+// two were skipped for good; now a legacy with nothing ack-pending starts
+// after what it delivered, and they are typed. R1 is the control: there the
+// floor is the start, and they were typed before the fix too.
+func TestConductor_MoveKeepsWhatWasPublishedWhileDown(t *testing.T) {
+	for _, r3 := range []bool{false, true} {
+		t.Run(map[bool]string{false: "R1-control", true: "R3"}[r3], func(t *testing.T) {
+			var nc *nats.Conn
+			var js jetstream.JetStream
+			if r3 {
+				c, _ := outageRig(t)
+				var err error
+				nc, err = nats.Connect(c.URLs())
+				require.NoError(t, err)
+				t.Cleanup(nc.Close)
+				js, err = jetstream.New(nc)
+				require.NoError(t, err)
+			} else {
+				_, nc, js = rig(t)
+			}
+			ctx := t.Context()
+			publish(t, js, "h1", 1)
+			publish(t, js, "h2", 2)
+			old := layout.LegacyConductorConsumer("ann", "atomix")
+			_, err := js.CreateConsumer(ctx, events.EventsStream, jetstream.ConsumerConfig{Durable: old, FilterSubjects: Filters("atomix", []string{"taskforge"}), AckPolicy: jetstream.AckExplicitPolicy, AckWait: time.Minute, DeliverPolicy: jetstream.DeliverNewPolicy})
+			require.NoError(t, err)
+			for i, q := range []string{"three", "four"} {
+				_, err := events.Publish(ctx, js, events.Subject("bob", "taskforge", events.KindProject, "M2", "question"), events.MessageID("taskforge", "c1", int64(i+10)), []byte(`{"q":"`+q+`"}`))
+				require.NoError(t, err)
+			}
+			f := &fakeSession{nc: nc, answers: 99, acked: map[string]bool{}}
+			var mu sync.Mutex
+			var logged []string
+			cfg := scaled("ann", "cond-a", f)
+			cfg.Log = func(format string, a ...any) {
+				mu.Lock()
+				logged = append(logged, fmt.Sprintf(format, a...))
+				mu.Unlock()
+			}
+			t.Cleanup(func() {
+				if t.Failed() {
+					mu.Lock()
+					t.Log(strings.Join(logged, ""))
+					mu.Unlock()
+				}
+			})
+			go func() { _ = Run(ctx, nc, cfg) }()
+			require.Eventually(t, func() bool { return f.ackedWith(`"three"`) && f.ackedWith(`"four"`) }, 15*time.Second, 100*time.Millisecond, "what was published while the conductor was down is typed after the move")
+			require.False(t, f.typedWith("which port?"), "and nothing from before the legacy durable")
+		})
+	}
+}
