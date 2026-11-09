@@ -165,3 +165,35 @@ func TestNatslocal_ReadyWait(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(data), "${NATSLOCAL_READY_WAIT:-60}", "the default is natstest's 60 s")
 }
+
+// R5A-1: NATSLOCAL_READY_WAIT that is not a whole number of seconds, at
+// least 1, is refused before any node starts (abc and 0 stopped the node
+// at once, 1.5 broke the wait's loop).
+func TestNatslocal_ReadyWaitIsValidated(t *testing.T) {
+	script, err := filepath.Abs("../../deploy/natslocal/natslocal.sh")
+	require.NoError(t, err)
+	dir := t.TempDir()
+	fake := filepath.Join(dir, "nats-server")
+	require.NoError(t, os.WriteFile(fake, []byte("#!/bin/sh\n[ \"$1\" = --version ] && { echo 'nats-server: v2.14.5'; exit 0; }\necho '[1] [INF] Server is ready'\nexec sleep 30\n"), 0o755))
+	for _, tc := range []struct{ wait, refused string }{{"abc", "abc"}, {"0", "0"}, {"1.5", "1.5"}, {"05", "05"}, {"2", ""}} {
+		nl := filepath.Join(t.TempDir(), "nl")
+		env := append(os.Environ(), "NATSLOCAL_DIR="+nl, "NATS_SERVER="+fake, "NATSLOCAL_ALLOW_EPHEMERAL=1", "NATSLOCAL_READY_WAIT="+tc.wait)
+		cfg := exec.Command("bash", script, "config")
+		cfg.Env = env
+		out, err := cfg.CombinedOutput()
+		require.NoError(t, err, "%s", out)
+		c := exec.Command("bash", script, "start", "1")
+		c.Env = env
+		out, err = c.CombinedOutput()
+		stop := exec.Command("bash", script, "stop", "1")
+		stop.Env = env
+		_ = stop.Run()
+		if tc.refused == "" {
+			require.NoError(t, err, "control %q: %s", tc.wait, out)
+			continue
+		}
+		require.Error(t, err, tc.wait)
+		require.Contains(t, string(out), "NATSLOCAL_READY_WAIT="+tc.refused+" is not a whole number of seconds", tc.wait)
+		require.NoFileExists(t, filepath.Join(nl, "n1.pid"), "%q: no node started", tc.wait)
+	}
+}

@@ -128,6 +128,14 @@ check_ports() {
   exit 1
 }
 
+# check_ready_wait: NATSLOCAL_READY_WAIT is a whole number of seconds, at
+# least 1 (R5A-1: abc or 0 stopped the node at once, 1.5 broke the loop).
+check_ready_wait() {
+  case "${NATSLOCAL_READY_WAIT:-60}" in
+    ''|*[!0-9]*|0*) echo "natslocal: NATSLOCAL_READY_WAIT=${NATSLOCAL_READY_WAIT:-} is not a whole number of seconds, at least 1" >&2; exit 2 ;;
+  esac
+}
+
 # wait_node N: wait until node N says it is ready in its log (since this
 # start), or fails: an [FTL] line or its process gone is reported with the
 # node's own line (exit 1). Its port answering proves nothing: another
@@ -160,7 +168,7 @@ urls() { echo "nats://127.0.0.1:$(client_port 1),nats://127.0.0.1:$(client_port 
 
 case "${1:-}" in
   up)
-    need_bin; check_ports 1 2 3; mkdir -p "$DIR"
+    need_bin; check_ready_wait; check_ports 1 2 3; mkdir -p "$DIR"
     for n in 1 2 3; do config "$n"; start_node "$n"; done
     for n in 1 2 3; do wait_node "$n"; done
     echo "natslocal: up — $(urls) (dir $DIR)"
@@ -171,7 +179,7 @@ case "${1:-}" in
     echo "natslocal: down"
     ;;
   stop) stop_node "${2:?node 1..3}" ;;
-  start) need_bin; check_ports "${2:?node 1..3}"; start_node "$2"; wait_node "$2" ;;
+  start) need_bin; check_ready_wait; check_ports "${2:?node 1..3}"; start_node "$2"; wait_node "$2" ;;
   check-ports) check_ports 1 2 3 ;;
   urls) urls ;;
   config) mkdir -p "$DIR"; for n in 1 2 3; do config "$n"; done; echo "natslocal: configs in $DIR" ;;
