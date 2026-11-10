@@ -323,9 +323,11 @@ func (r *runner) createDurable(ctx context.Context, want jetstream.ConsumerConfi
 // was published while the conductor was down for the upgrade. A floor of
 // 0 then is a durable that never delivered anything: none (0), and the new
 // one starts fresh. Two pairs could share the old name (ann in x-y, ann-x
-// in y): it is moved from, and then deleted by bind, only when its filters
-// are this conductor's, so a pair never takes the other's floor or deletes
-// its durable (V12-10-2).
+// in y): it is moved from, and then deleted by bind, only when it filters
+// this conductor's ensemble's coordinator subject. The pairs sharing a name
+// differ in ensemble, so a pair never takes the other's floor or deletes
+// its durable, while a conductor whose projects changed across the upgrade
+// still moves (V12-10-2).
 func (r *runner) legacyStart(ctx context.Context) (from uint64, legacy string) {
 	legacy = layout.LegacyConductorConsumer(tok(r.cfg.User), tok(r.cfg.Ensemble))
 	lc, err := r.js.Consumer(ctx, events.EventsStream, legacy)
@@ -333,8 +335,8 @@ func (r *runner) legacyStart(ctx context.Context) (from uint64, legacy string) {
 		return 0, ""
 	}
 	info := lc.CachedInfo()
-	if have, want := filtersOf(info.Config), Filters(r.cfg.Ensemble, r.cfg.Projects); !sameSet(have, want) {
-		r.logf("conductor: the durable %s filters %v, not this conductor's %v: another pair's (or other projects'), not moved from and left as it is (V12-10-2)\n", legacy, have, want)
+	if have, own := filtersOf(info.Config), Filters(r.cfg.Ensemble, nil)[0]; !slices.Contains(have, own) {
+		r.logf("conductor: the durable %s filters %v, not this conductor's ensemble (%s): another pair's, not moved from and left as it is (V12-10-2)\n", legacy, have, own)
 		return 0, ""
 	}
 	floor := boundFloor(info)
@@ -356,14 +358,6 @@ func filtersOf(c jetstream.ConsumerConfig) []string {
 		return []string{c.FilterSubject}
 	}
 	return nil
-}
-
-// sameSet reports a and b holding the same subjects, in any order.
-func sameSet(a, b []string) bool {
-	a, b = slices.Clone(a), slices.Clone(b)
-	slices.Sort(a)
-	slices.Sort(b)
-	return slices.Equal(slices.Compact(a), slices.Compact(b))
 }
 
 // StartSeqMeta is the conductor durable's metadata key holding the stream

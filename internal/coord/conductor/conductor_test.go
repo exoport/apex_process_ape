@@ -1589,3 +1589,53 @@ func TestConductor_ACollidingPairNeitherMovesFromNorDeletesTheOthersLegacy(t *te
 	_, err = js.Consumer(ctx, events.EventsStream, old)
 	require.ErrorIs(t, err, jetstream.ErrConsumerNotFound)
 }
+
+// V12-10-2 (Q-V12102-1): ownership is the ensemble, not the whole filter
+// set. A conductor whose --project set changed across the upgrade (it now
+// also follows other) still moves from its own legacy durable and deletes
+// it; the colliding pair, whose ensemble differs, does not (the test
+// above).
+func TestConductor_AProjectChangeAcrossTheUpgradeStillMoves(t *testing.T) {
+	_, nc, js := rig(t)
+	ctx := t.Context()
+	old := layout.LegacyConductorConsumer("ann", "atomix")
+	lc, err := js.CreateConsumer(ctx, events.EventsStream, jetstream.ConsumerConfig{Durable: old, FilterSubjects: Filters("atomix", []string{"taskforge"}), AckPolicy: jetstream.AckExplicitPolicy, AckWait: time.Minute})
+	require.NoError(t, err)
+	q := func(s string, i int64) {
+		_, err := events.Publish(ctx, js, events.Subject("bob", "taskforge", events.KindProject, "M2", "question"), events.MessageID("taskforge", "c1", i), []byte(`{"q":"`+s+`"}`))
+		require.NoError(t, err)
+	}
+	q("one", 1)
+	b, err := lc.Fetch(1, jetstream.FetchMaxWait(5*time.Second))
+	require.NoError(t, err)
+	for m := range b.Messages() {
+		require.NoError(t, m.DoubleAck(ctx))
+	}
+	q("two", 2)
+	f := &fakeSession{nc: nc, answers: 99, acked: map[string]bool{}}
+	var mu sync.Mutex
+	var logged []string
+	cfg := scaled("ann", "cond-a", f)
+	cfg.Projects = []string{"taskforge", "other"}
+	cfg.Log = func(format string, a ...any) {
+		mu.Lock()
+		logged = append(logged, fmt.Sprintf(format, a...))
+		mu.Unlock()
+	}
+	t.Cleanup(func() {
+		if t.Failed() {
+			mu.Lock()
+			t.Log(strings.Join(logged, ""))
+			mu.Unlock()
+		}
+	})
+	go func() { _ = Run(ctx, nc, cfg) }()
+	require.Eventually(t, func() bool { return f.ackedWith(`"two"`) }, 15*time.Second, 50*time.Millisecond, "what the legacy left comes again")
+	require.False(t, f.typedWith(`"one"`))
+	mu.Lock()
+	all := strings.Join(logged, "")
+	mu.Unlock()
+	require.Contains(t, all, "conductor: moved from the durable "+old+" to "+layout.ConductorConsumer("ann", "atomix")+" (V12-10), from stream sequence 2; "+old+" deleted")
+	_, err = js.Consumer(ctx, events.EventsStream, old)
+	require.ErrorIs(t, err, jetstream.ErrConsumerNotFound)
+}
