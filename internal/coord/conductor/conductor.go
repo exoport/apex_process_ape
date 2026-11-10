@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -126,23 +127,74 @@ func Ack(nc *nats.Conn, token string) error {
 // refuses this credential a call on the conductor's durable (OBS-2D-2): a
 // credential minted before V12-10 grants only conductor-<user>-<ens>, and
 // its bind otherwise ended in a timeout that named nothing. The violation
-// comes on the connection's error handler, which is chained, not
-// replaced; stop puts the previous one back.
+// comes on the connection's error handler; stop ends the watch.
 func refusedDurable(ctx context.Context, nc *nats.Conn, durable string) (bctx context.Context, stop func()) {
 	bctx, cancel := context.WithCancelCause(ctx)
-	prev := nc.Opts.AsyncErrorCB
-	nc.SetErrorHandler(func(c *nats.Conn, s *nats.Subscription, err error) {
+	unwatch := watchErrors(nc, func(err error) {
 		if errors.Is(err, nats.ErrPermissionViolation) && onDurable(err.Error(), durable) {
 			cancel(&apexv1.FailError{Code: apexv1.CodeConductorCredential, Action: apexv1.ActionPerson, Msg: fmt.Sprintf(
 				"conductor: the server refused this credential its durable %s (%v): the credential was minted before ape 1.5 named the durable conductor_<user>_<ensemble> (V12-10), so it grants only the old name; nothing was delivered. The operator who holds the account's keys mints it again — `ape nats mint user --dir <keys> --kind member --name <user> --project <project> --ensemble <ensemble> --out <file>` — and it replaces hot/ape-nats.creds in each checkout of the person's", durable, err)})
 		}
-		if prev != nil {
-			prev(c, s, err)
-		}
 	})
 	return bctx, func() {
-		nc.SetErrorHandler(prev)
+		unwatch()
 		cancel(nil)
+	}
+}
+
+// errWatch is one connection's error handler while a conductor's first
+// bind watches it: it calls every watcher, then the handler it replaced.
+// Several conductors can share a connection, so it is installed once per
+// connection and the handler it replaced is put back when the last watcher
+// leaves; a handler set by hand in between is never overwritten.
+type errWatch struct {
+	prev, self nats.ErrHandler
+	fns        map[int]func(error)
+	next       int
+}
+
+var (
+	errWatchMu sync.Mutex
+	errWatches = map[*nats.Conn]*errWatch{}
+)
+
+func watchErrors(nc *nats.Conn, fn func(error)) (unwatch func()) {
+	errWatchMu.Lock()
+	defer errWatchMu.Unlock()
+	w := errWatches[nc]
+	if w == nil {
+		w = &errWatch{prev: nc.ErrorHandler(), fns: map[int]func(error){}}
+		w.self = func(c *nats.Conn, s *nats.Subscription, err error) {
+			errWatchMu.Lock()
+			fns := make([]func(error), 0, len(w.fns))
+			for _, f := range w.fns {
+				fns = append(fns, f)
+			}
+			errWatchMu.Unlock()
+			for _, f := range fns {
+				f(err)
+			}
+			if w.prev != nil {
+				w.prev(c, s, err)
+			}
+		}
+		nc.SetErrorHandler(w.self)
+		errWatches[nc] = w
+	}
+	id := w.next
+	w.next++
+	w.fns[id] = fn
+	return func() {
+		errWatchMu.Lock()
+		defer errWatchMu.Unlock()
+		delete(w.fns, id)
+		if len(w.fns) > 0 || errWatches[nc] != w {
+			return
+		}
+		delete(errWatches, nc)
+		if reflect.ValueOf(nc.ErrorHandler()).Pointer() == reflect.ValueOf(w.self).Pointer() {
+			nc.SetErrorHandler(w.prev)
+		}
 	}
 }
 

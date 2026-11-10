@@ -1661,3 +1661,30 @@ func TestOnDurable(t *testing.T) {
 		require.Equal(t, want, onDurable(v(subj), d), subj)
 	}
 }
+
+// OBS-2D-2's watch on a connection two conductors share (as
+// TestHeartbeatKeepsOnlyAnAnsweringConductor's do): each watcher sees an
+// error while it watches, the handler the connection had keeps getting
+// them, and it is the connection's handler again once both have left, in
+// either order.
+func TestWatchErrors_ASharedConnection(t *testing.T) {
+	_, nc, _ := rig(t)
+	var mu sync.Mutex
+	got := map[string]int{}
+	see := func(who string) func(error) {
+		return func(error) { mu.Lock(); got[who]++; mu.Unlock() }
+	}
+	orig := func(*nats.Conn, *nats.Subscription, error) { mu.Lock(); got["orig"]++; mu.Unlock() }
+	nc.SetErrorHandler(orig)
+	stopA := watchErrors(nc, see("a"))
+	stopB := watchErrors(nc, see("b"))
+	nc.ErrorHandler()(nc, nil, errors.New("one"))
+	stopA()
+	nc.ErrorHandler()(nc, nil, errors.New("two"))
+	stopB()
+	nc.ErrorHandler()(nc, nil, errors.New("three"))
+	mu.Lock()
+	defer mu.Unlock()
+	require.Equal(t, map[string]int{"a": 1, "b": 2, "orig": 3}, got)
+	require.Empty(t, errWatches, "nothing left installed")
+}
