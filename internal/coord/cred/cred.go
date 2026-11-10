@@ -118,9 +118,12 @@ func ConductorGrant(user, ensemble string, projects ...string) aped.Grant {
 		pub = append(pub, "ape.evt."+u+"."+natsconn.SubjectToken(p)+".project.>")
 	}
 	pub = append(pub, durable(eventsStream, layout.ConductorConsumer(u, e))...)
-	// The durable's name before V12-10, read once to move from it: INFO
-	// only, since two pairs could share that name.
-	pub = append(pub, "$JS.API.CONSUMER.INFO."+eventsStream+"."+layout.LegacyConductorConsumer(u, e))
+	// The durable's name before V12-10, read once to move from it and
+	// deleted after the move (V12-10-2). Two pairs could share that name:
+	// the conductor moves from and deletes it only when its filters are
+	// its own, and neither pair may create, pull from or ack it.
+	legacy := layout.LegacyConductorConsumer(u, e)
+	pub = append(pub, "$JS.API.CONSUMER.INFO."+eventsStream+"."+legacy, "$JS.API.CONSUMER.DELETE."+eventsStream+"."+legacy)
 	return aped.Grant{
 		PubAllow: append(pub, getStreams(eventsStream, leasesStream, metaStream)...),
 		SubAllow: []string{inbox(u)},

@@ -1246,8 +1246,9 @@ func TestBind_UpdateKeepsTheRecordedStart(t *testing.T) {
 // V12-10: the first attach under the durable's new name finds the old one
 // (conductor-<user>-<ens>) and starts after its floor, so what it delivered
 // and was not acknowledged comes again: event 1 was acked there, 2 and 3
-// were not. The old durable is left in place. The control: with no old
-// durable, the new one starts fresh, recording its start.
+// were not. The old durable is deleted after the move (V12-10-2). The
+// control: with no old durable, the new one starts fresh, recording its
+// start.
 func TestConductor_MovesFromTheLegacyDurable(t *testing.T) {
 	for _, legacy := range []bool{true, false} {
 		t.Run(map[bool]string{true: "legacy", false: "control-none"}[legacy], func(t *testing.T) {
@@ -1306,11 +1307,11 @@ func TestConductor_MovesFromTheLegacyDurable(t *testing.T) {
 				require.Empty(t, moved())
 				return
 			}
-			require.Contains(t, moved(), "conductor: moved from the durable "+old+" to "+name+" (V12-10), from stream sequence 2")
+			require.Contains(t, moved(), "conductor: moved from the durable "+old+" to "+name+" (V12-10), from stream sequence 2; "+old+" deleted")
 			require.Eventually(t, func() bool { return f.ackedWith(`"two"`) && f.ackedWith(`"three"`) }, 10*time.Second, 50*time.Millisecond, "what the old durable left unacknowledged comes again")
 			require.False(t, f.typedWith(`"one"`), "what it acknowledged does not")
 			_, err := js.Consumer(ctx, events.EventsStream, old)
-			require.NoError(t, err, "the old durable is left for an admin")
+			require.ErrorIs(t, err, jetstream.ErrConsumerNotFound, "the old durable is deleted (V12-10-2)")
 		})
 	}
 }
@@ -1407,4 +1408,184 @@ func (l *lostReply) CreateConsumer(ctx context.Context, stream string, cfg jetst
 		return nil, context.DeadlineExceeded
 	}
 	return c, err
+}
+
+// V12-10-2 (OBS-2D-1, research's R3 probe): the move happens once. A later
+// attach that finds the new durable gone (an admin's delete while no attach
+// ran) moved from the legacy floor again, which never advanced: every event
+// since the upgrade was typed a second time, acknowledged ones included.
+// The legacy durable is deleted after the move, so that attach starts
+// fresh. On R1 and on R3 (where a never-delivered durable reads floor 0).
+func TestConductor_MovesFromTheLegacyDurableOnce(t *testing.T) {
+	for _, r3 := range []bool{false, true} {
+		t.Run(map[bool]string{false: "R1", true: "R3"}[r3], func(t *testing.T) {
+			var nc *nats.Conn
+			var js jetstream.JetStream
+			if r3 {
+				c, _ := outageRig(t)
+				var err error
+				nc, err = nats.Connect(c.URLs())
+				require.NoError(t, err)
+				t.Cleanup(nc.Close)
+				js, err = jetstream.New(nc)
+				require.NoError(t, err)
+			} else {
+				_, nc, js = rig(t)
+			}
+			ctx := t.Context()
+			old := layout.LegacyConductorConsumer("ann", "atomix")
+			name := layout.ConductorConsumer("ann", "atomix")
+			q := func(s string, i int64) {
+				_, err := events.Publish(ctx, js, events.Subject("bob", "taskforge", events.KindProject, "M2", "question"), events.MessageID("taskforge", "c1", i), []byte(`{"q":"`+s+`"}`))
+				require.NoError(t, err)
+			}
+			q("h1", 1)
+			_, err := js.CreateConsumer(ctx, events.EventsStream, jetstream.ConsumerConfig{Durable: old, FilterSubjects: Filters("atomix", []string{"taskforge"}), AckPolicy: jetstream.AckExplicitPolicy, AckWait: time.Minute, DeliverPolicy: jetstream.DeliverNewPolicy})
+			require.NoError(t, err)
+			q("gap1", 10) // published while the conductor is down for the upgrade
+			var mu sync.Mutex
+			var logged []string
+			attach := func(f *fakeSession) (context.CancelFunc, chan error) {
+				cfg := scaled("ann", "cond-a", f)
+				cfg.Log = func(format string, a ...any) {
+					mu.Lock()
+					logged = append(logged, fmt.Sprintf(format, a...))
+					mu.Unlock()
+				}
+				rctx, cancel := context.WithCancel(ctx)
+				done := make(chan error, 1)
+				go func() { done <- Run(rctx, nc, cfg) }()
+				return cancel, done
+			}
+			moves := func() int {
+				mu.Lock()
+				defer mu.Unlock()
+				n := 0
+				for _, l := range logged {
+					if strings.HasPrefix(l, "conductor: moved from the durable") {
+						n++
+					}
+				}
+				return n
+			}
+			t.Cleanup(func() {
+				if t.Failed() {
+					mu.Lock()
+					t.Log(strings.Join(logged, ""))
+					mu.Unlock()
+				}
+			})
+
+			f1 := &fakeSession{nc: nc, answers: 99, acked: map[string]bool{}}
+			stop, done := attach(f1)
+			require.Eventually(t, func() bool { return f1.ackedWith(`"gap1"`) }, 15*time.Second, 50*time.Millisecond, "the move types what was published while down")
+			q("after1", 11)
+			q("after2", 12)
+			require.Eventually(t, func() bool { return f1.ackedWith(`"after1"`) && f1.ackedWith(`"after2"`) }, 15*time.Second, 50*time.Millisecond)
+			require.Eventually(t, func() bool {
+				c, err := js.Consumer(ctx, events.EventsStream, name)
+				return err == nil && c.CachedInfo().AckFloor.Stream == 4 && c.CachedInfo().NumAckPending == 0
+			}, 10*time.Second, 250*time.Millisecond, "all three acknowledged")
+			stop()
+			require.NoError(t, <-done)
+			require.Equal(t, 1, moves())
+
+			require.NoError(t, js.DeleteConsumer(ctx, events.EventsStream, name), "an admin deletes the new durable while no attach runs")
+			f2 := &fakeSession{nc: nc, answers: 99, acked: map[string]bool{}}
+			stop, done = attach(f2)
+			t.Cleanup(func() { stop(); <-done })
+			bound := func() int {
+				mu.Lock()
+				defer mu.Unlock()
+				n := 0
+				for _, l := range logged {
+					if strings.HasPrefix(l, "conductor: bound its consumer "+name) {
+						n++
+					}
+				}
+				return n
+			}
+			// The log, not the durable's INFO: a tight INFO poll during an
+			// attach can lose its create's reply on R3 (FINDING-V12-13-1).
+			require.Eventually(t, func() bool { return bound() == 2 }, 15*time.Second, 50*time.Millisecond, "bound again")
+			q("after3", 13)
+			require.Eventually(t, func() bool { return f2.ackedWith(`"after3"`) }, 15*time.Second, 50*time.Millisecond, "what comes after is typed")
+			require.False(t, f2.typedWith(`"gap1"`) || f2.typedWith(`"after1"`) || f2.typedWith(`"after2"`), "what the first attach acknowledged is not typed again")
+			require.Equal(t, 1, moves(), "no second move")
+		})
+	}
+}
+
+// V12-10-2: ann in ensemble x-y and ann-x in y shared the legacy name
+// conductor-ann-x-y. Only the pair whose filters it holds moves from it and
+// deletes it: ann-x, attaching first, starts fresh and leaves ann's
+// durable as it is (it neither takes ann's floor, the colliding-pair caveat
+// of V12-10-1, nor deletes it); ann then moves from it.
+func TestConductor_ACollidingPairNeitherMovesFromNorDeletesTheOthersLegacy(t *testing.T) {
+	_, nc, js := rig(t)
+	ctx := t.Context()
+	old := layout.LegacyConductorConsumer("ann", "x-y")
+	require.Equal(t, old, layout.LegacyConductorConsumer("ann-x", "y"))
+	q := func(s string, i int64) {
+		_, err := events.Publish(ctx, js, events.Subject("bob", "taskforge", events.KindProject, "M2", "question"), events.MessageID("taskforge", "c1", i), []byte(`{"q":"`+s+`"}`))
+		require.NoError(t, err)
+	}
+	lc, err := js.CreateConsumer(ctx, events.EventsStream, jetstream.ConsumerConfig{Durable: old, FilterSubjects: Filters("x-y", []string{"taskforge"}), AckPolicy: jetstream.AckExplicitPolicy, AckWait: time.Minute})
+	require.NoError(t, err)
+	q("one", 1)
+	b, err := lc.Fetch(1, jetstream.FetchMaxWait(5*time.Second))
+	require.NoError(t, err)
+	for m := range b.Messages() {
+		require.NoError(t, m.DoubleAck(ctx))
+	}
+	q("two", 2)
+	was, err := lc.Info(ctx)
+	require.NoError(t, err)
+	var mu sync.Mutex
+	var logged []string
+	attach := func(user, ens string) (*fakeSession, context.CancelFunc) {
+		f := &fakeSession{nc: nc, answers: 99, acked: map[string]bool{}}
+		cfg := scaled(user, "cond-"+user, f)
+		cfg.Ensemble = ens
+		cfg.Log = func(format string, a ...any) {
+			mu.Lock()
+			logged = append(logged, fmt.Sprintf(format, a...))
+			mu.Unlock()
+		}
+		rctx, cancel := context.WithCancel(ctx)
+		go func() { _ = Run(rctx, nc, cfg) }()
+		t.Cleanup(cancel)
+		return f, cancel
+	}
+	saw := func(prefix string) bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return slices.ContainsFunc(logged, func(l string) bool { return strings.HasPrefix(l, prefix) })
+	}
+	t.Cleanup(func() {
+		if t.Failed() {
+			mu.Lock()
+			t.Log(strings.Join(logged, ""))
+			mu.Unlock()
+		}
+	})
+
+	attach("ann-x", "y")
+	theirs := layout.ConductorConsumer("ann-x", "y")
+	require.Eventually(t, func() bool { return saw("conductor: bound its consumer " + theirs) }, 15*time.Second, 50*time.Millisecond)
+	require.True(t, saw("conductor: the durable "+old+" filters "), "said why it did not move")
+	require.False(t, saw("conductor: moved from the durable"), "ann-x does not take ann's floor")
+	c, err := js.Consumer(ctx, events.EventsStream, theirs)
+	require.NoError(t, err)
+	require.Equal(t, jetstream.DeliverNewPolicy, c.CachedInfo().Config.DeliverPolicy, "a fresh start")
+	now, err := lc.Info(ctx)
+	require.NoError(t, err, "ann's legacy durable is not deleted")
+	require.Equal(t, was.AckFloor, now.AckFloor)
+	require.Equal(t, was.Delivered, now.Delivered)
+
+	f, _ := attach("ann", "x-y")
+	require.Eventually(t, func() bool { return f.ackedWith(`"two"`) }, 15*time.Second, 50*time.Millisecond, "the control: ann moves from her own")
+	require.True(t, saw("conductor: moved from the durable "+old+" to "+layout.ConductorConsumer("ann", "x-y")+" (V12-10), from stream sequence 2; "+old+" deleted"))
+	_, err = js.Consumer(ctx, events.EventsStream, old)
+	require.ErrorIs(t, err, jetstream.ErrConsumerNotFound)
 }

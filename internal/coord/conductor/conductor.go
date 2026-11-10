@@ -271,7 +271,15 @@ func (r *runner) bind(ctx context.Context, from uint64) (jetstream.Consumer, err
 	}
 	c, err = r.createDurable(ctx, want)
 	if err == nil && moved != "" {
-		r.logf("conductor: moved from the durable %s to %s (V12-10), from stream sequence %d; %s is left for an admin to delete\n", moved, want.Durable, from, moved)
+		// The move happens once (V12-10-2): left in place, the legacy
+		// durable never advances, and a later attach that found the new one
+		// gone moved from its floor again, typing everything since the
+		// upgrade a second time.
+		if derr := r.js.DeleteConsumer(ctx, events.EventsStream, moved); derr != nil && !errors.Is(derr, jetstream.ErrConsumerNotFound) {
+			r.logf("conductor: moved from the durable %s to %s (V12-10), from stream sequence %d; deleting %s failed (%v): an admin deletes it, or an attach that finds %s gone moves from it again\n", moved, want.Durable, from, moved, derr, want.Durable)
+		} else {
+			r.logf("conductor: moved from the durable %s to %s (V12-10), from stream sequence %d; %s deleted\n", moved, want.Durable, from, moved)
+		}
 	}
 	if errors.Is(err, jetstream.ErrConsumerExists) {
 		return r.js.Consumer(ctx, events.EventsStream, want.Durable)
@@ -314,7 +322,10 @@ func (r *runner) createDurable(ctx context.Context, want jetstream.ConsumerConfi
 // that never got an event reads floor 0, and starting fresh skipped what
 // was published while the conductor was down for the upgrade. A floor of
 // 0 then is a durable that never delivered anything: none (0), and the new
-// one starts fresh. It is only read: two pairs could share the old name.
+// one starts fresh. Two pairs could share the old name (ann in x-y, ann-x
+// in y): it is moved from, and then deleted by bind, only when its filters
+// are this conductor's, so a pair never takes the other's floor or deletes
+// its durable (V12-10-2).
 func (r *runner) legacyStart(ctx context.Context) (from uint64, legacy string) {
 	legacy = layout.LegacyConductorConsumer(tok(r.cfg.User), tok(r.cfg.Ensemble))
 	lc, err := r.js.Consumer(ctx, events.EventsStream, legacy)
@@ -322,6 +333,10 @@ func (r *runner) legacyStart(ctx context.Context) (from uint64, legacy string) {
 		return 0, ""
 	}
 	info := lc.CachedInfo()
+	if have, want := filtersOf(info.Config), Filters(r.cfg.Ensemble, r.cfg.Projects); !sameSet(have, want) {
+		r.logf("conductor: the durable %s filters %v, not this conductor's %v: another pair's (or other projects'), not moved from and left as it is (V12-10-2)\n", legacy, have, want)
+		return 0, ""
+	}
 	floor := boundFloor(info)
 	if info.NumAckPending == 0 {
 		floor = max(floor, info.Delivered.Stream)
@@ -330,6 +345,25 @@ func (r *runner) legacyStart(ctx context.Context) (from uint64, legacy string) {
 		return 0, ""
 	}
 	return floor + 1, legacy
+}
+
+// filtersOf is a consumer's filter subjects, one or several.
+func filtersOf(c jetstream.ConsumerConfig) []string {
+	if len(c.FilterSubjects) > 0 {
+		return c.FilterSubjects
+	}
+	if c.FilterSubject != "" {
+		return []string{c.FilterSubject}
+	}
+	return nil
+}
+
+// sameSet reports a and b holding the same subjects, in any order.
+func sameSet(a, b []string) bool {
+	a, b = slices.Clone(a), slices.Clone(b)
+	slices.Sort(a)
+	slices.Sort(b)
+	return slices.Equal(slices.Compact(a), slices.Compact(b))
 }
 
 // StartSeqMeta is the conductor durable's metadata key holding the stream

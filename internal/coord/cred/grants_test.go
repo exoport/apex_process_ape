@@ -491,5 +491,64 @@ func TestGrants_V12_10_CollidingPairsHaveTheirOwnDurables(t *testing.T) {
 	}, nil)
 	g := cred.MemberGrant("ann-x", "taskforge", "y")
 	require.Contains(t, g.PubAllow, pre+"CREATE."+events.EventsStream+"."+annX, "the control: its own durable")
-	require.Contains(t, g.PubAllow, pre+"INFO."+events.EventsStream+"."+layout.LegacyConductorConsumer("ann-x", "y"), "and the old name, read only")
+	require.Contains(t, g.PubAllow, pre+"INFO."+events.EventsStream+"."+layout.LegacyConductorConsumer("ann-x", "y"), "and the old name, read")
+	require.Contains(t, g.PubAllow, pre+"DELETE."+events.EventsStream+"."+layout.LegacyConductorConsumer("ann-x", "y"), "and deleted after the move (V12-10-2)")
+}
+
+// V12-10-2: ann's conductor, on her own member credential and an enforcing
+// server that refuses nothing (natstest.Enforced fails the test on any
+// refusal), moves from her legacy durable and deletes it.
+func TestGrants_V12_10_2_TheMoveDeletesTheLegacyDurableOnItsCredential(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	e := natstest.StartEnforced(t)
+	admin := connect(t, e.URL, e.Admin)
+	ajs, err := jetstream.New(admin)
+	require.NoError(t, err)
+	require.NoError(t, lease.Declare(ctx, ajs, 1))
+	require.NoError(t, events.Declare(ctx, ajs, 1))
+	als, err := lease.Open(ctx, ajs)
+	require.NoError(t, err)
+	require.NoError(t, als.SetEpoch(ctx, 1))
+	old := layout.LegacyConductorConsumer("ann", "atomix")
+	lc, err := ajs.CreateConsumer(ctx, events.EventsStream, jetstream.ConsumerConfig{Durable: old, FilterSubjects: conductor.Filters("atomix", []string{"taskforge"}), AckPolicy: jetstream.AckExplicitPolicy, AckWait: time.Minute})
+	require.NoError(t, err)
+	q := func(s string, i int64) {
+		_, err := events.Publish(ctx, ajs, events.Subject("bob", "taskforge", events.KindProject, "M2", "question"), events.MessageID("taskforge", "c1", i), []byte(`{"q":"`+s+`"}`))
+		require.NoError(t, err)
+	}
+	q("one", 1)
+	b, err := lc.Fetch(1, jetstream.FetchMaxWait(5*time.Second))
+	require.NoError(t, err)
+	for m := range b.Messages() {
+		require.NoError(t, m.DoubleAck(ctx))
+	}
+	q("two", 2)
+
+	annCreds := e.Mint(t, "ann", perms(cred.MemberGrant("ann", "taskforge", "atomix")))
+	cnc := connect(t, e.URL, annCreds)
+	a := &acker{nc: cnc}
+	var logMu sync.Mutex
+	var logged []string
+	go func() {
+		_ = conductor.Run(ctx, cnc, conductor.Config{
+			User: "ann", Ensemble: "atomix", Projects: []string{"taskforge"}, Holder: "cond-a", Nonce: "n",
+			LeaseTTL: 3 * time.Second, Renew: 500 * time.Millisecond, AckWait: time.Second,
+			Escalate: time.Minute, Pause: 2 * time.Minute, Session: a,
+			Log: func(f string, args ...any) {
+				logMu.Lock()
+				logged = append(logged, fmt.Sprintf(f, args...))
+				logMu.Unlock()
+			},
+		})
+	}()
+	require.Eventually(t, func() bool { return a.saw(`"two"`) }, 15*time.Second, 50*time.Millisecond, "the move delivers what the legacy left")
+	require.False(t, a.saw(`"one"`))
+	logMu.Lock()
+	all := strings.Join(logged, "")
+	logMu.Unlock()
+	require.Contains(t, all, "conductor: moved from the durable "+old+" to "+layout.ConductorConsumer("ann", "atomix")+" (V12-10), from stream sequence 2; "+old+" deleted", all)
+	_, err = ajs.Consumer(ctx, events.EventsStream, old)
+	require.ErrorIs(t, err, jetstream.ErrConsumerNotFound, "deleted on ann's credential")
+	require.Empty(t, e.Violations())
 }

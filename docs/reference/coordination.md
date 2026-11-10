@@ -404,8 +404,12 @@ A conductor receives its ensemble's events through the durable consumer **`condu
 coordination: block refuse one), so two people's durables never share a name (V12-10: `conductor-ann-x-y` was both
 ann's in ensemble `x-y` and `ann-x`'s in `y`). The first attach after an upgrade finds the old `conductor-<user>-<ens>`
 durable and starts the new one after its acknowledged floor, so what it left unacknowledged comes again. It logs
-`conductor: moved from the durable …`, and leaves the old durable for the operator to delete. A credential minted before
-that change must be minted again, since it grants the old name only. On a first attach, the durable records where it
+`conductor: moved from the durable … deleted` and deletes the old durable, so the move happens once: left in place, the
+old durable never advanced, and an attach that later found the new durable gone moved from it again and typed every
+event since the upgrade a second time (V12-10-2). It moves from and deletes the old durable only when the old one's
+filters are its own; a colliding pair's durable is neither moved from nor deleted, and the attach starts fresh. That also
+holds for a conductor whose projects changed across the upgrade. A credential minted before that change must be minted
+again, since it grants the old name only. On a first attach, the durable records where it
 starts (the stream's last sequence + 1) in its own metadata, `ape.start-seq`. A durable lost before its first
 acknowledgement is then bound again from there, not from sequence 1 (V12-13).
 Only the holder of `conductor.<user>.<ens>` binds it, so a conductor that takes the lease over inherits the events the
