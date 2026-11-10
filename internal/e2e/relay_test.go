@@ -23,9 +23,14 @@ import (
 // session (any line but apex-plan's) writes a transcript whose turn sent
 // the next of FAKE_LOOP_TOKENS (space-separated, one per loop session) on
 // FAKE_MODEL, reports it through UserPromptSubmit, saves `ape status
-// --json` as status-<n>.json, launches one child —
-// `ape task apex-plan`, as the loop does — recording its exit and output,
-// then ends its turn. A child session (apex-plan's line) ends its turn at
+// --json` as status-<n>.json (and the run's relay record as
+// record-<n>.json), launches one child — `ape task apex-plan`, as the loop
+// does — recording its exit and output, then ends its turn. Before saving
+// and launching it waits (at most 10 s) until ape has the transcript the
+// hook named: status shows a context fill, or, for a model whose window ape
+// does not know, the relay record holds the transcript. The hook's `ape
+// notify` is fire-and-forget, so without the wait the snapshot and the
+// child launch could come before it (V15-RED-2). A child session (apex-plan's line) ends its turn at
 // once.
 const fakeClaudeLoop = `#!/bin/bash
 if [ "$1" = "--version" ]; then echo "2.1.300 (Claude Code)"; exit 0; fi
@@ -51,7 +56,13 @@ tr="$FAKE_DIR/$kind-$n.jsonl"
 printf '{"type":"assistant","sessionId":"%s-%s","timestamp":"2026-10-19T12:00:00.000Z","message":{"id":"msg_%s_%s","model":"%s","stop_reason":"tool_use","usage":{"input_tokens":2,"output_tokens":1,"cache_read_input_tokens":%s,"cache_creation_input_tokens":0}}}\n' "$kind" "$n" "$kind" "$n" "${FAKE_MODEL:-claude-sonnet-4-5}" "$tokens" > "$tr"
 printf '{"session_id":"%s-%s","hook_event_name":"UserPromptSubmit","cwd":"%s","transcript_path":"%s","prompt":"x"}' "$kind" "$n" "$PWD" "$tr" | sh -c "$ups"
 if [ "$kind" = loop ]; then
-  "$APE_BIN" status --json --cwd "$PWD" > "$FAKE_DIR/status-$n.json" 2>/dev/null
+  for _ in $(seq 50); do
+    "$APE_BIN" status --json --cwd "$PWD" > "$FAKE_DIR/status-$n.json" 2>/dev/null
+    grep -qE '"context_fill": *[0-9]' "$FAKE_DIR/status-$n.json" && break
+    cat "$PWD"/_apex/state/runs/relays/*.json 2>/dev/null | grep -qE '"transcript": *"[^"]' && [ -n "$FAKE_MODEL" ] && break
+    sleep 0.2
+  done
+  cat "$PWD"/_apex/state/runs/relays/*.json > "$FAKE_DIR/record-$n.json" 2>/dev/null
   "$APE_BIN" task apex-plan --args M1 --idle-timeout 60s --cwd "$PWD" > "$FAKE_DIR/child-of-$n.out" 2>&1
   echo $? > "$FAKE_DIR/child-of-$n.code"
 fi
@@ -193,7 +204,13 @@ func TestTask_LoopRelayedAtTheThreshold(t *testing.T) {
 		require.Equal(t, ms[i].RunID, st.Sessions[0].RunID)
 		r := st.Sessions[0].Relay
 		require.NotNil(t, r, "session %s", n)
-		require.NotNil(t, r.ContextFill)
+		var rec struct {
+			Transcript string `json:"transcript"`
+		}
+		raw := fakeFile(t, fake, "status-"+n+".json")
+		recRaw := fakeFile(t, fake, "record-"+n+".json")
+		_ = json.Unmarshal([]byte(recRaw), &rec)
+		require.NotNil(t, r.ContextFill, "session %s: no context fill; the relay record's transcript then was %q; status: %s", n, rec.Transcript, raw)
 		require.InDelta(t, want.fill, *r.ContextFill, 1e-4)
 		require.InDelta(t, 0.6, r.ContextRelay, 1e-9)
 		require.Equal(t, want.relays, r.Relays)
