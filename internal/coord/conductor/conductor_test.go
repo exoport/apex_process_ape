@@ -1543,7 +1543,7 @@ func TestConductor_ACollidingPairNeitherMovesFromNorDeletesTheOthersLegacy(t *te
 	require.NoError(t, err)
 	var mu sync.Mutex
 	var logged []string
-	attach := func(user, ens string) (*fakeSession, context.CancelFunc) {
+	attach := func(user, ens string) *fakeSession {
 		f := &fakeSession{nc: nc, answers: 99, acked: map[string]bool{}}
 		cfg := scaled(user, "cond-"+user, f)
 		cfg.Ensemble = ens
@@ -1555,7 +1555,7 @@ func TestConductor_ACollidingPairNeitherMovesFromNorDeletesTheOthersLegacy(t *te
 		rctx, cancel := context.WithCancel(ctx)
 		go func() { _ = Run(rctx, nc, cfg) }()
 		t.Cleanup(cancel)
-		return f, cancel
+		return f
 	}
 	saw := func(prefix string) bool {
 		mu.Lock()
@@ -1583,7 +1583,7 @@ func TestConductor_ACollidingPairNeitherMovesFromNorDeletesTheOthersLegacy(t *te
 	require.Equal(t, was.AckFloor, now.AckFloor)
 	require.Equal(t, was.Delivered, now.Delivered)
 
-	f, _ := attach("ann", "x-y")
+	f := attach("ann", "x-y")
 	require.Eventually(t, func() bool { return f.ackedWith(`"two"`) }, 15*time.Second, 50*time.Millisecond, "the control: ann moves from her own")
 	require.True(t, saw("conductor: moved from the durable "+old+" to "+layout.ConductorConsumer("ann", "x-y")+" (V12-10), from stream sequence 2; "+old+" deleted"))
 	_, err = js.Consumer(ctx, events.EventsStream, old)
