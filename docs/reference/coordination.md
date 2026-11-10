@@ -411,7 +411,9 @@ filters its own ensemble's coordinator subject (`ape.evt.coord.<ens>.>`): the pa
 ensemble, so a colliding pair's durable is neither moved from nor deleted, and that attach starts fresh, while a
 conductor whose projects changed across the upgrade still moves. A legacy durable left after a move (the conductor
 stopped between creating the new durable and deleting the old one, or the delete failed and was logged) is safe for an
-admin to delete. A credential minted before that change must be minted again, since it grants the old name only. On a first attach, the durable records where it
+admin to delete. A credential minted before that change must be minted again, since it grants the old name only: an
+attach on one stops at once with `coord.conductor-credential`, which says so, rather than waiting out the server's
+refusal of the new name (OBS-2D-2). On a first attach, the durable records where it
 starts (the stream's last sequence + 1) in its own metadata, `ape.start-seq`. A durable lost before its first
 acknowledgement is then bound again from there, not from sequence 1 (V12-13).
 Only the holder of `conductor.<user>.<ens>` binds it, so a conductor that takes the lease over inherits the events the

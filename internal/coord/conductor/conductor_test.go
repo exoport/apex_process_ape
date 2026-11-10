@@ -1639,3 +1639,25 @@ func TestConductor_AProjectChangeAcrossTheUpgradeStillMoves(t *testing.T) {
 	_, err = js.Consumer(ctx, events.EventsStream, old)
 	require.ErrorIs(t, err, jetstream.ErrConsumerNotFound)
 }
+
+// OBS-2D-2: the violations that end the first bind at once are those on
+// the conductor's own durable (any JetStream API verb on it), and no other.
+func TestOnDurable(t *testing.T) {
+	d := layout.ConductorConsumer("ann", "atomix")
+	v := func(subj string) string {
+		return `nats: permissions violation: Permissions Violation for Publish to "` + subj + `"`
+	}
+	for subj, want := range map[string]bool{
+		"$JS.API.CONSUMER.INFO.APE_EVENTS." + d:                                               true,
+		"$JS.API.CONSUMER.CREATE.APE_EVENTS." + d:                                             true,
+		"$JS.API.CONSUMER.CREATE.APE_EVENTS." + d + ".ape.evt.coord.x.>":                      true,
+		"$JS.API.CONSUMER.MSG.NEXT.APE_EVENTS." + d:                                           true,
+		"$JS.API.CONSUMER.DELETE.APE_EVENTS." + d:                                             true,
+		"$JS.API.CONSUMER.INFO.APE_EVENTS." + layout.LegacyConductorConsumer("ann", "atomix"): false,
+		"$JS.API.CONSUMER.INFO.OTHER." + d:                                                    false,
+		"$JS.API.CONSUMER.INFO.APE_EVENTS." + d + "x":                                         false,
+		"$KV.ape-leases.conductor.ann.atomix":                                                 false,
+	} {
+		require.Equal(t, want, onDurable(v(subj), d), subj)
+	}
+}

@@ -144,7 +144,7 @@ func TestDiagnosticCodes_PublishedListMatchesTheCode(t *testing.T) {
 		"CodeCheckGrepTestOutput": CodeCheckGrepTestOutput, "CodeSessionAuthLost": CodeSessionAuthLost,
 		// v1.5 (in development).
 		"CodeCoordNATSUnreachable": CodeCoordNATSUnreachable, "CodeCoordMembership": CodeCoordMembership, "CodeCoordMilestonePaused": CodeCoordMilestonePaused,
-		"CodeFetchFailed": CodeFetchFailed, "CodeNotLeaseHolder": CodeNotLeaseHolder, "CodeMilestoneBranchMissing": CodeMilestoneBranchMissing, "CodeIntegrationPush": CodeIntegrationPush, "CodeIntegrationPR": CodeIntegrationPR, "CodeIntegrationEjections": CodeIntegrationEjections, "CodeTakeInNeeded": CodeTakeInNeeded, "CodeCIRed": CodeCIRed, "CodeCIOutsideFlow": CodeCIOutsideFlow, "CodeQueueSettings": CodeQueueSettings, "CodeTweakNoMilestone": CodeTweakNoMilestone, "CodeMilestoneMoved": CodeMilestoneMoved, "CodeTakeInRed": CodeTakeInRed, "CodeCloseBusy": CodeCloseBusy, "CodeCoordURLRewritten": CodeCoordURLRewritten, "CodeCloseLost": CodeCloseLost, "CodeMilestoneBranchExists": CodeMilestoneBranchExists, "CodeRecordEjected": CodeRecordEjected, "CodeRecordPending": CodeRecordPending,
+		"CodeFetchFailed": CodeFetchFailed, "CodeNotLeaseHolder": CodeNotLeaseHolder, "CodeMilestoneBranchMissing": CodeMilestoneBranchMissing, "CodeIntegrationPush": CodeIntegrationPush, "CodeIntegrationPR": CodeIntegrationPR, "CodeIntegrationEjections": CodeIntegrationEjections, "CodeTakeInNeeded": CodeTakeInNeeded, "CodeCIRed": CodeCIRed, "CodeCIOutsideFlow": CodeCIOutsideFlow, "CodeQueueSettings": CodeQueueSettings, "CodeTweakNoMilestone": CodeTweakNoMilestone, "CodeMilestoneMoved": CodeMilestoneMoved, "CodeTakeInRed": CodeTakeInRed, "CodeCloseBusy": CodeCloseBusy, "CodeCoordURLRewritten": CodeCoordURLRewritten, "CodeConductorCredential": CodeConductorCredential, "CodeCloseLost": CodeCloseLost, "CodeMilestoneBranchExists": CodeMilestoneBranchExists, "CodeRecordEjected": CodeRecordEjected, "CodeRecordPending": CodeRecordPending,
 		"CodeNoticeUnknown": CodeNoticeUnknown, "CodeNoticeAcked": CodeNoticeAcked,
 		// v1.5 (D876).
 		"CodeCoordIntegration": CodeCoordIntegration, "CodeIntegrationModePending": CodeIntegrationModePending, "CodeCIWorkflowMode": CodeCIWorkflowMode, "CodeCIRunnerNotInRelease": CodeCIRunnerNotInRelease, "CodeTrunkOneMember": CodeTrunkOneMember, "CodeCIWatchMode": CodeCIWatchMode,
@@ -157,7 +157,7 @@ func TestDiagnosticCodes_PublishedListMatchesTheCode(t *testing.T) {
 		"CodeOrdersCheckRed": CodeOrdersCheckRed, "CodeOrdersDeclined": CodeOrdersDeclined,
 		"CodeOrdersCondition": CodeOrdersCondition, "CodeOrdersNoReason": CodeOrdersNoReason, "CodeOrdersEvidence": CodeOrdersEvidence,
 	}
-	for _, glob := range []string{"*.go", filepath.Join("..", "apecmd", "v1_*.go"), filepath.Join("..", "coord", "member", "*.go")} {
+	for _, glob := range []string{"*.go", filepath.Join("..", "apecmd", "v1_*.go"), filepath.Join("..", "coord", "member", "*.go"), filepath.Join("..", "coord", "conductor", "*.go")} {
 		files, err := filepath.Glob(glob)
 		require.NoError(t, err)
 		for _, f := range files {

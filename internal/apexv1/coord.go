@@ -32,6 +32,11 @@ const CodeCloseLost = "coord.close-lost"
 // at hot/ape-nats.creds.
 const CodeCoordMembership = "coord.membership"
 
+// CodeConductorCredential: `ape conductor attach` on a credential minted
+// before V12-10, which grants the conductor's durable under its old name
+// only: the server refused the new name (OBS-2D-2).
+const CodeConductorCredential = "coord.conductor-credential"
+
 // CodeCoordURLRewritten: in an App project, the checkout's own git config
 // rewrites the coordinated repository's URL (url.*.insteadOf), so ape's
 // call would not go where its token is for (FINDING-V15-1A-6).
@@ -54,6 +59,7 @@ func init() {
 		CodeDoc{CodeCloseLost, 1, ActionRetry, "ape milestone close in a project integrating through GitHub: right before it enqueued its close PR, the close lease close.<project> (D709) was held by another checkout — it lapsed during this close (a NATS outage longer than its TTL) and another close took it — or could not be read; nothing was enqueued, since the PR would merge onto a main this close never gated against — close again once that close is done (FINDING-V15-1A-11)"},
 		CodeDoc{CodeCloseBusy, 1, ActionRetry, "ape milestone close in a project integrating through GitHub: another checkout's close holds the project's close lease (close.<project>, D709), which serializes taking main in, gating on the merge, enqueuing and waiting for the merge — the message names the holder. A close with a --wait above 0 waits for it (at most 2 h) and is refused only past that; with --wait 0 it is refused at once — close again once it is done"},
 		CodeDoc{CodeCoordMembership, 1, ActionPerson, "the project's coordination: block in _apex/config.yaml cannot be used (v1.5, OQ3, OQ4): it lacks ensemble, home or url, its ensemble is named as a member project (R8: both compared as subject tokens), the ensemble credential hot/ape-nats.creds is missing, or coordination.github names no <owner>/<name> repository or its token hot/github.token is missing (stage 1a) — a person fixes the block or places the credential. In a project whose GitHub access is the App service's (coordination.github.app), every git call to the coordinated repository refuses with it rather than fall back to the remote with git's own credentials, which may be a person's (FINDING-V15-1A-6)"},
+		CodeDoc{CodeConductorCredential, 1, ActionPerson, "`ape conductor attach` (v1.5): the server refused the conductor's credential its durable conductor_<user>_<ensemble> — the credential was minted before ape 1.5 named the durable so (V12-10) and grants only the old conductor-<user>-<ensemble>; the attach stops at once, with nothing delivered and its lease let go. The operator who holds the account's keys mints the person's credential again (`ape nats mint user --kind member …`), and it replaces hot/ape-nats.creds in each of the person's checkouts (OBS-2D-2)"},
 		CodeDoc{CodeCoordURLRewritten, 1, ActionPerson, "a project whose GitHub access is the App service's (coordination.github.app): the checkout's own git config (.git/config) rewrites the coordinated repository's https URL with url.<base>.insteadOf, so ape's fetch or push would go elsewhere than its token is for, and refuses (FINDING-V15-1A-6) — the person's global and system config are never read for these calls; a person removes the rule from .git/config (`git config --unset url.<base>.insteadOf`)"},
 		CodeDoc{CodeNoticeUnknown, 1, ActionPerson, "`ape coord notice ack <id>` (v1.5, PLAN-V15-ASSESSOR step 6): the ensemble's coordinator published no impact notice with that id — the ids are in `ape status --json`'s milestones[].notices and in the conductor's delivery"},
 		CodeDoc{CodeNoticeAcked, 1, ActionPerson, "`ape coord notice ack <id>` (v1.5, PLAN-V15-ASSESSOR step 6): the notice was acknowledged already (the message says how, by whom and when); an ack is recorded once"},

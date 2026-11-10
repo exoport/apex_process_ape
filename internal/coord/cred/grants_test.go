@@ -3,6 +3,7 @@ package cred_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"slices"
@@ -551,4 +552,60 @@ func TestGrants_V12_10_2_TheMoveDeletesTheLegacyDurableOnItsCredential(t *testin
 	_, err = ajs.Consumer(ctx, events.EventsStream, old)
 	require.ErrorIs(t, err, jetstream.ErrConsumerNotFound, "deleted on ann's credential")
 	require.Empty(t, e.Violations())
+}
+
+// OBS-2D-2: an attach on a credential minted before V12-10 (its grant names
+// the durable conductor-<user>-<ens> only) stops at once with
+// coord.conductor-credential, which says to mint it again, and lets its
+// lease go; it timed out naming nothing. The grant here is today's member
+// grant with the durable's name put back to the old one, as 1.4's mint
+// wrote it.
+func TestGrants_OBS_2D_2_AnAttachOnAPre15CredentialSaysToMintItAgain(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	e := natstest.StartEnforced(t)
+	admin := connect(t, e.URL, e.Admin)
+	ajs, err := jetstream.New(admin)
+	require.NoError(t, err)
+	require.NoError(t, lease.Declare(ctx, ajs, 1))
+	require.NoError(t, events.Declare(ctx, ajs, 1))
+	als, err := lease.Open(ctx, ajs)
+	require.NoError(t, err)
+	require.NoError(t, als.SetEpoch(ctx, 1))
+	durable, old := layout.ConductorConsumer("ann", "atomix"), layout.LegacyConductorConsumer("ann", "atomix")
+	g := cred.MemberGrant("ann", "taskforge", "atomix")
+	var pub []string
+	for _, p := range g.PubAllow {
+		if strings.Contains(p, "."+old) {
+			continue // V12-10's INFO and DELETE on the old name
+		}
+		if p = strings.ReplaceAll(p, durable, old); !slices.Contains(pub, p) {
+			pub = append(pub, p)
+		}
+	}
+	g.PubAllow = pub
+	require.NotContains(t, strings.Join(g.PubAllow, " "), durable, "an old-shape grant")
+	require.Contains(t, g.PubAllow, "$JS.API.CONSUMER.CREATE."+events.EventsStream+"."+old)
+	annCreds := e.Mint(t, "ann", perms(g))
+	e.Expect(`Publish Violation - Subject "$JS.API.CONSUMER.INFO.` + events.EventsStream + `.` + durable + `"`)
+	cnc := connect(t, e.URL, annCreds)
+	start := time.Now()
+	err = conductor.Run(ctx, cnc, conductor.Config{
+		User: "ann", Ensemble: "atomix", Projects: []string{"taskforge"}, Holder: "cond-a", Nonce: "n",
+		LeaseTTL: time.Minute, Renew: 500 * time.Millisecond, AckWait: time.Second,
+		Escalate: time.Minute, Pause: 2 * time.Minute, Session: &acker{nc: cnc},
+	})
+	took := time.Since(start)
+	t.Logf("OBS-2D-2: after %v: %v", took, err)
+	fe, ok := errors.AsType[*apexv1.FailError](err)
+	require.True(t, ok, "a coded refusal, not a timeout: %v", err)
+	require.Equal(t, apexv1.CodeConductorCredential, fe.Code)
+	require.Equal(t, apexv1.ActionPerson, fe.Action)
+	require.Contains(t, fe.Msg, "minted before ape 1.5")
+	require.Contains(t, fe.Msg, "ape nats mint user")
+	require.Less(t, took, 3*time.Second, "at once (a JetStream request times out at 5 s)")
+	h, _, err := als.Holder(ctx, layout.ConductorKey("ann", "atomix"))
+	require.True(t, err != nil || h == "", "the lease is let go (holder %q, %v)", h, err)
+	_, err = ajs.Consumer(ctx, events.EventsStream, durable)
+	require.ErrorIs(t, err, jetstream.ErrConsumerNotFound, "nothing bound")
 }

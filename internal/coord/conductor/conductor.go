@@ -122,6 +122,42 @@ func Ack(nc *nats.Conn, token string) error {
 	return err
 }
 
+// refusedDurable is ctx for the first bind, ended at once when the server
+// refuses this credential a call on the conductor's durable (OBS-2D-2): a
+// credential minted before V12-10 grants only conductor-<user>-<ens>, and
+// its bind otherwise ended in a timeout that named nothing. The violation
+// comes on the connection's error handler, which is chained, not
+// replaced; stop puts the previous one back.
+func refusedDurable(ctx context.Context, nc *nats.Conn, durable string) (bctx context.Context, stop func()) {
+	bctx, cancel := context.WithCancelCause(ctx)
+	prev := nc.Opts.AsyncErrorCB
+	nc.SetErrorHandler(func(c *nats.Conn, s *nats.Subscription, err error) {
+		if errors.Is(err, nats.ErrPermissionViolation) && onDurable(err.Error(), durable) {
+			cancel(&apexv1.FailError{Code: apexv1.CodeConductorCredential, Action: apexv1.ActionPerson, Msg: fmt.Sprintf(
+				"conductor: the server refused this credential its durable %s (%v): the credential was minted before ape 1.5 named the durable conductor_<user>_<ensemble> (V12-10), so it grants only the old name; nothing was delivered. The operator who holds the account's keys mints it again — `ape nats mint user --dir <keys> --kind member --name <user> --project <project> --ensemble <ensemble> --out <file>` — and it replaces hot/ape-nats.creds in each checkout of the person's", durable, err)})
+		}
+		if prev != nil {
+			prev(c, s, err)
+		}
+	})
+	return bctx, func() {
+		nc.SetErrorHandler(prev)
+		cancel(nil)
+	}
+}
+
+// onDurable reports a permissions violation's message naming a JetStream
+// API call on the conductor's durable (create, info, pull, delete).
+func onDurable(msg, durable string) bool {
+	i := strings.Index(msg, `"$JS.API.CONSUMER.`)
+	if i < 0 {
+		return false
+	}
+	subj, _, _ := strings.Cut(msg[i+1:], `"`)
+	parts := strings.Split(subj, ".")
+	return slices.Contains(parts, durable) && slices.Contains(parts, events.EventsStream)
+}
+
 type pending struct {
 	first     time.Time
 	project   string
@@ -150,11 +186,19 @@ func Run(ctx context.Context, nc *nats.Conn, cfg Config) error {
 		return err
 	}
 	r := &runner{cfg: cfg, js: js, pend: map[uint64]*pending{}, lastAck: time.Now(), reconnects: nc.Stats().Reconnects}
-	cons, err := r.bind(ctx, 0)
+	bctx, refused := refusedDurable(ctx, nc, layout.ConductorConsumer(tok(cfg.User), tok(cfg.Ensemble)))
+	cons, err := r.bind(bctx, 0)
+	if err == nil {
+		err = context.Cause(bctx) // refused after all: a call of the bind's that answered anyway
+	}
+	refused()
 	if err != nil {
 		// Nothing was delivered: the lease is let go, so a corrected
 		// attach need not wait out its TTL (v1.5 PRE-3).
 		_ = ls.Release(context.WithoutCancel(ctx), l)
+		if fe, ok := errors.AsType[*apexv1.FailError](context.Cause(bctx)); ok {
+			return fe
+		}
 		return fmt.Errorf("conductor: bind consumer: %w", err)
 	}
 	r.cons = cons

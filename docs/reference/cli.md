@@ -2861,7 +2861,8 @@ The projects must belong to one ensemble (two checkouts of one project count onc
 (hot/ape-nats.creds) are the first project's.
 
 Exit codes: 0 stopped (Ctrl-C) · 1 the lease is held by another of your conductors, or
-was lost · 2 usage (no pane, no member project, projects of different ensembles), or a model
+was lost, or the credential was minted before ape 1.5 named the durable
+conductor_<user>_<ensemble> (coord.conductor-credential: mint it again; it stops at once) · 2 usage (no pane, no member project, projects of different ensembles), or a model
 session.
 
 Examples:
