@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -56,7 +57,39 @@ func orphan(t *testing.T, env ...string) int {
 	require.NoError(t, sh.Run())
 	pid := readPID(t, pidf)
 	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+	settled(t, pid)
 	return pid
+}
+
+// settled waits until pid is what orphan promises: `sleep 600`, in a
+// session of its own. The shell writes the pid as it forks, before the
+// child has run setsid and exec'd twice (setsid, then sleep), and a
+// process mid-exec shows an empty command line (measured, v1.4) and may
+// show no environment, so a scan then can miss it (V8-CI-1, a hypothesis
+// this wait removes from the test rather than proves).
+func settled(t *testing.T, pid int) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		p, ok := readProc(pid, time.Time{})
+		return ok && p.sid == pid && slices.Equal(p.argv, []string{"sleep", "600"})
+	}, 5*time.Second, 10*time.Millisecond, "pid %d is sleep 600 in its own session", pid)
+}
+
+// scanned says, on a red, what the scan could see of pid and of every
+// process carrying marker (V8-CI-1: the next red names its cause).
+func scanned(t *testing.T, marker string, pid int) {
+	t.Helper()
+	p, ok := readProc(pid, time.Time{})
+	env, err := os.ReadFile(filepath.Join(procRoot, strconv.Itoa(pid), "environ"))
+	t.Logf("V8-CI-1: pid %d read %v: ppid %d pgid %d sid %d state %q argv %q; environ %d bytes (err %v), marker entry %v",
+		pid, ok, p.ppid, p.pgid, p.sid, p.state, p.argv, len(env), err, hasEntry(env, []byte(marker)))
+	for _, m := range markedProcs([]byte(marker), time.Time{}) {
+		t.Logf("V8-CI-1: marked pid %d ppid %d pgid %d sid %d state %q argv %q", m.pid, m.ppid, m.pgid, m.sid, m.state, m.argv)
+	}
+	for _, a := range Ancestors(pid, Parent) {
+		q, _ := readProc(a, time.Time{})
+		t.Logf("V8-CI-1: ancestor %d argv %q", a, q.argv)
+	}
 }
 
 func readPID(t *testing.T, path string) int {
@@ -94,6 +127,9 @@ func TestLeftovers_FindsReparentedMarkedProcess(t *testing.T) {
 	require.NotEqual(t, os.Getpid(), pp, "the sleep is no child of this process")
 
 	reported := SessionLeftovers(t.Context(), marker, LeftoversReport, LeftoversGrace)
+	if !slices.Equal([]int{pid}, pidsOf(reported)) {
+		scanned(t, marker, pid)
+	}
 	require.Equal(t, []int{pid}, pidsOf(reported))
 	require.Equal(t, LeftoverKept, reported[0].Action)
 	require.Equal(t, "sleep 600", reported[0].Command)
