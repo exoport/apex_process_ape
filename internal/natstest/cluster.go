@@ -41,6 +41,9 @@ const clusterAttempts = 5
 // it waits.
 const readyPoll = 250 * time.Millisecond
 
+// peerPoll is how often waitPeers counts the meta leader's peers.
+const peerPoll = 50 * time.Millisecond
+
 // reservePorts picks the cluster's ports, n client ports then n route
 // ports; a test replaces it.
 var reservePorts = freePorts
@@ -108,7 +111,33 @@ func runCluster(t *testing.T, n int) (*Cluster, error) {
 		c.Servers = append(c.Servers, s)
 	}
 	c.WaitMetaLeader(ReadyWait)
+	c.waitPeers(n, ReadyWait)
 	return c, nil
+}
+
+// waitPeers waits until the meta leader counts n peers online with
+// JetStream, the set an R3 placement draws from: a meta leader can be
+// elected before every peer has reported, and an R3 create then failed
+// with 10005 "no suitable peers for placement" (Windows, V8-WIN-3 and
+// CI-5GREEN-2 on 0e50409).
+func (c *Cluster) waitPeers(n int, d time.Duration) {
+	c.t.Helper()
+	deadline := time.Now().Add(d)
+	for {
+		most := 0
+		for _, s := range c.Servers {
+			if s != nil && s.Running() {
+				most = max(most, len(s.JetStreamClusterPeers()))
+			}
+		}
+		if most >= n {
+			return
+		}
+		if time.Now().After(deadline) {
+			c.t.Fatalf("natstest: the meta leader counts %d of %d peers after %v", most, n, d)
+		}
+		time.Sleep(peerPoll)
+	}
 }
 
 func (c *Cluster) start(o *server.Options) *server.Server {

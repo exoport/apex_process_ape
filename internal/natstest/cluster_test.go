@@ -12,6 +12,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// RunCluster returns a cluster an R3 placement can use at once: the meta
+// leader counts every peer (V8-WIN-3; CI-5GREEN-2 on 0e50409 failed an R3
+// create with 10005 right after RunCluster).
+func TestRunCluster_EveryPeerCountedBeforeItReturns(t *testing.T) {
+	c := RunCluster(t, 3)
+	most := 0
+	for _, s := range c.Servers {
+		most = max(most, len(s.JetStreamClusterPeers()))
+	}
+	require.Equal(t, 3, most, "the meta leader counts all three peers")
+}
+
 // The Tier-1 cluster carries an R3 KV bucket and keeps it through the loss
 // of one node, and the node rejoins with its data.
 func TestRunCluster_R3SurvivesANode(t *testing.T) {
