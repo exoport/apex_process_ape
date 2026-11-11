@@ -257,11 +257,19 @@ func TestLoadState_RetriesATransientFailure(t *testing.T) {
 	require.NoError(t, saveState(root, &State{Alive: true, Pending: []int64{3}, Delivered: []Delivered{}}))
 	p := statePath(root)
 	require.NoError(t, os.Rename(p, p+".away"))
-	require.NoError(t, os.Mkdir(p, 0o755))
+	// A record that cannot be read for a moment, then the good one renamed
+	// over it in one step. The test's first version restored by a remove
+	// and a rename, and a read in between found no record at all, which
+	// LoadState rightly answers at once (ErrNoTerminal): the test's own
+	// gap, 2 in 300 under load and once on GitHub (CI-5GREEN-3 on 11dc072).
+	require.NoError(t, os.WriteFile(p, []byte(`{"alive": tr`), 0o600))
 	go func() {
 		time.Sleep(100 * time.Millisecond)
-		_ = os.Remove(p)
-		_ = os.Rename(p+".away", p)
+		// Windows refuses a rename over a file another handle is reading;
+		// it is tried again until it lands.
+		for os.Rename(p+".away", p) != nil {
+			time.Sleep(5 * time.Millisecond)
+		}
 	}()
 	st, err := LoadState(root)
 	require.NoError(t, err, "a read that fails for a moment is retried")
