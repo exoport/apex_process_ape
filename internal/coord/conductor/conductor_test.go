@@ -440,8 +440,17 @@ func bound(t *testing.T, js jetstream.JetStream) {
 
 func outage(t *testing.T, c *natstest.Cluster, d time.Duration) {
 	t.Helper()
+	outageWith(t, c, d, nil)
+}
+
+// outageWith is outage, calling during (if any) once every node is down.
+func outageWith(t *testing.T, c *natstest.Cluster, d time.Duration, during func()) {
+	t.Helper()
 	for i := range c.Servers {
 		c.Stop(i)
+	}
+	if during != nil {
+		during()
 	}
 	time.Sleep(d)
 	for i := range c.Servers {
@@ -488,6 +497,13 @@ func TestDrill_ConductorRidesOutANATSOutage(t *testing.T) {
 		var logged []string
 		errA := make(chan error, 1)
 		cfg := scaled("ann", "cond-a", a)
+		// V15-RED-1 (research, D910): the scaled bound LeaseTTL + AckWait +
+		// 2 × Renew must clear the held event's redelivery after the three
+		// nodes restart (≤ 8 s seen here). LeaseTTL 6 s makes it 8 s and
+		// keeps AckWait (1 s) below LeaseTTL, as shipped (1 min < 5 min); a
+		// longer AckWait instead lets a redelivery typed into a session
+		// still holding miss the window (65033f4: red 1 in 10).
+		cfg.LeaseTTL = 6 * time.Second
 		cfg.Log = func(f string, args ...any) {
 			logMu.Lock()
 			logged = append(logged, time.Now().Format("15:04:05.000 ")+fmt.Sprintf(f, args...))
@@ -514,16 +530,19 @@ func TestDrill_ConductorRidesOutANATSOutage(t *testing.T) {
 		require.NoError(t, err)
 		require.Eventually(t, func() bool { return a.typedWith("held across") }, 5*time.Second, 50*time.Millisecond, "delivered, not yet acknowledged")
 
-		outage(t, c, 3*cfg.LeaseTTL)
+		// The session answers again from the moment the nodes are down, so
+		// a redelivery after the restart is never typed into a held
+		// session (research, D910).
+		outageWith(t, c, 3*cfg.LeaseTTL, func() { a.hold.Store(false) })
 		back := time.Now()
 		select {
 		case err := <-errA:
 			t.Fatalf("attach ended during the outage: %v", err)
 		default:
 		}
-		a.hold.Store(false)
 		require.Eventually(t, func() bool { return a.ackedWith("held across") }, afterOutage, 100*time.Millisecond, "redelivered to the same conductor after the outage, acknowledged")
 		waited(t, "the held event acknowledged", back)
+		t.Logf("the bound after the outage: %v", cfg.recoveryBound())
 		require.Eventually(t, func() bool {
 			_, err := events.Publish(context.Background(), js, events.Subject("bob", "taskforge", events.KindProject, "M2", "question"), events.MessageID("taskforge", "c1", 3), []byte(`{"q":"after"}`))
 			return err == nil
@@ -1768,8 +1787,10 @@ func TestDrill_ConductorWaitsForItsEventsAfterAnOutage(t *testing.T) {
 	require.NoError(t, err)
 	require.Eventually(t, func() bool { return a.typedWith("held across") }, 5*time.Second, 50*time.Millisecond)
 
-	outage(t, c, 3*cfg.LeaseTTL)
-	a.hold.Store(false)
+	// The hold ends while every node is down, as in rides-it-out: the gate
+	// lifts 5 s after the conductor's "renewed again", which outage can
+	// return after.
+	outageWith(t, c, 3*cfg.LeaseTTL, func() { a.hold.Store(false) })
 	require.Eventually(t, func() bool { return a.ackedWith("held across") }, afterOutage, 100*time.Millisecond, "typed again after the outage, acknowledged")
 	require.False(t, has("judged silent"), "no silence judged before the held event could be delivered again")
 	select {
@@ -1859,9 +1880,17 @@ func TestDrill_ADeafConductorYieldsWithinTheBound(t *testing.T) {
 	var logMu sync.Mutex
 	var logged []string
 	cfg := scaled("ann", "cond-a", a)
+	// back is when the conductor said its lease was renewed again, not
+	// when the test saw it: outage returns seconds after that, once the
+	// cluster has a meta leader (a yield read 4.3 s from the test's view).
+	var back time.Time
 	cfg.Log = func(f string, args ...any) {
 		logMu.Lock()
-		logged = append(logged, time.Now().Format("15:04:05.000 ")+fmt.Sprintf(f, args...))
+		line := fmt.Sprintf(f, args...)
+		if back.IsZero() && strings.Contains(line, "renewed again") {
+			back = time.Now()
+		}
+		logged = append(logged, time.Now().Format("15:04:05.000 ")+line)
 		logMu.Unlock()
 	}
 	has := func(x string) bool {
@@ -1887,18 +1916,14 @@ func TestDrill_ADeafConductorYieldsWithinTheBound(t *testing.T) {
 	testFetchGate.Store(&g)
 	t.Cleanup(func() { testFetchGate.Store(nil); close(g) })
 	outage(t, c, 3*cfg.LeaseTTL)
-	var back time.Time
-	require.Eventually(t, func() bool {
-		if has("renewed again") && back.IsZero() {
-			back = time.Now()
-		}
-		return !back.IsZero()
-	}, afterOutage, 50*time.Millisecond)
+	require.Eventually(t, func() bool { return has("renewed again") }, afterOutage, 50*time.Millisecond)
 	select {
 	case err := <-errA:
 		require.ErrorIs(t, err, ErrLost)
 		require.ErrorContains(t, err, "lapsed: ")
+		logMu.Lock()
 		took, bnd := time.Since(back), cfg.recoveryBound()
+		logMu.Unlock()
 		t.Logf("D910: yielded %v after the lease came back (bound %v + the lease's TTL %v)", took.Round(100*time.Millisecond), bnd, cfg.LeaseTTL)
 		require.Greater(t, took, bnd, "not before the bound")
 		require.Less(t, took, bnd+cfg.LeaseTTL+5*time.Second, "within the bound, then the lease's lapse")
