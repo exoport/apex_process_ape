@@ -3,6 +3,7 @@ package natsconn
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -76,6 +77,40 @@ func TestAuthRefused_TheServersOwnRefusals(t *testing.T) {
 			require.True(t, AuthRefused(err), "%s: %v is the credential's refusal", name, err)
 		})
 	}
+}
+
+// protoError is shaped as nats.go's unexported natsProtoErr, which carries a
+// server -ERR's text: "nats: " + the text as the server sends it, and an
+// Is that compares the lower-cased whole with the target's text.
+type protoError string
+
+func (e protoError) Error() string { return "nats: " + string(e) }
+
+func (e protoError) Is(target error) bool { return strings.ToLower(e.Error()) == target.Error() }
+
+// FD61-T1: the server's four refusals as nats.go delivers them, without a
+// server. Two of them match no sentinel ("user authentication expired" is
+// not ErrAuthExpired's "authentication expired", nor "revoked" its), which
+// is why reading the text is the fix (FINDING-FD6-1); the rows pin both.
+func TestAuthRefused_TheServersFourTexts(t *testing.T) {
+	for _, row := range []struct {
+		text          string
+		sentinelMatch bool
+	}{
+		{"Authorization Violation", true},
+		{"User Authentication Expired", false},
+		{"User Authentication Revoked", false},
+		{"Account Authentication Expired", true},
+	} {
+		err := protoError(row.text)
+		sentinel := errors.Is(err, nats.ErrAuthorization) || errors.Is(err, nats.ErrAuthExpired) ||
+			errors.Is(err, nats.ErrAuthRevoked) || errors.Is(err, nats.ErrAccountAuthExpired)
+		require.Equal(t, row.sentinelMatch, sentinel, "%q against the sentinels, as nats.go's Is reads it", row.text)
+		require.True(t, AuthRefused(err), "%q is the credential's refusal", row.text)
+		require.True(t, AuthRefused(fmt.Errorf("conductor: %w", err)), "%q wrapped", row.text)
+	}
+	require.False(t, AuthRefused(protoError("Permissions Violation for Publish to \"x\"")), "a permission refusal is not the credential's")
+	require.False(t, AuthRefused(protoError("Maximum Connections Exceeded")), "nor a server limit")
 }
 
 // The controls: an outage or a closed connection is not the credential's.
