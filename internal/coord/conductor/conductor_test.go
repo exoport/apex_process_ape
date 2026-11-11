@@ -268,6 +268,9 @@ func TestHeartbeatKeepsOnlyAnAnsweringConductor(t *testing.T) {
 	select {
 	case err := <-errS:
 		require.ErrorIs(t, err, ErrLost)
+		// V15-RED-1: the run's end says why — no longer a bare "lease lost".
+		require.ErrorContains(t, err, "conductor.sam.atomix lapsed: ")
+		require.ErrorContains(t, err, "unacknowledged past the lease's TTL")
 	case <-time.After(12 * time.Second):
 		t.Fatal("a conductor that never acknowledges its heartbeats kept its lease")
 	}
@@ -1687,4 +1690,219 @@ func TestWatchErrors_ASharedConnection(t *testing.T) {
 	defer mu.Unlock()
 	require.Equal(t, map[string]int{"a": 1, "b": 2, "orig": 3}, got)
 	require.Empty(t, errWatches, "nothing left installed")
+}
+
+// V15-RED-1 (research's gated drill, D909): after an outage the lease KV
+// answered seconds before the events consumer did, and the conductor
+// judged itself silent LeaseTTL after the lease came back, while the event
+// it held was still pending and could not yet be delivered again (5/5 on
+// 13f183a); when the server's key expiry fell in that stretch the attach
+// ended. Here deliver's next fetch is held from 2 s into the outage until
+// 5 s after the lease is back — past LeaseTTL (3 s), where the old rule
+// judged, and inside the bound LeaseTTL + AckWait + 2 × Renew (D910;
+// AckWait 3 s here, so 3 + 3 + 1 = 7 s: the gate lifts 2 s, four renew
+// ticks, before it; the bound's own rows are TestAnswering_AfterAnOutage…)
+// — and no silence may be judged before the held event is typed again and
+// acknowledged.
+func TestDrill_ConductorWaitsForItsEventsAfterAnOutage(t *testing.T) {
+	c, js := outageRig(t)
+	ctx := t.Context()
+	anc, err := nats.Connect(c.URLs(), nats.MaxReconnects(-1), nats.ReconnectWait(200*time.Millisecond))
+	require.NoError(t, err)
+	t.Cleanup(anc.Close)
+	a := &fakeSession{nc: anc, answers: 99, acked: map[string]bool{}}
+	var logMu sync.Mutex
+	var logged []string
+	cfg := scaled("ann", "cond-a", a)
+	cfg.AckWait = 3 * time.Second // the bound 7 s, past the gate's 5 s
+	require.Equal(t, 7*time.Second, cfg.recoveryBound())
+	cfg.Log = func(f string, args ...any) {
+		logMu.Lock()
+		logged = append(logged, time.Now().Format("15:04:05.000 ")+fmt.Sprintf(f, args...))
+		logMu.Unlock()
+	}
+	has := func(x string) bool {
+		logMu.Lock()
+		defer logMu.Unlock()
+		return strings.Contains(strings.Join(logged, ""), x)
+	}
+	t.Cleanup(func() {
+		if t.Failed() {
+			logMu.Lock()
+			t.Log(strings.Join(logged, ""))
+			logMu.Unlock()
+		}
+	})
+	gateDone := make(chan struct{})
+	go func() {
+		defer close(gateDone)
+		for !has("riding it out") && ctx.Err() == nil {
+			time.Sleep(20 * time.Millisecond)
+		}
+		time.Sleep(2 * time.Second)
+		g := make(chan struct{})
+		testFetchGate.Store(&g)
+		for !has("renewed again") && ctx.Err() == nil {
+			time.Sleep(20 * time.Millisecond)
+		}
+		time.Sleep(5 * time.Second)
+		testFetchGate.Store(nil)
+		close(g)
+	}()
+	t.Cleanup(func() { <-gateDone; testFetchGate.Store(nil) })
+	errA := make(chan error, 1)
+	go func() { errA <- Run(ctx, anc, cfg) }()
+	bound(t, js)
+	publish(t, js, "block", 1)
+	require.Eventually(t, func() bool { return a.done.Load() == 1 }, 5*time.Second, 50*time.Millisecond)
+	a.hold.Store(true)
+	_, err = events.Publish(ctx, js, events.Subject("bob", "taskforge", events.KindProject, "M2", "question"), events.MessageID("taskforge", "c1", 2), []byte(`{"q":"held across"}`))
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return a.typedWith("held across") }, 5*time.Second, 50*time.Millisecond)
+
+	outage(t, c, 3*cfg.LeaseTTL)
+	a.hold.Store(false)
+	require.Eventually(t, func() bool { return a.ackedWith("held across") }, afterOutage, 100*time.Millisecond, "typed again after the outage, acknowledged")
+	require.False(t, has("judged silent"), "no silence judged before the held event could be delivered again")
+	select {
+	case err := <-errA:
+		t.Fatalf("attach ended: %v", err)
+	default:
+	}
+}
+
+// V15-RED-1's rule, row by row: after an outage an event pending from
+// before it is not judged until it is typed again, and that re-type
+// restarts the window; a failing read of the durable is not judged
+// either; each for at most LeaseTTL + AckWait + 2 × Renew (D910), after
+// which a conductor still unable to answer is judged as before (it yields
+// its lease).
+func TestAnswering_AfterAnOutageAndWhileItsDurableCannotBeRead(t *testing.T) {
+	ttl, ack, renew := 3*time.Second, time.Second, 2*time.Second
+	bound := ttl + ack + 2*renew
+	stale := time.Now().Add(-2 * ttl)
+	fresh := func() *runner {
+		return &runner{cfg: Config{LeaseTTL: ttl, AckWait: ack, Renew: renew}, pend: map[uint64]*pending{2: {first: stale}}, lastAck: stale}
+	}
+	shipped := Config{}
+	shipped.defaults()
+	require.Equal(t, 8*time.Minute, shipped.recoveryBound(), "as shipped: 5 min + 1 min + 2 × 1 min")
+	r := fresh()
+	require.Equal(t, bound, r.cfg.recoveryBound())
+
+	r = fresh()
+	require.False(t, r.answering(), "the control: an event waiting past the TTL is silence")
+
+	r = fresh()
+	r.down = true
+	r.reachable()
+	r.lastAck = stale // the lease came back; the window as the old rule would judge it
+	require.True(t, r.answering(), "pending from before the outage, not yet typed again: not judged")
+	r.typedSeq(2, "ape.evt.bob.taskforge.project.M2.question")
+	require.True(t, r.answering(), "typed again: the window starts there")
+	r.lastAck = stale
+	require.False(t, r.answering(), "and runs again")
+
+	r = fresh()
+	r.recovered, r.retyped = time.Now().Add(-(ttl + ack + time.Second)), map[uint64]bool{}
+	require.True(t, r.answering(), "past LeaseTTL + AckWait but inside the two renew ticks: not judged yet (D910)")
+	r.recovered = time.Now().Add(-(bound + time.Second))
+	require.False(t, r.answering(), "deaf past the bound: judged as before, so it yields its lease")
+
+	r = fresh()
+	r.sweep(context.Background(), infoFails{})
+	require.True(t, r.answering(), "its durable cannot be read, so no acknowledgement can be seen: not judged")
+	require.Len(t, r.pend, 1, "and nothing is dropped on a read that failed")
+	r.infoDown = time.Now().Add(-(ttl + ack + time.Second))
+	require.True(t, r.answering(), "unreadable past LeaseTTL + AckWait, inside the bound: not judged yet")
+	r.infoDown = time.Now().Add(-(bound + time.Second))
+	require.False(t, r.answering(), "unreadable past the bound: judged as before")
+
+	r = fresh()
+	was := fetchPause.Load()
+	fetchPause.Store(int64(time.Millisecond))
+	t.Cleanup(func() { fetchPause.Store(was) })
+	r.fetchFailed(context.Background(), errors.New("nats: no responders available"))
+	require.True(t, r.answering(), "no fetch can deliver it: not judged")
+	r.fetchOK()
+	require.True(t, r.answering(), "the first good fetch restarts the window")
+	r.lastAck = stale
+	require.False(t, r.answering(), "and it runs again")
+	r.fetchFailed(context.Background(), errors.New("nats: no responders available"))
+	r.fetchDown = time.Now().Add(-(ttl + ack + time.Second))
+	require.True(t, r.answering(), "fetches failing past LeaseTTL + AckWait, inside the bound: not judged yet")
+	r.fetchDown = time.Now().Add(-(bound + time.Second))
+	require.False(t, r.answering(), "fetches failing past the bound: judged as before")
+}
+
+// D909+: a conductor that stays deaf after an outage (its events consumer
+// never delivers again) is not kept forever by the suppression: past
+// the bound, LeaseTTL + AckWait + 2 × Renew (D910; 3 + 1 + 1 = 5 s here),
+// it is judged as before, its lease lapses one TTL later and Run ends with
+// the lapsed line — ≈ 8 s after the lease came back, never before the
+// bound.
+func TestDrill_ADeafConductorYieldsWithinTheBound(t *testing.T) {
+	c, js := outageRig(t)
+	ctx := t.Context()
+	anc, err := nats.Connect(c.URLs(), nats.MaxReconnects(-1), nats.ReconnectWait(200*time.Millisecond))
+	require.NoError(t, err)
+	t.Cleanup(anc.Close)
+	a := &fakeSession{nc: anc, answers: 99, acked: map[string]bool{}}
+	var logMu sync.Mutex
+	var logged []string
+	cfg := scaled("ann", "cond-a", a)
+	cfg.Log = func(f string, args ...any) {
+		logMu.Lock()
+		logged = append(logged, time.Now().Format("15:04:05.000 ")+fmt.Sprintf(f, args...))
+		logMu.Unlock()
+	}
+	has := func(x string) bool {
+		logMu.Lock()
+		defer logMu.Unlock()
+		return strings.Contains(strings.Join(logged, ""), x)
+	}
+	t.Cleanup(func() {
+		if t.Failed() {
+			logMu.Lock()
+			t.Log(strings.Join(logged, ""))
+			logMu.Unlock()
+		}
+	})
+	errA := make(chan error, 1)
+	go func() { errA <- Run(ctx, anc, cfg) }()
+	bound(t, js)
+	a.hold.Store(true)
+	_, err = events.Publish(ctx, js, events.Subject("bob", "taskforge", events.KindProject, "M2", "question"), events.MessageID("taskforge", "c1", 2), []byte(`{"q":"held across"}`))
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return a.typedWith("held across") }, 5*time.Second, 50*time.Millisecond)
+	g := make(chan struct{}) // never opened: deliver never fetches again
+	testFetchGate.Store(&g)
+	t.Cleanup(func() { testFetchGate.Store(nil); close(g) })
+	outage(t, c, 3*cfg.LeaseTTL)
+	var back time.Time
+	require.Eventually(t, func() bool {
+		if has("renewed again") && back.IsZero() {
+			back = time.Now()
+		}
+		return !back.IsZero()
+	}, afterOutage, 50*time.Millisecond)
+	select {
+	case err := <-errA:
+		require.ErrorIs(t, err, ErrLost)
+		require.ErrorContains(t, err, "lapsed: ")
+		took, bnd := time.Since(back), cfg.recoveryBound()
+		t.Logf("D910: yielded %v after the lease came back (bound %v + the lease's TTL %v)", took.Round(100*time.Millisecond), bnd, cfg.LeaseTTL)
+		require.Greater(t, took, bnd, "not before the bound")
+		require.Less(t, took, bnd+cfg.LeaseTTL+5*time.Second, "within the bound, then the lease's lapse")
+	case <-time.After(afterOutage):
+		t.Fatal("a deaf conductor kept its lease past the bound")
+	}
+	require.True(t, has("judged silent"), "and said so")
+}
+
+// infoFails is a durable whose INFO fails as a cluster just back can.
+type infoFails struct{ jetstream.Consumer }
+
+func (infoFails) Info(context.Context) (*jetstream.ConsumerInfo, error) {
+	return nil, context.DeadlineExceeded
 }

@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -291,7 +292,7 @@ func Run(ctx context.Context, nc *nats.Conn, cfg Config) error {
 			}
 			r.sweep(ctx, r.consumer())
 			if l, err = r.keep(ctx, ls, l); err != nil {
-				return err
+				return r.ends(err)
 			}
 		}
 	}
@@ -308,6 +309,22 @@ type runner struct {
 	// away since (said once); reconnects is the connection's count.
 	down       bool
 	reconnects uint64
+	// After an outage (V15-RED-1): recovered is when the lease came back,
+	// and retyped the events pending from before it that were typed again
+	// since. Until each is (or recoveryBound passes), silence is not
+	// judged: the events consumer answers seconds after the lease KV, and
+	// its first redelivery is the conductor's first chance to answer.
+	// infoDown is when the conductor's reads of its durable began failing
+	// (zero: they answer): no acknowledgement can be seen while they do.
+	recovered time.Time
+	retyped   map[uint64]bool
+	infoDown  time.Time
+	// fetchDown is when the conductor's own fetches began failing (zero:
+	// they answer): no delivery can reach the session while they do.
+	fetchDown time.Time
+	// silent: this conductor judged itself silent and said so (once, until
+	// it answers again).
+	silent bool
 	// seen is the highest stream sequence typed, or acknowledged as the
 	// durable last reported (its ack floor, never past an unanswered
 	// delivery: D863+); rebindMu serialises a rebind between deliver and
@@ -554,11 +571,16 @@ func (r *runner) keep(ctx context.Context, ls *lease.Store, l lease.Lease) (leas
 	// window).
 	if !r.down && !r.answering() {
 		// Silent: stop renewing; the lease expires on its own.
+		if !r.silent {
+			r.silent = true
+			r.logf("conductor: judged silent — %s; the lease is not renewed\n", r.silence())
+		}
 		if _, _, err := ls.Holder(ctx, l.Key); err == nil && ls.Fence(ctx, l.Key, l.Token) != nil {
-			return l, ErrLost
+			return l, fmt.Errorf("%w: %s lapsed: %s", ErrLost, l.Key, r.silence())
 		}
 		return l, nil
 	}
+	r.silent = false
 	nl, err := ls.Renew(ctx, l)
 	if err == nil {
 		r.reachable()
@@ -614,6 +636,7 @@ func (r *runner) reachable() {
 		r.down = false
 		r.mu.Lock()
 		r.lastAck = time.Now()
+		r.recovered, r.retyped = r.lastAck, map[uint64]bool{}
 		r.mu.Unlock()
 		r.logf("conductor: the conductor lease is renewed again\n")
 	}
@@ -631,11 +654,19 @@ func (r *runner) reachable() {
 // second (FINDING-2A-3).
 func (r *runner) deliver(ctx context.Context) {
 	for ctx.Err() == nil {
+		if g := testFetchGate.Load(); g != nil {
+			select {
+			case <-*g:
+			case <-ctx.Done():
+				return
+			}
+		}
 		batch, err := r.consumer().Fetch(1, jetstream.FetchMaxWait(time.Second))
 		if err != nil {
 			r.fetchFailed(ctx, err)
 			continue
 		}
+		r.fetchOK()
 		cons := r.consumer()
 		for m := range batch.Messages() {
 			md, err := m.Metadata()
@@ -654,13 +685,7 @@ func (r *runner) deliver(ctx context.Context) {
 			}
 			reply := m.Reply()
 			_ = r.cfg.Session.Type(Format(md.Sequence.Stream, r.cfg.Nonce, m.Subject(), m.Data(), reply))
-			r.mu.Lock()
-			r.seen = max(r.seen, md.Sequence.Stream)
-			if _, ok := r.pend[md.Sequence.Stream]; !ok {
-				proj, ms := projectOf(m.Subject())
-				r.pend[md.Sequence.Stream] = &pending{first: time.Now(), project: proj, milestone: ms}
-			}
-			r.mu.Unlock()
+			r.typedSeq(md.Sequence.Stream, m.Subject())
 		}
 		if err := batch.Error(); err != nil {
 			r.fetchFailed(ctx, err)
@@ -673,12 +698,57 @@ func (r *runner) deliver(ctx context.Context) {
 // that it is (so an outage's 503s are not taken for a deletion); then,
 // whatever the error, a pause before the next pull.
 func (r *runner) fetchFailed(ctx context.Context, err error) {
+	r.mu.Lock()
+	if r.fetchDown.IsZero() {
+		r.fetchDown = time.Now()
+	}
+	r.mu.Unlock()
 	if errors.Is(err, jetstream.ErrConsumerNotFound) || errors.Is(err, jetstream.ErrConsumerDeleted) || errors.Is(err, nats.ErrNoResponders) {
 		r.rebind(ctx)
 	}
 	select {
 	case <-ctx.Done():
-	case <-time.After(time.Second):
+	case <-time.After(time.Duration(fetchPause.Load())):
+	}
+}
+
+// fetchOK ends a run of failed fetches: deliveries can reach the session
+// again, and the window starts again from now (V15-RED-1).
+func (r *runner) fetchOK() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.fetchDown.IsZero() {
+		r.fetchDown = time.Time{}
+		r.lastAck = time.Now()
+	}
+}
+
+// fetchPause is the pause after a failed fetch, in nanoseconds; atomic so
+// a test can stretch it while a conductor runs (V15-RED-1, DFX-1).
+var fetchPause = func() *atomic.Int64 { var v atomic.Int64; v.Store(int64(time.Second)); return &v }()
+
+// testFetchGate, while it holds a channel, makes deliver wait on it before
+// its next fetch: a test's way to hold the events consumer after an
+// outage as a slow cluster does (V15-RED-1's gated drill).
+var testFetchGate atomic.Pointer[chan struct{}]
+
+// typedSeq records an event just typed: pending until acknowledged, and,
+// typed again after an outage while it was pending from before it, the
+// conductor's first chance to answer it — the answer window restarts
+// there (V15-RED-1).
+func (r *runner) typedSeq(seq uint64, subject string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.seen = max(r.seen, seq)
+	p, ok := r.pend[seq]
+	if !ok {
+		proj, ms := projectOf(subject)
+		r.pend[seq] = &pending{first: time.Now(), project: proj, milestone: ms}
+		return
+	}
+	if !r.recovered.IsZero() && p.first.Before(r.recovered) && !r.retyped[seq] {
+		r.retyped[seq] = true
+		r.lastAck = time.Now()
 	}
 }
 
@@ -693,11 +763,20 @@ func (r *runner) sweep(ctx context.Context, cons jetstream.Consumer) {
 		r.rebind(ctx)
 		return
 	}
-	if err != nil {
-		return
-	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if err != nil {
+		if r.infoDown.IsZero() {
+			r.infoDown = time.Now()
+		}
+		return
+	}
+	if !r.infoDown.IsZero() {
+		// Its first good read since they failed: acknowledgements made
+		// meanwhile are seen now, and the window starts again (V15-RED-1).
+		r.infoDown = time.Time{}
+		r.lastAck = time.Now()
+	}
 	floor := info.AckFloor.Stream
 	// The ack floor, not what was delivered (FINDING-DRY-2C-1, D863+):
 	// delivered events this runner never typed (one fetched for a busy
@@ -737,14 +816,69 @@ func (r *runner) sweep(ctx context.Context, cons jetstream.Consumer) {
 }
 
 // answering is the renewal rule (OQ22): nothing is waiting, or the
-// conductor acknowledged something within the lease's TTL.
+// conductor acknowledged something within the lease's TTL. After an
+// outage, and while its reads of its durable fail, it is not judged
+// (V15-RED-1) — for at most recoveryBound, after which a conductor still
+// unable to answer is judged as before and yields its lease.
 func (r *runner) answering() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if len(r.pend) == 0 {
 		return true
 	}
+	bound := r.cfg.recoveryBound()
+	if !r.recovered.IsZero() {
+		if time.Since(r.recovered) >= bound {
+			r.recovered, r.retyped = time.Time{}, nil
+		} else {
+			for seq, p := range r.pend {
+				if p.first.Before(r.recovered) && !r.retyped[seq] {
+					return true // pending from before the outage, not yet typed again
+				}
+			}
+		}
+	}
+	if !r.infoDown.IsZero() && time.Since(r.infoDown) < bound {
+		return true // no acknowledgement can be seen
+	}
+	if !r.fetchDown.IsZero() && time.Since(r.fetchDown) < bound {
+		return true // no delivery can reach the session
+	}
 	return time.Since(r.lastAck) < r.cfg.LeaseTTL
+}
+
+// recoveryBound is how long a suppression of the answer rule lasts
+// (V15-RED-1, D910): the lease's TTL, then the redelivery interval for
+// the first redelivery after an outage, then two renew ticks for it to be
+// typed, answered and seen — 8 min as shipped. Without the two ticks a
+// redelivery due near AckWait's end was judged before it could count.
+func (c *Config) recoveryBound() time.Duration {
+	return c.LeaseTTL + c.AckWait + 2*c.Renew
+}
+
+// silence says what made the conductor silent: the events waiting and the
+// last acknowledgement, for its log and the lapsed lease's error.
+func (r *runner) silence() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	oldest := uint64(0)
+	for seq := range r.pend {
+		if oldest == 0 || seq < oldest {
+			oldest = seq
+		}
+	}
+	return fmt.Sprintf("%d event(s) unacknowledged past the lease's TTL (%s; the oldest stream sequence %d; the last acknowledgement %s ago)",
+		len(r.pend), r.cfg.LeaseTTL, oldest, time.Since(r.lastAck).Round(100*time.Millisecond))
+}
+
+// ends is the run's end on err: a lost lease is said in the run's own
+// log, not only in its exit (V15-RED-1: a drill's conductor ended with
+// nothing logged).
+func (r *runner) ends(err error) error {
+	if errors.Is(err, ErrLost) {
+		r.logf("%v; the run ends (another of your conductors may take the ensemble over)\n", err)
+	}
+	return err
 }
 
 func (r *runner) publish(ctx context.Context, p *pending, event string) {
