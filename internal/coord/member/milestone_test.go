@@ -71,17 +71,30 @@ func leaseCode(t *testing.T, err error) string {
 // renewed every every.
 func shortLeases(t *testing.T, every time.Duration) {
 	t.Helper()
+	shortLeasesTTL(t, time.Second, every)
+}
+
+// shortLeasesTTL is shortLeases with the TTL given.
+func shortLeasesTTL(t *testing.T, ttl, every time.Duration) {
+	t.Helper()
 	oldTTL, oldEvery := MilestoneTTL, MilestoneRenewEvery
-	MilestoneTTL, MilestoneRenewEvery = time.Second, every
+	MilestoneTTL, MilestoneRenewEvery = ttl, every
 	t.Cleanup(func() { MilestoneTTL, MilestoneRenewEvery = oldTTL, oldEvery })
 }
+
+// lapseTTL is the TTL of the lease tests that assume a lease outlives the
+// steps between its claim and the next check (V15-RED-3): at 1 s a stalled
+// Windows runner let ann's claim lapse before bob's, which the test needs
+// refused (CI-5GREEN-1 on f1eb84d; first on 70a839a). Every lapse wait is a
+// multiple of MilestoneTTL, so it scales with it.
+const lapseTTL = 3 * time.Second
 
 // Stage 1a step 4: a milestone has one holder, a checkout; a change of it
 // starts only in the holder's checkout; a claim lapses with no run
 // renewing it and is taken again by its own checkout, never by another's
 // gate; a release ends it.
 func TestMilestoneLease_ClaimGateRelease(t *testing.T) {
-	shortLeases(t, 300*time.Millisecond)
+	shortLeasesTTL(t, lapseTTL, 300*time.Millisecond)
 	ctx := context.Background()
 	now := time.Now()
 	url := leaseCluster(t)
@@ -132,7 +145,7 @@ func TestMilestoneLease_ClaimGateRelease(t *testing.T) {
 // run lives (the control: the same claim with no hold lapses, above); free
 // again once the run stops and the TTL passes.
 func TestMilestoneLease_LoopHoldRenews(t *testing.T) {
-	shortLeases(t, 250*time.Millisecond)
+	shortLeasesTTL(t, lapseTTL, 250*time.Millisecond)
 	ctx := context.Background()
 	now := time.Now()
 	url := leaseCluster(t)
@@ -206,7 +219,7 @@ func mustHolder(t *testing.T, url, key string) string {
 // checkout's claim stands. The control: another member claimed the lapsed
 // lease first, and the keeper stops, naming them.
 func TestMilestoneLease_LoopHoldRetakesALapsedLease(t *testing.T) {
-	shortLeases(t, 250*time.Millisecond)
+	shortLeasesTTL(t, lapseTTL, 250*time.Millisecond)
 	ctx := context.Background()
 	url := leaseCluster(t)
 	lapse := func(t *testing.T, p *apexv1.Project, ms string) {
