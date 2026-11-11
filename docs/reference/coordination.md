@@ -413,7 +413,10 @@ conductor whose projects changed across the upgrade still moves. A legacy durabl
 stopped between creating the new durable and deleting the old one, or the delete failed and was logged) is safe for an
 admin to delete. A credential minted before that change must be minted again, since it grants the old name only: an
 attach on one stops at once with `coord.conductor-credential`, which says so, rather than waiting out the server's
-refusal of the new name (OBS-2D-2). On a first attach, the durable records where it
+refusal of the new name (OBS-2D-2). A connection closed for good during an attach ends it too, with exit 1 and the
+reason: nats.go closes one when the server refuses the same credential twice, so an expired or revoked credential ends
+the attach with `coord.conductor-credential` rather than leaving it riding out an outage that never ends
+(V8D-CLOSED-1). On a first attach, the durable records where it
 starts (the stream's last sequence + 1) in its own metadata, `ape.start-seq`. A durable lost before its first
 acknowledgement is then bound again from there, not from sequence 1 (V12-13).
 Only the holder of `conductor.<user>.<ens>` binds it, so a conductor that takes the lease over inherits the events the

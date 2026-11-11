@@ -1973,3 +1973,70 @@ func dumpRed1(t *testing.T, js jetstream.JetStream, a *fakeSession, errA chan er
 		t.Logf("V15-RED-1 Run still running")
 	}
 }
+
+// V8D-CLOSED-1 (research's probe): a connection closed for good is never
+// connected again, and the V8d tick rode it out with no end — "riding it
+// out" once, then nothing, while the session got no events. nats.go
+// closes one on the same auth error twice, so an expired or revoked
+// credential did this to a live attach. Now the next tick ends Run with
+// ErrClosed, and Run says so.
+func TestRun_EndsOnAClosedConnection(t *testing.T) {
+	url, _, js := rig(t)
+	anc, err := nats.Connect(url)
+	require.NoError(t, err)
+	t.Cleanup(anc.Close)
+	a := &fakeSession{nc: anc, answers: 99, acked: map[string]bool{}}
+	var logMu sync.Mutex
+	var logged []string
+	cfg := scaled("ann", "cond-a", a)
+	cfg.Log = func(f string, args ...any) {
+		logMu.Lock()
+		logged = append(logged, fmt.Sprintf(f, args...))
+		logMu.Unlock()
+	}
+	errA := make(chan error, 1)
+	go func() { errA <- Run(t.Context(), anc, cfg) }()
+	bound(t, js)
+	time.Sleep(2 * time.Second)
+	anc.Close()
+	closed := time.Now()
+	select {
+	case err := <-errA:
+		took := time.Since(closed)
+		t.Logf("V8D-CLOSED-1: Run ended %v after the close: %v", took.Round(10*time.Millisecond), err)
+		require.ErrorIs(t, err, ErrClosed)
+		require.Less(t, took, 2*cfg.Renew+time.Second, "within a tick or two")
+		_, isFail := errors.AsType[*apexv1.FailError](err)
+		require.False(t, isFail, "no auth error: not the credential's")
+		logMu.Lock()
+		defer logMu.Unlock()
+		require.Contains(t, strings.Join(logged, ""), "its NATS connection is closed", "and Run says so")
+	case <-time.After(10 * time.Second):
+		t.Fatal("the conductor rode a closed connection out: Run still running 10 s after the close")
+	}
+}
+
+// V8D-CLOSED-1, the close's reason: after an auth error (expired,
+// revoked, refused) the run's end is the credential's, named as the
+// attach's first refusal is (coord.conductor-credential), with the
+// re-mint; any other close says the close and its last error.
+func TestClosedErr_NamesTheCredentialAfterAnAuthError(t *testing.T) {
+	for _, last := range []error{nats.ErrAuthExpired, nats.ErrAuthRevoked, nats.ErrAuthorization, fmt.Errorf("nats: %w", nats.ErrAccountAuthExpired)} {
+		err := closedErr(last)
+		require.ErrorIs(t, err, ErrClosed, "%v", last)
+		fe, ok := errors.AsType[*apexv1.FailError](err)
+		require.True(t, ok, "%v: the credential's", last)
+		require.Equal(t, apexv1.CodeConductorCredential, fe.Code)
+		require.Equal(t, apexv1.ActionPerson, fe.Action)
+		require.Contains(t, err.Error(), "the server refused its credential")
+		require.Contains(t, err.Error(), "ape nats mint user")
+		require.Contains(t, err.Error(), "hot/ape-nats.creds")
+	}
+	for _, last := range []error{nil, nats.ErrStaleConnection, errors.New("read tcp: connection reset by peer")} {
+		err := closedErr(last)
+		require.ErrorIs(t, err, ErrClosed, "%v", last)
+		_, ok := errors.AsType[*apexv1.FailError](err)
+		require.False(t, ok, "%v: not the credential's", last)
+		require.NotContains(t, err.Error(), "ape nats mint")
+	}
+}

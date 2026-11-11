@@ -84,6 +84,10 @@ var ErrTaken = errors.New("conductor: another of your conductors holds this ense
 // ErrLost: the conductor lease expired or moved on.
 var ErrLost = errors.New("conductor: lease lost")
 
+// ErrClosed: the conductor's NATS connection was closed for good, so
+// nothing comes back on it (V8D-CLOSED-1).
+var ErrClosed = errors.New("conductor: its NATS connection is closed")
+
 // Filters are the subjects a conductor of ens receives: the coordinator's
 // events (heartbeats included), the ensemble's contracts, and each member
 // project's events. A project named twice — two checkouts of one
@@ -281,7 +285,13 @@ func Run(ctx context.Context, nc *nats.Conn, cfg Config) error {
 		case <-t.C:
 			// The connection says an outage too: a request made while it
 			// is down waits in its buffer rather than failing, so no error
-			// need ever reach keep (V8d).
+			// need ever reach keep (V8d). A connection closed for good is
+			// never connected again, so it ends the run rather than being
+			// ridden out with no end (V8D-CLOSED-1): nats.go closes one on
+			// the same auth error twice, an expired or revoked credential.
+			if nc.IsClosed() {
+				return r.ends(closedErr(nc.LastError()))
+			}
 			if !nc.IsConnected() {
 				r.unreachable(errors.New("NATS disconnected"))
 				continue
@@ -871,12 +881,45 @@ func (r *runner) silence() string {
 		len(r.pend), r.cfg.LeaseTTL, oldest, time.Since(r.lastAck).Round(100*time.Millisecond))
 }
 
+// closedErr is a closed connection's end: the credential's, named as
+// the attach's first refusal is (coord.conductor-credential), when the
+// server refused it last; else the close and its last error.
+func closedErr(last error) error {
+	if authRefused(last) {
+		return &closedCredentialError{apexv1.FailError{Code: apexv1.CodeConductorCredential, Action: apexv1.ActionPerson, Msg: fmt.Sprintf(
+			"%v: the server refused its credential (%v) — expired, revoked or not valid; nothing more can be delivered. The operator who holds the account's keys mints it again — `ape nats mint user --dir <keys> --kind member --name <user> --project <project> --ensemble <ensemble> --out <file>` — and it replaces hot/ape-nats.creds in each checkout of the person's; then attach again", ErrClosed, last)}}
+	}
+	if last != nil {
+		return fmt.Errorf("%w (its last error: %w); nothing more can be delivered, attach again", ErrClosed, last)
+	}
+	return fmt.Errorf("%w; nothing more can be delivered, attach again", ErrClosed)
+}
+
+// closedCredentialError is the credential's FailError that is also
+// ErrClosed, so Run's log and its exit both carry it.
+type closedCredentialError struct{ apexv1.FailError }
+
+func (e *closedCredentialError) Error() string { return e.Msg }
+func (e *closedCredentialError) Unwrap() []error {
+	return []error{&e.FailError, ErrClosed}
+}
+
+// authRefused is a refusal of the credential itself — rejected, expired
+// or revoked — as member's reading of it (V8LM2-1).
+func authRefused(err error) bool {
+	return errors.Is(err, nats.ErrAuthorization) || errors.Is(err, nats.ErrAuthExpired) || errors.Is(err, nats.ErrAuthRevoked) ||
+		errors.Is(err, nats.ErrAccountAuthExpired)
+}
+
 // ends is the run's end on err: a lost lease is said in the run's own
 // log, not only in its exit (V15-RED-1: a drill's conductor ended with
 // nothing logged).
 func (r *runner) ends(err error) error {
-	if errors.Is(err, ErrLost) {
+	switch {
+	case errors.Is(err, ErrLost):
 		r.logf("%v; the run ends (another of your conductors may take the ensemble over)\n", err)
+	case errors.Is(err, ErrClosed):
+		r.logf("%v; the run ends\n", err)
 	}
 	return err
 }
