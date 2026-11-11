@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -241,8 +242,9 @@ func TestLoadState_TransientlyUnreadableRecord(t *testing.T) {
 // W1 (1.4.3): LoadState itself retries a read that fails while the
 // supervisor rewrites the record (on Windows a read overlapping the rename
 // is a sharing violation), so `ape conductor send|stop|status|read` never
-// gives a wrong answer for it. Deterministic on every OS: the record is a
-// directory for 100 ms. A missing record stays ErrNoTerminal at once.
+// gives a wrong answer for it. This row takes the parse branch on every
+// OS: the record is a truncated write for 100 ms, and the next row takes
+// the read-error branch. A missing record stays ErrNoTerminal at once.
 func TestLoadState_RetriesATransientFailure(t *testing.T) {
 	root := project(t)
 	_, err := LoadState(root)
@@ -273,6 +275,37 @@ func TestLoadState_RetriesATransientFailure(t *testing.T) {
 	}()
 	st, err := LoadState(root)
 	require.NoError(t, err, "a read that fails for a moment is retried")
+	require.True(t, st.Alive)
+	require.Equal(t, []int64{3}, st.Pending)
+}
+
+// W1's read-error branch (C56-1, research): a read that fails, not with
+// ErrNotExist, for a moment is retried too. A symlink to itself at the
+// record's path makes every read fail ("too many levels of symbolic
+// links"), and the good record renamed over it replaces the link in one
+// step. POSIX only: a symlink needs a privilege on Windows, where the
+// parse row above still runs.
+func TestLoadState_RetriesAReadError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a symlink needs a privilege on Windows")
+	}
+	root := project(t)
+	retries := loadRetries
+	loadRetries = 100
+	t.Cleanup(func() { loadRetries = retries })
+	require.NoError(t, saveState(root, &State{Alive: true, Pending: []int64{3}, Delivered: []Delivered{}}))
+	p := statePath(root)
+	require.NoError(t, os.Rename(p, p+".away"))
+	require.NoError(t, os.Symlink(p, p))
+	_, rerr := os.ReadFile(p)
+	require.Error(t, rerr, "the loop cannot be read")
+	require.NotErrorIs(t, rerr, os.ErrNotExist, "and it is not a missing record")
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		_ = os.Rename(p+".away", p)
+	}()
+	st, err := LoadState(root)
+	require.NoError(t, err, "a read that errors for a moment is retried")
 	require.True(t, st.Alive)
 	require.Equal(t, []int64{3}, st.Pending)
 }
