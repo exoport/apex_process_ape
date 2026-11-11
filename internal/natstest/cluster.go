@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"net"
 	"net/url"
+	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -38,7 +41,8 @@ const clusterAttempts = 5
 // it waits.
 const readyPoll = 250 * time.Millisecond
 
-// reservePorts picks the route ports; a test replaces it.
+// reservePorts picks the cluster's ports, n client ports then n route
+// ports; a test replaces it.
 var reservePorts = freePorts
 
 // errBind: a node could not listen on its port. freePorts releases its
@@ -66,7 +70,8 @@ func RunCluster(t *testing.T, n int) *Cluster {
 
 func runCluster(t *testing.T, n int) (*Cluster, error) {
 	t.Helper()
-	ports := reservePorts(t, n)
+	ports := reservePorts(t, 2*n)
+	clients, ports := ports[:n], ports[n:]
 	routes := make([]*url.URL, n)
 	for i, p := range ports {
 		routes[i] = &url.URL{Scheme: "nats", Host: fmt.Sprintf("127.0.0.1:%d", p)}
@@ -84,7 +89,7 @@ func runCluster(t *testing.T, n int) (*Cluster, error) {
 		o := &server.Options{
 			ServerName: fmt.Sprintf("n%d", i+1),
 			Host:       "127.0.0.1",
-			Port:       -1,
+			Port:       clients[i],
 			JetStream:  true,
 			StoreDir:   dirs[i],
 			NoLog:      true,
@@ -98,12 +103,9 @@ func runCluster(t *testing.T, n int) (*Cluster, error) {
 			c.Shutdown()
 			return nil, err
 		}
+		// Restart comes back on the same ports, as a real node does, so
+		// a client's URLs still reach it after an outage.
 		c.Servers = append(c.Servers, s)
-		// Restart comes back on the same client port, as a real node
-		// does, so a client's URLs still reach it after an outage.
-		if a, ok := c.Servers[i].Addr().(*net.TCPAddr); ok {
-			o.Port = a.Port
-		}
 	}
 	c.WaitMetaLeader(ReadyWait)
 	return c, nil
@@ -243,23 +245,77 @@ func (c *Cluster) WaitMetaLeader(d time.Duration) {
 	}
 }
 
-// freePorts reserves n loopback ports for the cluster routes.
+// freePorts picks n loopback ports below the ephemeral range, each one
+// listened on once to see it is free (V15-RED-4). A port the kernel hands
+// out (":0") is an ephemeral one, and while its node is down for an
+// outage drill any outgoing connection can be given it, so Restart failed
+// to bind (36457 on a ci-local). Ports below the range are only ever
+// taken by a process that names them. Ports are released before the
+// nodes bind them, so another test can still take one in between: that
+// is errBind, and RunCluster tries again (V8-FLAKE-4).
 func freePorts(t *testing.T, n int) []int {
 	t.Helper()
-	ls := make([]net.Listener, 0, n)
+	lo, hi := portFloor, ephemeralLow()
+	if hi-lo < 1000 {
+		t.Fatalf("natstest: the ephemeral range starts at %d, leaving no ports below it above %d", hi, lo)
+	}
 	ports := make([]int, 0, n)
 	var lc net.ListenConfig
-	for range n {
-		l, err := lc.Listen(context.Background(), "tcp", "127.0.0.1:0")
-		if err != nil {
-			t.Fatalf("natstest: reserve port: %v", err)
+	for tries := 0; len(ports) < n; tries++ {
+		if tries == 100*n {
+			t.Fatalf("natstest: no free port in %d-%d after %d tries", lo, hi-1, tries)
 		}
-		ls = append(ls, l)
-		addr, _ := l.Addr().(*net.TCPAddr)
-		ports = append(ports, addr.Port)
-	}
-	for _, l := range ls {
+		p := lo + rand.IntN(hi-lo) //nolint:gosec // a port, not a secret
+		if !claimPort(p) {
+			continue
+		}
+		l, err := lc.Listen(context.Background(), "tcp", "127.0.0.1:"+strconv.Itoa(p))
+		if err != nil {
+			continue // taken, or excluded (Windows reserves ranges for Hyper-V)
+		}
 		_ = l.Close()
+		ports = append(ports, p)
 	}
 	return ports
+}
+
+// portFloor is the lowest port freePorts picks: above the registered
+// services a developer machine runs.
+const portFloor = 20000
+
+// ephemeralLow is where the kernel's ephemeral ports start: Linux's
+// ip_local_port_range, else 32768, below Windows' and macOS' 49152.
+func ephemeralLow() int {
+	const below = 32768
+	b, err := os.ReadFile("/proc/sys/net/ipv4/ip_local_port_range")
+	if err != nil {
+		return below
+	}
+	f := strings.Fields(string(b))
+	if len(f) == 0 {
+		return below
+	}
+	low, err := strconv.Atoi(f[0])
+	if err != nil {
+		return below
+	}
+	return min(low, below)
+}
+
+// claimed are the ports this process has handed out, never handed out
+// twice: a stopped node's ports are free while it is down, and a parallel
+// test must not pick them then.
+var (
+	claimedMu sync.Mutex
+	claimed   = map[int]bool{}
+)
+
+func claimPort(p int) bool {
+	claimedMu.Lock()
+	defer claimedMu.Unlock()
+	if claimed[p] {
+		return false
+	}
+	claimed[p] = true
+	return true
 }

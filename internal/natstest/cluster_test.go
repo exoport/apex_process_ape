@@ -50,6 +50,29 @@ func TestRunCluster_R3SurvivesANode(t *testing.T) {
 	require.Equal(t, "v2", string(e.Value()))
 }
 
+// V15-RED-4: a node stopped for an outage comes back on its ports, so
+// they are picked below the ephemeral range, where no outgoing connection
+// is handed one while the node is down (a route port, 36457, was on a
+// ci-local).
+func TestRunCluster_PortsBelowTheEphemeralRange(t *testing.T) {
+	c := RunCluster(t, 3)
+	hi := ephemeralLow()
+	for i, s := range c.Servers {
+		a, ok := s.Addr().(*net.TCPAddr)
+		require.True(t, ok)
+		for what, p := range map[string]int{"client": a.Port, "route": c.opts[i].Cluster.Port} {
+			require.GreaterOrEqual(t, p, portFloor, "n%d's %s port", i+1, what)
+			require.Less(t, p, hi, "n%d's %s port below the ephemeral range", i+1, what)
+		}
+	}
+	was := c.Servers[0].ClientURL()
+	c.Stop(0)
+	c.Restart(0)
+	require.Equal(t, was, c.Servers[0].ClientURL(), "back on the same client port")
+	c.WaitMetaLeader(30 * time.Second)
+	require.Len(t, map[int]bool{c.opts[0].Port: true, c.opts[1].Port: true, c.opts[2].Port: true, c.opts[0].Cluster.Port: true, c.opts[1].Cluster.Port: true, c.opts[2].Cluster.Port: true}, 6, "six distinct ports")
+}
+
 // V8-FLAKE-4: freePorts releases its ports before the nodes bind them, so
 // a parallel test can take one in between; the node then never became
 // ready and RunCluster failed "not ready" after the whole wait. Now the
@@ -71,7 +94,7 @@ func TestRunCluster_APortTakenMeanwhile(t *testing.T) {
 		calls++
 		ports := freePorts(t, n)
 		if calls == 1 {
-			ports[n-1] = addr.Port // taken by "another test"
+			ports[n-1] = addr.Port // n3's route port, taken by "another test"
 		}
 		return ports
 	}
