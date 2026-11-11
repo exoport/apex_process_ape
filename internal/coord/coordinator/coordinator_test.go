@@ -223,23 +223,24 @@ func TestCoordinator_RidesOutANATSOutage(t *testing.T) {
 // buffer and is answered once a node is back, so a coordinator can ride
 // an outage out with no call of its ticks failing, and said nothing of it
 // (the full-outage drill above, Windows run 42844724276). Here no call
-// fails at all: only the coordinator's own node stops, the other two keep
-// the quorum, and its connection moves to one of them. The connection's
-// word is then what says the outage, as the conductor's does (V8d).
+// can fail: the one server is never stopped, so no leader moves, and the
+// connection is made to reconnect to it (ForceReconnect). The
+// connection's word is then the only thing that can say the outage, as
+// the conductor's does (V8d). Stopping a cluster node instead left a call
+// failing on Windows while its stream's leader moved (CI-5GREEN-2), which
+// is the other branch, not this one.
 func TestCoordinator_SaysAReconnectThatNoCallFailed(t *testing.T) {
-	c := natstest.RunCluster(t, 3)
-	first := c.Servers[0].ClientURL()
-	nc, err := nats.Connect(c.URLs(), nats.DontRandomize(), nats.MaxReconnects(-1), nats.ReconnectWait(100*time.Millisecond))
+	url := natstest.RunJetStreamServer(t)
+	nc, err := nats.Connect(url, nats.MaxReconnects(-1), nats.ReconnectWait(100*time.Millisecond))
 	require.NoError(t, err)
 	t.Cleanup(nc.Close)
-	require.Equal(t, first, nc.ConnectedUrl(), "the coordinator's link is to the node the test stops")
 	js, err := jetstream.New(nc)
 	require.NoError(t, err)
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
-	require.NoError(t, lease.Declare(ctx, js, 3))
-	require.NoError(t, slots.Declare(ctx, js, 3))
-	require.NoError(t, events.Declare(ctx, js, 3))
+	require.NoError(t, lease.Declare(ctx, js, 1))
+	require.NoError(t, slots.Declare(ctx, js, 1))
+	require.NoError(t, events.Declare(ctx, js, 1))
 	ls, err := lease.Open(ctx, js)
 	require.NoError(t, err)
 	require.NoError(t, ls.SetEpoch(ctx, 1))
@@ -269,9 +270,12 @@ func TestCoordinator_SaysAReconnectThatNoCallFailed(t *testing.T) {
 		h, _, err := ls.Holder(ctx, "coord.ens")
 		return err == nil && h == "c1"
 	}, 10*time.Second, 50*time.Millisecond, "the coordinator holds coord.ens")
+	time.Sleep(2 * cfg.Renew) // a few good renewals first: nothing to say yet
+	require.False(t, said("riding it out"), "nothing said before the reconnect")
 
-	c.Stop(0)
-	require.Eventually(t, func() bool { return nc.IsConnected() && nc.ConnectedUrl() != first }, 20*time.Second, 50*time.Millisecond)
+	was := nc.Stats().Reconnects
+	require.NoError(t, nc.ForceReconnect())
+	require.Eventually(t, func() bool { return nc.IsConnected() && nc.Stats().Reconnects > was }, 20*time.Second, 50*time.Millisecond, "reconnected")
 	// Said once per outage, so the line names what said it first: the
 	// reconnect, not a call's error.
 	require.Eventually(t, func() bool { return said("could not be renewed (NATS reconnected); riding it out") }, 10*time.Second, 50*time.Millisecond, "the reconnect is said, though no call failed")
