@@ -251,10 +251,15 @@ func (c *Coordinator) keep(ctx context.Context, ls *lease.Store) error {
 // down waits in its buffer rather than failing, for the whole outage, and
 // is answered when a node is back, so a renewal can land with no error
 // ever reaching keep and the outage go unsaid. It reports whether the
-// tick may go on: not while disconnected.
+// tick may go on: not while disconnected, but always on a connection
+// closed for good, which reads as disconnected too and is keep's to end
+// (V8n; V8W5-1, research: skipped, the coordinator ran on over it).
 func (c *Coordinator) observe(connected bool, reconnects uint64) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if !connected && c.nc != nil && c.nc.IsClosed() {
+		return true
+	}
 	if !connected {
 		c.unreachable(errors.New("NATS disconnected"))
 		return false
