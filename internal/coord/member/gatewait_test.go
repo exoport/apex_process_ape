@@ -416,7 +416,7 @@ func TestFenceClose_RetakesALeaseThatLapsedDuringTheWait(t *testing.T) {
 // renewed at the current revision), so the fence passes and the keeper
 // goes on renewing — they never refuse each other.
 func TestFenceMilestone_ALapseWithAKeeperRunning(t *testing.T) {
-	shortLeases(t, 300*time.Millisecond)
+	shortLeasesTTL(t, lapseTTL, 300*time.Millisecond)
 	p, c, js := gateRig(t)
 	ctx := t.Context()
 	defer func(d time.Duration) { gateWaitEvery = d }(gateWaitEvery)

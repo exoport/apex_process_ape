@@ -86,7 +86,8 @@ func shortLeasesTTL(t *testing.T, ttl, every time.Duration) {
 // steps between its claim and the next check (V15-RED-3): at 1 s a stalled
 // Windows runner let ann's claim lapse before bob's, which the test needs
 // refused (CI-5GREEN-1 on f1eb84d; first on 70a839a). Every lapse wait is a
-// multiple of MilestoneTTL, so it scales with it.
+// multiple of MilestoneTTL, so it scales with it. The tests that want a
+// lapse stay at shortLeases' 1 s (research's classification, D914).
 const lapseTTL = 3 * time.Second
 
 // Stage 1a step 4: a milestone has one holder, a checkout; a change of it
@@ -177,7 +178,7 @@ func TestMilestoneLease_LoopHoldRenews(t *testing.T) {
 // the close, renewed past its TTL, kept by the same checkout run again,
 // refused to another (coord.close-busy), and free once released.
 func TestHoldClose(t *testing.T) {
-	shortLeases(t, 250*time.Millisecond)
+	shortLeasesTTL(t, lapseTTL, 250*time.Millisecond)
 	ctx := context.Background()
 	url := leaseCluster(t)
 	ann, bob := checkout(t, url, "ann"), checkout(t, url, "bob")
@@ -303,7 +304,7 @@ func (s *syncBuf) String() string {
 // first close's keeper cancels it (onLost) and its fence right before the
 // enqueue refuses coord.close-lost, so it enqueues nothing.
 func TestHoldClose_LapseRetakenOrLostToASecondClose(t *testing.T) {
-	shortLeases(t, 250*time.Millisecond)
+	shortLeasesTTL(t, lapseTTL, 250*time.Millisecond)
 	ctx := context.Background()
 	url := leaseCluster(t)
 	lapse := func(t *testing.T, h *closeHold) {
@@ -440,7 +441,7 @@ func TestMilestoneLease_ReleasedByThisCheckoutIsNoLoss(t *testing.T) {
 // called with --wait 0 is (CloseBusy); past max the refusal comes back;
 // the checkout holding it is not busy to itself.
 func TestWaitClose_WaitsForTheOtherClose(t *testing.T) {
-	shortLeases(t, 250*time.Millisecond)
+	shortLeasesTTL(t, lapseTTL, 250*time.Millisecond)
 	oldPoll := CloseWaitPoll
 	CloseWaitPoll = 100 * time.Millisecond
 	t.Cleanup(func() { CloseWaitPoll = oldPoll })

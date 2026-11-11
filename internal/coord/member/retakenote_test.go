@@ -18,7 +18,7 @@ import (
 // lease had been free for 2 h 40 min. The control: a hold right after the
 // claim, the lease live, says nothing of the kind.
 func TestHoldMilestone_NotesARetakeAfterALapse(t *testing.T) {
-	shortLeases(t, 250*time.Millisecond)
+	shortLeasesTTL(t, lapseTTL, 250*time.Millisecond)
 	ctx := context.Background()
 	url := leaseCluster(t)
 	for _, tc := range []struct {
@@ -33,7 +33,7 @@ func TestHoldMilestone_NotesARetakeAfterALapse(t *testing.T) {
 			_, err = ClaimMilestone(ctx, ann, "M1")
 			require.NoError(t, err)
 			if tc.lapse {
-				time.Sleep(2500 * time.Millisecond) // past the 1 s TTL, nothing renewing
+				time.Sleep(5 * MilestoneTTL / 2) // past the TTL, nothing renewing
 			}
 			var log syncBuf
 			stop, err := HoldMilestone(ctx, ann, "M1", &log)
