@@ -16,6 +16,7 @@ import (
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats-server/v2/server"
 	natsserver "github.com/nats-io/nats-server/v2/test"
+	"github.com/nats-io/nkeys"
 )
 
 // RunServer starts an embedded core (no-JetStream) nats-server on a random
@@ -61,6 +62,21 @@ func StartOperatorJetStream(t *testing.T) (url string, accountKey KeyPair) {
 // going to logger (nil: none).
 func startOperatorJetStream(t *testing.T, logger server.Logger) (url string, accountKey KeyPair) {
 	t.Helper()
+	o := startOperator(t, logger)
+	return o.s.ClientURL(), o.account
+}
+
+// operator is a running operator-mode JetStream server, with what a test
+// needs to change its account later (CredServer's revocations).
+type operator struct {
+	s        *server.Server
+	operator nkeys.KeyPair
+	account  KeyPair
+	claims   *jwt.AccountClaims
+}
+
+func startOperator(t *testing.T, logger server.Logger) *operator {
+	t.Helper()
 	okp := createOperator(t)
 	akp := createAccount(t)
 	apub := publicKey(t, akp)
@@ -101,7 +117,7 @@ func startOperatorJetStream(t *testing.T, logger server.Logger) (url string, acc
 	if !s.ReadyForConnections(5 * time.Second) {
 		t.Fatal("natstest: operator server not ready in time")
 	}
-	return s.ClientURL(), KeyPair{akp}
+	return &operator{s: s, operator: okp, account: KeyPair{akp}, claims: ac}
 }
 
 // StartOperator starts an embedded nats-server in operator/JWT mode with a

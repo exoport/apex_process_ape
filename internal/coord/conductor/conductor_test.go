@@ -2040,3 +2040,69 @@ func TestClosedErr_NamesTheCredentialAfterAnAuthError(t *testing.T) {
 		require.NotContains(t, err.Error(), "ape nats mint")
 	}
 }
+
+// FINDING-FD6-1 (eval's F-D6, live): a credential that expires, or is
+// revoked, during an attach ends it, and the end is the credential's,
+// with the re-mint. The refusal arrives as the server's text — "User
+// Authentication Expired" matches no nats.go sentinel — so a T1 on the
+// sentinels could not see it; this one reads what the server sends.
+func TestRun_ACredentialRefusedDuringTheAttachEndsItNamingTheCredential(t *testing.T) {
+	for _, how := range []string{"expired", "revoked"} {
+		t.Run(how, func(t *testing.T) {
+			srv := natstest.StartCredServer(t)
+			admin, _ := srv.Mint(t, "admin", time.Time{})
+			nc, err := nats.Connect(srv.URL, nats.UserCredentials(admin))
+			require.NoError(t, err)
+			t.Cleanup(nc.Close)
+			js, err := jetstream.New(nc)
+			require.NoError(t, err)
+			ctx := t.Context()
+			require.NoError(t, lease.Declare(ctx, js, 1))
+			require.NoError(t, slots.Declare(ctx, js, 1))
+			require.NoError(t, events.Declare(ctx, js, 1))
+			ls, err := lease.Open(ctx, js)
+			require.NoError(t, err)
+			require.NoError(t, ls.SetEpoch(ctx, 1))
+
+			var expires time.Time
+			if how == "expired" {
+				expires = time.Now().Add(5 * time.Second)
+			}
+			creds, pub := srv.Mint(t, "ann", expires)
+			anc, err := nats.Connect(srv.URL, nats.UserCredentials(creds), nats.MaxReconnects(-1), nats.ReconnectWait(100*time.Millisecond))
+			require.NoError(t, err)
+			t.Cleanup(anc.Close)
+			a := &fakeSession{nc: anc, answers: 99, acked: map[string]bool{}}
+			var logMu sync.Mutex
+			var logged []string
+			cfg := scaled("ann", "cond-a", a)
+			cfg.Log = func(f string, args ...any) {
+				logMu.Lock()
+				logged = append(logged, fmt.Sprintf(f, args...))
+				logMu.Unlock()
+			}
+			errA := make(chan error, 1)
+			go func() { errA <- Run(ctx, anc, cfg) }()
+			bound(t, js)
+			if how == "revoked" {
+				time.Sleep(1100 * time.Millisecond) // revocation is by issue time, to the second
+				srv.Revoke(t, pub)
+			}
+			select {
+			case err := <-errA:
+				t.Logf("FINDING-FD6-1 %s: last error %q; Run: %v", how, anc.LastError(), err)
+				require.ErrorIs(t, err, ErrClosed)
+				fe, ok := errors.AsType[*apexv1.FailError](err)
+				require.True(t, ok, "the credential's end, not the generic close")
+				require.Equal(t, apexv1.CodeConductorCredential, fe.Code)
+				require.Contains(t, err.Error(), "ape nats mint user")
+				require.Contains(t, err.Error(), "hot/ape-nats.creds")
+				logMu.Lock()
+				defer logMu.Unlock()
+				require.Contains(t, strings.Join(logged, ""), "the server refused its credential", "and Run says so")
+			case <-time.After(30 * time.Second):
+				t.Fatalf("the attach rode a %s credential out", how)
+			}
+		})
+	}
+}

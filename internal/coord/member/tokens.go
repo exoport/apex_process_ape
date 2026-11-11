@@ -55,7 +55,7 @@ func (m Membership) GitHubTokenFor(ctx context.Context, purpose string) (string,
 				}
 			}))
 		if err != nil {
-			return !authRefused(err), err
+			return !natsconn.AuthRefused(err), err
 		}
 		defer nc.Close()
 		rep, err := ghapp.Ask(actx, nc, ghapp.TokenSubject, id.SubjectToken, ghapp.Request{Repo: m.GitHubRepo, Purpose: purpose})
@@ -71,14 +71,6 @@ func (m Membership) GitHubTokenFor(ctx context.Context, purpose string) (string,
 		return false, nil
 	})
 	return tok, err
-}
-
-// authRefused is a connection the server refused for its credential —
-// rejected, expired or revoked: not an outage, so not waited out
-// (V8LM2-1).
-func authRefused(err error) bool {
-	return errors.Is(err, nats.ErrAuthorization) || errors.Is(err, nats.ErrAuthExpired) || errors.Is(err, nats.ErrAuthRevoked) ||
-		errors.Is(err, nats.ErrAccountAuthExpired)
 }
 
 // askUnanswered is an App service request nobody answered: no responders,

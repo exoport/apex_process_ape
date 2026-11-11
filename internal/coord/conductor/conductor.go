@@ -28,6 +28,7 @@ import (
 	"github.com/exoport/apex_process_ape/internal/coord/events"
 	"github.com/exoport/apex_process_ape/internal/coord/layout"
 	"github.com/exoport/apex_process_ape/internal/coord/lease"
+	"github.com/exoport/apex_process_ape/internal/natsconn"
 )
 
 // Defaults (OQ22, OQ24).
@@ -883,9 +884,10 @@ func (r *runner) silence() string {
 
 // closedErr is a closed connection's end: the credential's, named as
 // the attach's first refusal is (coord.conductor-credential), when the
-// server refused it last; else the close and its last error.
+// server refused it last — read as it arrives, the server's own text
+// (FINDING-FD6-1); else the close and its last error.
 func closedErr(last error) error {
-	if authRefused(last) {
+	if natsconn.AuthRefused(last) {
 		return &closedCredentialError{apexv1.FailError{Code: apexv1.CodeConductorCredential, Action: apexv1.ActionPerson, Msg: fmt.Sprintf(
 			"%v: the server refused its credential (%v) — expired, revoked or not valid; nothing more can be delivered. The operator who holds the account's keys mints it again — `ape nats mint user --dir <keys> --kind member --name <user> --project <project> --ensemble <ensemble> --out <file>` — and it replaces hot/ape-nats.creds in each checkout of the person's; then attach again", ErrClosed, last)}}
 	}
@@ -902,13 +904,6 @@ type closedCredentialError struct{ apexv1.FailError }
 func (e *closedCredentialError) Error() string { return e.Msg }
 func (e *closedCredentialError) Unwrap() []error {
 	return []error{&e.FailError, ErrClosed}
-}
-
-// authRefused is a refusal of the credential itself — rejected, expired
-// or revoked — as member's reading of it (V8LM2-1).
-func authRefused(err error) bool {
-	return errors.Is(err, nats.ErrAuthorization) || errors.Is(err, nats.ErrAuthExpired) || errors.Is(err, nats.ErrAuthRevoked) ||
-		errors.Is(err, nats.ErrAccountAuthExpired)
 }
 
 // ends is the run's end on err: a lost lease is said in the run's own
