@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -142,6 +143,13 @@ func TestCoordinator_RidesOutANATSOutage(t *testing.T) {
 				}
 				return false
 			}
+			t.Cleanup(func() {
+				if t.Failed() {
+					logMu.Lock()
+					t.Log("the coordinator's log:\n" + strings.Join(logged, ""))
+					logMu.Unlock()
+				}
+			})
 			rctx, stop := context.WithCancel(ctx)
 			defer stop()
 			done := make(chan error, 1)
@@ -209,6 +217,114 @@ func TestCoordinator_RidesOutANATSOutage(t *testing.T) {
 			waitedFor("says it holds the lease again")
 		})
 	}
+}
+
+// V8-WIN-5: a request made while NATS is down waits in the connection's
+// buffer and is answered once a node is back, so a coordinator can ride
+// an outage out with no call of its ticks failing, and said nothing of it
+// (the full-outage drill above, Windows run 42844724276). Here no call
+// fails at all: only the coordinator's own node stops, the other two keep
+// the quorum, and its connection moves to one of them. The connection's
+// word is then what says the outage, as the conductor's does (V8d).
+func TestCoordinator_SaysAReconnectThatNoCallFailed(t *testing.T) {
+	c := natstest.RunCluster(t, 3)
+	first := c.Servers[0].ClientURL()
+	nc, err := nats.Connect(c.URLs(), nats.DontRandomize(), nats.MaxReconnects(-1), nats.ReconnectWait(100*time.Millisecond))
+	require.NoError(t, err)
+	t.Cleanup(nc.Close)
+	require.Equal(t, first, nc.ConnectedUrl(), "the coordinator's link is to the node the test stops")
+	js, err := jetstream.New(nc)
+	require.NoError(t, err)
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	require.NoError(t, lease.Declare(ctx, js, 3))
+	require.NoError(t, slots.Declare(ctx, js, 3))
+	require.NoError(t, events.Declare(ctx, js, 3))
+	ls, err := lease.Open(ctx, js)
+	require.NoError(t, err)
+	require.NoError(t, ls.SetEpoch(ctx, 1))
+	var logMu sync.Mutex
+	var logged []string
+	said := func(s string) bool {
+		logMu.Lock()
+		defer logMu.Unlock()
+		return strings.Contains(strings.Join(logged, ""), s)
+	}
+	t.Cleanup(func() {
+		if t.Failed() {
+			logMu.Lock()
+			t.Log("the coordinator's log:\n" + strings.Join(logged, ""))
+			logMu.Unlock()
+		}
+	})
+	cfg := Config{
+		Ensemble: "ens", ID: "c1", TTL: 2 * time.Second, Renew: 500 * time.Millisecond,
+		Log: func(f string, a ...any) { logMu.Lock(); logged = append(logged, fmt.Sprintf(f, a...)); logMu.Unlock() },
+	}
+	rctx, stop := context.WithCancel(ctx)
+	defer stop()
+	done := make(chan error, 1)
+	go func() { done <- Run(rctx, nc, cfg) }()
+	require.Eventually(t, func() bool {
+		h, _, err := ls.Holder(ctx, "coord.ens")
+		return err == nil && h == "c1"
+	}, 10*time.Second, 50*time.Millisecond, "the coordinator holds coord.ens")
+
+	c.Stop(0)
+	require.Eventually(t, func() bool { return nc.IsConnected() && nc.ConnectedUrl() != first }, 20*time.Second, 50*time.Millisecond)
+	// Said once per outage, so the line names what said it first: the
+	// reconnect, not a call's error.
+	require.Eventually(t, func() bool { return said("could not be renewed (NATS reconnected); riding it out") }, 10*time.Second, 50*time.Millisecond, "the reconnect is said, though no call failed")
+	require.Eventually(t, func() bool { return said("is renewed again") }, 10*time.Second, 50*time.Millisecond, "and the next good renewal ends it")
+	select {
+	case err := <-done:
+		t.Fatalf("the coordinator ended: %v", err)
+	default:
+	}
+	h, _, err := ls.Holder(ctx, "coord.ens")
+	require.NoError(t, err)
+	require.Equal(t, "c1", h, "it held coord.ens throughout")
+}
+
+// observe, row by row: the connection's word on an outage, said once, on
+// either branch of a ride-out — no call failed (only the reconnect says
+// it) or one did (keep said it first, and the reconnect adds nothing).
+func TestObserve_TheConnectionSaysAnOutage(t *testing.T) {
+	var logged []string
+	fresh := func() *Coordinator {
+		logged = nil
+		return &Coordinator{cfg: Config{Ensemble: "ens", Renew: time.Second, Log: func(f string, a ...any) { logged = append(logged, fmt.Sprintf(f, a...)) }}, reconnects: 3}
+	}
+	c := fresh()
+	require.True(t, c.observe(true, 3), "the control: connected, no reconnect")
+	require.Empty(t, logged)
+	require.False(t, c.down)
+
+	c = fresh()
+	require.False(t, c.observe(false, 3), "disconnected: the tick does not go on")
+	require.True(t, c.down)
+	require.Len(t, logged, 1)
+	require.Contains(t, logged[0], "riding it out")
+	require.Contains(t, logged[0], "NATS disconnected")
+	require.False(t, c.observe(false, 3))
+	require.Len(t, logged, 1, "said once per outage")
+
+	c = fresh() // no call failed: the buffered renewal landed after the reconnect
+	require.True(t, c.observe(true, 4), "reconnected: the tick goes on")
+	require.True(t, c.down)
+	require.Len(t, logged, 1)
+	require.Contains(t, logged[0], "NATS reconnected")
+	c.reachable() // keep's next good renewal
+	require.Contains(t, logged[1], "is renewed again")
+	require.True(t, c.observe(true, 4))
+	require.Len(t, logged, 2, "the same count again is no new outage")
+
+	c = fresh() // a call failed first: keep said it
+	c.unreachable(errors.New("lease: read epoch: nats: no responders available for request"))
+	require.True(t, c.observe(true, 4))
+	require.Len(t, logged, 1, "already said: the reconnect adds nothing")
+	c.reachable()
+	require.Contains(t, logged[1], "is renewed again")
 }
 
 // V8n's ride-out has an end: a connection closed for good (its reconnects

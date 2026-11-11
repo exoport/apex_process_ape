@@ -95,8 +95,10 @@ type Coordinator struct {
 
 	mu   sync.Mutex
 	held lease.Lease
-	// down: coord.<ens> could not be kept at the last tick (said once).
-	down bool
+	// down: coord.<ens> could not be kept at the last tick (said once);
+	// reconnects is the connection's count.
+	down       bool
+	reconnects uint64
 }
 
 // ErrNotLeader: another coordinator holds coord.<ens>.
@@ -164,6 +166,7 @@ func Run(ctx context.Context, nc *nats.Conn, cfg Config) error {
 		go c.runAssessor(wctx)
 	}
 
+	c.reconnects = nc.Stats().Reconnects
 	t := time.NewTicker(cfg.Renew)
 	defer t.Stop()
 	for {
@@ -175,6 +178,9 @@ func Run(ctx context.Context, nc *nats.Conn, cfg Config) error {
 			_ = ls.Release(context.WithoutCancel(ctx), l)
 			return nil
 		case <-t.C:
+			if !c.observe(nc.IsConnected(), nc.Stats().Reconnects) {
+				continue
+			}
 			if err := c.keep(ctx, ls); err != nil {
 				return err
 			}
@@ -238,6 +244,26 @@ func (c *Coordinator) keep(ctx context.Context, ls *lease.Store) error {
 		return nil
 	}
 	return fmt.Errorf("coordinator: lost coord.%s: %s holds it now", c.cfg.Ensemble, cur)
+}
+
+// observe is the connection's own word on an outage, before a tick's
+// calls (V8-WIN-5, as the conductor's V8d): a request made while NATS is
+// down waits in its buffer rather than failing, for the whole outage, and
+// is answered when a node is back, so a renewal can land with no error
+// ever reaching keep and the outage go unsaid. It reports whether the
+// tick may go on: not while disconnected.
+func (c *Coordinator) observe(connected bool, reconnects uint64) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !connected {
+		c.unreachable(errors.New("NATS disconnected"))
+		return false
+	}
+	if reconnects != c.reconnects {
+		c.reconnects = reconnects
+		c.unreachable(errors.New("NATS reconnected"))
+	}
+	return true
 }
 
 // unreachable says once per outage that coord.<ens> could not be kept.
