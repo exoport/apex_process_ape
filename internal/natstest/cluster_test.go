@@ -89,19 +89,26 @@ func TestRunCluster_APortTakenMeanwhile(t *testing.T) {
 	addr, ok := held.Addr().(*net.TCPAddr)
 	require.True(t, ok)
 	calls := 0
+	var second time.Time
 	reservePorts = func(t *testing.T, n int) []int {
 		t.Helper()
 		calls++
 		ports := freePorts(t, n)
-		if calls == 1 {
+		switch calls {
+		case 1:
 			ports[n-1] = addr.Port // n3's route port, taken by "another test"
+		case 2:
+			second = time.Now()
 		}
 		return ports
 	}
 	start := time.Now()
 	c := RunCluster(t, 3)
 	require.Equal(t, 2, calls, "the cluster was started again on fresh ports")
-	require.Less(t, time.Since(start), ReadyWait, "the taken port ended the first try at once")
+	// The first try alone: one that waited for its node would take
+	// ReadyWait. Not the whole RunCluster, whose second, fresh start took
+	// 21 s on a Windows runner (V8-FLAKE-4, CI-5GREEN-EC7-1: 20.998 s).
+	require.Less(t, second.Sub(start), ReadyWait, "the taken port ended the first try at once (not the second try's start, 21 s once on Windows)")
 	nc, err := nats.Connect(c.URLs())
 	require.NoError(t, err)
 	defer nc.Close()
