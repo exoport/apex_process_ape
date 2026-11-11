@@ -470,6 +470,13 @@ func waited(t *testing.T, what string, back time.Time) {
 }
 
 func TestDrill_ConductorRidesOutANATSOutage(t *testing.T) {
+	if d, err := time.ParseDuration(os.Getenv("V15RED1_FETCH_PAUSE")); err == nil {
+		// The probe: the first good fetch after the outage lands up to d
+		// after the lease KV is back. Set once for the process and never
+		// restored: a Cleanup's restore raced a still-running Run's
+		// fetchFailed under -race (DFX-1).
+		fetchPause.Store(int64(d))
+	}
 	t.Run("rides-it-out", func(t *testing.T) {
 		c, js := outageRig(t)
 		ctx := t.Context()
@@ -479,6 +486,7 @@ func TestDrill_ConductorRidesOutANATSOutage(t *testing.T) {
 		a := &fakeSession{nc: anc, answers: 99, acked: map[string]bool{}}
 		var logMu sync.Mutex
 		var logged []string
+		errA := make(chan error, 1)
 		cfg := scaled("ann", "cond-a", a)
 		cfg.Log = func(f string, args ...any) {
 			logMu.Lock()
@@ -490,9 +498,9 @@ func TestDrill_ConductorRidesOutANATSOutage(t *testing.T) {
 				logMu.Lock()
 				t.Log(strings.Join(logged, ""))
 				logMu.Unlock()
+				dumpRed1(t, js, a, errA)
 			}
 		})
-		errA := make(chan error, 1)
 		go func() { errA <- Run(ctx, anc, cfg) }()
 		bound(t, js)
 		publish(t, js, "block", 1)
@@ -1905,4 +1913,38 @@ type infoFails struct{ jetstream.Consumer }
 
 func (infoFails) Info(context.Context) (*jetstream.ConsumerInfo, error) {
 	return nil, context.DeadlineExceeded
+}
+
+// dumpRed1 logs, on a red outage drill, the durable's JetStream state, the
+// stream's, every delivery the session saw and how Run ended (V15-RED-1,
+// D908): enough to tell a lost redelivery from a conductor that stopped.
+func dumpRed1(t *testing.T, js jetstream.JetStream, a *fakeSession, errA chan error) {
+	t.Helper()
+	ictx, icancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer icancel()
+	if cons, err := js.Consumer(ictx, events.EventsStream, layout.ConductorConsumer("ann", "atomix")); err != nil {
+		t.Logf("V15-RED-1 consumer: %v", err)
+	} else if info, err := cons.Info(ictx); err != nil {
+		t.Logf("V15-RED-1 consumer info: %v", err)
+	} else {
+		t.Logf("V15-RED-1 consumer: delivered stream %d consumer %d; ack floor stream %d consumer %d; ack-pending %d; redelivered %d; pending %d; waiting %d; ack_wait %v; max_deliver %d",
+			info.Delivered.Stream, info.Delivered.Consumer, info.AckFloor.Stream, info.AckFloor.Consumer, info.NumAckPending, info.NumRedelivered, info.NumPending, info.NumWaiting, info.Config.AckWait, info.Config.MaxDeliver)
+	}
+	if st, err := js.Stream(ictx, events.EventsStream); err == nil {
+		si := st.CachedInfo()
+		t.Logf("V15-RED-1 stream: first %d last %d msgs %d; cluster leader %q replicas %d", si.State.FirstSeq, si.State.LastSeq, si.State.Msgs, si.Cluster.Leader, len(si.Cluster.Replicas))
+	}
+	a.mu.Lock()
+	for i, tx := range a.typed {
+		sq := seqRe.FindStringSubmatch(tx)
+		t.Logf("V15-RED-1 typed #%d seq %s acked %v: %.120s", i+1, sq[1], a.acked[sq[1]], tx)
+	}
+	a.mu.Unlock()
+	t.Logf("V15-RED-1 session: done %d, hold %v", a.done.Load(), a.hold.Load())
+	select {
+	case err := <-errA:
+		t.Logf("V15-RED-1 Run had ended: %v", err)
+	default:
+		t.Logf("V15-RED-1 Run still running")
+	}
 }
