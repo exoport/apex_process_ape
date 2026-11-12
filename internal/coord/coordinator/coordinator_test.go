@@ -40,7 +40,9 @@ func TestCoordinator_PublishesTheOutageOnReconnect(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, ls.SetEpoch(ctx, 1))
 
-	rctx, stop := context.WithCancel(ctx)
+	// No deadline, as ape coordinator: under the rig's, a call whose reply
+	// the stopped node lost would hold c.mu for the rest of it.
+	rctx, stop := context.WithCancel(context.Background())
 	defer stop()
 	go func() { _ = Run(rctx, nc, Config{Ensemble: "ens", ID: "c1"}) }()
 	require.Eventually(t, func() bool {
@@ -267,7 +269,8 @@ func TestCoordinator_SaysAReconnectThatNoCallFailed(t *testing.T) {
 		Ensemble: "ens", ID: "c1", TTL: 2 * time.Second, Renew: 500 * time.Millisecond,
 		Log: func(f string, a ...any) { logMu.Lock(); logged = append(logged, fmt.Sprintf(f, a...)); logMu.Unlock() },
 	}
-	rctx, stop := context.WithCancel(ctx)
+	// No deadline, as ape coordinator (the outage drill's reason, above).
+	rctx, stop := context.WithCancel(context.Background())
 	defer stop()
 	done := make(chan error, 1)
 	go func() { done <- Run(rctx, nc, cfg) }()
