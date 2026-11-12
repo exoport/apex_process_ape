@@ -284,24 +284,21 @@ func Run(ctx context.Context, nc *nats.Conn, cfg Config) error {
 			_ = ls.Release(context.WithoutCancel(ctx), l)
 			return nil
 		case <-t.C:
-			// The connection says an outage too: a request made while it
-			// is down waits in its buffer rather than failing, so no error
-			// need ever reach keep (V8d). A connection closed for good is
-			// never connected again, so it ends the run rather than being
-			// ridden out with no end (V8D-CLOSED-1): nats.go closes one on
-			// the same auth error twice, an expired or revoked credential.
-			if nc.IsClosed() {
-				return r.ends(closedErr(nc.LastError()))
-			}
-			if !nc.IsConnected() {
-				r.unreachable(errors.New("NATS disconnected"))
+			if up, err := r.link(nc); err != nil {
+				return r.ends(err)
+			} else if !up {
 				continue
 			}
-			if n := nc.Stats().Reconnects; n != r.reconnects {
-				r.reconnects = n
-				r.unreachable(errors.New("NATS reconnected"))
-			}
 			r.sweep(ctx, r.consumer())
+			// Read again before keep judges anything: sweep's call can
+			// wait out a whole outage in the connection's buffer, and an
+			// outage no tick saw would leave keep judging silence on the
+			// acknowledgements the outage itself held back (V15-RED-1-B).
+			if up, err := r.link(nc); err != nil {
+				return r.ends(err)
+			} else if !up {
+				continue
+			}
 			if l, err = r.keep(ctx, ls, l); err != nil {
 				return r.ends(err)
 			}
@@ -743,6 +740,11 @@ var fetchPause = func() *atomic.Int64 { var v atomic.Int64; v.Store(int64(time.S
 // outage as a slow cluster does (V15-RED-1's gated drill).
 var testFetchGate atomic.Pointer[chan struct{}]
 
+// testSweepHook, when set, runs as sweep starts, before its read of the
+// durable: a test's way to hold one tick across a whole outage, as a call
+// waiting in the connection's buffer does (V15-RED-1-B). Nil in ape.
+var testSweepHook atomic.Pointer[func()]
+
 // typedSeq records an event just typed: pending until acknowledged, and,
 // typed again after an outage while it was pending from before it, the
 // conductor's first chance to answer it — the answer window restarts
@@ -769,6 +771,9 @@ func (r *runner) typedSeq(seq uint64, subject string) {
 // bound again here too (DRY-2B-1): deliver meets it only at its next
 // fetch, which waits while a delivery is held for a busy session.
 func (r *runner) sweep(ctx context.Context, cons jetstream.Consumer) {
+	if h := testSweepHook.Load(); h != nil {
+		(*h)()
+	}
 	info, err := cons.Info(ctx)
 	if errors.Is(err, jetstream.ErrConsumerNotFound) {
 		r.rebind(ctx)
@@ -909,6 +914,28 @@ func (e *closedCredentialError) Unwrap() []error {
 // ends is the run's end on err: a lost lease is said in the run's own
 // log, not only in its exit (V15-RED-1: a drill's conductor ended with
 // nothing logged).
+// link is the connection's own word on an outage. A request made while it
+// is down waits in its buffer rather than failing, so no error need ever
+// reach keep (V8d): disconnected, the tick goes no further (up false); a
+// reconnect since the last look is an outage too. A connection closed for
+// good is never connected again, so it ends the run rather than being
+// ridden out with no end (V8D-CLOSED-1): nats.go closes one on the same
+// auth error twice, an expired or revoked credential.
+func (r *runner) link(nc *nats.Conn) (up bool, err error) {
+	if nc.IsClosed() {
+		return false, closedErr(nc.LastError())
+	}
+	if !nc.IsConnected() {
+		r.unreachable(errors.New("NATS disconnected"))
+		return false, nil
+	}
+	if n := nc.Stats().Reconnects; n != r.reconnects {
+		r.reconnects = n
+		r.unreachable(errors.New("NATS reconnected"))
+	}
+	return true, nil
+}
+
 func (r *runner) ends(err error) error {
 	switch {
 	case errors.Is(err, ErrLost):
