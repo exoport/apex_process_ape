@@ -299,12 +299,18 @@ func TestDrill_SupervisorRidesOutANATSOutage(t *testing.T) {
 	js, err := jetstream.New(nc)
 	require.NoError(t, err)
 	ctx := context.Background()
-	require.NoError(t, lease.Declare(ctx, js, 3))
-	require.NoError(t, slots.Declare(ctx, js, 3))
-	require.NoError(t, events.Declare(ctx, js, 3))
-	ls, err := lease.Open(ctx, js)
+	// The R3 setup under a deadline, as the coordinator's rigs: without one
+	// each call took nats.go's 5 s default, and an R3 stream create on a
+	// loaded Windows runner outlasted it ("declare APE_METRICS: context
+	// deadline exceeded", CI-5GREEN-3 on 083b036).
+	dctx, dcancel := context.WithTimeout(ctx, 60*time.Second)
+	defer dcancel()
+	require.NoError(t, lease.Declare(dctx, js, 3))
+	require.NoError(t, slots.Declare(dctx, js, 3))
+	require.NoError(t, events.Declare(dctx, js, 3))
+	ls, err := lease.Open(dctx, js)
 	require.NoError(t, err)
-	require.NoError(t, ls.SetEpoch(ctx, 1))
+	require.NoError(t, ls.SetEpoch(dctx, 1))
 
 	snc, err := nats.Connect(url, nats.MaxReconnects(-1), nats.ReconnectWait(200*time.Millisecond))
 	require.NoError(t, err)
@@ -411,10 +417,16 @@ func TestDrill_ServiceAnswersEveryRequestAfterAnOutage(t *testing.T) {
 	js, err := jetstream.New(snc)
 	require.NoError(t, err)
 	ctx := context.Background()
-	require.NoError(t, lease.Declare(ctx, js, 3))
-	ls, err := lease.Open(ctx, js)
+	// The R3 setup under a deadline, as the coordinator's rigs: without one
+	// each call took nats.go's 5 s default, and an R3 stream create on a
+	// loaded Windows runner outlasted it ("declare APE_METRICS: context
+	// deadline exceeded", CI-5GREEN-3 on 083b036).
+	dctx, dcancel := context.WithTimeout(ctx, 60*time.Second)
+	defer dcancel()
+	require.NoError(t, lease.Declare(dctx, js, 3))
+	ls, err := lease.Open(dctx, js)
 	require.NoError(t, err)
-	require.NoError(t, ls.SetEpoch(ctx, 1))
+	require.NoError(t, ls.SetEpoch(dctx, 1))
 
 	sctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)

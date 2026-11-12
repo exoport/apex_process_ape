@@ -409,7 +409,12 @@ func outageRig(t *testing.T) (*natstest.Cluster, jetstream.JetStream) {
 	t.Cleanup(nc.Close)
 	js, err := jetstream.New(nc)
 	require.NoError(t, err)
-	ctx := context.Background()
+	// The R3 setup under a deadline, as the coordinator's rigs: without one
+	// each call took nats.go's 5 s default, and an R3 stream create on a
+	// loaded Windows runner outlasted it ("declare APE_METRICS: context
+	// deadline exceeded", CI-5GREEN-3 on 083b036).
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
 	require.NoError(t, lease.Declare(ctx, js, 3))
 	require.NoError(t, slots.Declare(ctx, js, 3))
 	require.NoError(t, events.Declare(ctx, js, 3))
