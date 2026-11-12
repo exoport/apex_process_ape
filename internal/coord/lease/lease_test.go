@@ -199,3 +199,77 @@ func testOwner(t *testing.T, s *Store) {
 	require.NoError(t, err)
 	require.Equal(t, []string{key}, keys)
 }
+
+// V15-REL-1: the store tells a release from a lapse, on one server and on
+// an R3 cluster, and a release made on another connection (another
+// process of the same checkout) reads the same: a KV delete's
+// KV-Operation DEL, where a TTL expiry leaves the server's MaxAge marker.
+func TestReleased_TellsAReleaseFromALapse(t *testing.T) {
+	for _, n := range []int{1, 3} {
+		t.Run(map[int]string{1: "one-server", 3: "r3"}[n], func(t *testing.T) {
+			var urls string
+			if n == 1 {
+				urls = natstest.RunJetStreamServer(t)
+			} else {
+				urls = natstest.RunCluster(t, 3).URLs()
+			}
+			open := func() *Store {
+				nc, err := nats.Connect(urls)
+				require.NoError(t, err)
+				t.Cleanup(nc.Close)
+				js, err := jetstream.New(nc)
+				require.NoError(t, err)
+				s, err := Open(t.Context(), js)
+				require.NoError(t, err)
+				return s
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			nc, err := nats.Connect(urls)
+			require.NoError(t, err)
+			defer nc.Close()
+			js, err := jetstream.New(nc)
+			require.NoError(t, err)
+			require.NoError(t, Declare(ctx, js, n))
+			s, err := Open(ctx, js)
+			require.NoError(t, err)
+			require.NoError(t, s.SetEpoch(ctx, 1))
+			other := open() // a second process of the same checkout
+
+			rel, err := s.Released(ctx, "milestone.p.never")
+			require.NoError(t, err)
+			require.False(t, rel, "never written: not released")
+
+			held, err := s.Claim(ctx, "milestone.p.held", "ann/1", time.Minute)
+			require.NoError(t, err)
+			rel, err = s.Released(ctx, held.Key)
+			require.NoError(t, err)
+			require.False(t, rel, "held: not released")
+
+			a, err := s.Claim(ctx, "milestone.p.a", "ann/1", time.Minute)
+			require.NoError(t, err)
+			require.NoError(t, other.Release(ctx, a))
+			for _, by := range []*Store{s, other} {
+				rel, err = by.Released(ctx, a.Key)
+				require.NoError(t, err)
+				require.True(t, rel, "released on another connection: released, read from either")
+			}
+
+			_, err = s.Claim(ctx, "milestone.p.b", "ann/1", time.Second)
+			require.NoError(t, err)
+			require.Eventually(t, func() bool {
+				h, _, err := s.Holder(ctx, "milestone.p.b")
+				return err == nil && h == ""
+			}, 20*time.Second, 100*time.Millisecond, "expired")
+			rel, err = s.Released(ctx, "milestone.p.b")
+			require.NoError(t, err)
+			require.False(t, rel, "expired by its TTL: a lapse, not a release")
+
+			again, err := s.Claim(ctx, "milestone.p.a", "ann/1", time.Minute)
+			require.NoError(t, err, "a released key can be claimed again")
+			rel, err = s.Released(ctx, again.Key)
+			require.NoError(t, err)
+			require.False(t, rel, "and is then held, not released")
+		})
+	}
+}

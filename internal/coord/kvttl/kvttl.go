@@ -35,6 +35,23 @@ func Update(ctx context.Context, js jetstream.JetStream, bucket, key string, val
 	return ack.Sequence, nil
 }
 
+// Delete writes key's delete (KV-Operation DEL) as a compare-and-swap at
+// rev, the subject's last sequence (0: no message on it), as Update does
+// for a value: it fails with ErrConflict when anything was written since.
+// A KV delete with LastRevision cannot say "at 0" (V15-REL-1).
+func Delete(ctx context.Context, js jetstream.JetStream, bucket, key string, rev uint64) error {
+	msg := nats.NewMsg("$KV." + bucket + "." + key)
+	msg.Header.Set("KV-Operation", "DEL")
+	msg.Header.Set(jetstream.ExpectedLastSubjSeqHeader, strconv.FormatUint(rev, 10))
+	if _, err := js.PublishMsg(ctx, msg); err != nil {
+		if Conflict(err) {
+			return ErrConflict
+		}
+		return err
+	}
+	return nil
+}
+
 // Conflict reports a compare-and-swap conflict: 10071, or 10164 on a
 // replicated stream, or the KV client's own ErrKeyExists.
 func Conflict(err error) bool {

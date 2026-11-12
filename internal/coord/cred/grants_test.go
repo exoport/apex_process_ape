@@ -609,3 +609,55 @@ func TestGrants_OBS_2D_2_AnAttachOnAPre15CredentialSaysToMintItAgain(t *testing.
 	_, err = ajs.Consumer(ctx, events.EventsStream, durable)
 	require.ErrorIs(t, err, jetstream.ErrConsumerNotFound, "nothing bound")
 }
+
+// V15-REL-1: a member reads, under its own allow-list, whether its
+// milestone's lease was released rather than lapsed — the stream's last
+// record for the key (stream INFO and a direct get, getStreams). Every
+// call the read makes is the server's to refuse; Enforced fails the test
+// on any refusal.
+func TestGrants_AMemberReadsWhetherItsLeaseWasReleased(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	e := natstest.StartEnforced(t)
+	admin := connect(t, e.URL, e.Admin)
+	ajs, err := jetstream.New(admin)
+	require.NoError(t, err)
+	require.NoError(t, lease.Declare(ctx, ajs, 1))
+	als, err := lease.Open(ctx, ajs)
+	require.NoError(t, err)
+	require.NoError(t, als.SetEpoch(ctx, 1))
+
+	ann := connect(t, e.URL, e.Mint(t, "ann", perms(cred.MemberGrant("ann", "taskforge", "atomix"))))
+	js, err := jetstream.New(ann)
+	require.NoError(t, err)
+	ls, err := lease.Open(ctx, js)
+	require.NoError(t, err)
+	l, err := ls.Claim(ctx, layout.MilestoneKey("taskforge", "M1"), "ann/1", time.Minute)
+	require.NoError(t, err)
+	rel, err := ls.Released(ctx, l.Key)
+	require.NoError(t, err)
+	require.False(t, rel, "held")
+	require.NoError(t, ls.Release(ctx, l))
+	rel, err = ls.Released(ctx, l.Key)
+	require.NoError(t, err)
+	require.True(t, rel, "released, read under the member's own grant")
+
+	// The control: the same grant without the leases stream's API is
+	// refused the read, so the pass above is the grant's.
+	g := cred.MemberGrant("bob", "taskforge", "atomix")
+	g.PubAllow = slices.DeleteFunc(slices.Clone(g.PubAllow), func(s string) bool {
+		return strings.HasPrefix(s, "$JS.API.STREAM.INFO.KV_ape-leases") || strings.HasPrefix(s, "$JS.API.DIRECT.GET.KV_ape-leases") || strings.HasPrefix(s, "$JS.API.STREAM.MSG.GET.KV_ape-leases")
+	})
+	e.Expect("$JS.API.STREAM.INFO.KV_ape-leases")
+	e.Expect("$JS.API.DIRECT.GET.KV_ape-leases")
+	bob := connect(t, e.URL, e.Mint(t, "bob", perms(g)))
+	bjs, err := jetstream.New(bob)
+	require.NoError(t, err)
+	cctx, ccancel := context.WithTimeout(ctx, 5*time.Second) // a refused request is never answered
+	defer ccancel()
+	bls, err := lease.Open(cctx, bjs)
+	if err == nil {
+		_, err = bls.Released(cctx, l.Key)
+	}
+	require.Error(t, err, "without the stream's API the read is refused")
+}

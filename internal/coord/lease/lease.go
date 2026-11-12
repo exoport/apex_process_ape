@@ -367,3 +367,99 @@ func (s *Store) Holder(ctx context.Context, key string) (string, layout.Token, e
 	}
 	return v.Holder, layout.Token{Epoch: epoch, Revision: e.Revision()}, nil
 }
+
+// Last is key's last record in the store, as a keeper reads it before
+// taking back its own lease (V15-REL-1): Seq is the subject's last
+// sequence (0 when there is no message on it), Released a client's removal
+// (a release's KV delete, or a purge), Live a value. Neither is a lapse:
+// the server's TTL marker (Nats-Marker-Reason), or nothing once that
+// marker expired too.
+type Last struct {
+	Seq            uint64
+	Released, Live bool
+}
+
+// Lapsed reports a lapse: nobody's value and no release.
+func (l Last) Lapsed() bool { return !l.Released && !l.Live }
+
+// LastRecord reads key's last record (Last).
+func (s *Store) LastRecord(ctx context.Context, key string) (Last, error) {
+	st, err := s.js.Stream(ctx, "KV_"+LeasesBucket)
+	if err != nil {
+		return Last{}, fmt.Errorf("lease: bind the %s stream: %w", LeasesBucket, err)
+	}
+	m, err := st.GetLastMsgForSubject(ctx, "$KV."+LeasesBucket+"."+key)
+	if errors.Is(err, jetstream.ErrMsgNotFound) {
+		return Last{}, nil
+	}
+	if err != nil {
+		return Last{}, fmt.Errorf("lease: read %s's last record: %w", key, err)
+	}
+	switch {
+	case m.Header.Get(kvOperation) == "DEL", m.Header.Get(kvOperation) == "PURGE":
+		return Last{Seq: m.Sequence, Released: true}, nil
+	case m.Header.Get(markerReason) != "":
+		return Last{Seq: m.Sequence}, nil
+	}
+	return Last{Seq: m.Sequence, Live: true}, nil
+}
+
+// Released reports whether key's last record is a client's removal — a
+// release (a KV delete) or a purge — rather than a lapse (LastRecord).
+func (s *Store) Released(ctx context.Context, key string) (bool, error) {
+	l, err := s.LastRecord(ctx, key)
+	return l.Released, err
+}
+
+// Reclaim takes key again for holder after a lapse, as a compare-and-swap
+// at last.Seq, the record it read (LastRecord): a release written since —
+// a delete that landed between the read and the claim — fails it with
+// ErrStale, where Claim's create would have taken the key over the delete
+// (V15-REL-1). A claim of someone else's released key is Claim's, which
+// is right there.
+func (s *Store) Reclaim(ctx context.Context, key, holder string, ttl time.Duration, last Last) (Lease, error) {
+	if !last.Lapsed() {
+		return Lease{}, fmt.Errorf("%w: %s's last record is not a lapse", ErrStale, key)
+	}
+	epoch, err := s.Epoch(ctx)
+	if err != nil {
+		return Lease{}, err
+	}
+	val, err := json.Marshal(Value{Holder: holder, At: s.now().UTC(), TTLSecs: ttl.Seconds()})
+	if err != nil {
+		return Lease{}, err
+	}
+	rev, err := kvttl.Update(ctx, s.js, LeasesBucket, key, val, last.Seq, ttl)
+	if err != nil {
+		if errors.Is(err, kvttl.ErrConflict) || kvttl.Conflict(err) {
+			return Lease{}, fmt.Errorf("%w: %s was written since it was read", ErrStale, key)
+		}
+		return Lease{}, fmt.Errorf("lease: claim %s again: %w", key, err)
+	}
+	return Lease{Key: key, Holder: holder, Token: layout.Token{Epoch: epoch, Revision: rev}, TTL: ttl}, nil
+}
+
+// ReleaseLapsed writes the release of a key that lapsed (last a lapse): a
+// delete at last.Seq, so the store says released, not lapsed, as a
+// release of a held key does (V15-REL-1, research's hole A). Anything
+// written since — another member's claim — fails it with ErrStale, and
+// that claim stands.
+func (s *Store) ReleaseLapsed(ctx context.Context, key string, last Last) error {
+	if !last.Lapsed() {
+		return fmt.Errorf("%w: %s's last record is not a lapse", ErrStale, key)
+	}
+	if err := kvttl.Delete(ctx, s.js, LeasesBucket, key, last.Seq); err != nil {
+		if errors.Is(err, kvttl.ErrConflict) {
+			return fmt.Errorf("%w: %s was written since it was read", ErrStale, key)
+		}
+		return fmt.Errorf("lease: release %s: %w", key, err)
+	}
+	return nil
+}
+
+// kvOperation is the header a KV delete or purge carries; markerReason
+// the one the server's TTL marker carries.
+const (
+	kvOperation  = "KV-Operation"
+	markerReason = "Nats-Marker-Reason"
+)

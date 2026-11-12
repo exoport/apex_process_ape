@@ -14,6 +14,7 @@ import (
 
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/exoport/apex_process_ape/internal/apexv1"
@@ -230,9 +231,12 @@ func TestMilestoneLease_LoopHoldRetakesALapsedLease(t *testing.T) {
 		defer s.close()
 		js, err := jetstream.New(s.nc)
 		require.NoError(t, err)
-		kv, err := js.KeyValue(ctx, lease.LeasesBucket)
+		// A lapse: the key gone with no client's removal on record, as
+		// after a TTL expiry whose marker has expired too. A KV delete is
+		// a release, which the keeper does not take again (V15-REL-1).
+		st, err := js.Stream(ctx, "KV_"+lease.LeasesBucket)
 		require.NoError(t, err)
-		require.NoError(t, kv.Delete(ctx, s.key(ms)))
+		require.NoError(t, st.Purge(ctx, jetstream.WithPurgeSubject("$KV."+lease.LeasesBucket+"."+s.key(ms))))
 	}
 	holder := func(t *testing.T, p *apexv1.Project) string {
 		t.Helper()
@@ -429,8 +433,90 @@ func TestMilestoneLease_ReleasedByThisCheckoutIsNoLoss(t *testing.T) {
 	defer stop()
 	_, err = ReleaseMilestone(ctx, ann, "M1")
 	require.NoError(t, err)
-	require.Eventually(t, func() bool { return strings.Contains(log.String(), "released by this checkout (the milestone closed)") }, 10*time.Second, 50*time.Millisecond, log.String())
+	logSays(t, &log, "released by this checkout (the milestone closed)")
 	require.NotContains(t, log.String(), "was lost")
+}
+
+// logWait bounds logSays.
+const logWait = 10 * time.Second
+
+// logSays waits until log holds want, and on a timeout says what it held
+// then: require.Eventually's message is read at its call, before the wait,
+// so a log passed to it is always empty there (V15-REL-1's red said
+// nothing).
+func logSays(t *testing.T, log *syncBuf, want string) {
+	t.Helper()
+	if !assert.Eventually(t, func() bool { return strings.Contains(log.String(), want) }, logWait, 50*time.Millisecond) {
+		t.Fatalf("the log never said %q; it held:\n%s", want, log.String())
+	}
+}
+
+// V15-REL-1: a milestone's release is final for its run's keeper. In the
+// gap between the release's delete and its claim book's Released — made
+// here from another connection and book, as another process of the
+// checkout makes it — the keeper's renewal is refused, the book still says
+// claimed and nobody holds the key; the keeper took it again and kept the
+// closed milestone's lease. It now reads the store's record (a delete, not
+// a lapse) and stops. The control: a lapse is still taken again.
+func TestHoldMilestone_AReleaseIsNotTakenAgain(t *testing.T) {
+	shortLeasesTTL(t, lapseTTL, 250*time.Millisecond)
+	ctx := context.Background()
+	url := leaseCluster(t)
+	holder := func(t *testing.T, p *apexv1.Project, ms string) string {
+		t.Helper()
+		s, err := openMilestones(ctx, p)
+		require.NoError(t, err)
+		defer s.close()
+		h, _, err := s.store.Holder(ctx, s.key(ms))
+		require.NoError(t, err)
+		return h
+	}
+	t.Run("in-the-gap", func(t *testing.T) {
+		ann := checkout(t, url, "ann")
+		_, err := ClaimMilestone(ctx, ann, "M1")
+		require.NoError(t, err)
+		var log syncBuf
+		stop, err := HoldMilestone(ctx, ann, "M1", &log)
+		require.NoError(t, err)
+		defer stop()
+		// ReleaseMilestone's two steps, with the gap a stalled host opens.
+		s, err := openMilestones(ctx, ann)
+		require.NoError(t, err)
+		defer s.close()
+		key := s.key("M1")
+		cur, tok, err := s.store.Holder(ctx, key)
+		require.NoError(t, err)
+		require.Equal(t, s.holder, cur)
+		l := lease.Lease{Key: key, Holder: s.holder, Token: tok, TTL: MilestoneTTL}
+		require.NoError(t, s.store.Release(ctx, l))
+		time.Sleep(4 * MilestoneRenewEvery)
+		require.NoError(t, s.book.Record(key, l, lease.Released))
+
+		logSays(t, &log, "released by this checkout (the milestone closed)")
+		require.NotContains(t, log.String(), "taken again", "the released lease is not taken again")
+		time.Sleep(2 * MilestoneRenewEvery)
+		require.Empty(t, holder(t, ann, "M1"), "nobody holds the closed milestone's lease")
+	})
+	t.Run("control-a-lapse-is-taken-again", func(t *testing.T) {
+		// A trunk project is one person's (D876): a second checkout of ann's.
+		ann2 := checkout(t, url, "ann")
+		_, err := ClaimMilestone(ctx, ann2, "M2")
+		require.NoError(t, err)
+		var log syncBuf
+		stop, err := HoldMilestone(ctx, ann2, "M2", &log)
+		require.NoError(t, err)
+		defer stop()
+		s, err := openMilestones(ctx, ann2)
+		require.NoError(t, err)
+		defer s.close()
+		js, err := jetstream.New(s.nc)
+		require.NoError(t, err)
+		st, err := js.Stream(ctx, "KV_"+lease.LeasesBucket)
+		require.NoError(t, err)
+		require.NoError(t, st.Purge(ctx, jetstream.WithPurgeSubject("$KV."+lease.LeasesBucket+"."+s.key("M2"))))
+		logSays(t, &log, "was taken again")
+		require.Equal(t, s.holder, holder(t, ann2, "M2"), "this checkout holds it again")
+	})
 }
 
 // V8e (FINDING-V15-1C-3): a close that found another checkout's close in

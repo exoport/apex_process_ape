@@ -136,6 +136,47 @@ func (s *milestones) claimFresh(ctx context.Context, ms string) (lease.Lease, bo
 	return l, fresh, s.book.Record(key, l, lease.Held)
 }
 
+// errReleased: the store says ms's lease was released, whatever this
+// checkout's book says yet (V15-REL-1).
+var errReleased = errors.New("member: the milestone's lease was released")
+
+// reclaim is how this checkout takes back its own claim's lease — a run's
+// start, its keeper, a gate — when nobody holds the key (V15-REL-1): only
+// when the store's last record is a lapse, and by a compare-and-swap at
+// that record, so a release, or one written meanwhile, is never taken
+// over (errReleased; lease.ErrStale: read again). A live key is
+// claimFresh's: this checkout's own adopted, another's refused. The book
+// alone cannot tell: a release writes it after its delete, and in another
+// process.
+func (s *milestones) reclaim(ctx context.Context, ms string) (lease.Lease, bool, error) {
+	if err := s.ownTrunk(ctx); err != nil {
+		return lease.Lease{}, false, err
+	}
+	key := s.key(ms)
+	last, err := s.store.LastRecord(ctx, key)
+	switch {
+	case err != nil:
+		return lease.Lease{}, false, err
+	case last.Released:
+		return lease.Lease{}, false, errReleased
+	case last.Live:
+		return s.claimFresh(ctx, ms)
+	}
+	if reclaimSeam != nil {
+		reclaimSeam(key)
+	}
+	l, err := s.store.Reclaim(ctx, key, s.holder, MilestoneTTL, last)
+	if err != nil {
+		return lease.Lease{}, false, err
+	}
+	return l, true, s.book.Record(key, l, lease.Held)
+}
+
+// reclaimSeam, when set, runs between reclaim's read and its claim: a
+// test's way to land a release there (V15-REL-1, research's hole B). Nil
+// in ape.
+var reclaimSeam func(key string)
+
 // claimed reports whether this checkout's book holds ms (claimed and not
 // released since).
 func (s *milestones) claimed(ms string) (bool, error) {
@@ -286,11 +327,28 @@ func ReleaseMilestone(ctx context.Context, p *apexv1.Project, ms string) (held b
 		return false, err
 	}
 	l := lease.Lease{Key: key, Holder: s.holder, Token: tok, TTL: MilestoneTTL}
-	if cur == s.holder {
+	switch cur {
+	case s.holder:
 		if err := s.store.Release(ctx, l); err != nil {
 			return false, err
 		}
 		held = true
+	case "":
+		// It lapsed, and this checkout's claim stands: the release is still
+		// written to the store, a delete at the lapse's record, so a keeper
+		// or gate reads "released", not "lapsed" (V15-REL-1, research's
+		// hole A). Another member's claim since stands (ErrStale).
+		if ok, err := s.claimed(ms); err == nil && ok {
+			last, err := s.store.LastRecord(ctx, key)
+			if err != nil {
+				return false, err
+			}
+			if last.Lapsed() {
+				if err := s.store.ReleaseLapsed(ctx, key, last); err != nil && !errors.Is(err, lease.ErrStale) {
+					return false, err
+				}
+			}
+		}
 	}
 	return held, s.book.Record(key, l, lease.Released)
 }
@@ -323,7 +381,15 @@ func HoldMilestone(ctx context.Context, p *apexv1.Project, ms string, log io.Wri
 		}
 		if err == nil {
 			before, _, _ = s.book.Last(s.key(ms))
-			l, fresh, err = s.claimFresh(ctx, ms)
+			l, fresh, err = s.reclaim(ctx, ms)
+		}
+		if errors.Is(err, errReleased) {
+			s.close()
+			return false, notHolder(fmt.Sprintf("%s's lease was released by this checkout (the milestone closed, or `ape milestone release`): a milestone's loop runs on its claim — `ape milestone claim %s`, then start the loop again", ms, ms))
+		}
+		if errors.Is(err, lease.ErrStale) {
+			s.close()
+			return true, err // written between the read and the claim: read again
 		}
 		if err != nil {
 			s.close()
@@ -401,9 +467,23 @@ func (s *milestones) retake(ctx context.Context, ms string, stale error, log io.
 		fmt.Fprintf(log, "ape: the lease on %s was lost (%v) and %s holds it now: the run's next change new or start refuses\n", ms, stale, cur)
 		return nil, false
 	}
-	next, err := s.claim(ctx, ms)
+	var next lease.Lease
+	if cur == "" {
+		// Nobody holds it and the book still says claimed: a lapse is
+		// taken again, a release is not, whatever the book says yet
+		// (reclaim; V15-REL-1: the keeper re-took the lease of a milestone
+		// that was closing, between the release's delete and its book).
+		// Only this checkout's release deletes its milestone's key.
+		next, _, err = s.reclaim(ctx, ms)
+		if errors.Is(err, errReleased) {
+			fmt.Fprintf(log, "%s ape: the lease on %s was released by this checkout (the milestone closed): the run stops renewing it\n", time.Now().UTC().Format(time.RFC3339), ms)
+			return nil, false
+		}
+	} else {
+		next, err = s.claim(ctx, ms) // cur is this checkout: adopted
+	}
 	if err != nil {
-		return nil, true // taken by another between the read and the claim shows next tick
+		return nil, true // taken, or written, between the read and the claim: the next tick reads it again
 	}
 	if cur == "" {
 		fmt.Fprintf(log, "ape: the lease on %s lapsed (%v) and was taken again: this checkout's claim stands\n", ms, stale)
@@ -428,10 +508,14 @@ func requireMilestoneLease(ctx context.Context, p *apexv1.Project, op, ms string
 	if cur == s.holder {
 		return nil
 	}
-	// Lapsed between runs, and still this checkout's claim: taken again.
+	// Lapsed between runs, and still this checkout's claim: taken again,
+	// unless it was released (reclaim, V15-REL-1, research's hole C), which
+	// is refused below as a lease this checkout does not hold.
 	if ok, err := s.claimed(ms); cur == "" && err == nil && ok {
-		_, err := s.claim(ctx, ms)
-		return s.downErr(ms+"'s lease", err)
+		_, _, err := s.reclaim(ctx, ms)
+		if !errors.Is(err, errReleased) && !errors.Is(err, lease.ErrStale) {
+			return s.downErr(ms+"'s lease", err)
+		}
 	}
 	if cur == "" {
 		return notHolder(fmt.Sprintf("%s refused: this checkout holds no lease on %s (never claimed, released, or lapsed with no run renewing it) — `ape milestone claim %s`, then run its loop", op, ms, ms))
