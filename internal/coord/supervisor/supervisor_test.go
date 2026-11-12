@@ -49,11 +49,37 @@ func rig(t *testing.T) (url string, nc *nats.Conn, js jetstream.JetStream) {
 // proc is a coordinator run in-process on its own connection; Stop is a
 // kill: the connection drops, nothing is released.
 type proc struct {
-	cancel context.CancelFunc
-	nc     *nats.Conn
+	cancel  context.CancelFunc
+	nc      *nats.Conn
+	ens, id string
+	done    chan struct{} // Run returned
 }
 
-func (p *proc) Stop() { p.nc.Close(); p.cancel() }
+// Stop waits, at most startWait, until the coordinator is past its start
+// (Run returned, or its status answers with its id) before the kill:
+// nats.go v1.53.1's micro.AddService races a close of its connection
+// (its closed-handler iterates the handler map AddService is still
+// writing), which a replace right after a start met under -race
+// (RACE-RESTARTBUDGET). A real coordinator is a process, killed whole.
+func (p *proc) Stop() {
+	deadline := time.Now().Add(startWait)
+	for time.Now().Before(deadline) {
+		select {
+		case <-p.done:
+			deadline = time.Time{}
+			continue
+		default:
+		}
+		if m, err := p.nc.Request("ape.coord."+p.ens+".status", nil, 250*time.Millisecond); err == nil && strings.Contains(string(m.Data), `"id":"`+p.id+`"`) {
+			break
+		}
+	}
+	p.nc.Close()
+	p.cancel()
+}
+
+// startWait bounds proc.Stop's wait for a coordinator's start.
+const startWait = 5 * time.Second
 
 // procs are the coordinators the test supervisors started, newest last.
 var procs struct {
@@ -70,10 +96,11 @@ func starter(t *testing.T, url string, ids *atomic.Int32, opts ...nats.Option) S
 		}
 		id := fmt.Sprintf("coord-%d", ids.Add(1))
 		ctx, cancel := context.WithCancel(parent)
+		p := &proc{cancel: cancel, nc: nc, ens: ens, id: id, done: make(chan struct{})}
 		go func() {
+			defer close(p.done)
 			_ = coordinator.Run(ctx, nc, coordinator.Config{Ensemble: ens, ID: id, TTL: ttl, Renew: renew})
 		}()
-		p := &proc{cancel: cancel, nc: nc}
 		procs.Lock()
 		procs.list = append(procs.list, p)
 		procs.Unlock()
