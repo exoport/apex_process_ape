@@ -1,5 +1,74 @@
 # CHANGELOG
 
+## v1.5.0 (2026-11-12)
+
+APEX v1.5.0, on v1.4.5: **coordination**. Several people can work on one project, and one person
+on several projects as an ensemble, coordinated through NATS. A project with no `coordination:`
+block works as before (`solo`). The framework's v1.5.0 payload declares
+`min_ape_version: "1.5.0"`. Checked on Claude Code 2.1.316 (the 1.5 trial's stages and checks on
+this binary); the framework's v1.5.0 eval measures it with the payload. See
+[Coordination](docs/reference/coordination.md). What it adds:
+
+- **Integration modes.** `coordination.integration` in `_apex/config.yaml` picks how a project's
+  work reaches `main`. `trunk` runs several repositories with one person each (a second person is
+  refused with `coord.trunk-one-member`), and `ape` fetches `main` before it judges a change.
+  `queue` lets several people share one repository through GitHub's merge queue and a GitHub App
+  (`ape ghapp`), with nothing of `ape`'s running on GitHub. With `events: watch`, `ape ci watch`
+  tells a waiting close about its merge in about ten seconds. A block a 1.5 pre-release wrote
+  without a mode is refused (`coord.integration`) until `ape project integration-mode` writes it
+  (`queue` where the block has `github:`, else `trunk`); the framework's migration runs it during
+  `ape framework update`.
+- **The NATS layout and credentials.** `ape nats declare` creates or updates every bucket, stream
+  and object store the ensemble uses (`--replicas 3` on a three-node cluster). `ape nats mint`
+  makes an enforcing cluster's operator and accounts and mints a credential per kind, and
+  `ape nats replay` writes a checkout's own events back.
+- **Milestone leases.** `ape milestone claim` takes a milestone's lease and `ape milestone
+  release` gives it back. A loop renews its milestone's lease for its whole run, takes back a
+  lease that lapsed while NATS was away, and never takes back one that was released. A change on
+  a milestone this checkout does not hold is refused with `session.not-lease-holder`, at a change
+  boundary. `ape milestone close` releases the lease even while the milestone's loop still runs;
+  a close that merged but could not release it says so and names `ape milestone release`. In a
+  trunk project, `ape milestone owner --to <user> --by <who>` hands the project to another person.
+- **The coordinator and the supervisor.** `ape coordinator --ensemble <name>` holds the ensemble's
+  lease, serves its slots and status, and publishes its events. `ape supervisor` starts an
+  ensemble's coordinator and replaces it only when its lease is stale and its ping unanswered, at
+  most 3 times per ensemble in 15 minutes. Both ride out a NATS outage and say so once.
+- **The conductor.** `ape conductor attach --project <dir>…` delivers an ensemble's events into
+  the person's tmux pane, through the durable consumer `conductor_<user>_<ensemble>`, at least
+  once. It rides out a NATS outage and does not judge itself silent across one. A connection
+  closed for good ends the attach instead of riding it out; when the server refused its
+  credential (expired or revoked), with `coord.conductor-credential`, which names the re-mint.
+  Poll a conductor's durable no faster than every 100 ms while it attaches: in testing a tighter
+  poll made it fail.
+- **If you ran a 1.5 pre-release:** it named the conductor's durable `conductor-<user>-<ensemble>`.
+  Mint each person's credential again and replace `hot/ape-nats.creds` in each of their
+  checkouts: an attach on an old credential stops at once with `coord.conductor-credential`. The
+  first attach moves from the old durable after its acknowledged floor and deletes it; an old
+  durable left behind is safe for an admin to delete.
+- **The self-hosted runner mode is not in this release.** `queue/runner` would put a NATS
+  credential into GitHub, so `ape ci workflow` and the App's set-up acts that need it refuse with
+  `ci.runner-not-in-release` and write nothing. Use `events: watch` or `events: poll`.
+
+Known issues:
+
+- **`ape nats declare` can time out on its first try against a cluster that has only just
+  formed.** Each of its stream and bucket creates waits for nats.go's 5 s default, and a
+  three-node (R3) create on a slow or loaded host can take longer. The error reads
+  `declare <name>: context deadline exceeded`. Every create is a create-or-update, so running
+  `ape nats declare` again is safe and completes what the first try did not. A longer deadline on
+  the command is planned for 1.5.1 (V15-DECLARE-1).
+
+## v1.4.5 (2026-11-07)
+
+APEX v1.4.5, on v1.4.4: dependency updates only, for two Go vulnerability advisories published on
+2026-11-06. No code changed. The framework's `min_ape_version` stays 1.4.4. What it updates:
+
+- **github.com/klauspost/compress v1.19.2 → v1.20.2** (GO-2026-6865, a panic on two-block zstd
+  frames) and **github.com/andybalholm/brotli v1.2.1 → v1.2.7** (GO-2026-6888, excessive memory
+  when decompressing crafted streams). Neither is reachable in 1.4.4: ape compresses only its own
+  run transcripts, decompresses nothing in production, and its commit secret scan reads added
+  diff text, never an archive. The update keeps `govulncheck` clean for those who run it.
+
 ## v1.4.4 (2026-11-01)
 
 APEX v1.4.4, on v1.4.3: one fix found when an accepted config landed through a pull request (the
