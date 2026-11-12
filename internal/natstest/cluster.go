@@ -140,15 +140,6 @@ func (c *Cluster) waitPeers(n int, d time.Duration) {
 	}
 }
 
-func (c *Cluster) start(o *server.Options) *server.Server {
-	c.t.Helper()
-	s, err := c.startNode(o)
-	if err != nil {
-		c.t.Fatalf("%v", err)
-	}
-	return s
-}
-
 // startNode starts one node and waits until it accepts connections, at
 // most ReadyWait. The node logs into a fatalLog, so a port it could not
 // bind (errBind) ends the wait at once, with the server's own line,
@@ -223,12 +214,44 @@ func (c *Cluster) Stop(i int) {
 	stop(c.Servers[i])
 }
 
-// Restart starts server i again on its old options and store.
+// Restart starts server i again on its old options and store. A port it
+// cannot bind is tried again for up to restartBindWait: its ports are its
+// own (claimAcross), but one can still be held a moment after the node
+// that had it stopped (CI-5GREEN-4 on b4a54f8, a router port on Windows).
+// The error names the first refusal and the last.
 func (c *Cluster) Restart(i int) {
 	c.t.Helper()
-	o := c.opts[i].Clone()
-	c.Servers[i] = c.start(o)
+	deadline := time.Now().Add(restartBindWait)
+	var first error
+	for {
+		s, err := c.startNode(c.opts[i].Clone())
+		if err == nil {
+			if first != nil {
+				c.t.Logf("natstest: %s bound its ports again after %v", c.opts[i].ServerName, first)
+			}
+			c.Servers[i] = s
+			return
+		}
+		if !errors.Is(err, errBind) {
+			c.t.Fatalf("%v", err)
+		}
+		if first == nil {
+			first = err
+		}
+		if time.Now().After(deadline) {
+			c.t.Fatalf("natstest: %s could not bind its ports again in %v: first %v; last %v", c.opts[i].ServerName, restartBindWait, first, err)
+		}
+		time.Sleep(restartBindPoll)
+	}
 }
+
+// restartBindWait bounds Restart's tries on a port it could not bind,
+// well inside the outage drills' waits after the nodes are back (60 s);
+// restartBindPoll spaces them.
+const (
+	restartBindWait = 20 * time.Second
+	restartBindPoll = 250 * time.Millisecond
+)
 
 // Shutdown stops every server and waits until each has closed its store:
 // on Windows an open file cannot be removed, so the stores' removal would
@@ -294,7 +317,7 @@ func freePorts(t *testing.T, n int) []int {
 		if tries == 100*n {
 			t.Fatalf("natstest: no free port in %d-%d after %d tries", lo, hi-1, tries)
 		}
-		p := lo + rand.IntN(hi-lo) //nolint:gosec // a port, not a secret
+		p := pickPort(lo, hi)
 		if !claimPort(p) {
 			continue
 		}
@@ -306,6 +329,11 @@ func freePorts(t *testing.T, n int) []int {
 		ports = append(ports, p)
 	}
 	return ports
+}
+
+// pickPort is freePorts' draw from [lo, hi); a test replaces it.
+var pickPort = func(lo, hi int) int {
+	return lo + rand.IntN(hi-lo) //nolint:gosec // a port, not a secret
 }
 
 // portFloor is the lowest port freePorts picks: above the registered
@@ -333,7 +361,8 @@ func ephemeralLow() int {
 
 // claimed are the ports this process has handed out, never handed out
 // twice: a stopped node's ports are free while it is down, and a parallel
-// test must not pick them then.
+// test must not pick them then. claimAcross makes the same promise
+// between processes.
 var (
 	claimedMu sync.Mutex
 	claimed   = map[int]bool{}
@@ -342,7 +371,7 @@ var (
 func claimPort(p int) bool {
 	claimedMu.Lock()
 	defer claimedMu.Unlock()
-	if claimed[p] {
+	if claimed[p] || !claimAcross(p) {
 		return false
 	}
 	claimed[p] = true
