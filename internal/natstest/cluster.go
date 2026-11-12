@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -145,6 +146,7 @@ func (c *Cluster) waitPeers(n int, d time.Duration) {
 // bind (errBind) ends the wait at once, with the server's own line,
 // rather than after ReadyWait as "not ready".
 func (c *Cluster) startNode(o *server.Options) (*server.Server, error) {
+	nodeStarts.Add(1)
 	s, err := server.NewServer(o)
 	if err != nil {
 		return nil, fmt.Errorf("natstest: new cluster server %s: %w", o.ServerName, err)
@@ -214,40 +216,69 @@ func (c *Cluster) Stop(i int) {
 	stop(c.Servers[i])
 }
 
-// Restart starts server i again on its old options and store. A port it
-// cannot bind is tried again for up to restartBindWait: its ports are its
-// own (claimAcross), but one can still be held a moment after the node
-// that had it stopped (CI-5GREEN-4 on b4a54f8, a router port on Windows).
-// The error names the first refusal and the last.
+// Restart starts server i again on its old options and store. Its ports
+// are its own (claimAcross), but one can still be held a moment after the
+// node that had it stopped (CI-5GREEN-4 on b4a54f8, a router port on
+// Windows), so Restart first waits, up to restartBindWait, until both can
+// be bound, and only then starts the node: a start that fails to bind has
+// already opened the store, and on Windows its files stay locked after it
+// stops, so a second start on the same store is refused (CI-5GREEN-3 on
+// 5c98b25). A port taken in the instant between the look and the start
+// is waited out the same way, and the store lock that start leaves with
+// it. The error names the first refusal and the last.
 func (c *Cluster) Restart(i int) {
 	c.t.Helper()
+	o := c.opts[i]
 	deadline := time.Now().Add(restartBindWait)
 	var first error
+	bindLost := false
 	for {
-		s, err := c.startNode(c.opts[i].Clone())
+		err := portsFree(o.Port, o.Cluster.Port)
 		if err == nil {
-			if first != nil {
-				c.t.Logf("natstest: %s bound its ports again after %v", c.opts[i].ServerName, first)
+			var s *server.Server
+			if s, err = c.startNode(o.Clone()); err == nil {
+				if first != nil {
+					c.t.Logf("natstest: %s bound its ports again after %v", o.ServerName, first)
+				}
+				c.Servers[i] = s
+				return
 			}
-			c.Servers[i] = s
-			return
-		}
-		if !errors.Is(err, errBind) {
-			c.t.Fatalf("%v", err)
+			switch {
+			case errors.Is(err, errBind):
+				bindLost = true
+			case bindLost && strings.Contains(err.Error(), "Can't start JetStream"):
+				// the store lock of the start that lost its port
+			default:
+				c.t.Fatalf("%v", err)
+			}
 		}
 		if first == nil {
 			first = err
 		}
 		if time.Now().After(deadline) {
-			c.t.Fatalf("natstest: %s could not bind its ports again in %v: first %v; last %v", c.opts[i].ServerName, restartBindWait, first, err)
+			c.t.Fatalf("natstest: %s could not bind its ports again in %v: first %v; last %v", o.ServerName, restartBindWait, first, err)
 		}
 		time.Sleep(restartBindPoll)
 	}
 }
 
-// restartBindWait bounds Restart's tries on a port it could not bind,
-// well inside the outage drills' waits after the nodes are back (60 s);
-// restartBindPoll spaces them.
+// portsFree reports whether each port can be listened on now, closing
+// each listener again: Restart's look before a start.
+func portsFree(ports ...int) error {
+	var lc net.ListenConfig
+	for _, p := range ports {
+		l, err := lc.Listen(context.Background(), "tcp", "127.0.0.1:"+strconv.Itoa(p))
+		if err != nil {
+			return fmt.Errorf("%w: %w", errBind, err)
+		}
+		_ = l.Close()
+	}
+	return nil
+}
+
+// restartBindWait bounds Restart's wait for a node's ports, well inside
+// the outage drills' waits after the nodes are back (60 s);
+// restartBindPoll spaces the looks.
 const (
 	restartBindWait = 20 * time.Second
 	restartBindPoll = 250 * time.Millisecond
@@ -330,6 +361,10 @@ func freePorts(t *testing.T, n int) []int {
 	}
 	return ports
 }
+
+// nodeStarts counts startNode's server starts in this process, for a
+// test of how many a Restart took.
+var nodeStarts atomic.Int64
 
 // pickPort is freePorts' draw from [lo, hi); a test replaces it.
 var pickPort = func(lo, hi int) int {

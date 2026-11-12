@@ -78,7 +78,7 @@ func TestClaimAcross_AnotherProcessesPortIsNotPicked(t *testing.T) {
 
 // CI-5GREEN-4 on b4a54f8 (H2): Restart failed at once on a port it could
 // not bind. Now a port of its own held a moment after the node stopped is
-// tried again until the node binds it.
+// waited out before the node starts, and the node starts once.
 func TestRestart_RetriesAPortHeldAMoment(t *testing.T) {
 	c := RunCluster(t, 3)
 	route := c.opts[0].Cluster.Port
@@ -88,9 +88,12 @@ func TestRestart_RetriesAPortHeldAMoment(t *testing.T) {
 	require.NoError(t, err, "n1's route port, held as a closing socket would hold it")
 	const hold = 2 * time.Second
 	go func() { time.Sleep(hold); _ = held.Close() }()
-	start := time.Now()
+	start, starts := time.Now(), nodeStarts.Load()
 	c.Restart(0)
 	require.GreaterOrEqual(t, time.Since(start), hold-100*time.Millisecond, "it waited for the port, not around it")
+	// One start: a start that loses its port has opened the store, which
+	// Windows then keeps locked for the next (CI-5GREEN-3 on 5c98b25).
+	require.Equal(t, int64(1), nodeStarts.Load()-starts, "the node started once, after its ports were free")
 	require.True(t, c.Servers[0].Running())
 	require.Equal(t, route, c.opts[0].Cluster.Port, "on its own route port")
 	c.WaitMetaLeader(30 * time.Second)
