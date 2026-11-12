@@ -144,10 +144,9 @@ var errReleased = errors.New("member: the milestone's lease was released")
 // start, its keeper, a gate — when nobody holds the key (V15-REL-1): only
 // when the store's last record is a lapse, and by a compare-and-swap at
 // that record, so a release, or one written meanwhile, is never taken
-// over (errReleased; lease.ErrStale: read again). A live key is
-// claimFresh's: this checkout's own adopted, another's refused. The book
-// alone cannot tell: a release writes it after its delete, and in another
-// process.
+// over (errReleased; lease.ErrStale: read again). A live key is adopt's:
+// this checkout's own renewed, another's refused. The book alone cannot
+// tell: a release writes it after its delete, and in another process.
 func (s *milestones) reclaim(ctx context.Context, ms string) (lease.Lease, bool, error) {
 	if err := s.ownTrunk(ctx); err != nil {
 		return lease.Lease{}, false, err
@@ -160,7 +159,11 @@ func (s *milestones) reclaim(ctx context.Context, ms string) (lease.Lease, bool,
 	case last.Released:
 		return lease.Lease{}, false, errReleased
 	case last.Live:
-		return s.claimFresh(ctx, ms)
+		if liveSeam != nil {
+			liveSeam(key)
+		}
+		l, err := s.adopt(ctx, ms)
+		return l, false, err
 	}
 	if reclaimSeam != nil {
 		reclaimSeam(key)
@@ -172,10 +175,37 @@ func (s *milestones) reclaim(ctx context.Context, ms string) (lease.Lease, bool,
 	return l, true, s.book.Record(key, l, lease.Held)
 }
 
-// reclaimSeam, when set, runs between reclaim's read and its claim: a
-// test's way to land a release there (V15-REL-1, research's hole B). Nil
-// in ape.
-var reclaimSeam func(key string)
+// adopt keeps this checkout's own live key: renewed at the token it reads,
+// a compare-and-swap, never a create — nats.go's create writes again over
+// a delete, so a release landing after the read would be taken over
+// (V15-REL-1, research's hole D). Gone since the read is lease.ErrStale
+// (read again); held by another member is refused, naming the holder.
+func (s *milestones) adopt(ctx context.Context, ms string) (lease.Lease, error) {
+	key := s.key(ms)
+	cur, tok, err := s.store.Holder(ctx, key)
+	switch {
+	case err != nil:
+		return lease.Lease{}, err
+	case cur == "":
+		return lease.Lease{}, fmt.Errorf("%w: %s is not held", lease.ErrStale, key)
+	case cur != s.holder:
+		return lease.Lease{}, notHolder(fmt.Sprintf("%s is held by %s — a milestone has one holder; agree a handover with them, or claim another milestone", ms, cur))
+	}
+	l, err := s.store.Renew(ctx, lease.Lease{Key: key, Holder: s.holder, Token: tok, TTL: MilestoneTTL})
+	if err != nil {
+		return lease.Lease{}, err
+	}
+	return l, s.book.Record(key, l, lease.Held)
+}
+
+// The seams, when set, run where a test lands a write between a read and
+// the act on it (V15-REL-1): reclaimSeam between reclaim's read of a
+// lapse and its claim (research's hole B); liveSeam between its read of a
+// live key and adopt, retakeOwnSeam between retake's read of this
+// checkout's own key and adopt (hole D); releaseHeldSeam and
+// releaseLapsedSeam before ReleaseMilestone's delete of a held or a
+// lapsed lease (holes F and E). Nil in ape.
+var reclaimSeam, liveSeam, retakeOwnSeam, releaseHeldSeam, releaseLapsedSeam func(key string)
 
 // claimed reports whether this checkout's book holds ms (claimed and not
 // released since).
@@ -312,9 +342,19 @@ func ClaimMilestoneAdopt(ctx context.Context, p *apexv1.Project, ms string, adop
 	return c, err
 }
 
+// releaseTries bounds ReleaseMilestone's reads again after a write landed
+// between its read and its delete.
+const releaseTries = 10
+
 // ReleaseMilestone is `ape milestone release <M>`: the key is deleted at
 // its revision when this checkout still holds it, and the book marks M
 // released, so no later run takes it again without a new claim.
+//
+// A delete refused as stale is read again, at most releaseTries times
+// (V15-REL-1, research's holes E and F): the writer since can be one of
+// this checkout's own keepers — a close inside a loop's run has two —
+// renewing, or re-taking a lapse, and the release must still land.
+// Another member's claim since stands.
 func ReleaseMilestone(ctx context.Context, p *apexv1.Project, ms string) (held bool, err error) {
 	s, err := openMilestones(ctx, p, nats.NoReconnect())
 	if err != nil {
@@ -322,32 +362,48 @@ func ReleaseMilestone(ctx context.Context, p *apexv1.Project, ms string) (held b
 	}
 	defer s.close()
 	key := s.key(ms)
-	cur, tok, err := s.store.Holder(ctx, key)
-	if err != nil {
-		return false, err
-	}
-	l := lease.Lease{Key: key, Holder: s.holder, Token: tok, TTL: MilestoneTTL}
-	switch cur {
-	case s.holder:
-		if err := s.store.Release(ctx, l); err != nil {
+	var l lease.Lease
+	for try := 1; ; try++ {
+		cur, tok, err := s.store.Holder(ctx, key)
+		if err != nil {
 			return false, err
 		}
-		held = true
-	case "":
-		// It lapsed, and this checkout's claim stands: the release is still
-		// written to the store, a delete at the lapse's record, so a keeper
-		// or gate reads "released", not "lapsed" (V15-REL-1, research's
-		// hole A). Another member's claim since stands (ErrStale).
-		if ok, err := s.claimed(ms); err == nil && ok {
-			last, err := s.store.LastRecord(ctx, key)
-			if err != nil {
-				return false, err
+		l = lease.Lease{Key: key, Holder: s.holder, Token: tok, TTL: MilestoneTTL}
+		var werr error
+		switch cur {
+		case s.holder:
+			if releaseHeldSeam != nil {
+				releaseHeldSeam(key)
 			}
-			if last.Lapsed() {
-				if err := s.store.ReleaseLapsed(ctx, key, last); err != nil && !errors.Is(err, lease.ErrStale) {
+			if werr = s.store.Release(ctx, l); werr == nil {
+				held = true
+			}
+		case "":
+			// It lapsed, and this checkout's claim stands: the release is
+			// still written to the store, a delete at the lapse's record, so
+			// a keeper or gate reads "released", not "lapsed" (research's
+			// hole A). A live record since the read is read again.
+			if ok, err := s.claimed(ms); err == nil && ok {
+				last, err := s.store.LastRecord(ctx, key)
+				if err != nil {
 					return false, err
 				}
+				switch {
+				case last.Lapsed():
+					if releaseLapsedSeam != nil {
+						releaseLapsedSeam(key)
+					}
+					werr = s.store.ReleaseLapsed(ctx, key, last)
+				case last.Live:
+					werr = fmt.Errorf("%w: %s was claimed since it was read", lease.ErrStale, key)
+				}
 			}
+		}
+		if werr == nil {
+			break
+		}
+		if !errors.Is(werr, lease.ErrStale) || try >= releaseTries {
+			return false, werr
 		}
 	}
 	return held, s.book.Record(key, l, lease.Released)
@@ -480,7 +536,14 @@ func (s *milestones) retake(ctx context.Context, ms string, stale error, log io.
 			return nil, false
 		}
 	} else {
-		next, err = s.claim(ctx, ms) // cur is this checkout: adopted
+		if retakeOwnSeam != nil {
+			retakeOwnSeam(s.key(ms))
+		}
+		// cur is this checkout: adopted by a compare-and-swap, so a
+		// release since the read is not taken over (research's hole D).
+		if err = s.ownTrunk(ctx); err == nil {
+			next, err = s.adopt(ctx, ms)
+		}
 	}
 	if err != nil {
 		return nil, true // taken, or written, between the read and the claim: the next tick reads it again

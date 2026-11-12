@@ -802,9 +802,20 @@ func awaitClosePR(ctx context.Context, p *apexv1.Project, id string, opt apexv1.
 		}
 	}
 	if err == nil && g != nil && g.Integration != nil && g.Integration.State == apexv1.IntegrationMerged {
-		_, _ = member.ReleaseMilestone(context.WithoutCancel(ctx), p, id)
+		_, rerr := member.ReleaseMilestone(context.WithoutCancel(ctx), p, id)
+		closeReleaseNote(os.Stderr, id, rerr)
 	}
 	return g, err
+}
+
+// closeReleaseNote says a merged close whose lease release failed, so the
+// lease a run may still renew is not left unsaid (V15-REL-1, research's
+// hole F). A project in no ensemble has no lease to release.
+func closeReleaseNote(w io.Writer, id string, err error) {
+	if err == nil || errors.Is(err, member.ErrNotMember) {
+		return
+	}
+	fmt.Fprintf(w, "ape: %s closed, but its lease could not be released (%v): release it with `ape milestone release %s`\n", id, err, id)
 }
 
 func newDecisionCmd() *cobra.Command {
