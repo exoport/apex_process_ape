@@ -418,7 +418,10 @@ reason: nats.go closes one when the server refuses the same credential twice, so
 the attach with `coord.conductor-credential` rather than leaving it riding out an outage that never ends
 (V8D-CLOSED-1). On a first attach, the durable records where it
 starts (the stream's last sequence + 1) in its own metadata, `ape.start-seq`. A durable lost before its first
-acknowledgement is then bound again from there, not from sequence 1 (V12-13).
+acknowledgement is then bound again from there, not from sequence 1 (V12-13). Do not poll a conductor's durable
+while an attach runs. In testing, a tight (≈ 50 ms) `nats consumer info` loop on it made the attach lose the reply to
+its create of the durable, and fail (FINDING-V12-13-1). ape now tries a create that times out up to 5 times, 1 s
+apart, but that case was not measured again; watch the durable at 100 ms or slower, if at all.
 Only the holder of `conductor.<user>.<ens>` binds it, so a conductor that takes the lease over inherits the events the
 last one left unacknowledged, and its acknowledgements are what renews the lease. A durable deleted while a conductor
 runs (after V12-3 only the operator's credential or a rebuild can delete it) is bound again, logged
