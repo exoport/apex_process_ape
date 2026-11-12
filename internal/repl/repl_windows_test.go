@@ -32,17 +32,25 @@ func TestSessionLifecycle_Windows(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = KillSession(t.Context(), name) })
 
-	// Give the pump time to drain cmd.exe's stdout. cmd.exe's banner
-	// + the echoed line render quickly but ConPTY has some buffering;
-	// 500ms is generous.
-	time.Sleep(500 * time.Millisecond)
-
-	pane, err := CapturePane(t.Context(), name)
-	if err != nil {
-		t.Fatalf("CapturePane on Windows: %v", err)
-	}
-	if !strings.Contains(pane, sentinel) {
-		t.Fatalf("expected %q in pane, got:\n%s", sentinel, pane)
+	// Wait for the pump to have drained cmd.exe's output. A fixed 500 ms
+	// was not enough on a loaded runner: the pane was still empty at
+	// 0.54 s, cmd.exe not yet started (V8-WIN-5, CI-5GREEN-4 on 744f355),
+	// so the capture is polled, bounded, and a red shows the last pane.
+	var pane string
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		var err error
+		pane, err = CapturePane(t.Context(), name)
+		if err != nil {
+			t.Fatalf("CapturePane on Windows: %v", err)
+		}
+		if strings.Contains(pane, sentinel) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected %q in pane within 20 s, got:\n%s", sentinel, pane)
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 
 	if err := KillSession(t.Context(), name); err != nil {
