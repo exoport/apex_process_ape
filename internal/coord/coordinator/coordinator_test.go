@@ -150,7 +150,12 @@ func TestCoordinator_RidesOutANATSOutage(t *testing.T) {
 					logMu.Unlock()
 				}
 			})
-			rctx, stop := context.WithCancel(ctx)
+			// The coordinator runs with no deadline, as `ape coordinator`
+			// does, so each of its JetStream calls gets nats.go's own 5 s
+			// timeout. Under the rig's 240 s one, a renewal whose ack the
+			// restart lost waited out the rest of it holding c.mu, and status
+			// never answered (CI-5GREEN-2 on 4d597e0, Windows).
+			rctx, stop := context.WithCancel(context.Background())
 			defer stop()
 			done := make(chan error, 1)
 			go func() { done <- Run(rctx, nc, cfg) }()
