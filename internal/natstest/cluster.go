@@ -147,6 +147,11 @@ func (c *Cluster) waitPeers(n int, d time.Duration) {
 // rather than after ReadyWait as "not ready".
 func (c *Cluster) startNode(o *server.Options) (*server.Server, error) {
 	nodeStarts.Add(1)
+	if f := testStartErr.Load(); f != nil {
+		if err := (*f)(o.ServerName); err != nil {
+			return nil, err
+		}
+	}
 	s, err := server.NewServer(o)
 	if err != nil {
 		return nil, fmt.Errorf("natstest: new cluster server %s: %w", o.ServerName, err)
@@ -224,31 +229,29 @@ func (c *Cluster) Stop(i int) {
 // already opened the store, and on Windows its files stay locked after it
 // stops, so a second start on the same store is refused (CI-5GREEN-3 on
 // 5c98b25). A port taken in the instant between the look and the start
-// is waited out the same way, and the store lock that start leaves with
-// it. The error names the first refusal and the last.
+// is waited out the same way. So is JetStream's refusal of a store whose
+// files are still in use, on any start: on Windows the stopped node itself
+// can still hold them (V8-WIN-4's lock, CI-5GREEN-2 on 9b13533). How long
+// a restart waited is logged. The error names the first refusal and the
+// last.
 func (c *Cluster) Restart(i int) {
 	c.t.Helper()
 	o := c.opts[i]
 	deadline := time.Now().Add(restartBindWait)
 	var first error
-	bindLost := false
+	began := time.Now()
 	for {
 		err := portsFree(o.Port, o.Cluster.Port)
 		if err == nil {
 			var s *server.Server
 			if s, err = c.startNode(o.Clone()); err == nil {
 				if first != nil {
-					c.t.Logf("natstest: %s bound its ports again after %v", o.ServerName, first)
+					c.t.Logf("natstest: %s started again after %v (first refusal: %v)", o.ServerName, time.Since(began).Round(time.Millisecond), first)
 				}
 				c.Servers[i] = s
 				return
 			}
-			switch {
-			case errors.Is(err, errBind):
-				bindLost = true
-			case bindLost && strings.Contains(err.Error(), "Can't start JetStream"):
-				// the store lock of the start that lost its port
-			default:
+			if !errors.Is(err, errBind) && !storeInUse(err) {
 				c.t.Fatalf("%v", err)
 			}
 		}
@@ -260,6 +263,12 @@ func (c *Cluster) Restart(i int) {
 		}
 		time.Sleep(restartBindPoll)
 	}
+}
+
+// storeInUse is JetStream refusing to start on a store whose files are
+// still held open (on Windows, "Access is denied" on its own rename).
+func storeInUse(err error) bool {
+	return strings.Contains(err.Error(), "Can't start JetStream")
 }
 
 // portsFree reports whether each port can be listened on now, closing
@@ -365,6 +374,10 @@ func freePorts(t *testing.T, n int) []int {
 // nodeStarts counts startNode's server starts in this process, for a
 // test of how many a Restart took.
 var nodeStarts atomic.Int64
+
+// testStartErr, when set, can fail a start before the server is made: a
+// test's stand-in for a refusal only Windows produces. Nil otherwise.
+var testStartErr atomic.Pointer[func(name string) error]
 
 // pickPort is freePorts' draw from [lo, hi); a test replaces it.
 var pickPort = func(lo, hi int) int {

@@ -3,6 +3,7 @@ package natstest
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"net"
 	"os"
 	"os/exec"
@@ -96,5 +97,30 @@ func TestRestart_RetriesAPortHeldAMoment(t *testing.T) {
 	require.Equal(t, int64(1), nodeStarts.Load()-starts, "the node started once, after its ports were free")
 	require.True(t, c.Servers[0].Running())
 	require.Equal(t, route, c.opts[0].Cluster.Port, "on its own route port")
+	c.WaitMetaLeader(30 * time.Second)
+}
+
+// CI-5GREEN-2 on 9b13533: a restart whose ports were free still failed,
+// on JetStream's rename of a store the stopped node itself still held
+// (Windows). Now that refusal is waited out on any start, and the node
+// comes back. The seam stands in for the Windows lock.
+func TestRestart_WaitsOutAStoreStillInUse(t *testing.T) {
+	c := RunCluster(t, 3)
+	c.Stop(0)
+	refused := 0
+	f := func(name string) error {
+		if name != "n1" || refused == 2 {
+			return nil
+		}
+		refused++
+		return fmt.Errorf("natstest: cluster server %s: Can't start JetStream: rename …\\msgs …\\__msgs__: Access is denied", name)
+	}
+	testStartErr.Store(&f)
+	t.Cleanup(func() { testStartErr.Store(nil) })
+	starts := nodeStarts.Load()
+	c.Restart(0)
+	require.Equal(t, 2, refused, "both refusals were waited out")
+	require.Equal(t, int64(3), nodeStarts.Load()-starts, "two refused starts, then the one that came up")
+	require.True(t, c.Servers[0].Running())
 	c.WaitMetaLeader(30 * time.Second)
 }
