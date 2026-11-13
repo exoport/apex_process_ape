@@ -76,6 +76,7 @@ func TestAttach_DeliversThroughTheGate(t *testing.T) {
 	require.NoError(t, events.Declare(ctx, js, 1))
 	ls, err := lease.Open(ctx, js)
 	require.NoError(t, err)
+	natstest.WaitKV(t, js, lease.MetaBucket)
 	require.NoError(t, ls.SetEpoch(ctx, 1))
 
 	pane := &lockedPane{screen: busyScreen, conductor: true, session: "conductor-1"}

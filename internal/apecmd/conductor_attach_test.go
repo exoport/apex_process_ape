@@ -45,6 +45,7 @@ func TestConductorAttach_RunsAsTheCredentialsUser(t *testing.T) {
 	require.NoError(t, events.Declare(ctx, ajs, 1))
 	ls, err := lease.Open(ctx, ajs)
 	require.NoError(t, err)
+	natstest.WaitKV(t, ajs, lease.MetaBucket)
 	require.NoError(t, ls.SetEpoch(ctx, 1))
 
 	root := v1Repo(t)
@@ -112,6 +113,7 @@ func TestConductorAttach_RunsAsTheCredentialsUser(t *testing.T) {
 	require.NoError(t, events.Declare(ctx, ujs, 1))
 	uls, err := lease.Open(ctx, ujs)
 	require.NoError(t, err)
+	natstest.WaitKV(t, ujs, lease.MetaBucket)
 	require.NoError(t, uls.SetEpoch(ctx, 1))
 	require.NoError(t, os.WriteFile(apexv1.ConfigPath(root), append(cfg, []byte(strings.Replace(block, e.URL, url, 1))...), 0o644))
 	anon, _ := natstest.MintStandaloneCreds(t, "")

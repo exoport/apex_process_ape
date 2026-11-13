@@ -125,6 +125,7 @@ func rig(t *testing.T) (string, *nats.Conn, jetstream.JetStream) {
 	require.NoError(t, events.Declare(ctx, js, 1))
 	ls, err := lease.Open(ctx, js)
 	require.NoError(t, err)
+	natstest.WaitKV(t, js, lease.MetaBucket)
 	require.NoError(t, ls.SetEpoch(ctx, 1))
 	return url, nc, js
 }
@@ -339,6 +340,7 @@ func TestRun_ReleasesTheLeaseOnABindError(t *testing.T) {
 	require.NoError(t, lease.Declare(ctx, js, 1))
 	ls, err := lease.Open(ctx, js)
 	require.NoError(t, err)
+	natstest.WaitKV(t, js, lease.MetaBucket)
 	require.NoError(t, ls.SetEpoch(ctx, 1))
 	cfg := scaled("ann", "cond-a", &fakeSession{nc: nc, acked: map[string]bool{}})
 	cfg.LeaseTTL = time.Minute
@@ -420,6 +422,7 @@ func outageRig(t *testing.T) (*natstest.Cluster, jetstream.JetStream) {
 	require.NoError(t, events.Declare(ctx, js, 3))
 	ls, err := lease.Open(ctx, js)
 	require.NoError(t, err)
+	natstest.WaitKV(t, js, lease.MetaBucket)
 	require.NoError(t, ls.SetEpoch(ctx, 1))
 	return c, js
 }
@@ -2067,6 +2070,7 @@ func TestRun_ACredentialRefusedDuringTheAttachEndsItNamingTheCredential(t *testi
 			require.NoError(t, events.Declare(ctx, js, 1))
 			ls, err := lease.Open(ctx, js)
 			require.NoError(t, err)
+			natstest.WaitKV(t, js, lease.MetaBucket)
 			require.NoError(t, ls.SetEpoch(ctx, 1))
 
 			var expires time.Time

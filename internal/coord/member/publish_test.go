@@ -90,6 +90,7 @@ func TestGate_PausedMilestone(t *testing.T) {
 	require.NoError(t, lease.Declare(ctx, js, 1))
 	ls, err := lease.Open(ctx, js)
 	require.NoError(t, err)
+	natstest.WaitKV(t, js, lease.MetaBucket)
 	require.NoError(t, ls.SetEpoch(ctx, 1))
 	for _, ms := range []string{"M2", "M3"} {
 		_, err = ClaimMilestone(ctx, p, ms)

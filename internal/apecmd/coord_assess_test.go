@@ -444,6 +444,7 @@ func TestAssessor_ReplayAfterAPublishRunsNoSession(t *testing.T) {
 	require.NoError(t, rebuild.Declare(ctx, js, 1))
 	ls, err := lease.Open(ctx, js)
 	require.NoError(t, err)
+	natstest.WaitKV(t, js, lease.MetaBucket)
 	require.NoError(t, ls.SetEpoch(ctx, 1))
 	holds := func(id string) func() bool {
 		return func() bool { h, _, err := ls.Holder(ctx, "coord.ens"); return err == nil && h == id }

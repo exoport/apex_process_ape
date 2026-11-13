@@ -102,6 +102,7 @@ func noticeRig(t *testing.T) (*nats.Conn, jetstream.JetStream, *lease.Store) {
 	require.NoError(t, events.Declare(ctx, js, 1))
 	ls, err := lease.Open(ctx, js)
 	require.NoError(t, err)
+	natstest.WaitKV(t, js, lease.MetaBucket)
 	require.NoError(t, ls.SetEpoch(ctx, 1))
 	return nc, js, ls
 }

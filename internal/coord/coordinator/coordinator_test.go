@@ -38,6 +38,7 @@ func TestCoordinator_PublishesTheOutageOnReconnect(t *testing.T) {
 	require.NoError(t, events.Declare(ctx, js, 3))
 	ls, err := lease.Open(ctx, js)
 	require.NoError(t, err)
+	natstest.WaitKV(t, js, lease.MetaBucket)
 	require.NoError(t, ls.SetEpoch(ctx, 1))
 
 	// No deadline, as ape coordinator: under the rig's, a call whose reply
@@ -114,6 +115,7 @@ func TestCoordinator_RidesOutANATSOutage(t *testing.T) {
 			require.NoError(t, events.Declare(ctx, js, 3))
 			ls, err := lease.Open(ctx, js)
 			require.NoError(t, err)
+			natstest.WaitKV(t, js, lease.MetaBucket)
 			require.NoError(t, ls.SetEpoch(ctx, 1))
 
 			var logMu sync.Mutex
@@ -250,6 +252,7 @@ func TestCoordinator_SaysAReconnectThatNoCallFailed(t *testing.T) {
 	require.NoError(t, events.Declare(ctx, js, 1))
 	ls, err := lease.Open(ctx, js)
 	require.NoError(t, err)
+	natstest.WaitKV(t, js, lease.MetaBucket)
 	require.NoError(t, ls.SetEpoch(ctx, 1))
 	var logMu sync.Mutex
 	var logged []string
@@ -356,6 +359,7 @@ func TestCoordinator_EndsOnAClosedConnection(t *testing.T) {
 	require.NoError(t, events.Declare(ctx, js, 1))
 	ls, err := lease.Open(ctx, js)
 	require.NoError(t, err)
+	natstest.WaitKV(t, js, lease.MetaBucket)
 	require.NoError(t, ls.SetEpoch(ctx, 1))
 
 	cnc, err := nats.Connect(url)

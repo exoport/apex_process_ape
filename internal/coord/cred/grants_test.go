@@ -115,6 +115,7 @@ func TestGrants_TheEnsembleUnderItsOwnAllowLists(t *testing.T) {
 	require.NoError(t, events.Declare(ctx, ajs, 1))
 	als, err := lease.Open(ctx, ajs)
 	require.NoError(t, err)
+	natstest.WaitKV(t, ajs, lease.MetaBucket)
 	require.NoError(t, als.SetEpoch(ctx, 1))
 	var seenMu sync.Mutex
 	var seen []string
@@ -357,6 +358,7 @@ func TestGrants_V12_3_AnotherPersonsDurable(t *testing.T) {
 	require.NoError(t, events.Declare(ctx, ajs, 1))
 	als, err := lease.Open(ctx, ajs)
 	require.NoError(t, err)
+	natstest.WaitKV(t, ajs, lease.MetaBucket)
 	require.NoError(t, als.SetEpoch(ctx, 1))
 	durable := layout.ConductorConsumer("ann", "atomix")
 
@@ -510,6 +512,7 @@ func TestGrants_V12_10_2_TheMoveDeletesTheLegacyDurableOnItsCredential(t *testin
 	require.NoError(t, events.Declare(ctx, ajs, 1))
 	als, err := lease.Open(ctx, ajs)
 	require.NoError(t, err)
+	natstest.WaitKV(t, ajs, lease.MetaBucket)
 	require.NoError(t, als.SetEpoch(ctx, 1))
 	old := layout.LegacyConductorConsumer("ann", "atomix")
 	lc, err := ajs.CreateConsumer(ctx, events.EventsStream, jetstream.ConsumerConfig{Durable: old, FilterSubjects: conductor.Filters("atomix", []string{"taskforge"}), AckPolicy: jetstream.AckExplicitPolicy, AckWait: time.Minute})
@@ -571,6 +574,7 @@ func TestGrants_OBS_2D_2_AnAttachOnAPre15CredentialSaysToMintItAgain(t *testing.
 	require.NoError(t, events.Declare(ctx, ajs, 1))
 	als, err := lease.Open(ctx, ajs)
 	require.NoError(t, err)
+	natstest.WaitKV(t, ajs, lease.MetaBucket)
 	require.NoError(t, als.SetEpoch(ctx, 1))
 	durable, old := layout.ConductorConsumer("ann", "atomix"), layout.LegacyConductorConsumer("ann", "atomix")
 	g := cred.MemberGrant("ann", "taskforge", "atomix")
@@ -625,6 +629,7 @@ func TestGrants_AMemberReadsWhetherItsLeaseWasReleased(t *testing.T) {
 	require.NoError(t, lease.Declare(ctx, ajs, 1))
 	als, err := lease.Open(ctx, ajs)
 	require.NoError(t, err)
+	natstest.WaitKV(t, ajs, lease.MetaBucket)
 	require.NoError(t, als.SetEpoch(ctx, 1))
 
 	ann := connect(t, e.URL, e.Mint(t, "ann", perms(cred.MemberGrant("ann", "taskforge", "atomix"))))

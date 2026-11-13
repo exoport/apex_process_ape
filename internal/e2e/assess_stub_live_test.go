@@ -24,6 +24,7 @@ import (
 	"github.com/exoport/apex_process_ape/internal/coord/lease"
 	"github.com/exoport/apex_process_ape/internal/coord/member"
 	"github.com/exoport/apex_process_ape/internal/coord/rebuild"
+	"github.com/exoport/apex_process_ape/internal/natstest"
 )
 
 // fakeClaudeStubAssessor is fakeClaude as PLAN §4's stub assessor: after
@@ -217,6 +218,7 @@ func TestLive_AssessorStubCheck(t *testing.T) {
 	require.Eventually(t, func() bool { return rebuild.Declare(ctx, js, 3) == nil }, time.Minute, time.Second)
 	ls, err := lease.Open(ctx, js)
 	require.NoError(t, err)
+	natstest.WaitKV(t, js, lease.MetaBucket)
 	if ep, err := ls.Epoch(ctx); err != nil || ep == 0 {
 		require.NoError(t, ls.SetEpoch(ctx, 1))
 	}

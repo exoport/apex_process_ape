@@ -81,6 +81,7 @@ func TestCoordinator_BatchesItsProjectsTriggers(t *testing.T) {
 	require.NoError(t, events.Declare(ctx, js, 1))
 	ls, err := lease.Open(ctx, js)
 	require.NoError(t, err)
+	natstest.WaitKV(t, js, lease.MetaBucket)
 	require.NoError(t, ls.SetEpoch(ctx, 1))
 	got := make(chan Batch, 8)
 	rctx, stop := context.WithCancel(ctx)

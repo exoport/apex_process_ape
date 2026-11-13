@@ -63,6 +63,7 @@ func TestFixture_ScratchCoordinated(t *testing.T) {
 	}, 2*time.Minute, time.Second)
 	ls, err := lease.Open(ctx, js)
 	require.NoError(t, err)
+	natstest.WaitKV(t, js, lease.MetaBucket)
 	if ep, err := ls.Epoch(ctx); err != nil || ep == 0 {
 		require.NoError(t, ls.SetEpoch(ctx, 1))
 	}

@@ -41,6 +41,7 @@ func TestMilestoneClaim_CLI(t *testing.T) {
 	require.NoError(t, lease.Declare(ctx, js, 1))
 	ls, err := lease.Open(ctx, js)
 	require.NoError(t, err)
+	natstest.WaitKV(t, js, lease.MetaBucket)
 	require.NoError(t, ls.SetEpoch(ctx, 1))
 
 	cfg, err := os.ReadFile(apexv1.ConfigPath(root))
@@ -99,6 +100,7 @@ func TestMilestoneTakeIn_CLI(t *testing.T) {
 	require.NoError(t, lease.Declare(ctx, js, 1))
 	ls, err := lease.Open(ctx, js)
 	require.NoError(t, err)
+	natstest.WaitKV(t, js, lease.MetaBucket)
 	require.NoError(t, ls.SetEpoch(ctx, 1))
 
 	v1Git(t, root, "branch", "-M", "main")
@@ -178,6 +180,7 @@ func TestCoordinatedArchiveAndCloseNeedTheLease(t *testing.T) {
 	require.NoError(t, lease.Declare(ctx, js, 1))
 	ls, err := lease.Open(ctx, js)
 	require.NoError(t, err)
+	natstest.WaitKV(t, js, lease.MetaBucket)
 	require.NoError(t, ls.SetEpoch(ctx, 1))
 	cfg, err := os.ReadFile(apexv1.ConfigPath(root))
 	require.NoError(t, err)
@@ -230,6 +233,7 @@ func TestMilestoneClose_HoldsTheLeaseWhileItsGateRuns(t *testing.T) {
 	require.NoError(t, lease.Declare(ctx, js, 1))
 	ls, err := lease.Open(ctx, js)
 	require.NoError(t, err)
+	natstest.WaitKV(t, js, lease.MetaBucket)
 	require.NoError(t, ls.SetEpoch(ctx, 1))
 	checkoutOf := func(user string, slowGate bool) string {
 		root := v1Repo(t)
@@ -316,6 +320,7 @@ func TestMilestoneClose_WaitZeroRefusesABusyCloseAtOnce(t *testing.T) {
 	require.NoError(t, lease.Declare(ctx, js, 1))
 	ls, err := lease.Open(ctx, js)
 	require.NoError(t, err)
+	natstest.WaitKV(t, js, lease.MetaBucket)
 	require.NoError(t, ls.SetEpoch(ctx, 1))
 	cfg, err := os.ReadFile(apexv1.ConfigPath(root))
 	require.NoError(t, err)

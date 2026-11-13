@@ -36,6 +36,7 @@ func leaseCluster(t *testing.T) string {
 	require.NoError(t, lease.Declare(ctx, js, 1))
 	s, err := lease.Open(ctx, js)
 	require.NoError(t, err)
+	natstest.WaitKV(t, js, lease.MetaBucket)
 	require.NoError(t, s.SetEpoch(ctx, 1))
 	return url
 }

@@ -42,6 +42,7 @@ func rig(t *testing.T) (url string, nc *nats.Conn, js jetstream.JetStream) {
 	require.NoError(t, events.Declare(ctx, js, 1))
 	ls, err := lease.Open(ctx, js)
 	require.NoError(t, err)
+	natstest.WaitKV(t, js, lease.MetaBucket)
 	require.NoError(t, ls.SetEpoch(ctx, 1))
 	return url, nc, js
 }
@@ -337,6 +338,7 @@ func TestDrill_SupervisorRidesOutANATSOutage(t *testing.T) {
 	require.NoError(t, events.Declare(dctx, js, 3))
 	ls, err := lease.Open(dctx, js)
 	require.NoError(t, err)
+	natstest.WaitKV(t, js, lease.MetaBucket)
 	require.NoError(t, ls.SetEpoch(dctx, 1))
 
 	snc, err := nats.Connect(url, nats.MaxReconnects(-1), nats.ReconnectWait(200*time.Millisecond))
@@ -453,6 +455,7 @@ func TestDrill_ServiceAnswersEveryRequestAfterAnOutage(t *testing.T) {
 	require.NoError(t, lease.Declare(dctx, js, 3))
 	ls, err := lease.Open(dctx, js)
 	require.NoError(t, err)
+	natstest.WaitKV(t, js, lease.MetaBucket)
 	require.NoError(t, ls.SetEpoch(dctx, 1))
 
 	sctx, cancel := context.WithCancel(context.Background())

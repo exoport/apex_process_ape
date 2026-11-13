@@ -39,6 +39,7 @@ func enforcedCluster(t *testing.T) (*natstest.Enforced, jetstream.JetStream) {
 	require.NoError(t, events.Declare(ctx, js, 1))
 	s, err := lease.Open(ctx, js)
 	require.NoError(t, err)
+	natstest.WaitKV(t, js, lease.MetaBucket)
 	require.NoError(t, s.SetEpoch(ctx, 1))
 	return e, js
 }

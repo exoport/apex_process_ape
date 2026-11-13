@@ -37,6 +37,7 @@ func gateRig(t *testing.T) (*apexv1.Project, *natstest.Cluster, jetstream.JetStr
 	require.NoError(t, lease.Declare(ctx, js, 1))
 	ls, err := lease.Open(ctx, js)
 	require.NoError(t, err)
+	natstest.WaitKV(t, js, lease.MetaBucket)
 	require.NoError(t, ls.SetEpoch(ctx, 1))
 	p := project(t, strings.Replace(block, "nats://127.0.0.1:4222", c.URLs(), 1), false)
 	creds, _ := natstest.MintStandaloneCreds(t, "dana")

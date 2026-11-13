@@ -25,6 +25,7 @@ func store(t *testing.T, urls string, replicas int) *Store {
 	require.NoError(t, Declare(ctx, js, replicas), "declaring again is a no-op")
 	s, err := Open(ctx, js)
 	require.NoError(t, err)
+	natstest.WaitKV(t, js, MetaBucket)
 	_, err = s.Epoch(ctx)
 	require.ErrorIs(t, err, ErrNoEpoch)
 	require.NoError(t, s.SetEpoch(ctx, 1))
@@ -233,6 +234,7 @@ func TestReleased_TellsAReleaseFromALapse(t *testing.T) {
 			require.NoError(t, Declare(ctx, js, n))
 			s, err := Open(ctx, js)
 			require.NoError(t, err)
+			natstest.WaitKV(t, js, MetaBucket)
 			require.NoError(t, s.SetEpoch(ctx, 1))
 			other := open() // a second process of the same checkout
 
