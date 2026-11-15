@@ -258,10 +258,16 @@ var afterHeldCopy func()
 // fence checks the coordinator's current lease. A renew between the copy
 // and the check moves the key's revision (S5-1): then the lease it holds
 // now is checked once more, so the coordinator never fences out its own
-// publish; a lease another coordinator took stays refused.
+// publish; a lease another coordinator took stays refused. Each read of
+// the lease waits for a renewal under way to be written back (renewMu,
+// COORD-MU-R1), so a copy is never a token the store has moved past; the
+// checks themselves, network calls, hold no lock, so a renewal never waits
+// behind a slow fence (COORD-MU-R2: it could outlast the lease's TTL).
 func (p publisher) fence(ctx context.Context) error {
 	c := p.c
 	held := func() lease.Lease {
+		c.renewMu.Lock()
+		defer c.renewMu.Unlock()
 		c.mu.Lock()
 		defer c.mu.Unlock()
 		return c.held

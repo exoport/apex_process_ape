@@ -93,8 +93,22 @@ type Coordinator struct {
 	leases *lease.Store
 	slots  *slots.Store
 
-	mu   sync.Mutex
-	held lease.Lease
+	// mu guards held, which status and the notices' fence read while a
+	// tick renews it. Only Run's loop (keep) writes it, so keep reads it
+	// once and holds mu only to write it back (V15-COORD-MU-1: holding it
+	// across the tick's calls kept status waiting behind a slow renewal).
+	// renewMu is held by keep for a whole tick, from before its renewal
+	// until the lease is written back, and by the notices' fence around
+	// each read of held (then mu), never across its checks: between a
+	// renewal landing in the store and keep writing it back, held is a
+	// token the store has already moved past, and a fence checking it
+	// would fence out the coordinator's own publish (COORD-MU-R1, S5-1);
+	// a renewal waiting behind a fence's network calls could outlast the
+	// TTL (COORD-MU-R2). Lock order renewMu, then mu. status takes mu
+	// only, and never waits for it.
+	mu      sync.Mutex
+	renewMu sync.Mutex
+	held    lease.Lease
 	// down: coord.<ens> could not be kept at the last tick (said once);
 	// reconnects is the connection's count.
 	down       bool
@@ -197,15 +211,24 @@ func Run(ctx context.Context, nc *nats.Conn, cfg Config) error {
 // a connection closed for good: nothing comes back on it, and a
 // coordinator riding it out would run on holding nothing.
 func (c *Coordinator) keep(ctx context.Context, ls *lease.Store) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	if c.nc.IsClosed() {
 		return fmt.Errorf("coordinator: lost coord.%s: its NATS connection is closed", c.cfg.Ensemble)
 	}
 	key := layout.CoordKey(c.cfg.Ensemble)
-	l, err := ls.Renew(ctx, c.held)
+	c.renewMu.Lock()
+	defer c.renewMu.Unlock()
+	c.mu.Lock()
+	held := c.held
+	c.mu.Unlock()
+	if testKeepHook != nil {
+		testKeepHook()
+	}
+	l, err := ls.Renew(ctx, held)
+	if testAfterRenew != nil {
+		testAfterRenew(c)
+	}
 	if err == nil {
-		c.held = l
+		c.setHeld(l)
 		c.reachable()
 		return nil
 	}
@@ -226,7 +249,7 @@ func (c *Coordinator) keep(ctx context.Context, ls *lease.Store) error {
 			c.unreachable(err)
 			return nil
 		}
-		c.held = l
+		c.setHeld(l)
 		c.reachable()
 		return nil
 	case cur == "":
@@ -238,13 +261,29 @@ func (c *Coordinator) keep(ctx context.Context, ls *lease.Store) error {
 			c.unreachable(err)
 			return nil
 		}
-		c.held = l
+		c.setHeld(l)
 		c.reachable()
 		c.logf("coordinator: coord.%s had lapsed during the outage; claimed again\n", c.cfg.Ensemble)
 		return nil
 	}
 	return fmt.Errorf("coordinator: lost coord.%s: %s holds it now", c.cfg.Ensemble, cur)
 }
+
+// setHeld is keep's write of the lease it now holds.
+func (c *Coordinator) setHeld(l lease.Lease) {
+	c.mu.Lock()
+	c.held = l
+	c.mu.Unlock()
+}
+
+// testKeepHook, when set, runs in keep after its read of the lease and
+// before its renewal: a test's slow renewal. testAfterRenew runs once the
+// renewal has returned and before the lease is written back: a test's
+// look into that window. Nil in ape.
+var (
+	testKeepHook   func()
+	testAfterRenew func(*Coordinator)
+)
 
 // observe is the connection's own word on an outage, before a tick's
 // calls (V8-WIN-5, as the conductor's V8d): a request made while NATS is
