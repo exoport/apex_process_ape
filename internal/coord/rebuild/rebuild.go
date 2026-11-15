@@ -49,25 +49,38 @@ var (
 )
 
 // Declare re-declares every bucket, stream and Object Store of the layout,
-// idempotently (§4.4 step 1).
+// idempotently (§4.4 step 1). Each create is a step of its own under
+// Retry, so a just-started cluster's slow first answers are waited out
+// (V15-DECLARE-1).
 func Declare(ctx context.Context, js jetstream.JetStream, replicas int) error {
-	if err := lease.Declare(ctx, js, replicas); err != nil {
-		return err
+	type step struct {
+		what string
+		do   func(ctx context.Context) error
 	}
-	if err := slots.Declare(ctx, js, replicas); err != nil {
-		return err
-	}
-	if err := events.Declare(ctx, js, replicas); err != nil {
-		return err
+	steps := []step{
+		{"lease: declare", func(ctx context.Context) error { return lease.Declare(ctx, js, replicas) }},
+		{"slots: declare", func(ctx context.Context) error { return slots.Declare(ctx, js, replicas) }},
+		{"events: declare", func(ctx context.Context) error { return events.Declare(ctx, js, replicas) }},
 	}
 	for _, b := range kvBuckets {
-		if _, err := js.CreateOrUpdateKeyValue(ctx, jetstream.KeyValueConfig{Bucket: b, Replicas: replicas, History: 1}); err != nil {
-			return fmt.Errorf("rebuild: declare %s: %w", b, err)
-		}
+		steps = append(steps, step{"rebuild: declare " + b, func(ctx context.Context) error {
+			if _, err := js.CreateOrUpdateKeyValue(ctx, jetstream.KeyValueConfig{Bucket: b, Replicas: replicas, History: 1}); err != nil {
+				return fmt.Errorf("rebuild: declare %s: %w", b, err)
+			}
+			return nil
+		}})
 	}
 	for _, o := range objStores {
-		if _, err := js.CreateOrUpdateObjectStore(ctx, jetstream.ObjectStoreConfig{Bucket: o, Replicas: replicas, Compression: false}); err != nil {
-			return fmt.Errorf("rebuild: declare %s: %w", o, err)
+		steps = append(steps, step{"rebuild: declare " + o, func(ctx context.Context) error {
+			if _, err := js.CreateOrUpdateObjectStore(ctx, jetstream.ObjectStoreConfig{Bucket: o, Replicas: replicas, Compression: false}); err != nil {
+				return fmt.Errorf("rebuild: declare %s: %w", o, err)
+			}
+			return nil
+		}})
+	}
+	for _, st := range steps {
+		if err := Retry(ctx, st.what, st.do); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -112,26 +125,62 @@ func NewEpoch(ctx context.Context, js jetstream.JetStream, ls *lease.Store, loca
 	if err != nil {
 		return 0, err
 	}
-	if cur, err := ls.Epoch(ctx); err == nil && cur > last {
-		last = cur
+	// The cluster's epoch, read straight after the creates: a read the
+	// cluster did not answer was taken as "none", so the next epoch could
+	// be at or below the cluster's (V15-DECLARE-1, D924). Only an absent
+	// epoch is none now.
+	var cur uint64
+	if err := Retry(ctx, "rebuild: read the epoch", func(ctx context.Context) error {
+		var err error
+		cur, err = readEpoch(ctx, ls)
+		if errors.Is(err, lease.ErrNoEpoch) {
+			cur, err = 0, nil
+		}
+		return err
+	}); err != nil {
+		return 0, err
 	}
+	last = max(last, cur)
 	next := last + 1
-	if err := ls.SetEpoch(ctx, next); err != nil {
+	// A write whose answer was lost may have landed: then the epoch reads
+	// next, and is not written again. A read not answered is the step's
+	// error, tried again, never a write: SetEpoch's own read could be
+	// answered, find next, and refuse to stand still (DECLARE-R1).
+	if err := Retry(ctx, "rebuild: write the epoch", func(ctx context.Context) error {
+		e, err := readEpoch(ctx, ls)
+		switch {
+		case err == nil && e == next:
+			return nil
+		case err != nil && !errors.Is(err, lease.ErrNoEpoch):
+			return err
+		}
+		return writeEpoch(ctx, ls, next)
+	}); err != nil {
 		return 0, err
 	}
 	if err := local.write(next); err != nil {
 		return 0, err
 	}
-	meta, err := js.KeyValue(ctx, lease.MetaBucket)
-	if err != nil {
-		return 0, err
-	}
 	until := time.Now().Add(window).UTC().Format(time.RFC3339Nano)
-	if _, err := meta.Put(ctx, windowKey(next), []byte(until)); err != nil {
+	if err := Retry(ctx, "rebuild: open the re-claim window", func(ctx context.Context) error {
+		meta, err := js.KeyValue(ctx, lease.MetaBucket)
+		if err != nil {
+			return err
+		}
+		_, err = meta.Put(ctx, windowKey(next), []byte(until))
+		return err
+	}); err != nil {
 		return 0, err
 	}
 	return next, nil
 }
+
+// readEpoch and writeEpoch are NewEpoch's read and write of the cluster's
+// epoch; a test's seams.
+var (
+	readEpoch  = func(ctx context.Context, ls *lease.Store) (uint64, error) { return ls.Epoch(ctx) }
+	writeEpoch = func(ctx context.Context, ls *lease.Store, e uint64) error { return ls.SetEpoch(ctx, e) }
+)
 
 // Reclaim re-claims one lease for holder after a rebuild (§4.4 step 4): it
 // bids its last-known token from the previous epoch, waits for the window

@@ -1,6 +1,7 @@
 package apecmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -41,7 +42,12 @@ func newNatsDeclareCmd() *cobra.Command {
 what is missing and leaving what exists (§4.4 step 1). With --new-epoch, also write the
 epoch after the higher of --epoch-file (the supervisor's local copy) and the cluster's,
 to both, and open the re-claim window for --window: leases are re-claimed by the
-highest revision of the previous epoch until it closes.`,
+highest revision of the previous epoch until it closes.
+
+A just-started cluster answers its first creates slowly: a step it does not answer in
+15 s (a timeout, no responders, JetStream not ready yet) is tried again every 2 s, for
+at most 90 s in all. A refusal (a permission, JetStream not enabled, --replicas above
+the cluster's size) is not.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if newEpoch && epochFile == "" {
@@ -64,8 +70,14 @@ highest revision of the previous epoch until it closes.`,
 			if !newEpoch {
 				return nil
 			}
-			ls, err := lease.Open(ctx, js)
-			if err != nil {
+			// The binds read the buckets just created: waited out as the
+			// creates are (V15-DECLARE-1).
+			var ls *lease.Store
+			if err := rebuild.Retry(ctx, "lease: open", func(ctx context.Context) error {
+				var err error
+				ls, err = lease.Open(ctx, js)
+				return err
+			}); err != nil {
 				return err
 			}
 			e, err := rebuild.NewEpoch(ctx, js, ls, rebuild.EpochFile(epochFile), window)
