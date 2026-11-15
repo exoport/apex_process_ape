@@ -198,3 +198,17 @@ func TestBaseCheckedOutElsewhere(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "main", CurrentBranch(ctx(), p.Root))
 }
+
+// V15-MIG-BASE-TEXT: on a change branch whose change records no base (here
+// a change/<id> made by hand), the refusal read `git switch the base
+// branch`. It names the base when the state has one (above), and otherwise
+// says to switch to it, with <base> where a name would go.
+func TestRefuseOnChangeBranch_NoRecordedBase(t *testing.T) {
+	p := fixture(t, baseFiles())
+	run(t, p.Root, "switch", "-q", "-c", "change/by-hand")
+
+	err := p.refuseOnChangeBranch(ctx(), "the integration mode")
+	require.Equal(t, CodeChangeBranch, failCode(t, err))
+	require.EqualError(t, err, "the integration mode is recorded on the base branch, and HEAD is on change/by-hand"+
+		" — switch to the base branch (`git switch <base>`) and run it again")
+}

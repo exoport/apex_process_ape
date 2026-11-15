@@ -141,12 +141,15 @@ func (p *Project) refuseOnChangeBranch(ctx context.Context, what string) error {
 	if id == "" {
 		return nil
 	}
-	base := "the base branch"
+	// A branch named change/<id> with no state of its own (made by hand,
+	// or a fixture's) records no base: say what to do rather than put a
+	// phrase where the branch's name goes (V15-MIG-BASE-TEXT).
+	todo := "switch to the base branch (`git switch <base>`)"
 	if st, err := LoadState(p.StateFile(id)); err == nil && st.BaseBranch != "" {
-		base = st.BaseBranch
+		todo = "`git switch " + st.BaseBranch + "`"
 	}
 	return &FailError{Code: CodeChangeBranch, Msg: what + " is recorded on the base branch, and HEAD is on " + ChangeBranch(id) +
-		" — `git switch " + base + "` and run it again"}
+		" — " + todo + " and run it again"}
 }
 
 // requireCleanTree refuses when anything is uncommitted (ignored files
