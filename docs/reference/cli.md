@@ -1679,8 +1679,12 @@ run.busy (exit 3, action retry; the message names the running verb and since whe
 whose process is gone (killed, the machine restarted) is removed and reported as
 run.interrupted (exit 1, action retry) — never an attempt. A run stopped by SIGTERM/SIGINT
 kills its checks and records nothing — no attempt, no state commit, no gate run — and
-reports run.interrupted. No check outlives the worker. Never run these with
-run_in_background, and never end a turn on an exit 75: run the same command again.
+reports run.interrupted. No check outlives the worker. `ape run status <scope>` shows a
+run (scope: the change id or M<n>), `ape status` lists the live ones, and
+`ape run stop <scope>` stops one (SIGTERM to its worker: run.interrupted; a close past its
+fence only with --force). Stopping a loop does not stop the runs its session started: stop
+each by its scope. Never run these with run_in_background, and never end a turn on an exit
+75: run the same command again.
 Beside the exit codes above: 75 still running · 3 run.busy · 1 run.interrupted · 2 a
 --wait outside 0–9m30s (usage.wait).
 
@@ -2159,8 +2163,12 @@ run.busy (exit 3, action retry; the message names the running verb and since whe
 whose process is gone (killed, the machine restarted) is removed and reported as
 run.interrupted (exit 1, action retry) — never an attempt. A run stopped by SIGTERM/SIGINT
 kills its checks and records nothing — no attempt, no state commit, no gate run — and
-reports run.interrupted. No check outlives the worker. Never run these with
-run_in_background, and never end a turn on an exit 75: run the same command again.
+reports run.interrupted. No check outlives the worker. `ape run status <scope>` shows a
+run (scope: the change id or M<n>), `ape status` lists the live ones, and
+`ape run stop <scope>` stops one (SIGTERM to its worker: run.interrupted; a close past its
+fence only with --force). Stopping a loop does not stop the runs its session started: stop
+each by its scope. Never run these with run_in_background, and never end a turn on an exit
+75: run the same command again.
 Beside the exit codes above: 75 still running · 3 run.busy · 1 run.interrupted · 2 a
 --wait outside 0–9m30s (usage.wait).
 
@@ -2413,8 +2421,12 @@ run.busy (exit 3, action retry; the message names the running verb and since whe
 whose process is gone (killed, the machine restarted) is removed and reported as
 run.interrupted (exit 1, action retry) — never an attempt. A run stopped by SIGTERM/SIGINT
 kills its checks and records nothing — no attempt, no state commit, no gate run — and
-reports run.interrupted. No check outlives the worker. Never run these with
-run_in_background, and never end a turn on an exit 75: run the same command again.
+reports run.interrupted. No check outlives the worker. `ape run status <scope>` shows a
+run (scope: the change id or M<n>), `ape status` lists the live ones, and
+`ape run stop <scope>` stops one (SIGTERM to its worker: run.interrupted; a close past its
+fence only with --force). Stopping a loop does not stop the runs its session started: stop
+each by its scope. Never run these with run_in_background, and never end a turn on an exit
+75: run the same command again.
 Beside the exit codes above: 75 still running · 3 run.busy · 1 run.interrupted · 2 a
 --wait outside 0–9m30s (usage.wait).
 
@@ -5330,8 +5342,12 @@ run.busy (exit 3, action retry; the message names the running verb and since whe
 whose process is gone (killed, the machine restarted) is removed and reported as
 run.interrupted (exit 1, action retry) — never an attempt. A run stopped by SIGTERM/SIGINT
 kills its checks and records nothing — no attempt, no state commit, no gate run — and
-reports run.interrupted. No check outlives the worker. Never run these with
-run_in_background, and never end a turn on an exit 75: run the same command again.
+reports run.interrupted. No check outlives the worker. `ape run status <scope>` shows a
+run (scope: the change id or M<n>), `ape status` lists the live ones, and
+`ape run stop <scope>` stops one (SIGTERM to its worker: run.interrupted; a close past its
+fence only with --force). Stopping a loop does not stop the runs its session started: stop
+each by its scope. Never run these with run_in_background, and never end a turn on an exit
+75: run the same command again.
 Beside the exit codes above: 75 still running · 3 run.busy · 1 run.interrupted · 2 a
 --wait outside 0–9m30s (usage.wait).
 
@@ -5515,8 +5531,12 @@ run.busy (exit 3, action retry; the message names the running verb and since whe
 whose process is gone (killed, the machine restarted) is removed and reported as
 run.interrupted (exit 1, action retry) — never an attempt. A run stopped by SIGTERM/SIGINT
 kills its checks and records nothing — no attempt, no state commit, no gate run — and
-reports run.interrupted. No check outlives the worker. Never run these with
-run_in_background, and never end a turn on an exit 75: run the same command again.
+reports run.interrupted. No check outlives the worker. `ape run status <scope>` shows a
+run (scope: the change id or M<n>), `ape status` lists the live ones, and
+`ape run stop <scope>` stops one (SIGTERM to its worker: run.interrupted; a close past its
+fence only with --force). Stopping a loop does not stop the runs its session started: stop
+each by its scope. Never run these with run_in_background, and never end a turn on an exit
+75: run the same command again.
 Beside the exit codes above: 75 still running · 3 run.busy · 1 run.interrupted · 2 a
 --wait outside 0–9m30s (usage.wait).
 
@@ -5589,8 +5609,12 @@ run.busy (exit 3, action retry; the message names the running verb and since whe
 whose process is gone (killed, the machine restarted) is removed and reported as
 run.interrupted (exit 1, action retry) — never an attempt. A run stopped by SIGTERM/SIGINT
 kills its checks and records nothing — no attempt, no state commit, no gate run — and
-reports run.interrupted. No check outlives the worker. Never run these with
-run_in_background, and never end a turn on an exit 75: run the same command again.
+reports run.interrupted. No check outlives the worker. `ape run status <scope>` shows a
+run (scope: the change id or M<n>), `ape status` lists the live ones, and
+`ape run stop <scope>` stops one (SIGTERM to its worker: run.interrupted; a close past its
+fence only with --force). Stopping a loop does not stop the runs its session started: stop
+each by its scope. Never run these with run_in_background, and never end a turn on an exit
+75: run the same command again.
 Beside the exit codes above: 75 still running · 3 run.busy · 1 run.interrupted · 2 a
 --wait outside 0–9m30s (usage.wait).
 
@@ -5725,8 +5749,12 @@ run.busy (exit 3, action retry; the message names the running verb and since whe
 whose process is gone (killed, the machine restarted) is removed and reported as
 run.interrupted (exit 1, action retry) — never an attempt. A run stopped by SIGTERM/SIGINT
 kills its checks and records nothing — no attempt, no state commit, no gate run — and
-reports run.interrupted. No check outlives the worker. Never run these with
-run_in_background, and never end a turn on an exit 75: run the same command again.
+reports run.interrupted. No check outlives the worker. `ape run status <scope>` shows a
+run (scope: the change id or M<n>), `ape status` lists the live ones, and
+`ape run stop <scope>` stops one (SIGTERM to its worker: run.interrupted; a close past its
+fence only with --force). Stopping a loop does not stop the runs its session started: stop
+each by its scope. Never run these with run_in_background, and never end a turn on an exit
+75: run the same command again.
 Beside the exit codes above: 75 still running · 3 run.busy · 1 run.interrupted · 2 a
 --wait outside 0–9m30s (usage.wait).
 
@@ -5804,8 +5832,12 @@ run.busy (exit 3, action retry; the message names the running verb and since whe
 whose process is gone (killed, the machine restarted) is removed and reported as
 run.interrupted (exit 1, action retry) — never an attempt. A run stopped by SIGTERM/SIGINT
 kills its checks and records nothing — no attempt, no state commit, no gate run — and
-reports run.interrupted. No check outlives the worker. Never run these with
-run_in_background, and never end a turn on an exit 75: run the same command again.
+reports run.interrupted. No check outlives the worker. `ape run status <scope>` shows a
+run (scope: the change id or M<n>), `ape status` lists the live ones, and
+`ape run stop <scope>` stops one (SIGTERM to its worker: run.interrupted; a close past its
+fence only with --force). Stopping a loop does not stop the runs its session started: stop
+each by its scope. Never run these with run_in_background, and never end a turn on an exit
+75: run the same command again.
 Beside the exit codes above: 75 still running · 3 run.busy · 1 run.interrupted · 2 a
 --wait outside 0–9m30s (usage.wait).
 
@@ -6056,8 +6088,12 @@ run.busy (exit 3, action retry; the message names the running verb and since whe
 whose process is gone (killed, the machine restarted) is removed and reported as
 run.interrupted (exit 1, action retry) — never an attempt. A run stopped by SIGTERM/SIGINT
 kills its checks and records nothing — no attempt, no state commit, no gate run — and
-reports run.interrupted. No check outlives the worker. Never run these with
-run_in_background, and never end a turn on an exit 75: run the same command again.
+reports run.interrupted. No check outlives the worker. `ape run status <scope>` shows a
+run (scope: the change id or M<n>), `ape status` lists the live ones, and
+`ape run stop <scope>` stops one (SIGTERM to its worker: run.interrupted; a close past its
+fence only with --force). Stopping a loop does not stop the runs its session started: stop
+each by its scope. Never run these with run_in_background, and never end a turn on an exit
+75: run the same command again.
 Beside the exit codes above: 75 still running · 3 run.busy · 1 run.interrupted · 2 a
 --wait outside 0–9m30s (usage.wait).
 
@@ -8295,32 +8331,50 @@ a tool's time limit on that shell does not reach it.
 
 The ape change and ape milestone verbs that take --wait detach on their
 own and have no id here: run the same command again to attach (see their
---help, "Detached runs").
+--help, "Detached runs"). Their run is named by its scope — the change
+id, M<n>, or take-in-M<n> — for ape run status and ape run stop.
 
-  ape run wait <id>     wait for it; exit with the run's own exit code
-                        (75: --wait/--timeout expired, wait again; 76:
-                        its supervisor is gone without recording an exit)
-  ape run status <id>   show its handle: command, pids, stdout and log
-                        files, and the exit code once it has ended
-  ape run stop <id>     stop it (gracefully on Linux/macOS, hard on
-                        Windows) and wait for its exit to be recorded
+  ape run wait <id>       wait for it; exit with the run's own exit code
+                          (75: --wait/--timeout expired, wait again; 76:
+                          its supervisor is gone without recording an exit)
+  ape run status <id>     show its handle: command, pids, stdout and log
+                          files, and the exit code once it has ended
+  ape run status <scope>  show a long run's lock: verb, pid, since, log,
+                          alive; its result once it has ended
+  ape run stop <id>       stop it (gracefully on Linux/macOS, hard on
+                          Windows) and wait for its exit to be recorded
+  ape run stop <scope>    stop a long run's worker (SIGTERM: run.interrupted,
+                          nothing recorded) and wait for its lock to go
+
+Stopping a loop's run (ape run stop <id>) does not stop the long runs its
+session started: they run in their own sessions by design, and outlive it.
+Stop each by its scope.
 
 Subcommands:
 
-- `status` — Show a detached run's handle
-- `stop` — Stop a detached run and wait for its exit to be recorded
+- `status` — Show a detached run's handle, or a long run's lock
+- `stop` — Stop a detached run, or a long run, and wait for its exit to be recorded
 - `wait` — Wait for a detached run and exit with its exit code
 
 ## ape run status
 
-Show a detached run's handle
+Show a detached run's handle, or a long run's lock
 
 ```
-ape run status <id> [flags]
+ape run status <id|scope> [flags]
 ```
 
 Show a detached run's handle, with its state: running, "ended, exit N", or
 "gone without recording an exit".
+
+Given a long run's scope instead (a change id, M<n>, take-in-M<n>: the run
+of ape change start|verify|archive, ape milestone gate|close|approve|take-in),
+it prints that run's lock — {id, state, verb, scope, pid, since, log,
+alive, exit_code} — with state running (alive: the lock's pid
+is still that run's worker, `ape __run <id> …`), lost (the lock's process
+is gone, or its pid is another process's now) or, once the lock is
+released, ended with the result it recorded (exit_code, ended). A detached
+run's id is looked up first.
 
 --json prints the object `ape run wait --json` does instead — id, state
 (running, held, ended or lost; held_until while held), exit_code, log, stdout, run_id, run_dir, depth,
@@ -8336,10 +8390,10 @@ Flags:
 
 ## ape run stop
 
-Stop a detached run and wait for its exit to be recorded
+Stop a detached run, or a long run, and wait for its exit to be recorded
 
 ```
-ape run stop <id> [flags]
+ape run stop <id|scope> [flags]
 ```
 
 Stop a run started with --detach, then wait (up to --timeout) for its exit to
@@ -8364,11 +8418,31 @@ reports that); 75 if it has not ended within --timeout, or its process could
 not be checked; 76 if its supervisor is gone or the pid is no longer the
 run's (seen twice, a second apart); 0 at once if it had already ended.
 
+A long run (V15-2D-STOP-1) is stopped by its scope — the change id, M<n> or
+take-in-M<n> — when no detached run has that id. ape checks, immediately
+before, that the run lock's pid is still that run's worker (its start time
+is the lock's pid_start, and on Linux/macOS its command line is
+`ape __run <run-id> …`), sends it SIGTERM — it stops its checks and records nothing:
+no attempt, no state commit, no gate run (run.interrupted) — and waits up to
+--timeout for it to release its lock. It exits with the run's recorded
+exit: 1 (run.interrupted) for a run it stopped, or what a run that ended
+first recorded (that result is printed, and the next call of its verb runs
+again); 76 when the worker ended without recording a result (always on
+Windows, where the stop is a hard kill); 75 as above. A pid that is not
+the worker is refused as above, and a lock whose process is gone is
+removed. A coordinated ape milestone close whose log already has a fence
+line — past its take-in and push of milestone/<M>, or at its close PR's
+enqueue — is refused (exit 3, nothing signalled) unless --force: stopping
+it there can leave milestone/<M> pushed and its close PR open and queued.
+Stopping a loop's run does not stop the long runs its session started; stop
+those by their scope.
+
 Flags:
 
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
 | `--cwd` | string | `—` | Project root directory (default: current working dir) |
+| `--force` | bool | `false` | Stop a long run's `milestone close` even past its fence (a pushed branch or an open, queued PR may be left) |
 | `--timeout` | duration | `30s` | How long to wait for the run to end after asking it to stop |
 
 ## ape run wait
@@ -9818,6 +9892,12 @@ Show where the project stands, from the records ape keeps:
     run it relays; the brief says "context 12 % (relay at 60 %), relays 0/5". A
     session whose launch ape's usage guard holds on the 5-hour window (W4) carries
     held_until (", held: 5-hour window, launches <ts>")
+  - JSON "runs": the long runs in flight (V15-2D-STOP-1) — the detached workers of change
+    start|verify|archive, milestone gate|close|approve and take-in — as [{verb, scope,
+    command, pid, since, log}], oldest first, [] when none; "Running long runs:" in the
+    long output. A lock whose process is gone, or whose pid another process has now, is
+    not listed. `ape run status <scope>` shows one and `ape run stop <scope>` stops it;
+    stopping a loop does not stop the long runs its session started
 
 --brief renders at most 25 lines (what the SessionStart hook injects).
 

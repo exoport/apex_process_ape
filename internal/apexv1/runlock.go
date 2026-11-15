@@ -396,15 +396,62 @@ func (p *Project) LoadRunResult(scope string) *RunResult {
 // root: work in progress, which `ape task`'s idle backstop counts as
 // progress (D58 2.3).
 func AnyRunLive(root string) bool {
-	p := &Project{Root: root}
+	return len((&Project{Root: root}).liveRunLocks()) > 0
+}
+
+// liveRunLocks are the project's run locks whose process still runs
+// (Alive: its pid, and the same process), by scope.
+func (p *Project) liveRunLocks() []*RunLock {
 	paths, _ := filepath.Glob(filepath.Join(p.RunsDir(), "*.json"))
+	var out []*RunLock
 	for _, path := range paths {
 		if strings.HasSuffix(path, ".result.json") {
 			continue
 		}
 		if l := p.LoadRunLock(strings.TrimSuffix(filepath.Base(path), ".json")); l != nil && l.Alive() {
-			return true
+			out = append(out, l)
 		}
 	}
-	return false
+	return out
+}
+
+// LiveRun is a long run in flight, as `ape status` lists it (V15-2D-STOP-1).
+type LiveRun struct {
+	Verb  string `json:"verb"`
+	Scope string `json:"scope"`
+	// Command is the run's command as typed (RunLock.Command).
+	Command string `json:"command"`
+	PID     int    `json:"pid"`
+	Since   string `json:"since"`
+	Log     string `json:"log"`
+}
+
+// LiveRuns are the long runs in flight in the project, oldest first: a
+// lock whose process is gone, or whose pid another process has now, is
+// not one (and is left for the next long verb to report).
+func (p *Project) LiveRuns() []LiveRun {
+	locks := p.liveRunLocks()
+	out := make([]LiveRun, 0, len(locks))
+	for _, l := range locks {
+		out = append(out, LiveRun{Verb: l.Verb, Scope: l.Scope, Command: strings.Trim(l.Command(), "`"), PID: l.PID, Since: l.Started, Log: l.Log})
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Since < out[j].Since })
+	return out
+}
+
+// RunFenceLines are the fence lines (member's "ape: fence: …", D732)
+// run l's log holds so far: a close that wrote one has reached its
+// take-in and push of milestone/<M>, or its close PR's enqueue.
+func (p *Project) RunFenceLines(l *RunLock) []string {
+	data, err := os.ReadFile(filepath.Join(p.Root, filepath.FromSlash(l.Log)))
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for line := range strings.SplitSeq(string(data), "\n") {
+		if strings.Contains(line, " ape: fence: ") {
+			out = append(out, line)
+		}
+	}
+	return out
 }

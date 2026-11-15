@@ -160,6 +160,38 @@ The lock gives two answers:
 
 A `--wait` outside 0 to 9m30s is a usage error, `usage.wait` (exit 2).
 
+### See and stop a long run
+
+A long run's worker runs in its own session, so killing the call, the shell
+or the session that started it stops nothing. Name the run by its scope —
+the change id, `M<n>`, or `take-in-M<n>` for `ape milestone take-in`:
+
+- `ape status` lists the long runs in flight under "Running long runs" (JSON
+  `runs`: `verb`, `scope`, `command`, `pid`, `since`, `log`). A lock whose
+  process is gone, or whose pid another process has now, is not listed.
+- `ape run status <scope>` prints the run's lock — `state` (running or
+  lost), `verb`, `pid`, `since`, `log`, `alive` — and, once the lock is
+  released, the result the run recorded (`exit_code`, `ended`).
+- `ape run stop <scope>` checks that the lock's pid is still the run's
+  worker (its start time and, on Linux and macOS, its `ape __run <run-id>`
+  command line), sends it SIGTERM and waits up to `--timeout` (default 30s)
+  for the lock to go. The run stops its checks and records nothing, so the
+  stop exits 1 with `run.interrupted`; the next call of the verb runs again.
+  A pid that is not the worker is never signalled (exit 76), a check that
+  cannot tell signals nothing (exit 75), and a worker that ended without
+  recording a result exits 76. On Windows the stop is a hard kill, which
+  records no result: exit 76.
+
+A coordinated `ape milestone close` whose log already has a fence line (it
+has reached its take-in and push of `milestone/<M>`, or its close PR's
+enqueue) is refused, exit 3, with nothing signalled: stopping it there can
+leave `milestone/<M>` pushed and its close PR open and queued in main's
+merge queue. Let it finish, or pass `--force` and see to what is left.
+
+Stopping a loop's run, `ape run stop <id>`, does not stop the long runs its
+session started: they outlive the session by design. Stop each by its
+scope.
+
 In a Claude Code session, never run these with `run_in_background`, and never
 end a turn on an exit 75: run the same command again.
 

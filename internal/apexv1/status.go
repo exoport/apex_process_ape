@@ -457,6 +457,11 @@ type StatusReport struct {
 	// now, with their depth and parent run (D62): an apex-loop run at
 	// depth 1 and its one child at depth 2. Always present ([] when none).
 	Sessions []LiveSession `json:"sessions"`
+	// Runs are the long runs in flight (the detached workers of change
+	// start|verify|archive, milestone gate|close|approve and take-in:
+	// V15-2D-STOP-1), oldest first; a stale lock is not listed. Always
+	// present ([] when none).
+	Runs []LiveRun `json:"runs"`
 	// Usage is the claude.ai plan's usage as the sessions ape launches last
 	// read it from their status line (W4, `ape usage`): null before the
 	// first reading.
@@ -485,7 +490,7 @@ type StatusConfig struct {
 //
 //nolint:gocyclo,maintidx // one section per part of the report, each guarded by what it reads
 func (p *Project) Status() *StatusReport {
-	r := &StatusReport{Root: p.Root, Initialized: p.IsV1(), Changes: []ChangeStatus{}, Milestones: []MilestoneLine{}, Tweaks: []string{}, Advise: []AdviseFile{}, OutsideFlow: []OutsideFlow{}, RoadmapNext: []string{}, Questions: []Question{}}
+	r := &StatusReport{Root: p.Root, Initialized: p.IsV1(), Changes: []ChangeStatus{}, Milestones: []MilestoneLine{}, Tweaks: []string{}, Advise: []AdviseFile{}, OutsideFlow: []OutsideFlow{}, RoadmapNext: []string{}, Questions: []Question{}, Runs: []LiveRun{}}
 	cfg, cfgErr := LoadConfig(p.Root)
 	if cfgErr == nil && cfg.ProjectName != "" {
 		r.Project = cfg.ProjectName
@@ -515,6 +520,7 @@ func (p *Project) Status() *StatusReport {
 	r.Spend.Note = "sum of finished ape task/pipeline run manifests; a run still in progress is not counted yet"
 	r.LatestRun = p.LatestRun()
 	r.Sessions = p.LiveSessions()
+	r.Runs = p.LiveRuns()
 	r.Usage = usageStatus(time.Now())
 
 	ctx := context.Background()

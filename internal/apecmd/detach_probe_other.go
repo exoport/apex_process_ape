@@ -2,7 +2,11 @@
 
 package apecmd
 
-import "context"
+import (
+	"context"
+
+	"github.com/exoport/apex_process_ape/internal/apexv1"
+)
 
 // probeSupervisor: a pid that is gone is a definite negative; a live one's
 // command line comes from ps (macOS and the BSDs have no /proc), whose
@@ -12,4 +16,13 @@ func probeSupervisor(ctx context.Context, h *detachedHandle) supervisorCheck {
 		return supervisorNotOurs
 	}
 	return probeSupervisorPS(ctx, h)
+}
+
+// probeWorker: a lock whose process is gone, or another's now, is a
+// definite negative; a live one's command line comes from ps.
+func probeWorker(ctx context.Context, l *apexv1.RunLock) supervisorCheck {
+	if l.PID <= 0 || !l.Alive() {
+		return supervisorNotOurs
+	}
+	return probeWorkerPS(ctx, l)
 }

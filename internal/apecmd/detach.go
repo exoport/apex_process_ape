@@ -328,15 +328,24 @@ a tool's time limit on that shell does not reach it.
 
 The ape change and ape milestone verbs that take --wait detach on their
 own and have no id here: run the same command again to attach (see their
---help, "Detached runs").
+--help, "Detached runs"). Their run is named by its scope — the change
+id, M<n>, or take-in-M<n> — for ape run status and ape run stop.
 
-  ape run wait <id>     wait for it; exit with the run's own exit code
-                        (75: --wait/--timeout expired, wait again; 76:
-                        its supervisor is gone without recording an exit)
-  ape run status <id>   show its handle: command, pids, stdout and log
-                        files, and the exit code once it has ended
-  ape run stop <id>     stop it (gracefully on Linux/macOS, hard on
-                        Windows) and wait for its exit to be recorded`,
+  ape run wait <id>       wait for it; exit with the run's own exit code
+                          (75: --wait/--timeout expired, wait again; 76:
+                          its supervisor is gone without recording an exit)
+  ape run status <id>     show its handle: command, pids, stdout and log
+                          files, and the exit code once it has ended
+  ape run status <scope>  show a long run's lock: verb, pid, since, log,
+                          alive; its result once it has ended
+  ape run stop <id>       stop it (gracefully on Linux/macOS, hard on
+                          Windows) and wait for its exit to be recorded
+  ape run stop <scope>    stop a long run's worker (SIGTERM: run.interrupted,
+                          nothing recorded) and wait for its lock to go
+
+Stopping a loop's run (ape run stop <id>) does not stop the long runs its
+session started: they run in their own sessions by design, and outlive it.
+Stop each by its scope.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}
@@ -634,10 +643,19 @@ func newRunStatusCmd() *cobra.Command {
 		jsonOut bool
 	)
 	cmd := &cobra.Command{
-		Use:   "status <id>",
-		Short: "Show a detached run's handle",
+		Use:   "status <id|scope>",
+		Short: "Show a detached run's handle, or a long run's lock",
 		Long: `Show a detached run's handle, with its state: running, "ended, exit N", or
 "gone without recording an exit".
+
+Given a long run's scope instead (a change id, M<n>, take-in-M<n>: the run
+of ape change start|verify|archive, ape milestone gate|close|approve|take-in),
+it prints that run's lock — {id, state, verb, scope, pid, since, log,
+alive, exit_code} — with state running (alive: the lock's pid
+is still that run's worker, ` + "`ape __run <id> …`" + `), lost (the lock's process
+is gone, or its pid is another process's now) or, once the lock is
+released, ended with the result it recorded (exit_code, ended). A detached
+run's id is looked up first.
 
 --json prints the object ` + "`ape run wait --json`" + ` does instead — id, state
 (running, held, ended or lost; held_until while held), exit_code, log, stdout, run_id, run_dir, depth,
@@ -652,6 +670,10 @@ at most 2048 bytes; absent without a transcript) — and exits 0.`,
 			path := handlePath(root, args[0])
 			h, err := readHandle(path)
 			if err != nil {
+				// No handle by that id: a long run's scope (V15-2D-STOP-1).
+				if p := longRunScope(root, args[0]); p != nil && errors.Is(err, os.ErrNotExist) {
+					return runStatusLong(cmd, p, args[0], jsonOut)
+				}
 				return usageErrExit(ExitUsage, err)
 			}
 			// Lost only on a definite negative seen twice (F14): a look
@@ -697,10 +719,11 @@ func newRunStopCmd() *cobra.Command {
 	var (
 		cwd     string
 		timeout time.Duration
+		force   bool
 	)
 	cmd := &cobra.Command{
-		Use:   "stop <id>",
-		Short: "Stop a detached run and wait for its exit to be recorded",
+		Use:   "stop <id|scope>",
+		Short: "Stop a detached run, or a long run, and wait for its exit to be recorded",
 		Long: `Stop a run started with --detach, then wait (up to --timeout) for its exit to
 be recorded and report it. The supervisor ends itself once the run it
 supervises ends: it records the exit, then exits with that code.
@@ -721,7 +744,26 @@ a loaded machine) signals nothing either, and exits 75: run it again.
 Exits 0 once the run has ended, whatever its own exit code (ape run wait
 reports that); 75 if it has not ended within --timeout, or its process could
 not be checked; 76 if its supervisor is gone or the pid is no longer the
-run's (seen twice, a second apart); 0 at once if it had already ended.`,
+run's (seen twice, a second apart); 0 at once if it had already ended.
+
+A long run (V15-2D-STOP-1) is stopped by its scope — the change id, M<n> or
+take-in-M<n> — when no detached run has that id. ape checks, immediately
+before, that the run lock's pid is still that run's worker (its start time
+is the lock's pid_start, and on Linux/macOS its command line is
+` + "`ape __run <run-id> …`" + `), sends it SIGTERM — it stops its checks and records nothing:
+no attempt, no state commit, no gate run (run.interrupted) — and waits up to
+--timeout for it to release its lock. It exits with the run's recorded
+exit: 1 (run.interrupted) for a run it stopped, or what a run that ended
+first recorded (that result is printed, and the next call of its verb runs
+again); 76 when the worker ended without recording a result (always on
+Windows, where the stop is a hard kill); 75 as above. A pid that is not
+the worker is refused as above, and a lock whose process is gone is
+removed. A coordinated ape milestone close whose log already has a fence
+line — past its take-in and push of milestone/<M>, or at its close PR's
+enqueue — is refused (exit 3, nothing signalled) unless --force: stopping
+it there can leave milestone/<M> pushed and its close PR open and queued.
+Stopping a loop's run does not stop the long runs its session started; stop
+those by their scope.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root, err := resolveProjectRoot(cwd)
@@ -731,7 +773,14 @@ run's (seen twice, a second apart); 0 at once if it had already ended.`,
 			path := handlePath(root, args[0])
 			h, err := readHandle(path)
 			if err != nil {
-				return usageErrExit(ExitUsage, fmt.Errorf("no detached run at %s: %w", path, err))
+				// No handle by that id: a long run's scope (V15-2D-STOP-1).
+				if p := longRunScope(root, args[0]); p != nil && errors.Is(err, os.ErrNotExist) {
+					return runStopLong(cmd, p, args[0], timeout, force)
+				}
+				return usageErrExit(ExitUsage, fmt.Errorf("no detached run at %s, and no long run %q (_apex/state/runs/%s.json): %w", path, args[0], args[0], err))
+			}
+			if force {
+				return usageErr(errors.New("--force is for a long run's `milestone close` past its fence, not a --detach run"))
 			}
 			out := cmd.OutOrStdout()
 			if h.ExitCode != nil {
@@ -764,6 +813,7 @@ run's (seen twice, a second apart); 0 at once if it had already ended.`,
 	}
 	cmd.Flags().StringVar(&cwd, "cwd", "", "Project root directory (default: current working dir)")
 	cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Second, "How long to wait for the run to end after asking it to stop")
+	cmd.Flags().BoolVar(&force, "force", false, "Stop a long run's `milestone close` even past its fence (a pushed branch or an open, queued PR may be left)")
 	return cmd
 }
 
