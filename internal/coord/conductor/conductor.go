@@ -290,10 +290,11 @@ func Run(ctx context.Context, nc *nats.Conn, cfg Config) error {
 				continue
 			}
 			r.sweep(ctx, r.consumer())
-			// Read again before keep judges anything: sweep's call can
-			// wait out a whole outage in the connection's buffer, and an
-			// outage no tick saw would leave keep judging silence on the
-			// acknowledgements the outage itself held back (V15-RED-1-B).
+			// Read again before keep judges anything: sweep's calls (each
+			// up to nats.go's 5 s, the publishes' errors dropped) can
+			// together outlast an outage, and an outage no tick saw would
+			// leave keep judging silence on the acknowledgements the
+			// outage itself held back (V15-RED-1-B).
 			if up, err := r.link(nc); err != nil {
 				return r.ends(err)
 			} else if !up {
@@ -741,8 +742,8 @@ var fetchPause = func() *atomic.Int64 { var v atomic.Int64; v.Store(int64(time.S
 var testFetchGate atomic.Pointer[chan struct{}]
 
 // testSweepHook, when set, runs as sweep starts, before its read of the
-// durable: a test's way to hold one tick across a whole outage, as a call
-// waiting in the connection's buffer does (V15-RED-1-B). Nil in ape.
+// durable: a test's way to hold one tick across a whole outage, as a
+// tick's calls together can (V15-RED-1-B). Nil in ape.
 var testSweepHook atomic.Pointer[func()]
 
 // typedSeq records an event just typed: pending until acknowledged, and,
@@ -911,9 +912,6 @@ func (e *closedCredentialError) Unwrap() []error {
 	return []error{&e.FailError, ErrClosed}
 }
 
-// ends is the run's end on err: a lost lease is said in the run's own
-// log, not only in its exit (V15-RED-1: a drill's conductor ended with
-// nothing logged).
 // link is the connection's own word on an outage. A request made while it
 // is down waits in its buffer rather than failing, so no error need ever
 // reach keep (V8d): disconnected, the tick goes no further (up false); a
@@ -936,6 +934,9 @@ func (r *runner) link(nc *nats.Conn) (up bool, err error) {
 	return true, nil
 }
 
+// ends is the run's end on err: a lost lease is said in the run's own
+// log, not only in its exit (V15-RED-1: a drill's conductor ended with
+// nothing logged).
 func (r *runner) ends(err error) error {
 	switch {
 	case errors.Is(err, ErrLost):

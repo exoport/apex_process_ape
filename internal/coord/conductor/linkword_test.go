@@ -16,9 +16,9 @@ import (
 )
 
 // V15-RED-1-B (CI-5GREEN-3 on defa954, Windows): one tick saw the link up,
-// then its sweep waited out the whole outage, and keep judged silence on
-// an event the outage itself had kept unacknowledged; the next tick, 1 ms
-// later, said the reconnect. Here the seam holds a sweep across an outage
+// then its sweep's calls together outlasted the outage, and keep judged
+// silence on an event the outage itself had kept unacknowledged; the next
+// tick, 1 ms later, said the reconnect. Here the seam holds a sweep across an outage
 // no tick sees (and deliver's next fetch, which would start the window
 // again), and no silence may be judged when it returns: the connection is
 // read again before keep.
