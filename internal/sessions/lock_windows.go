@@ -14,6 +14,7 @@ import (
 // LockFileEx via golang.org/x/sys/windows if it ever becomes a real
 // problem in practice.
 func lockExclusive(_ *os.File) error { return nil }
+func lockShared(_ *os.File) error    { return nil }
 func unlock(_ *os.File)              {}
 
 // pidAlive asks Windows whether the process runs (proctree.Alive):

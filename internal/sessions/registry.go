@@ -171,7 +171,7 @@ func UpdateRun(path string, pid int, runID string, change func(*Session)) error 
 }
 
 // Alive lists the rows whose process is running (Session.Running), without taking the write lock
-// or rewriting the file: what a reader that must not block on, or modify,
+// (List's shared lock only) or rewriting the file: what a reader that must not block on, or modify,
 // another process's registry needs.
 func Alive(path string) ([]Session, error) {
 	rows, err := List(path)
@@ -208,8 +208,11 @@ func Prune(path string) ([]Session, error) {
 	return alive, err
 }
 
-// List reads the registry without taking the write lock or pruning.
-// Useful for `ape sessions` (which prunes first via Prune).
+// List reads the registry without pruning, under a shared lock: a writer
+// truncates the file and writes it again in place, so a read between the
+// two saw an empty or half-written registry and returned no rows
+// (V15-REG-1). Readers do not wait for each other. Useful for `ape
+// sessions` (which prunes first via Prune).
 func List(path string) ([]Session, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -219,6 +222,10 @@ func List(path string) ([]Session, error) {
 		return nil, err
 	}
 	defer f.Close()
+	if err := lockShared(f); err != nil {
+		return nil, fmt.Errorf("sessions: lock: %w", err)
+	}
+	defer unlock(f)
 	reg, err := decode(f)
 	if err != nil {
 		return nil, err

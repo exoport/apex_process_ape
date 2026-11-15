@@ -167,3 +167,56 @@ func TestAliveAndPrune_DropAReusedPid(t *testing.T) {
 		t.Fatal("the kept row is this process's")
 	}
 }
+
+// V15-REG-1: List read the registry without the lock while a writer
+// truncated and rewrote it in place, so a read between the two returned no
+// rows. Here a writer holds the lock with the file truncated; List waits
+// for it and reads the whole registry. Windows takes no lock.
+func TestList_WaitsOutAWriteInPlace(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the registry takes no lock on Windows")
+	}
+	path := tmpRegistry(t)
+	for _, pid := range []int{100, 200} {
+		if err := Register(path, Session{PID: pid}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	torn, release := make(chan struct{}), make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- withLockedFile(path, func(f *os.File) error {
+			reg, err := decode(f)
+			if err != nil {
+				return err
+			}
+			if err := f.Truncate(0); err != nil {
+				return err
+			}
+			close(torn)
+			<-release
+			return writeBack(f, reg)
+		})
+	}()
+	<-torn
+	listed := make(chan []Session, 1)
+	go func() {
+		rows, err := List(path)
+		if err != nil {
+			t.Error(err)
+		}
+		listed <- rows
+	}()
+	select {
+	case rows := <-listed:
+		t.Fatalf("List read the registry mid-write: %d row(s)", len(rows))
+	case <-time.After(200 * time.Millisecond):
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if rows := <-listed; len(rows) != 2 {
+		t.Fatalf("List after the write: %d row(s), want 2", len(rows))
+	}
+}
