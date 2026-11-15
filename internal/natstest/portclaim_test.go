@@ -4,9 +4,11 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io/fs"
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -75,6 +77,60 @@ func TestClaimAcross_AnotherProcessesPortIsNotPicked(t *testing.T) {
 	require.NoError(t, stdin.Close())
 	require.NoError(t, cmd.Wait())
 	require.True(t, claimAcross(p), "a dead process's claim is claimed again")
+}
+
+// deadPid is the pid of a process that has exited.
+func deadPid(t *testing.T) int {
+	t.Helper()
+	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^$")
+	require.NoError(t, cmd.Run())
+	return cmd.Process.Pid
+}
+
+// NT-1: two processes that read the same stale claim both removed it,
+// the second removing the live claim the first had made in its place, and
+// both held the port. Here the seam plays the first process: once this one
+// has read the claim as stale, the other reclaims it and claims the port
+// (a live pid, this test's parent). This one must then refuse the port and
+// leave the other's claim where it is.
+func TestClaimAcross_AStaleClaimIsReclaimedOnce(t *testing.T) {
+	wasDir := claimDir
+	t.Cleanup(func() { claimDir, testAfterStaleRead = wasDir, nil })
+	claimDir = t.TempDir()
+	const p = 21018
+	path := filepath.Join(claimDir, strconv.Itoa(p))
+	require.NoError(t, os.WriteFile(path, []byte(strconv.Itoa(deadPid(t))), 0o600))
+	other := strconv.Itoa(os.Getppid())
+	testAfterStaleRead = func(path string) {
+		testAfterStaleRead = nil
+		require.NoError(t, os.Remove(path))
+		require.NoError(t, os.WriteFile(path, []byte(other), 0o600))
+	}
+
+	require.False(t, claimAcross(p), "the port is the other process's now")
+	b, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, other, string(b), "the other process's live claim is not removed")
+	_, err = os.Stat(path + ".reclaim")
+	require.ErrorIs(t, err, fs.ErrNotExist, "the reclaim is let go")
+
+	// A reclaim another process holds refuses the port, the stale claim
+	// left to it.
+	require.NoError(t, os.WriteFile(path, []byte(strconv.Itoa(deadPid(t))), 0o600))
+	require.NoError(t, os.WriteFile(path+".reclaim", nil, 0o600))
+	require.False(t, claimAcross(p))
+	require.FileExists(t, path)
+	require.NoError(t, os.Remove(path+".reclaim"))
+	require.True(t, claimAcross(p), "a stale claim with no reclaim held is claimed again")
+}
+
+// NT-2: one 0700 claim directory in a shared /tmp, made by whoever ran
+// first, refused every port to every other user. Each user has their own.
+func TestClaimDir_IsPerUser(t *testing.T) {
+	require.NotEqual(t, claimDirName(1000), claimDirName(1001))
+	if uid := os.Getuid(); uid >= 0 {
+		require.Equal(t, claimDirName(uid), filepath.Base(claimDir))
+	}
 }
 
 // CI-5GREEN-4 on b4a54f8 (H2): Restart failed at once on a port it could
