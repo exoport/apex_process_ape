@@ -1222,7 +1222,8 @@ func TestDrill_ConductorLostBeforeItsFirstAckReplaysNoHistory(t *testing.T) {
 	require.NoError(t, err)
 	cc := c.CachedInfo().Config
 	require.Equal(t, "6", cc.Metadata[StartSeqMeta], "the start, after the stream's last event, is in the durable's own config")
-	require.Equal(t, jetstream.DeliverNewPolicy, cc.DeliverPolicy, "created DeliverNew, as before")
+	require.Equal(t, jetstream.DeliverByStartSequencePolicy, cc.DeliverPolicy, "created by start sequence (R-8a)")
+	require.Equal(t, uint64(6), cc.OptStartSeq, "at the recorded start")
 	// Lost before any ack: nothing was delivered, so nothing was acked. An
 	// R3 delete can outlast one request's 5 s under load: tried again.
 	require.Eventually(t, func() bool {
@@ -1615,7 +1616,9 @@ func TestConductor_ACollidingPairNeitherMovesFromNorDeletesTheOthersLegacy(t *te
 	require.False(t, saw("conductor: moved from the durable"), "ann-x does not take ann's floor")
 	c, err := js.Consumer(ctx, events.EventsStream, theirs)
 	require.NoError(t, err)
-	require.Equal(t, jetstream.DeliverNewPolicy, c.CachedInfo().Config.DeliverPolicy, "a fresh start")
+	fresh := c.CachedInfo().Config
+	require.Equal(t, jetstream.DeliverByStartSequencePolicy, fresh.DeliverPolicy, "a fresh start, by start sequence (R-8a)")
+	require.Equal(t, fresh.Metadata[StartSeqMeta], strconv.FormatUint(fresh.OptStartSeq, 10), "at its recorded start")
 	now, err := lc.Info(ctx)
 	require.NoError(t, err, "ann's legacy durable is not deleted")
 	require.Equal(t, was.AckFloor, now.AckFloor)

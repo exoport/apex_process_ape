@@ -349,14 +349,16 @@ type runner struct {
 // there (V12-8: get, then create). One that exists is used as it is, or
 // updated to this conductor's filters and ack wait keeping where it
 // delivers from (NATS refuses a change of its deliver policy or start
-// sequence). A new one starts at stream sequence from, or with the next
-// event when from is 0 (the first bind), which also writes where that is,
-// the stream's last sequence + 1, into the durable's own config as
-// StartSeqMeta (V12-13): a DeliverNew durable on an R3 stream reports ack
-// floor 0 until its first ack, so a rebind after a loss before that
-// replayed the whole stream. DeliverNew stays the create: one by start
-// sequence took ≈ 10 s on R3 while a consumer info for it was in flight,
-// and its reply timed out.
+// sequence). A new one starts at stream sequence from, or when from is 0
+// (the first bind) at the stream's last sequence + 1 as read here, which is
+// also written into the durable's own config as StartSeqMeta (V12-13): on
+// an R3 stream a durable reports ack floor 0 until its first ack, so a
+// rebind after a loss before that replayed the whole stream. The first
+// bind creates by that start sequence too, not DeliverNew (R-8a): an event
+// published between the read and the create was past DeliverNew's start
+// and never delivered. A create by start sequence took ≈ 10 s on R3 while
+// a CONSUMER.INFO poller was in flight (FINDING-V12-13-1); createDurable
+// waits out its lost reply, and nothing of ape's polls during an attach.
 func (r *runner) bind(ctx context.Context, from uint64) (jetstream.Consumer, error) {
 	want := jetstream.ConsumerConfig{
 		Durable:        layout.ConductorConsumer(tok(r.cfg.User), tok(r.cfg.Ensemble)),
@@ -389,7 +391,12 @@ func (r *runner) bind(ctx context.Context, from uint64) (jetstream.Consumer, err
 		if err != nil {
 			return nil, err
 		}
-		want.Metadata = map[string]string{StartSeqMeta: strconv.FormatUint(st.CachedInfo().State.LastSeq+1, 10)}
+		start := st.CachedInfo().State.LastSeq + 1
+		if testFirstBindHook != nil {
+			testFirstBindHook()
+		}
+		want.DeliverPolicy, want.OptStartSeq = jetstream.DeliverByStartSequencePolicy, start
+		want.Metadata = map[string]string{StartSeqMeta: strconv.FormatUint(start, 10)}
 	}
 	c, err = r.createDurable(ctx, want)
 	if err == nil && moved != "" {
@@ -408,6 +415,11 @@ func (r *runner) bind(ctx context.Context, from uint64) (jetstream.Consumer, err
 	}
 	return c, err
 }
+
+// testFirstBindHook, when set, runs in a first bind between its read of
+// the stream's last sequence and the create: a test's publish in that gap
+// (R-8a). Nil in ape.
+var testFirstBindHook func()
 
 // bindCreateTries bounds a durable's create when its reply times out
 // (FINDING-V12-13-1), bindCreateWait apart.
