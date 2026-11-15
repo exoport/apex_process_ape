@@ -1,5 +1,42 @@
 # CHANGELOG
 
+## v1.5.1 (2026-11-15)
+
+APEX v1.5.1, on v1.5.0: fixes to coordination found in and after the 1.5 trial, and a way to see
+and stop a long run. A project with no `coordination:` block is affected only by the long-run
+commands and the message fix below. What it changes:
+
+- **`ape run status <scope>` and `ape run stop <scope>` see and stop a long run.** A long run is
+  the worker of `ape change start|verify|archive` or `ape milestone gate|close|approve|take-in`,
+  and the scope is its change id, `M<n>` or `take-in-M<n>`. `ape status` lists the long runs in
+  flight (`--json`: `runs`). Before this, only `kill -TERM` on the pid in the run's lock could
+  stop one. The stop checks that the pid is still the run's worker before it signals, so a reused
+  pid is never touched; the run stops its checks and records nothing (`run.interrupted`, exit 1;
+  on Windows the stop exits 76). A coordinated `ape milestone close` that has already reached its
+  push or its close PR's enqueue is stopped only with `--force`, since stopping it there can leave
+  a pushed `milestone/<M>` and an open, queued PR, which the refusal names. Stopping a loop still
+  does not stop the long runs its session started: stop each one by its scope.
+- **`ape nats declare` no longer fails its first try on a cluster that has only just formed.** A
+  create or read the cluster does not answer in 15 s (a timeout, no responders, JetStream not ready
+  yet) is tried again every 2 s, for at most 90 s; a refusal (a permission, JetStream not enabled,
+  `--replicas` above the cluster's size) is still reported at once. With `--new-epoch`, a read of
+  the cluster's epoch that was not answered is no longer taken as "no epoch", which could have
+  opened an epoch at or below the cluster's. This removes v1.5.0's known issue.
+- **A conductor's first attach no longer misses an event published while it creates its durable.**
+  The durable now starts at the stream sequence it records, not at "new".
+- **A loop start that meets a lease being written as it claims it reads the lease again**, up to
+  ten times, and says what it finds (released, held by another, claimed again) instead of
+  `lease: stale token`.
+- **The coordinator's `status` answers while a lease renewal is slow**, and its notices are still
+  never fenced out by its own renewal.
+- **`ape status`'s live sessions and the checks that read the session registry** (the nesting
+  refusal, commit sharing) no longer read it half-written while another `ape` rewrites it (Linux
+  and macOS; the registry takes no lock on Windows). `ape status --wait` reads them the same way.
+- **On a `change/` branch with no recorded base, a refusal says "switch to the base branch
+  (`git switch <base>`)"** instead of `` `git switch the base branch` ``.
+- **github.com/nats-io/nats.go v1.53.1 → v1.55.0.** It fixes a rare race inside the library's
+  service setup that showed only in ape's tests. Nothing a user sees changes.
+
 ## v1.5.0 (2026-11-12)
 
 APEX v1.5.0, on v1.4.5: **coordination**. Several people can work on one project, and one person
