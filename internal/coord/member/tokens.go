@@ -74,10 +74,16 @@ func (m Membership) GitHubTokenFor(ctx context.Context, purpose string) (string,
 }
 
 // askUnanswered is an App service request nobody answered: no responders,
-// or no reply in time. A reply that refuses is not.
+// no reply in time, or the connection gone while it waited
+// (ErrConnectionClosed). A reply that refuses is not. Since nats.go
+// v1.55.0 (#2129) a request that ForceReconnect cuts returns
+// ErrDisconnected instead; the token ask runs on a NoReconnect connection
+// and never meets it, so that clause is defence, for a reconnecting
+// connection or a ForceReconnect that may one day carry an ask
+// (NATSGO-1, NATSGO-R2).
 func askUnanswered(err error) bool {
 	return errors.Is(err, nats.ErrNoResponders) || errors.Is(err, nats.ErrTimeout) || errors.Is(err, context.DeadlineExceeded) ||
-		errors.Is(err, nats.ErrConnectionClosed)
+		errors.Is(err, nats.ErrConnectionClosed) || errors.Is(err, nats.ErrDisconnected)
 }
 
 // webHost is the git host beside the API: github.com for api.github.com,
