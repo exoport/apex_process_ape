@@ -62,11 +62,16 @@ jobs:
       - name: Install Cosign
         uses: sigstore/cosign-installer@v3
 
+      # The version is the bingo pin (.bingo/goreleaser.mod), the one `make
+      # snapshot` builds with, so a release is built by the goreleaser that
+      # ci-local checked. `latest` would build it with whatever was published
+      # that day. internal/buildident's TestReleaseWorkflowPinsGoreleaser
+      # fails when the two differ.
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
-          version: latest
+          version: v2.18.0
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
