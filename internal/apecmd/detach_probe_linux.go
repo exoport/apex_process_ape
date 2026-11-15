@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/exoport/apex_process_ape/internal/apexv1"
 )
 
 // procRoot is where the process table is read; a test points it elsewhere.
@@ -37,4 +39,19 @@ func procCmdline(root string, pid int) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(strings.ReplaceAll(string(data), "\x00", " ")), nil
+}
+
+// probeWorker looks at a long run's worker as probeSupervisor does at a
+// supervisor: a lock whose process is gone, or whose pid another process
+// has now (its start time differs), is a definite negative before its
+// command line is read.
+func probeWorker(ctx context.Context, l *apexv1.RunLock) supervisorCheck {
+	if l.PID <= 0 || !l.Alive() {
+		return supervisorNotOurs
+	}
+	args, err := procCmdline(procRoot, l.PID)
+	if err != nil {
+		return probeWorkerPS(ctx, l)
+	}
+	return workerArgs(args, l.ID)
 }

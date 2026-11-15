@@ -405,6 +405,11 @@ finished before that call returns its result once, while nothing changed (see
 | 1, `run.interrupted` | The run's process is gone, or a signal stopped it. Nothing was recorded. Run it again. |
 | 2, `usage.wait` | `--wait` is outside 0–9m30s. |
 
+`ape status` lists a run in flight, `ape run status M<n>` shows it and `ape run stop M<n>` stops
+it (SIGTERM to its worker: `run.interrupted`, nothing recorded). A `close` past its fence is
+stopped only with `--force`, and stopping a loop does not stop these runs (see
+[See and stop a long run](detach-a-run.md#see-and-stop-a-long-run)).
+
 The run lock records a person's act, so attaching to it needs no new grant. A model session never runs these verbs with `run_in_background`, and never ends a turn
 on an exit 75. For runs started with `ape task --detach`, see
 [How to detach a run](detach-a-run.md).

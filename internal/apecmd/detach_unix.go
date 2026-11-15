@@ -13,6 +13,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/exoport/apex_process_ape/internal/apexv1"
 )
 
 // detachedProcAttr starts the supervisor in a new session: no controlling
@@ -52,17 +54,52 @@ func supervisorArgs(args, id string) supervisorCheck {
 // ours": the pid's liveness was already checked, and the next look
 // decides.
 func probeSupervisorPS(ctx context.Context, h *detachedHandle) supervisorCheck {
+	args, ok := psArgs(ctx, h.SupervisorPID)
+	if !ok {
+		return supervisorUnknown
+	}
+	return supervisorArgs(args, h.ID)
+}
+
+// psArgs is pid's command line as ps prints it; ok is false when ps failed
+// or timed out.
+func psArgs(ctx context.Context, pid int) (string, bool) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), psTimeout)
 	defer cancel()
-	ps := exec.CommandContext(ctx, "ps", "-o", "args=", "-p", strconv.Itoa(h.SupervisorPID)) //nolint:gosec // ps, with a pid ape recorded
+	ps := exec.CommandContext(ctx, "ps", "-o", "args=", "-p", strconv.Itoa(pid)) //nolint:gosec // ps, with a pid ape recorded
 	// A ps wrapper's child holding stdout open cannot outlast the timeout.
 	ps.WaitDelay = psTimeout
 	out, err := ps.Output()
 	if err != nil {
+		return "", false
+	}
+	return string(out), true
+}
+
+// workerArgs judges a long run's worker's command line, its argv joined
+// by spaces: `<ape> __run <run-id> <verb> <scope> …` (launchWorker). The
+// run id is in no other process's command line; the binary's path is not
+// matched (a test binary acts as ape).
+func workerArgs(args, id string) supervisorCheck {
+	if strings.Contains(" "+strings.TrimSpace(args)+" ", " __run "+id+" ") {
+		return supervisorOurs
+	}
+	return supervisorNotOurs
+}
+
+// probeWorkerPS asks ps for a long run's worker's command line; ps
+// failing is an unknown.
+func probeWorkerPS(ctx context.Context, l *apexv1.RunLock) supervisorCheck {
+	args, ok := psArgs(ctx, l.PID)
+	if !ok {
 		return supervisorUnknown
 	}
-	return supervisorArgs(string(out), h.ID)
+	return workerArgs(args, l.ID)
 }
+
+// termWorker asks a long run's worker to stop: SIGTERM, which it handles
+// as run.interrupted (its checks killed, nothing recorded, D58 2.2).
+func termWorker(pid int) error { return syscall.Kill(pid, syscall.SIGTERM) }
 
 // stopDetached asks the supervisor to stop — it forwards SIGTERM to the run
 // and records the exit — after checking, immediately before signalling,

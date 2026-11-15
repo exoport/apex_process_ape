@@ -1234,6 +1234,12 @@ func newStatusCmd() *cobra.Command {
     run it relays; the brief says "context 12 % (relay at 60 %), relays 0/5". A
     session whose launch ape's usage guard holds on the 5-hour window (W4) carries
     held_until (", held: 5-hour window, launches <ts>")
+  - JSON "runs": the long runs in flight (V15-2D-STOP-1) — the detached workers of change
+    start|verify|archive, milestone gate|close|approve and take-in — as [{verb, scope,
+    command, pid, since, log}], oldest first, [] when none; "Running long runs:" in the
+    long output. A lock whose process is gone, or whose pid another process has now, is
+    not listed. ` + "`ape run status <scope>`" + ` shows one and ` + "`ape run stop <scope>`" + ` stops it;
+    stopping a loop does not stop the long runs its session started
 
 --brief renders at most 25 lines (what the SessionStart hook injects).
 
@@ -1438,8 +1444,19 @@ func statusLong(r *apexv1.StatusReport) string {
 		}
 		b.WriteString("\n")
 	}
+	writeLongRuns(&b, r.Runs)
 	fmt.Fprintf(&b, "\nSpend note: %s\n", r.Spend.Note)
 	return b.String()
+}
+
+// writeLongRuns is statusLong's "Running long runs" block (V15-2D-STOP-1).
+func writeLongRuns(b *strings.Builder, runs []apexv1.LiveRun) {
+	for i, run := range runs {
+		if i == 0 {
+			b.WriteString("\nRunning long runs (`ape run status|stop <scope>`):\n")
+		}
+		fmt.Fprintf(b, "  %s %s since %s, pid %d, log %s\n", run.Scope, run.Command, run.Since, run.PID, run.Log)
+	}
 }
 
 // coordinationLine is ape status's coordination line (v1.5, §4.5): "" for

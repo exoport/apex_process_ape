@@ -93,8 +93,12 @@ run.busy (exit 3, action retry; the message names the running verb and since whe
 whose process is gone (killed, the machine restarted) is removed and reported as
 run.interrupted (exit 1, action retry) — never an attempt. A run stopped by SIGTERM/SIGINT
 kills its checks and records nothing — no attempt, no state commit, no gate run — and
-reports run.interrupted. No check outlives the worker. Never run these with
-run_in_background, and never end a turn on an exit 75: run the same command again.
+reports run.interrupted. No check outlives the worker. ` + "`ape run status <scope>`" + ` shows a
+run (scope: the change id or M<n>), ` + "`ape status`" + ` lists the live ones, and
+` + "`ape run stop <scope>`" + ` stops one (SIGTERM to its worker: run.interrupted; a close past its
+fence only with --force). Stopping a loop does not stop the runs its session started: stop
+each by its scope. Never run these with run_in_background, and never end a turn on an exit
+75: run the same command again.
 Beside the exit codes above: 75 still running · 3 run.busy · 1 run.interrupted · 2 a
 --wait outside 0–9m30s (usage.wait).`
 

@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/exoport/apex_process_ape/internal/apexv1"
 	"golang.org/x/sys/windows"
 )
 
@@ -113,4 +114,42 @@ func pidAlive(pid int) bool {
 	defer func() { _ = windows.CloseHandle(ph) }()
 	var code uint32
 	return windows.GetExitCodeProcess(ph, &code) == nil && code == 259 // STILL_ACTIVE
+}
+
+// probeWorker looks at a long run's worker: its lock's pid alive and the
+// same process (its creation time, RunLock.Alive), and an ape executable.
+// Windows gives no other process's command line cheaply; the creation
+// time is what a reused pid cannot have.
+func probeWorker(_ context.Context, l *apexv1.RunLock) supervisorCheck {
+	if l.PID <= 0 || !l.Alive() {
+		return supervisorNotOurs
+	}
+	ph, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(l.PID)) //nolint:gosec // a pid ape recorded
+	if err != nil {
+		if errors.Is(err, windows.ERROR_INVALID_PARAMETER) || errors.Is(err, windows.ERROR_ACCESS_DENIED) {
+			return supervisorNotOurs
+		}
+		return supervisorUnknown
+	}
+	defer func() { _ = windows.CloseHandle(ph) }()
+	var buf [windows.MAX_PATH]uint16
+	size := uint32(windows.MAX_PATH)
+	if err := windows.QueryFullProcessImageName(ph, 0, &buf[0], &size); err != nil {
+		return supervisorUnknown
+	}
+	if image := filepath.Base(windows.UTF16ToString(buf[:size])); !strings.EqualFold(strings.TrimSuffix(image, ".exe"), "ape") {
+		return supervisorNotOurs
+	}
+	return supervisorOurs
+}
+
+// termWorker ends a long run's worker: Windows has no SIGTERM, so it is a
+// HARD stop — its checks are not stopped by it and it records nothing,
+// not even run.interrupted (ape run stop then exits 76).
+func termWorker(pid int) error {
+	p, err := os.FindProcess(pid)
+	if err != nil {
+		return err
+	}
+	return p.Kill()
 }
