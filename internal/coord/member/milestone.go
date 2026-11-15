@@ -343,8 +343,27 @@ func ClaimMilestoneAdopt(ctx context.Context, p *apexv1.Project, ms string, adop
 }
 
 // releaseTries bounds ReleaseMilestone's reads again after a write landed
-// between its read and its delete.
-const releaseTries = 10
+// between its read and its delete; holdTries, HoldMilestone's after one
+// landed between its read and its claim.
+const (
+	releaseTries = 10
+	holdTries    = 10
+)
+
+// staleHoldError is HoldMilestone's refusal when ms's lease was written
+// between every read and claim it made: lease.ErrStale, said as what it
+// means for the run rather than as the store's "stale token".
+type staleHoldError struct {
+	ms  string
+	err error
+}
+
+func (e *staleHoldError) Error() string {
+	return fmt.Sprintf("%s's lease changed between each of %d reads and this checkout's claim (another checkout, or a release, is writing it now) — start the loop again",
+		e.ms, holdTries)
+}
+
+func (e *staleHoldError) Unwrap() error { return e.err }
 
 // ReleaseMilestone is `ape milestone release <M>`: the key is deleted at
 // its revision when this checkout still holds it, and the book marks M
@@ -438,6 +457,14 @@ func HoldMilestone(ctx context.Context, p *apexv1.Project, ms string, log io.Wri
 		if err == nil {
 			before, _, _ = s.book.Last(s.key(ms))
 			l, fresh, err = s.reclaim(ctx, ms)
+			// Written between the read and the claim (a release, or
+			// another's claim): read again here, at most holdTries
+			// times, so the next read's own word is what a loop start
+			// meets — outside a run's wait the raw "lease: stale token"
+			// reached the person (V15-REL-2).
+			for try := 1; errors.Is(err, lease.ErrStale) && try < holdTries; try++ {
+				l, fresh, err = s.reclaim(ctx, ms)
+			}
 		}
 		if errors.Is(err, errReleased) {
 			s.close()
@@ -445,7 +472,9 @@ func HoldMilestone(ctx context.Context, p *apexv1.Project, ms string, log io.Wri
 		}
 		if errors.Is(err, lease.ErrStale) {
 			s.close()
-			return true, err // written between the read and the claim: read again
+			// Still changing under every read: a run's wait reads
+			// again later; outside one it is said in words.
+			return true, &staleHoldError{ms: ms, err: err}
 		}
 		if err != nil {
 			s.close()
