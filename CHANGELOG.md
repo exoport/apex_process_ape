@@ -34,7 +34,7 @@ Code 2.1.325 (and 2.1.316). What it changes:
   enqueues it again if it was ejected.
 - **`ape nats declare` no longer fails its first try on a cluster that has only just formed.** A
   create or read the cluster does not answer in 15 s (a timeout, no responders, JetStream not ready
-  yet) is tried again every 2 s, for at most 90 s; a refusal (a permission, JetStream not enabled,
+  yet, a peer not yet online) is tried again every 2 s, for at most 90 s; a refusal (a permission, JetStream not enabled,
   `--replicas` above the cluster's size) is still reported at once. With `--new-epoch`, a read of
   the cluster's epoch that was not answered is no longer taken as "no epoch", which could have
   opened an epoch at or below the cluster's. This removes v1.5.0's known issue.

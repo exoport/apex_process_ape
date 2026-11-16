@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -53,8 +54,15 @@ func Retry(ctx context.Context, what string, step func(ctx context.Context) erro
 // transient reports whether err is the cluster not answering yet, rather
 // than refusing: a try's own deadline (not the caller's), a timeout, no
 // responders, or JetStream saying it is not ready (temporarily unavailable,
-// no leader). "No suitable peers" is not among them: --replicas 3 on one
-// server says it too, and waiting would only hide that.
+// no leader, or no suitable peers because a peer is offline).
+//
+// "No suitable peers" (10005) is transient only with nats-server's "peer
+// offline" reason, which a just-started cluster gives while a node is not
+// yet seen online (FINDING-151-D1: 3 first declares in 40). Without it, it
+// is a cluster too small for --replicas (two nodes asked for 3): waiting
+// would only hide that. --replicas 3 on one unclustered server is 10074,
+// "replicas > 1 not supported in non-clustered mode", a refusal too.
+// Measured on nats-server v2.14.5 (DECLARE-R2).
 func transient(ctx context.Context, err error) bool {
 	if ctx.Err() != nil {
 		return false
@@ -64,6 +72,8 @@ func transient(ctx context.Context, err error) bool {
 		switch api.ErrorCode {
 		case 10008, 10009: // JSClusterNotAvailErr, JSClusterNotLeaderErr
 			return true
+		case 10005: // JSClusterNoPeersErrF
+			return strings.Contains(api.Description, "peer offline")
 		}
 		return false
 	}

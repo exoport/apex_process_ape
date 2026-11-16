@@ -6150,9 +6150,9 @@ to both, and open the re-claim window for --window: leases are re-claimed by the
 highest revision of the previous epoch until it closes.
 
 A just-started cluster answers its first creates slowly: a step it does not answer in
-15 s (a timeout, no responders, JetStream not ready yet) is tried again every 2 s, for
-at most 90 s in all. A refusal (a permission, JetStream not enabled, --replicas above
-the cluster's size) is not.
+15 s (a timeout, no responders, JetStream not ready yet, a peer not yet online) is
+tried again every 2 s, for at most 90 s in all. A refusal (a permission, JetStream not
+enabled, --replicas above the cluster's size) is not.
 
 Flags:
 
