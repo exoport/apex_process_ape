@@ -22,6 +22,7 @@ func TestCacheReadMultiplierIsPerModel(t *testing.T) {
 	}{
 		{"claude-opus-5-5", 0.05},
 		{"claude-sonnet-5-5", 0.05}, // Q161: the pricing page, read 2026-10-21
+		{"claude-fable-5-2", 0.025}, // the pricing page, read 2026-11-16
 		{"claude-fable-5-1", 0.025},
 		{"claude-opus-5", DefaultCacheReadMul},
 		{"claude-sonnet-5", DefaultCacheReadMul},

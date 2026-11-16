@@ -75,6 +75,18 @@ updated: "2026-10-08"
 # `usage` block in the session JSONL (after NormalizeModel).
 prices:
   # Claude 5 family — top tier.
+  # Fable 5.2 (pricing page and models overview, read 2026-11-16): CHEAPER
+  # than Fable 5.1, 8.00/40.00 against 10.00/50.00, cache reads at 0.025x
+  # (0.20), cache writes the standard 1.25x/2.00x (10.00/16.00 on the page);
+  # 1M window, 128K output. Claude Code 2.1.325 starts it for `fable`.
+  claude-fable-5-2:
+    base_input: 8.00
+    output: 40.00
+    context_window: 1000000
+    cache_read_mul: 0.025
+    # The id is in 2.1.321's binary, not in 2.1.319's (2.1.320 was never
+    # published); 2.1.325's `fable` is measured to start it.
+    min_claude: "2.1.321"
   # Fable 5.1 supersedes Fable 5; the docs list Fable 5 under "Legacy models
   # (still available)", so both keep exact rows — a transcript written by the
   # older one must still price exactly.
@@ -236,7 +248,7 @@ aliases:
   opus: claude-opus-5-5
   sonnet: claude-sonnet-5-5
   haiku: claude-haiku-5-5
-  fable: claude-fable-5-1
+  fable: claude-fable-5-2
   mythos: claude-mythos-5-1
 
 # Family tiers — the estimate of last resort. Consulted only when no exact

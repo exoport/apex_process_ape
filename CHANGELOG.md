@@ -2,9 +2,17 @@
 
 ## v1.5.1 (2026-11-15)
 
-APEX v1.5.1, on v1.5.0: fixes to coordination found in and after the 1.5 trial, and a way to see
-and stop a long run. A project with no `coordination:` block is affected only by the long-run
-commands and the message fix below. What it changes:
+APEX v1.5.1, on v1.5.0: fixes to coordination found in and after the 1.5 trial, a way to see
+and stop a long run, and Claude Fable 5.2. A project with no `coordination:` block is affected
+only by the long-run commands, the model alias and the message fix below. Checked on Claude
+Code 2.1.325 (and 2.1.316). What it changes:
+
+- **`fable` now means Claude Fable 5.2 (`claude-fable-5-2`)**, as it does in Claude Code 2.1.325;
+  1.5.0 pinned `claude-fable-5-1`, so a spec, `--model` or skill saying `fable` ran Fable 5.1
+  under ape. Fable 5.2 is priced exactly ($8 / $40 per million tokens, cache reads $0.20), and
+  ape warns when the installed Claude Code predates it (2.1.321). Fable 5.1 keeps its row, so
+  older transcripts price as before. `mythos` still means Mythos 5.1 here: Mythos 5.2 was not
+  measured.
 
 - **`ape run status <scope>` and `ape run stop <scope>` see and stop a long run.** A long run is
   the worker of `ape change start|verify|archive` or `ape milestone gate|close|approve|take-in`,
