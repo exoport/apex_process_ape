@@ -16,6 +16,11 @@ commands and the message fix below. What it changes:
   push or its close PR's enqueue is stopped only with `--force`, since stopping it there can leave
   a pushed `milestone/<M>` and an open, queued PR, which the refusal names. Stopping a loop still
   does not stop the long runs its session started: stop each one by its scope.
+- **A coordinated `ape milestone close` interrupted while its close PR waits in main's merge
+  queue fails with `run.interrupted`** and names the PR as still queued, not merged. Before, it
+  reported the milestone done and recorded exit 0 (in 1.5.0 by a SIGTERM to its worker). Run the
+  close again: it goes on waiting for the PR, finishes the close if the PR merged meanwhile, or
+  gates and enqueues it again if it was ejected.
 - **`ape nats declare` no longer fails its first try on a cluster that has only just formed.** A
   create or read the cluster does not answer in 15 s (a timeout, no responders, JetStream not ready
   yet) is tried again every 2 s, for at most 90 s; a refusal (a permission, JetStream not enabled,

@@ -783,7 +783,14 @@ branch · 2 usage, or --accept-red from a model session.`,
 // while its close PR is queued, the close is read again at each member
 // NATS event or every apexv1.QueuePoll; once it merged, the milestone's
 // lease is released, its live key deleted. Any other close is returned as
-// it is.
+// it is. A wait cut by its context (the worker's SIGTERM: `ape run stop
+// --force`, Ctrl-C) is run.interrupted, naming the PR still queued: it
+// returned the queued result with no error, which the close reported as
+// done and recorded as exit 0 while its PR had not merged (FINDING-151-
+// E3-1). The close run again reads the PR again and goes on waiting, or
+// finishes it if it merged meanwhile, or re-gates and enqueues it again
+// if it was ejected (resolveClose); the lease stays held, as on any
+// interruption.
 func awaitClosePR(ctx context.Context, p *apexv1.Project, id string, opt apexv1.RunOptions, g *apexv1.GateResult, err error) (*apexv1.GateResult, error) {
 	queued := func() bool {
 		return err == nil && g != nil && g.Integration != nil && g.Integration.State == apexv1.IntegrationQueued
@@ -796,7 +803,7 @@ func awaitClosePR(ctx context.Context, p *apexv1.Project, id string, opt apexv1.
 				fmt.Fprintf(opt.Progress, "queued: %s (attempt %d) in main's merge queue; waiting for merged or ejected\n", g.Integration.PR.URL, g.Integration.Attempts)
 			}
 			if !apexv1.WaitQueue(ctx, wake) {
-				return g, err
+				return g, closeQueueInterrupted(g)
 			}
 			g, err = p.CloseMilestone(ctx, id, opt)
 		}
@@ -806,6 +813,15 @@ func awaitClosePR(ctx context.Context, p *apexv1.Project, id string, opt apexv1.
 		closeReleaseNote(os.Stderr, id, rerr)
 	}
 	return g, err
+}
+
+// closeQueueInterrupted is run.interrupted for a close whose wait for its
+// queued close PR was cut.
+func closeQueueInterrupted(g *apexv1.GateResult) error {
+	in := g.Integration
+	return &apexv1.FailError{Code: apexv1.CodeRunInterrupted, Action: apexv1.ActionRetry, Msg: fmt.Sprintf(
+		"the close of %s was interrupted while its close PR %s waited in main's merge queue (attempt %d): the PR is still queued, not merged, and %s is not closed into main — `ape milestone close %s` again waits for it (or finishes the close if it merged meanwhile)",
+		g.Milestone, in.PR.URL, in.Attempts, g.Milestone, g.Milestone)}
 }
 
 // closeReleaseNote says a merged close whose lease release failed, so the
