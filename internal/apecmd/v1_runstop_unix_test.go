@@ -260,3 +260,27 @@ func TestRunStop_NeitherLockNorResultIsLost(t *testing.T) {
 	require.Equal(t, exitCodeRunLost, exitCodeOf(t, err))
 	require.Contains(t, errOut.String(), "gone without recording a result")
 }
+
+// 2D-STOP-R2 (research's probe): the close writes its first fence line
+// while ape run stop looks at its worker. The fence is read again just
+// before the signal, so the stop refuses, exit 3, and signals nothing.
+func TestRunStop_AFenceWrittenDuringTheLookIsRefused(t *testing.T) {
+	root := v1Repo(t)
+	p, err := apexv1.Open(root)
+	require.NoError(t, err)
+	pid := fakeCloseWorker(t, p, "20261115-000000-1-cccccc", "")
+	was := probeWorkerFn
+	probeWorkerFn = func(ctx context.Context, l *apexv1.RunLock) supervisorCheck {
+		f, err := os.OpenFile(filepath.Join(p.Root, l.Log), os.O_APPEND|os.O_WRONLY, 0o644)
+		require.NoError(t, err)
+		_, _ = f.WriteString("2026-11-15T00:00:02Z ape: fence: milestone/M1: pushing under milestone.demo.M1, held by this checkout (token 3), last renewed 2026-11-15T00:00:00Z\n")
+		_ = f.Close()
+		return was(ctx, l)
+	}
+	t.Cleanup(func() { probeWorkerFn = was })
+	stdout, stderr, err := v1Exec(t, newRunCmd, "stop", "M1", "--timeout", "5s", "--cwd", root)
+	require.Equal(t, exitV1Conflict, exitCodeOf(t, err), stdout+stderr)
+	require.Contains(t, stderr, "is past its fence")
+	time.Sleep(200 * time.Millisecond)
+	require.True(t, alive(pid), "not signalled")
+}
