@@ -5505,7 +5505,11 @@ enqueues the close PR without running the gate again (main taken in and gated fi
 moved), then waits for the merge as above. Ejected: main is taken in again the same way, the gate runs again on
 the branch (red refuses: gate.red; an accepted red passes only on its red set), and the
 close PR is pushed and enqueued again, an attempt (limits.attempts:
-integration.ejections-exceeded).
+integration.ejections-exceeded). A close interrupted while its PR waits in the queue
+(SIGTERM, `ape run stop M<n> --force`) fails with run.interrupted, the PR still queued;
+until it merges, `ape status` marks the milestone undelivered with its "close_pr" (state
+queued or ejected) and names this command, which waits for it, or enqueues it again if it
+was ejected.
 
 Exit codes: 0 done · 1 gate red (without --accept-red), changes in flight, not approved,
 no approval record, a changed gate, an archived gate/ in the way, or HEAD on a change

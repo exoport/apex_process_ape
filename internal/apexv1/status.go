@@ -287,6 +287,27 @@ type Spend struct {
 	Note string `json:"note"`
 }
 
+// delivery is a coordinated done milestone's delivery: undelivered when
+// its close PR is recorded and has not merged (with that PR), or was
+// never enqueued (V8f), while milestone/<M> is not in main. Any other
+// milestone is neither.
+func (p *Project) delivery(ctx context.Context, ms, status string) (undelivered bool, pr *ClosePRLine) {
+	if status != MilestoneDone || p.MilestoneBase(ms) == "" {
+		return false, nil
+	}
+	if rec := p.closePending(ctx, ms); rec != nil {
+		return true, &ClosePRLine{State: rec.State, URL: rec.PR.URL, Attempts: rec.Attempts}
+	}
+	return p.closeUndelivered(ctx, ms), nil
+}
+
+// ClosePRLine is a milestone's close PR as `ape status` shows it.
+type ClosePRLine struct {
+	State    string `json:"state"`
+	URL      string `json:"url"`
+	Attempts int    `json:"attempts"`
+}
+
 // MilestoneLine is one roadmap entry in the status overview.
 type MilestoneLine struct {
 	ID     string `json:"id"`
@@ -294,9 +315,15 @@ type MilestoneLine struct {
 	Status string `json:"status"`
 	// AcceptRed: a person closed it with its gate red (H22).
 	AcceptRed *AcceptRed `json:"accept_red,omitempty"`
-	// Undelivered: coordinated, done, but its close PR was never enqueued
-	// (V8f): `ape milestone close <M>` opens it.
+	// Undelivered: coordinated, done on milestone/<M>, not in main: its
+	// close PR was never enqueued (V8f: `ape milestone close <M>` opens
+	// it), or it is recorded and has not merged (ClosePR, E31-R1: the
+	// close run again waits for it, or enqueues it again if ejected).
 	Undelivered bool `json:"undelivered,omitempty"`
+	// ClosePR is the close PR an Undelivered milestone waits on: its
+	// state (queued or ejected), URL and attempts. Absent when none was
+	// opened.
+	ClosePR *ClosePRLine `json:"close_pr,omitempty"`
 	// BaseSHA is the milestone's start (D130 Q60): HEAD at its first
 	// approval; absent before it is approved.
 	BaseSHA string `json:"base_sha,omitempty"`
@@ -532,7 +559,7 @@ func (p *Project) Status() *StatusReport {
 				line.LastGate = &GateSummary{SHA: run.SHA, Exit: run.Exit, At: run.At, Log: run.Log}
 			}
 			line.ApprovalSelfCheck = approvalSelfCheck(recs[line.ID])
-			line.Undelivered = line.Status == MilestoneDone && p.MilestoneBase(line.ID) != "" && p.closeUndelivered(ctx, line.ID)
+			line.Undelivered, line.ClosePR = p.delivery(ctx, line.ID, line.Status)
 			r.Milestones = append(r.Milestones, line)
 		}
 		if m := rm.Current(); m != nil {
@@ -782,7 +809,10 @@ func nextStepWhy(r *StatusReport) (next, why string) {
 	// V8f: a close that wrote done but never enqueued its PR comes first;
 	// the milestone is not delivered until its PR merges.
 	for i := range r.Milestones {
-		if m := &r.Milestones[i]; m.Undelivered {
+		if m := &r.Milestones[i]; m.Undelivered && m.ClosePR != nil {
+			return fmt.Sprintf("deliver %s: its close PR %s is %s, not merged — `ape milestone close %s` waits for it (or enqueues it again if it was ejected)", m.ID, m.ClosePR.URL, m.ClosePR.State, m.ID),
+				m.ID + " is done on " + MilestoneBranch(m.ID) + ", which is not in main: its close PR has not merged (a close interrupted while it waited, or a PR the queue ejected; action retry)"
+		} else if m.Undelivered {
 			return fmt.Sprintf("deliver %s: its close wrote it done, but its close PR was never enqueued — `ape milestone close %s` opens and enqueues it", m.ID, m.ID),
 				m.ID + " is done on " + MilestoneBranch(m.ID) + ", which is not in main and has no close PR (a close that failed after writing done; action retry)"
 		}

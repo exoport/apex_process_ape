@@ -62,7 +62,7 @@ func TestRecordPRs(t *testing.T) {
 	require.Equal(t, m3, run(t, p.Root, "rev-parse", "main"))
 
 	// The queue merged M3's record (it carries M2's): main fast-forwards.
-	mergeOnRemote(t, bare, "main", "apex/record-M3-proposed-"+short(m3))
+	mergeOnRemote(t, bare, "apex/record-M3-proposed-"+short(m3))
 	require.NoError(t, p.prepareRecordOnMain(ctx(), "test"))
 	require.Equal(t, run(t, bare, "rev-parse", "main"), run(t, p.Root, "rev-parse", "main"))
 	require.True(t, strings.HasPrefix(run(t, p.Root, "log", "-1", "--format=%s", "main"), "Merge"))

@@ -2,6 +2,7 @@ package apexv1
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -11,14 +12,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// mergeOnRemote merges branch from into branch into on the bare remote
-// with a merge commit, as a queue merging a PR does; it returns the merge.
-func mergeOnRemote(t *testing.T, bare, into, from string) string {
+// mergeOnRemote merges branch from into main on the bare remote with a
+// merge commit, as main's queue merging a PR does; it returns the merge.
+func mergeOnRemote(t *testing.T, bare, from string) string {
 	t.Helper()
 	tmp := t.TempDir()
-	run(t, tmp, "clone", "-q", "--branch", into, bare, ".")
+	run(t, tmp, "clone", "-q", "--branch", "main", bare, ".")
 	run(t, tmp, "merge", "-q", "--no-ff", "--no-edit", "origin/"+from)
-	run(t, tmp, "push", "-q", "origin", into)
+	run(t, tmp, "push", "-q", "origin", "main")
 	return run(t, tmp, "rev-parse", "HEAD")
 }
 
@@ -74,7 +75,7 @@ func TestClosePR(t *testing.T) {
 	require.Equal(t, "take-in-1", run(t, bare, "log", "-1", "--format=%(trailers:key=Take-in,valueonly)", "milestone/M1"))
 
 	f.states[7] = PRState{Queue: "AWAITING_CHECKS"}
-	release := mergeOnRemote(t, bare, "main", "milestone/M1")
+	release := mergeOnRemote(t, bare, "milestone/M1")
 	f.states[7] = PRState{Merged: true, MergeCommit: release}
 	g, err = p.CloseMilestone(ctx(), "M1", RunOptions{})
 	require.NoError(t, err)
@@ -298,9 +299,11 @@ func TestClosePR_DoneButUndeliveredIsDeliveredOnRerun(t *testing.T) {
 		require.Equal(t, IntegrationQueued, g.Integration.State)
 		require.Equal(t, []int{7}, f.enqueued)
 		require.Equal(t, done, run(t, bare, "rev-parse", "milestone/M1"), "the done commit landed on the remote's milestone branch")
-		require.False(t, p.Status().Milestones[0].Undelivered, "recorded: no longer undelivered")
+		st = p.Status()
+		require.True(t, st.Milestones[0].Undelivered, "queued, not merged: still not delivered (E31-R1)")
+		require.Equal(t, &ClosePRLine{State: IntegrationQueued, URL: g.Integration.PR.URL, Attempts: 1}, st.Milestones[0].ClosePR)
 
-		release := mergeOnRemote(t, bare, "main", "milestone/M1")
+		release := mergeOnRemote(t, bare, "milestone/M1")
 		f.states[7] = PRState{Merged: true, MergeCommit: release}
 		g, err = p.CloseMilestone(ctx(), "M1", RunOptions{})
 		require.NoError(t, err)
@@ -334,4 +337,58 @@ func TestClosePR_DoneButUndeliveredIsDeliveredOnRerun(t *testing.T) {
 		f.openErr = nil
 		deliver(t, p, bare, f)
 	})
+}
+
+// E31-R1 (research, with FINDING-151-E3-1): a close whose PR is queued and
+// not merged (its wait interrupted, or the PR ejected since) left status
+// reading the milestone plain done, with no flag and no next step:
+// closeUndelivered is false as soon as any close record exists. A close
+// record not merged, with milestone/<M> not in main, is not delivered now;
+// the next step names the close and what it does. The controls: merged,
+// it is delivered; no record, V8f's text stands (the test above).
+func TestStatus_AQueuedCloseIsNotDelivered(t *testing.T) {
+	files := baseFiles()
+	files["_apex/config.yaml"] = coordinatedConfig
+	files["gate.sh"] = "#!/bin/sh\nexit 0\n"
+	p := fixture(t, files)
+	bare := withOrigin(t, p)
+	_, _, err := p.PrepareMilestoneBranch(ctx(), "M1")
+	require.NoError(t, err)
+	f := &fakeIntegrator{states: map[int]PRState{}}
+	useIntegrator(t, f)
+	g, err := p.CloseMilestone(ctx(), "M1", RunOptions{})
+	require.NoError(t, err)
+	require.Equal(t, IntegrationQueued, g.Integration.State)
+
+	st := p.Status()
+	m := st.Milestones[0]
+	require.Equal(t, MilestoneDone, m.Status)
+	require.True(t, m.Undelivered, "done on its branch, not in main")
+	require.NotNil(t, m.ClosePR)
+	require.Equal(t, IntegrationQueued, m.ClosePR.State)
+	next, why := nextStepWhy(st)
+	require.Contains(t, next, "deliver M1: its close PR "+g.Integration.PR.URL+" is queued, not merged")
+	require.Contains(t, next, "`ape milestone close M1` waits for it (or enqueues it again if it was ejected)")
+	require.Contains(t, why, "its close PR has not merged")
+	b, err := json.Marshal(m)
+	require.NoError(t, err)
+	require.Contains(t, string(b), `"undelivered":true`)
+	require.Contains(t, string(b), `"close_pr":{"state":"queued"`)
+
+	// Ejected and recorded so by a close's read: still not delivered.
+	rec := p.LoadIntegration(closeID("M1"))
+	rec.State = IntegrationEjected
+	require.NoError(t, p.saveIntegration(*rec))
+	require.Equal(t, IntegrationEjected, p.Status().Milestones[0].ClosePR.State)
+
+	// The control: merged, delivered.
+	rec.State = IntegrationQueued
+	require.NoError(t, p.saveIntegration(*rec))
+	f.states[7] = PRState{Merged: true, MergeCommit: mergeOnRemote(t, bare, "milestone/M1")}
+	g, err = p.CloseMilestone(ctx(), "M1", RunOptions{})
+	require.NoError(t, err)
+	require.Equal(t, IntegrationMerged, g.Integration.State)
+	m = p.Status().Milestones[0]
+	require.False(t, m.Undelivered)
+	require.Nil(t, m.ClosePR)
 }

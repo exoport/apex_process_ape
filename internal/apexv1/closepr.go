@@ -219,6 +219,28 @@ func (p *Project) closeUndelivered(ctx context.Context, ms string) bool {
 	if rec := p.LoadIntegration(closeID(ms)); rec != nil && rec.Kind == KindClose {
 		return false
 	}
+	return p.branchNotInMain(ctx, ms)
+}
+
+// closePending is a coordinated milestone's close PR that has not merged
+// (queued, or ejected) while milestone/<M>, here, is not in the remote's
+// main as last fetched: a close interrupted while it waited, or one whose
+// PR the queue ejected since (E31-R1). The milestone is done on its
+// branch, not delivered. nil when there is no such record.
+func (p *Project) closePending(ctx context.Context, ms string) *Integration {
+	rec := p.LoadIntegration(closeID(ms))
+	if rec == nil || rec.Kind != KindClose || rec.State == IntegrationMerged {
+		return nil
+	}
+	if !p.branchNotInMain(ctx, ms) {
+		return nil
+	}
+	return rec
+}
+
+// branchNotInMain reports milestone/<M> here and not in the remote's main
+// as last fetched. A merged close deletes the branch.
+func (p *Project) branchNotInMain(ctx context.Context, ms string) bool {
 	br := MilestoneBranch(ms)
 	if !p.branchExists(ctx, br) {
 		return false

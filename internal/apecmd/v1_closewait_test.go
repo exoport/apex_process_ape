@@ -43,3 +43,14 @@ func TestAwaitClosePR_ACutQueueWaitIsInterrupted(t *testing.T) {
 	_, err = awaitClosePR(ctx, p, "M1", apexv1.RunOptions{}, merged, nil)
 	require.NoError(t, err)
 }
+
+// E31-R1: a close's result whose PR is queued printed "M1 status: done";
+// it is done on its branch, not in main. Merged, or no PR, it is done.
+func TestCloseStatus(t *testing.T) {
+	g := &apexv1.GateResult{Milestone: "M1", Status: apexv1.MilestoneDone, Integration: &apexv1.Integration{Kind: apexv1.KindClose, State: apexv1.IntegrationQueued}}
+	require.Equal(t, "done on milestone/M1, close PR queued (not in main)", closeStatus(g))
+	g.Integration.State = apexv1.IntegrationMerged
+	require.Equal(t, "done", closeStatus(g))
+	g.Integration = nil
+	require.Equal(t, "done", closeStatus(g))
+}

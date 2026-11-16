@@ -356,8 +356,17 @@ func gateHuman(g *apexv1.GateResult) func(io.Writer) {
 		}
 		printRegression(w, g.Run.Regression)
 		printStrays(w, g.Run.StrayFiles, g.Run.StraysKept)
-		fmt.Fprintf(w, "%s status: %s\n", g.Milestone, g.Status)
+		fmt.Fprintf(w, "%s status: %s\n", g.Milestone, closeStatus(g))
 	}
+}
+
+// closeStatus is a gate or close result's status line: a close whose PR
+// has not merged is done on its branch, not in main (E31-R1).
+func closeStatus(g *apexv1.GateResult) string {
+	if in := g.Integration; in != nil && in.Kind == apexv1.KindClose && in.State != apexv1.IntegrationMerged && g.Status == apexv1.MilestoneDone {
+		return fmt.Sprintf("%s on %s, close PR %s (not in main)", g.Status, apexv1.MilestoneBranch(g.Milestone), in.State)
+	}
+	return g.Status
 }
 
 // gateVerdict is the one line a gate or close result ends with (F1c,
@@ -661,7 +670,11 @@ enqueues the close PR without running the gate again (main taken in and gated fi
 moved), then waits for the merge as above. Ejected: main is taken in again the same way, the gate runs again on
 the branch (red refuses: gate.red; an accepted red passes only on its red set), and the
 close PR is pushed and enqueued again, an attempt (limits.attempts:
-integration.ejections-exceeded).
+integration.ejections-exceeded). A close interrupted while its PR waits in the queue
+(SIGTERM, ` + "`ape run stop M<n> --force`" + `) fails with run.interrupted, the PR still queued;
+until it merges, ` + "`ape status`" + ` marks the milestone undelivered with its "close_pr" (state
+queued or ejected) and names this command, which waits for it, or enqueues it again if it
+was ejected.
 
 Exit codes: 0 done · 1 gate red (without --accept-red), changes in flight, not approved,
 no approval record, a changed gate, an archived gate/ in the way, or HEAD on a change
